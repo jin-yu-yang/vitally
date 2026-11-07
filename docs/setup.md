@@ -383,7 +383,7 @@ check failed. Check, in this order:
 
 ## 4. Migrations
 
-Thirty-nine migrations, applied in order. 020, the version-2 switch-over, was added after 021 and 022: a stack that already has them applies it last, and a new one applies it in number order. Both give the same result. Re-running the migrator on an already-migrated stack is safe,
+Forty-one migrations, applied in order. 020, the version-2 switch-over, was added after 021 and 022: a stack that already has them applies it last, and a new one applies it in number order. Both give the same result. Re-running the migrator on an already-migrated stack is safe,
 but not because the files themselves are re-runnable — `001` and `002` create their tables with a
 plain `create table`, which fails the second time. What makes it safe is the ledger
 `tools/admin/migrate.mjs` keeps: `vitally_private.schema_migrations`, one row per file with a
@@ -432,6 +432,7 @@ already applied, so **the migrations are run only through the migrator, never by
 | `038_staff_identity.sql` | Hand-written: the `staff` membership access, `people.user_id` linking a person to its staff account, the database's own `acting_person` resolver for the six entry points, staff accepted by the locks, authority check and policies, and `add_staff_member`, `set_default_followup` and a re-runnable `initialize_workspace` |
 | `039_preparer_shaded_fields.sql` | Hand-written: the shaded section of Form 13614-C, filled by the case's preparer: the staff-only `preparer_shaded_fields` table (one row per case, in the Realtime publication; its select policy accepts `staff` like 038's), `vitally_private.check_preparer_fields`, and the `SAVE_PREPARER_FIELDS` action with its version guard; `check_operation_authority` and `vitally_apply_action` copied from 038 with the new action; the sample cases that have a preparer questionnaire get a fictional shaded row |
 | `040_remove_sample_case_tools.sql` | Hand-written: the sample cases, the reset and checkpoint functions, the client bindings and the `fixture` columns are removed, and `origin` accepts only `client` and `assisted`. A workspace starts with no cases; use `npm run seed:local` for rehearsal cases |
+| `041_resolve_go_over_during_hold.sql` | Hand-written: resolving a go-over task while the case is on a Hold from Ready to exit also switches the signing plan to the reviewer's method (#171) |
 
 Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
 never edit an applied one. The build writes one only when the catalogue's hash differs from the

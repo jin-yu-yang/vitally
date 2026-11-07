@@ -1834,6 +1834,28 @@ test("the three handlers store the answers", async (t) => {
         signing_appointment_at: null,
       });
     });
+    await t.test("a go-over resolved during a hold still switches the plan", async () => {
+      // Issue #171. A Hold from Ready to exit leaves the go-over task open.
+      // Resolving it while the case is on hold switches the plan too, so after
+      // Got in touch the client reads the reviewer's signing variant.
+      const caseId = await reviewingCase(f, f.reviewer);
+      await setService(f, caseId, "online");
+      await f.act(f.reviewer, caseId, "APPROVE_REVIEW", { questionnaire: NO });
+      const [task] = await goOver(f, caseId);
+      await f.act(f.siteCoordinator, caseId, "PUT_ON_HOLD", { confirmed: true });
+      assert.equal((await f.readStaffCase(caseId)).stage, "on_hold");
+      await f.act(f.siteCoordinator, caseId, "RESOLVE_FOLLOWUP", {
+        followupId: task.id,
+        outcome: "reached",
+        note: "Fictional: went over the return by phone.",
+      });
+      assert.deepEqual(await plan(f, caseId), { signing_plan: "portal", signing_appointment_at: null });
+      await f.act(f.siteCoordinator, caseId, "RESUME_FROM_HOLD", { confirmed: true });
+      assert.equal((await f.readStaffCase(caseId)).stage, "review_approved");
+      assert.deepEqual(await plan(f, caseId), { signing_plan: "portal", signing_appointment_at: null });
+      await f.act(f.siteCoordinator, caseId, "MARK_READY_TO_EFILE", { confirmed: true });
+      assert.equal((await f.readStaffCase(caseId)).stage, "ready_to_efile");
+    });
     await t.test("client messages carry no answer", async () => {
       const q = {
         ...REVIEWER,
