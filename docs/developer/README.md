@@ -98,7 +98,7 @@ src/
   vendor/pdfjs.mjs, vendor/pdfjs-worker.mjs
                            Committed copy of pdfjs-dist's legacy build (the shaded-section editor).
 supabase/
-  migrations/001-039       The whole schema, RLS, business logic and intake catalogue, in order.
+  migrations/001-041       The whole schema, RLS, business logic and intake catalogue, in order.
   test-stack.config.example.toml   Reference config for the local test stack.
 tools/
   admin/                   Privileged tooling: target guards, migrate, roster, workspace setup.
@@ -106,7 +106,7 @@ tools/
   build-intake-catalogue.mjs  Builds the catalogue data module and its migration from docs/intake-questions.
 tests/
   *.test.mjs               Unit tests (no network): 1496.
-  database*.mjs            Database tests against the local stack: 440.
+  database*.mjs            Database tests against the local stack: 441.
   auth-browser.mjs         Real sign-in in Chrome and Firefox: 20.
   browser.mjs              The full demonstration story, two browsers, both directions: 83.
   support/                 Test fixtures: throwaway workspaces, browser helpers, cleanup.
