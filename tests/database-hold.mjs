@@ -8,7 +8,7 @@ import { applyArgs, createDatabaseFixture, rejected } from "./support/database-f
 test("documents at intake against real Supabase", async (t) => {
   const f = await createDatabaseFixture();
   try {
-    const asSam = (caseId, type, payload = {}) => f.act(f.presenter, caseId, f.sam, type, payload);
+    const asSiteCoordinator = (caseId, type, payload = {}) => f.act(f.siteCoordinator, caseId, type, payload);
     const columns = async (caseId) =>
       (
         await f.sql(
@@ -25,19 +25,18 @@ test("documents at intake against real Supabase", async (t) => {
       ).rows;
     const atScreening = async () => {
       const { caseId } = await f.submittedClientCase();
-      await asSam(caseId, "START_SCREENING");
+      await asSiteCoordinator(caseId, "START_SCREENING");
       return caseId;
     };
-    const ask = (caseId, titles, who = [f.presenter, f.sam]) =>
+    const ask = (caseId, titles, client = f.siteCoordinator) =>
       f.act(
-        who[0],
+        client,
         caseId,
-        who[1],
         "REQUEST_DOCUMENTS_AT_INTAKE",
         { requests: titles.map((title) => ({ title, message: "A fictional note." })) },
       );
     const answer = (caseId, requestId) =>
-      f.act(f.applicantA, caseId, null, "RESPOND_DOCUMENT", { requestId, filename: f.sampleFilename });
+      f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", { requestId, filename: f.sampleFilename });
 
     await t.test("the stage check and origin constraints", async () => {
       const { caseId } = await f.submittedClientCase();
@@ -66,7 +65,7 @@ test("documents at intake against real Supabase", async (t) => {
       const rows = await requests(caseId);
       assert.equal(rows.length, 1);
       assert.equal(rows[0].status, "open");
-      assert.equal(rows[0].requested_by_person_id, f.sam);
+      assert.equal(rows[0].requested_by_person_id, f.siteCoordinatorId);
       assert.ok((await f.clientMessages(caseId)).includes("PCDC asked for these documents: Photo ID."));
     });
 
@@ -94,13 +93,13 @@ test("documents at intake against real Supabase", async (t) => {
 
     await t.test("refusals", async () => {
       const caseId = await atScreening();
-      for (const [who, code] of [
-        [[f.presenter, f.alex], "FORBIDDEN"],
-        [[f.presenter, f.morgan], "FORBIDDEN"],
-        [[f.presenter, null], "FORBIDDEN"],
-        [[f.applicantA, null], "FORBIDDEN"],
+      for (const [client, code] of [
+        [f.preparer, "FORBIDDEN"],
+        [f.reviewer, "FORBIDDEN"],
+        [f.presenter, "FORBIDDEN"],
+        [f.applicantA, "FORBIDDEN"],
       ])
-        await assert.rejects(() => ask(caseId, ["Photo ID"], who), rejected(code));
+        await assert.rejects(() => ask(caseId, ["Photo ID"], client), rejected(code));
       const valid = { title: "Photo ID", message: "A fictional note." };
       for (const requests of [
         [],
@@ -109,11 +108,11 @@ test("documents at intake against real Supabase", async (t) => {
         [{ ...valid, extra: "x" }],
       ])
         await assert.rejects(
-          () => asSam(caseId, "REQUEST_DOCUMENTS_AT_INTAKE", { requests }),
+          () => asSiteCoordinator(caseId, "REQUEST_DOCUMENTS_AT_INTAKE", { requests }),
           rejected("VALIDATION"),
         );
       await assert.rejects(
-        () => asSam(caseId, "REQUEST_DOCUMENTS_AT_INTAKE", { requests: [valid], extra: 1 }),
+        () => asSiteCoordinator(caseId, "REQUEST_DOCUMENTS_AT_INTAKE", { requests: [valid], extra: 1 }),
         rejected("VALIDATION"),
       );
       assert.equal((await columns(caseId)).stage, "screening");
@@ -130,10 +129,10 @@ test("documents at intake against real Supabase", async (t) => {
       await answer(caseId, request.id);
       assert.equal((await requests(caseId))[0].status, "awaiting_verification");
       await assert.rejects(
-        () => f.act(f.presenter, caseId, f.alex, "VERIFY_DOCUMENT", { requestId: request.id }),
+        () => f.act(f.preparer, caseId, "VERIFY_DOCUMENT", { requestId: request.id }),
         rejected("FORBIDDEN"),
       );
-      await asSam(caseId, "VERIFY_DOCUMENT", { requestId: request.id });
+      await asSiteCoordinator(caseId, "VERIFY_DOCUMENT", { requestId: request.id });
       assert.deepEqual(await columns(caseId), {
         stage: "screening",
         documents_origin: null,
@@ -152,7 +151,7 @@ test("documents at intake against real Supabase", async (t) => {
       const rows = await requests(caseId);
       const first = rows.find((r) => r.title === "Photo ID");
       await answer(caseId, first.id);
-      await asSam(caseId, "VERIFY_DOCUMENT", { requestId: first.id });
+      await asSiteCoordinator(caseId, "VERIFY_DOCUMENT", { requestId: first.id });
       assert.equal((await columns(caseId)).stage, "awaiting_documents");
       assert.equal((await f.clientMessages(caseId)).includes("PCDC is working on your application again."), false);
     });
@@ -160,17 +159,17 @@ test("documents at intake against real Supabase", async (t) => {
     await t.test("the preparer's loop is unchanged", async () => {
       const caseId = await f.assistedCase();
       assert.equal((await columns(caseId)).stage, "preparing");
-      await f.act(f.presenter, caseId, f.alex, "REQUEST_DOCUMENT", {
+      await f.act(f.preparer, caseId, "REQUEST_DOCUMENT", {
         title: "Second fictional document",
         message: "A fictional note.",
       });
       assert.equal((await columns(caseId)).stage, "preparing");
     });
 
-    const hold = (caseId, payload = { confirmed: true }, who = [f.presenter, f.sam]) =>
-      f.act(who[0], caseId, who[1], "PUT_ON_HOLD", payload);
-    const resume = (caseId, payload = { confirmed: true }, who = [f.presenter, f.sam]) =>
-      f.act(who[0], caseId, who[1], "RESUME_FROM_HOLD", payload);
+    const hold = (caseId, payload = { confirmed: true }, client = f.siteCoordinator) =>
+      f.act(client, caseId, "PUT_ON_HOLD", payload);
+    const resume = (caseId, payload = { confirmed: true }, client = f.siteCoordinator) =>
+      f.act(client, caseId, "RESUME_FROM_HOLD", payload);
     const waitingCase = async (titles = ["Photo ID"]) => {
       const caseId = await atScreening();
       await ask(caseId, titles);
@@ -203,7 +202,7 @@ test("documents at intake against real Supabase", async (t) => {
       await hold(caseId, { confirmed: true, note: "Left a fictional voicemail." });
       const [request] = await requests(caseId);
       await answer(caseId, request.id);
-      await asSam(caseId, "VERIFY_DOCUMENT", { requestId: request.id });
+      await asSiteCoordinator(caseId, "VERIFY_DOCUMENT", { requestId: request.id });
       assert.deepEqual(await columns(caseId), {
         stage: "screening",
         documents_origin: null,
@@ -213,16 +212,16 @@ test("documents at intake against real Supabase", async (t) => {
     });
 
     await t.test("an admin records a received document at the documents stages", async () => {
-      const created = await f.draftCase(f.presenter, { mode: "assisted", personId: f.sam });
+      const created = await f.draftCase(f.siteCoordinator, { mode: "assisted" });
       const caseId = created.caseId;
-      await asSam(caseId, "SUBMIT", { confirmed: true });
-      await asSam(caseId, "VERIFY_INTAKE", { checks: await f.checksFor(caseId) });
+      await asSiteCoordinator(caseId, "SUBMIT", { confirmed: true });
+      await asSiteCoordinator(caseId, "VERIFY_INTAKE", { checks: await f.checksFor(caseId) });
       await ask(caseId, ["Photo ID", "W-2"]);
       const [first, second] = await requests(caseId);
-      await asSam(caseId, "RECORD_DOCUMENT_RESPONSE", { requestId: first.id, filename: f.sampleFilename });
+      await asSiteCoordinator(caseId, "RECORD_DOCUMENT_RESPONSE", { requestId: first.id, filename: f.sampleFilename });
       assert.equal((await requests(caseId)).find((r) => r.id === first.id).status, "awaiting_verification");
       await hold(caseId);
-      await asSam(caseId, "RECORD_DOCUMENT_RESPONSE", { requestId: second.id, filename: f.sampleFilename });
+      await asSiteCoordinator(caseId, "RECORD_DOCUMENT_RESPONSE", { requestId: second.id, filename: f.sampleFilename });
       assert.equal((await requests(caseId)).find((r) => r.id === second.id).status, "awaiting_verification");
       assert.equal((await columns(caseId)).stage, "on_hold");
     });
@@ -237,7 +236,7 @@ test("documents at intake against real Supabase", async (t) => {
         closing_reason: null,
       });
       await assert.rejects(
-        () => asSam(caseId, "MARK_READY_TO_EFILE", { confirmed: true }),
+        () => asSiteCoordinator(caseId, "MARK_READY_TO_EFILE", { confirmed: true }),
         rejected("INVALID_TRANSITION"),
       );
       await resume(caseId);
@@ -256,9 +255,9 @@ test("documents at intake against real Supabase", async (t) => {
       await assert.rejects(() => hold(screening), rejected("INVALID_TRANSITION"));
       await assert.rejects(() => resume(screening), rejected("INVALID_TRANSITION"));
       const waiting = await waitingCase();
-      for (const person of [f.alex, f.morgan])
-        await assert.rejects(() => hold(waiting, { confirmed: true }, [f.presenter, person]), rejected("FORBIDDEN"));
-      await assert.rejects(() => hold(waiting, { confirmed: true }, [f.applicantA, null]), rejected("FORBIDDEN"));
+      for (const client of [f.preparer, f.reviewer])
+        await assert.rejects(() => hold(waiting, { confirmed: true }, client), rejected("FORBIDDEN"));
+      await assert.rejects(() => hold(waiting, { confirmed: true }, f.applicantA), rejected("FORBIDDEN"));
       for (const payload of [
         { confirmed: true, note: "x".repeat(1001) },
         { confirmed: true, note: "  " },
@@ -270,7 +269,7 @@ test("documents at intake against real Supabase", async (t) => {
       assert.equal((await columns(waiting)).stage, "awaiting_documents");
       await hold(waiting);
       await assert.rejects(() => resume(waiting, {}), rejected("VALIDATION"));
-      await assert.rejects(() => resume(waiting, { confirmed: true }, [f.presenter, f.alex]), rejected("FORBIDDEN"));
+      await assert.rejects(() => resume(waiting, { confirmed: true }, f.preparer), rejected("FORBIDDEN"));
       await assert.rejects(() => hold(waiting), rejected("INVALID_TRANSITION"));
     });
 
@@ -295,8 +294,8 @@ test("documents at intake against real Supabase", async (t) => {
       assert.equal("note" in bare.rows[0].detail, false);
     });
 
-    const close = (caseId, payload, who = [f.presenter, f.sam]) =>
-      f.act(who[0], caseId, who[1], "CLOSE_CASE", payload);
+    const close = (caseId, payload, client = f.siteCoordinator) =>
+      f.act(client, caseId, "CLOSE_CASE", payload);
     const CLOSED_LINES = {
       out_of_scope:
         "This application was closed because the return is outside what VITA volunteers can prepare. Your return was not filed by PCDC.",
@@ -397,8 +396,8 @@ test("documents at intake against real Supabase", async (t) => {
         closing_reason: null,
       });
     });
-    const withdraw = (caseId, payload = { confirmed: true }, who = [f.applicantA, null]) =>
-      f.act(who[0], caseId, who[1], "WITHDRAW", payload);
+    const withdraw = (caseId, payload = { confirmed: true }, client = f.applicantA) =>
+      f.act(client, caseId, "WITHDRAW", payload);
     const notices = async (caseId) =>
       (
         await f.sql(
@@ -409,12 +408,12 @@ test("documents at intake against real Supabase", async (t) => {
     const WITHDREW = "You withdrew your application. Your return was not filed.";
     const preparingCase = async () => {
       const caseId = await f.readyCase();
-      await f.act(f.presenter, caseId, f.alex, "CLAIM_PREPARATION", {});
+      await f.act(f.preparer, caseId, "CLAIM_PREPARATION", {});
       return caseId;
     };
     const reviewingCase = async () => {
       const caseId = await f.preparedCase();
-      await f.act(f.presenter, caseId, f.morgan, "CLAIM_REVIEW", {});
+      await f.act(f.reviewer, caseId, "CLAIM_REVIEW", {});
       return caseId;
     };
 
@@ -463,7 +462,7 @@ test("documents at intake against real Supabase", async (t) => {
       assert.equal(rows.length, 1);
       assert.equal(rows[0].status, "open");
       assert.equal(rows[0].request_id, null);
-      await f.act(f.presenter, caseId, f.sam, "RESOLVE_FOLLOWUP", {
+      await f.act(f.siteCoordinator, caseId, "RESOLVE_FOLLOWUP", {
         followupId: rows[0].id,
         outcome: "reached",
         note: "Fictional: told the volunteer to stop.",
@@ -525,7 +524,7 @@ test("documents at intake against real Supabase", async (t) => {
       ).rows;
     const readyToEfile = async () => {
       const caseId = await f.approvedCase();
-      await asSam(caseId, "MARK_READY_TO_EFILE", { confirmed: true });
+      await asSiteCoordinator(caseId, "MARK_READY_TO_EFILE", { confirmed: true });
       assert.equal((await columns(caseId)).stage, "ready_to_efile");
       return caseId;
     };
@@ -573,7 +572,7 @@ test("documents at intake against real Supabase", async (t) => {
       );
       // A documents hold has no reviewed return: closing it opens no notice.
       const documentsHold = await atScreening();
-      await asSam(documentsHold, "REQUEST_DOCUMENTS_AT_INTAKE", { requests: [{ title: "Photo ID", message: "A fictional note." }] });
+      await asSiteCoordinator(documentsHold, "REQUEST_DOCUMENTS_AT_INTAKE", { requests: [{ title: "Photo ID", message: "A fictional note." }] });
       await hold(documentsHold);
       await close(documentsHold, { confirmed: true, reason: "dismissed" });
       assert.deepEqual(await noticeReasons(documentsHold), []);
@@ -586,7 +585,7 @@ test("documents at intake against real Supabase", async (t) => {
       await assert.rejects(() => close(signing, { confirmed: true, reason: "dismissed" }), rejected("INVALID_TRANSITION"));
       assert.equal((await columns(ready)).stage, "ready_to_efile");
       assert.deepEqual(await noticeReasons(ready), []);
-      await asSam(ready, "MARK_EFILED", { confirmed: true, methods: { federal: "efile", state: "efile" } });
+      await asSiteCoordinator(ready, "MARK_EFILED", { confirmed: true, methods: { federal: "efile", state: "efile" } });
       await assert.rejects(() => close(ready, { confirmed: true, reason: "withdrawn" }), rejected("INVALID_TRANSITION"));
       assert.equal((await columns(ready)).stage, "efiled");
     });
@@ -607,9 +606,9 @@ test("documents at intake against real Supabase", async (t) => {
       await hold(signingHold);
       await assert.rejects(() => withdraw(signingHold), rejected("INVALID_TRANSITION"));
       const ready = await f.approvedCase();
-      await asSam(ready, "MARK_READY_TO_EFILE", { confirmed: true });
+      await asSiteCoordinator(ready, "MARK_READY_TO_EFILE", { confirmed: true });
       await assert.rejects(() => withdraw(ready), rejected("INVALID_TRANSITION"));
-      await asSam(ready, "MARK_EFILED", { confirmed: true, methods: { federal: "efile", state: "efile" } });
+      await asSiteCoordinator(ready, "MARK_EFILED", { confirmed: true, methods: { federal: "efile", state: "efile" } });
       assert.equal((await columns(ready)).stage, "efiled");
       await assert.rejects(() => withdraw(ready), rejected("INVALID_TRANSITION"));
       const closed = await f.readyCase();
@@ -617,10 +616,10 @@ test("documents at intake against real Supabase", async (t) => {
       await assert.rejects(() => withdraw(closed), rejected("INVALID_TRANSITION"));
 
       const target = await f.readyCase();
-      for (const person of [null, f.sam, f.alex])
-        await assert.rejects(() => withdraw(target, { confirmed: true }, [f.presenter, person]), rejected("FORBIDDEN"));
+      for (const client of [f.presenter, f.siteCoordinator, f.preparer])
+        await assert.rejects(() => withdraw(target, { confirmed: true }, client), rejected("FORBIDDEN"));
       // Another client cannot see the case at all.
-      await assert.rejects(() => withdraw(target, { confirmed: true }, [f.applicantB, null]), rejected("NOT_FOUND"));
+      await assert.rejects(() => withdraw(target, { confirmed: true }, f.applicantB), rejected("NOT_FOUND"));
       for (const payload of [{}, { confirmed: false }, { confirmed: true, extra: 1 }, { reason: "x" }])
         await assert.rejects(() => withdraw(target, payload), rejected("VALIDATION"));
       assert.equal((await columns(target)).stage, "preparation_ready");
@@ -631,9 +630,9 @@ test("documents at intake against real Supabase", async (t) => {
       const { revision } = await f.readStaffCase(caseId);
       const results = await Promise.all([
         f.applicantA.rpc("vitally_apply_action", applyArgs({ caseId, revision, type: "WITHDRAW", payload: { confirmed: true } })),
-        f.presenter.rpc(
+        f.siteCoordinator.rpc(
           "vitally_apply_action",
-          applyArgs({ caseId, revision, personId: f.sam, type: "PUT_ON_HOLD", payload: { confirmed: true } }),
+          applyArgs({ caseId, revision, type: "PUT_ON_HOLD", payload: { confirmed: true } }),
         ),
       ]);
       assert.equal(results.filter((r) => !r.error).length, 1);

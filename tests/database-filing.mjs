@@ -54,9 +54,9 @@ test("filing results schema against real Supabase", async (t) => {
         filing_notes:
           "insert into public.filing_notes(workspace_id,case_id,attempt,note,recorded_by) values($1,$2,1,'Fictional fix note.',$3)",
       };
-      await f.sql(inserts.filing_attempts, [f.workspaceId, caseId, f.sam]);
+      await f.sql(inserts.filing_attempts, [f.workspaceId, caseId, f.siteCoordinatorId]);
       await f.sql(inserts.filing_returns, [f.workspaceId, caseId]);
-      await f.sql(inserts.filing_notes, [f.workspaceId, caseId, f.sam]);
+      await f.sql(inserts.filing_notes, [f.workspaceId, caseId, f.siteCoordinatorId]);
       for (const table of Object.keys(inserts)) {
         const applicant = await f.applicantA.from(table).select("*").eq("case_id", caseId);
         assert.equal(applicant.error, null, table);
@@ -66,9 +66,9 @@ test("filing results schema against real Supabase", async (t) => {
         assert.equal(staff.data.length, 1, table);
         // A complete, otherwise-valid row, so only the missing insert grant can refuse it.
         const row = {
-          filing_attempts: { attempt: 2, filed_by: f.sam },
+          filing_attempts: { attempt: 2, filed_by: f.siteCoordinatorId },
           filing_returns: { attempt: 1, return_kind: "state", method: "efile" },
-          filing_notes: { attempt: 1, note: "Fictional second note.", recorded_by: f.sam },
+          filing_notes: { attempt: 1, note: "Fictional second note.", recorded_by: f.siteCoordinatorId },
         }[table];
         for (const client of [f.applicantA, f.presenter]) {
           const { error } = await client
@@ -87,11 +87,11 @@ test("filing results schema against real Supabase", async (t) => {
       await f.sql("insert into public.filing_attempts(workspace_id,case_id,attempt,filed_by) values($1,$2,1,$3)", [
         f.workspaceId,
         caseId,
-        f.sam,
+        f.siteCoordinatorId,
       ]);
       await f.sql(
         "insert into public.filing_notes(workspace_id,case_id,attempt,note,recorded_by) values($1,$2,1,'Fictional fix note.',$3)",
-        [f.workspaceId, caseId, f.sam],
+        [f.workspaceId, caseId, f.siteCoordinatorId],
       );
       await assert.rejects(() =>
         f.sql("update public.filing_notes set note='Changed' where case_id=$1", [caseId]),
@@ -117,20 +117,50 @@ test("fix notes go only with their case", async (t) => {
       await f.sql("insert into public.filing_attempts(workspace_id,case_id,attempt,filed_by) values($1,$2,1,$3)", [
         f.workspaceId,
         caseId,
-        f.sam,
+        f.siteCoordinatorId,
       ]);
       await f.sql(
         "insert into public.filing_notes(workspace_id,case_id,attempt,note,recorded_by) values($1,$2,1,'Fictional fix note.',$3)",
-        [f.workspaceId, caseId, f.sam],
+        [f.workspaceId, caseId, f.siteCoordinatorId],
       );
       return caseId;
     };
     const noteCount = async (caseId) =>
       (await f.sql("select count(*)::int n from public.filing_notes where case_id=$1", [caseId])).rows[0].n;
 
+    // A fix note made the way staff make one: Record filing result on a rejection.
+    const withRecordedNote = async (fixture) => {
+      const caseId = await fixture.approvedCase();
+      const act = (type, payload) => fixture.act(fixture.siteCoordinator, caseId, type, payload);
+      await act("MARK_READY_TO_EFILE", { confirmed: true });
+      await act("MARK_EFILED", { confirmed: true, methods: { federal: "efile", state: "efile" } });
+      const day = (await fixture.sql("select (now() at time zone 'America/New_York')::date::text d")).rows[0].d;
+      await act("RECORD_FILING_RESULT", {
+        confirmed: true,
+        results: {
+          federal: { result: "accepted", date: day },
+          state: { result: "rejected", date: day, code: "IND-031-04" },
+        },
+        fixNote: "Fictional note: correct the dependent's SSN.",
+      });
+      return caseId;
+    };
+
     await t.test("deleting a filing attempt alone is refused and keeps the note", async () => {
       const caseId = await withNote();
-      await assert.rejects(() => f.sql("delete from public.filing_attempts where case_id=$1", [caseId]));
+      await assert.rejects(
+        () => f.sql("delete from public.filing_attempts where case_id=$1", [caseId]),
+        rejected("VALIDATION"),
+      );
+      assert.equal(await noteCount(caseId), 1);
+    });
+
+    await t.test("a filing note can't be deleted on its own", async () => {
+      const caseId = await withRecordedNote(f);
+      await assert.rejects(
+        () => f.sql("delete from public.filing_notes where case_id=$1", [caseId]),
+        rejected("VALIDATION"),
+      );
       assert.equal(await noteCount(caseId), 1);
     });
 
@@ -138,6 +168,33 @@ test("fix notes go only with their case", async (t) => {
       const caseId = await withNote();
       await f.sql("delete from public.cases where id=$1", [caseId]);
       assert.equal(await noteCount(caseId), 0);
+    });
+
+    await t.test("deleting a case with filing notes succeeds", async () => {
+      const caseId = await withRecordedNote(f);
+      assert.equal(await noteCount(caseId), 1);
+      await f.sql("delete from public.cases where id=$1", [caseId]);
+      assert.equal(await noteCount(caseId), 0);
+      const left = await f.sql(
+        "select (select count(*) from public.filing_attempts where case_id=$1)::int attempts, (select count(*) from public.filing_returns where case_id=$1)::int returns",
+        [caseId],
+      );
+      assert.deepEqual(left.rows, [{ attempts: 0, returns: 0 }]);
+    });
+
+    await t.test("a workspace teardown with filing notes succeeds", async () => {
+      // A second fixture's own cleanup path deletes its workspace, notes included.
+      const other = await createDatabaseFixture();
+      let caseId;
+      try {
+        caseId = await withRecordedNote(other);
+        assert.equal(await noteCount(caseId), 1);
+      } finally {
+        await other.close();
+      }
+      assert.equal(await noteCount(caseId), 0);
+      const gone = await f.sql("select count(*)::int n from public.workspaces where id=$1", [other.workspaceId]);
+      assert.equal(gone.rows[0].n, 0);
     });
 
     await t.test("deleting the workspace removes its notes", async () => {
@@ -156,11 +213,11 @@ test("mark e-filed records the methods", async (t) => {
   try {
     const readyCase = async () => {
       const caseId = await f.approvedCase();
-      await f.act(f.presenter, caseId, f.sam, "MARK_READY_TO_EFILE", { confirmed: true });
+      await f.act(f.siteCoordinator, caseId, "MARK_READY_TO_EFILE", { confirmed: true });
       return caseId;
     };
     const filed = async (caseId, methods) =>
-      f.act(f.presenter, caseId, f.sam, "MARK_EFILED", { confirmed: true, methods });
+      f.act(f.siteCoordinator, caseId, "MARK_EFILED", { confirmed: true, methods });
     const columns = async (caseId) =>
       (
         await f.sql(
@@ -187,7 +244,7 @@ test("mark e-filed records the methods", async (t) => {
           state_result: given(state),
         });
         const attempts = await f.sql("select attempt, filed_by from public.filing_attempts where case_id=$1", [caseId]);
-        assert.deepEqual(attempts.rows, [{ attempt: 1, filed_by: f.sam }]);
+        assert.deepEqual(attempts.rows, [{ attempt: 1, filed_by: f.siteCoordinatorId }]);
         const returns = await f.sql(
           "select return_kind, method, result from public.filing_returns where case_id=$1 and attempt=1 order by return_kind",
           [caseId],
@@ -216,7 +273,7 @@ test("mark e-filed records the methods", async (t) => {
         { confirmed: true, methods: { federal: "efile", state: "efile" }, extra: 1 },
       ])
         await assert.rejects(
-          () => f.act(f.presenter, caseId, f.sam, "MARK_EFILED", payload),
+          () => f.act(f.siteCoordinator, caseId, "MARK_EFILED", payload),
           rejected("VALIDATION"),
           JSON.stringify(payload),
         );
@@ -268,8 +325,8 @@ test("return to signing and file again", async (t) => {
   try {
     const nyDay = async () =>
       (await f.sql("select (now() at time zone 'America/New_York')::date::text d")).rows[0].d;
-    const act = (caseId, type, payload, who = f.sam, client = f.presenter) =>
-      f.act(client, caseId, who, type, payload);
+    const act = (caseId, type, payload, client = f.siteCoordinator) =>
+      f.act(client, caseId, type, payload);
     const columns = async (caseId) =>
       (
         await f.sql(
@@ -288,7 +345,7 @@ test("return to signing and file again", async (t) => {
           [caseId],
         )
       ).rows)
-        await f.act(f.presenter, caseId, task.assignee_person_id, "RESOLVE_FOLLOWUP", {
+        await f.act(f.siteCoordinator, caseId, "RESOLVE_FOLLOWUP", {
           followupId: task.id,
           outcome: "reached",
           note: "Fictional: went over the return by phone.",
@@ -384,8 +441,8 @@ test("return to signing and file again", async (t) => {
         [caseId],
       );
       assert.deepEqual(attempts.rows, [
-        { attempt: 1, filed_by: f.sam },
-        { attempt: 2, filed_by: f.sam },
+        { attempt: 1, filed_by: f.siteCoordinatorId },
+        { attempt: 2, filed_by: f.siteCoordinatorId },
       ]);
       const returns = await f.sql(
         "select attempt, return_kind, method, result from public.filing_returns where case_id=$1 order by attempt, return_kind",
@@ -493,14 +550,9 @@ test("return to signing and file again", async (t) => {
 
     await t.test("admin only", async () => {
       const caseId = await answeredCase({ federal: "efile", state: "efile" }, { federal: "rejected", state: "accepted" });
-      for (const [client, who] of [
-        [f.presenter, f.alex],
-        [f.presenter, f.morgan],
-        [f.presenter, null],
-        [f.applicantA, null],
-      ])
+      for (const client of [f.preparer, f.reviewer, f.presenter, f.applicantA])
         await assert.rejects(
-          () => act(caseId, "RETURN_TO_SIGNING", { confirmed: true }, who, client),
+          () => act(caseId, "RETURN_TO_SIGNING", { confirmed: true }, client),
           rejected("FORBIDDEN"),
         );
       assert.equal((await columns(caseId)).stage, "rejected");
@@ -520,12 +572,12 @@ test("record filing result", async (t) => {
       ).rows[0].d;
     const filedCase = async (methods = { federal: "efile", state: "efile" }) => {
       const caseId = await f.approvedCase();
-      await f.act(f.presenter, caseId, f.sam, "MARK_READY_TO_EFILE", { confirmed: true });
-      await f.act(f.presenter, caseId, f.sam, "MARK_EFILED", { confirmed: true, methods });
+      await f.act(f.siteCoordinator, caseId, "MARK_READY_TO_EFILE", { confirmed: true });
+      await f.act(f.siteCoordinator, caseId, "MARK_EFILED", { confirmed: true, methods });
       return caseId;
     };
-    const record = (caseId, results, extra = {}, who = f.sam, client = f.presenter) =>
-      f.act(client, caseId, who, "RECORD_FILING_RESULT", { confirmed: true, results, ...extra });
+    const record = (caseId, results, extra = {}, client = f.siteCoordinator) =>
+      f.act(client, caseId, "RECORD_FILING_RESULT", { confirmed: true, results, ...extra });
     const columns = async (caseId) =>
       (
         await f.sql(
@@ -594,7 +646,7 @@ test("record filing result", async (t) => {
       assert.equal(c.stage, "efiled");
       assert.equal(c.state_result, "given_to_client");
       const row = (await f.sql("select result, answered_on, recorded_by from public.filing_returns where case_id=$1 and return_kind='state'", [caseId])).rows[0];
-      assert.deepEqual([row.result, row.answered_on, row.recorded_by], ["given_to_client", null, f.sam]);
+      assert.deepEqual([row.result, row.answered_on, row.recorded_by], ["given_to_client", null, f.siteCoordinatorId]);
       assert.equal(await lastMessage(caseId),
         "PCDC e-filed your federal return and gave your Pennsylvania return on paper to you or the person you sent. If it isn't signed yet, sign it, then mail it yourself. A reply can take about 3 months after you mail it.");
       for (const result of ["accepted", "mailed", "given_to_client"])
@@ -618,8 +670,8 @@ test("record filing result", async (t) => {
     });
     await t.test("a first filing missing a return is refused", async () => {
       const caseId = await f.approvedCase();
-      await f.act(f.presenter, caseId, f.sam, "MARK_READY_TO_EFILE", { confirmed: true });
-      await assert.rejects(() => f.act(f.presenter, caseId, f.sam, "MARK_EFILED", { confirmed: true, methods: { federal: "efile" } }), rejected("VALIDATION"));
+      await f.act(f.siteCoordinator, caseId, "MARK_READY_TO_EFILE", { confirmed: true });
+      await assert.rejects(() => f.act(f.siteCoordinator, caseId, "MARK_EFILED", { confirmed: true, methods: { federal: "efile" } }), rejected("VALIDATION"));
     });
     await t.test("stored mailed is renamed", async () => {
       // A 035-style row (the checks dropped, as before 037) holds mailed with a date;
@@ -633,7 +685,7 @@ test("record filing result", async (t) => {
         await f.sql("alter table public.cases drop constraint if exists cases_filing_results");
         await f.sql("alter table public.filing_returns drop constraint if exists filing_returns_result_check");
         await f.sql("update public.cases set federal_method='paper',state_method='paper',federal_result='mailed',state_result='mailed' where id=$1", [caseId]);
-        await f.sql("insert into public.filing_attempts(workspace_id,case_id,attempt,filed_by) values($1,$2,1,$3)", [f.workspaceId, caseId, f.sam]);
+        await f.sql("insert into public.filing_attempts(workspace_id,case_id,attempt,filed_by) values($1,$2,1,$3)", [f.workspaceId, caseId, f.siteCoordinatorId]);
         await f.sql("insert into public.filing_returns(workspace_id,case_id,attempt,return_kind,method,result,answered_on) values($1,$2,1,'federal','paper','mailed',current_date),($1,$2,1,'state','paper','mailed',current_date)", [f.workspaceId, caseId]);
         await f.sql("set constraints all immediate"); // the seed's deferred keys are checked before the ALTERs
         await f.sql(section);
@@ -671,12 +723,12 @@ test("record filing result", async (t) => {
       ];
       for (const [name, body] of bad)
         await assert.rejects(
-          () => f.act(f.presenter, caseId, f.sam, "RECORD_FILING_RESULT", { confirmed: true, ...body }),
+          () => f.act(f.siteCoordinator, caseId, "RECORD_FILING_RESULT", { confirmed: true, ...body }),
           rejected("VALIDATION"),
           name,
         );
       await assert.rejects(
-        () => f.act(f.presenter, caseId, f.sam, "RECORD_FILING_RESULT", { results: { federal: ok } }),
+        () => f.act(f.siteCoordinator, caseId, "RECORD_FILING_RESULT", { results: { federal: ok } }),
         rejected("VALIDATION"),
         "no confirmed",
       );
@@ -731,12 +783,12 @@ test("record filing result", async (t) => {
         "select note, attempt, recorded_by from public.filing_notes where case_id=$1 order by recorded_at",
         [caseId],
       );
-      assert.deepEqual(notes.rows, [{ note: "Fictional note one.", attempt: 1, recorded_by: f.sam }]);
+      assert.deepEqual(notes.rows, [{ note: "Fictional note one.", attempt: 1, recorded_by: f.siteCoordinatorId }]);
       const row = await f.sql(
         "select answered_on::text d, reject_code, recorded_by, result from public.filing_returns where case_id=$1 and return_kind='federal'",
         [caseId],
       );
-      assert.deepEqual(row.rows, [{ d: today, reject_code: "IND-031-04", recorded_by: f.sam, result: "rejected" }]);
+      assert.deepEqual(row.rows, [{ d: today, reject_code: "IND-031-04", recorded_by: f.siteCoordinatorId, result: "rejected" }]);
       assert.equal((await f.readStaffCase(caseId)).internalHistory.at(-1).detail.noteAdded, true);
       await record(caseId, { state: { result: "accepted", date: today } }, { fixNote: "Fictional note two." });
       notes = await f.sql("select note from public.filing_notes where case_id=$1 order by recorded_at", [caseId]);
@@ -753,13 +805,8 @@ test("record filing result", async (t) => {
       const today = await nyDay();
       const caseId = await filedCase();
       const results = { federal: { result: "accepted", date: today } };
-      for (const [client, who] of [
-        [f.presenter, f.alex],
-        [f.presenter, f.morgan],
-        [f.presenter, null],
-        [f.applicantA, null],
-      ])
-        await assert.rejects(() => record(caseId, results, {}, who, client), rejected("FORBIDDEN"));
+      for (const client of [f.preparer, f.reviewer, f.presenter, f.applicantA])
+        await assert.rejects(() => record(caseId, results, {}, client), rejected("FORBIDDEN"));
       assert.deepEqual(await counts(caseId), { answered: 0, notes: 0, events: 0 });
     });
 
@@ -780,7 +827,7 @@ test("record filing result", async (t) => {
       // The filing is credited to whoever marked it E-filed, not to the admin recording the answer.
       await f.sql(
         "update public.case_events set actor_person_id=$2 where case_id=$1 and action='MARK_EFILED'",
-        [caseId, f.alex],
+        [caseId, f.preparerId],
       );
       await record(caseId, {
         federal: { result: "accepted", date: await nyDay(-5) },
@@ -797,7 +844,7 @@ test("record filing result", async (t) => {
         "select attempt, filed_by, filed_at < now()-interval '9 days' old from public.filing_attempts where case_id=$1",
         [caseId],
       );
-      assert.deepEqual(attempt.rows, [{ attempt: 1, filed_by: f.alex, old: true }]);
+      assert.deepEqual(attempt.rows, [{ attempt: 1, filed_by: f.preparerId, old: true }]);
       // The bound still holds: an answer dated before the filing is refused.
       const other = await old();
       const eleven = await nyDay(-11);
@@ -816,11 +863,11 @@ test("record filing result", async (t) => {
       const caseId = await filedCase();
       const revision = (await f.sql("select revision from public.cases where id=$1", [caseId])).rows[0].revision;
       const call = () =>
-        f.presenter.rpc("vitally_apply_action", {
+        f.siteCoordinator.rpc("vitally_apply_action", {
           p_action_id: randomUUID(),
           p_case_id: caseId,
           p_expected_revision: Number(revision),
-          p_person_id: f.sam,
+          p_person_id: null,
           p_type: "RECORD_FILING_RESULT",
           p_payload: { confirmed: true, results: { federal: { result: "accepted", date: today } } },
         });
@@ -868,7 +915,7 @@ test("filing details stay with staff", async (t) => {
     const NOTE = "Fictional note: preparer to correct the dependent's SSN in TaxSlayer.";
     const nyDay = async () =>
       (await f.sql("select (now() at time zone 'America/New_York')::date::text d")).rows[0].d;
-    const act = (caseId, type, payload) => f.act(f.presenter, caseId, f.sam, type, payload);
+    const act = (caseId, type, payload) => f.act(f.siteCoordinator, caseId, type, payload);
     // A client's case, filed and rejected on the state return with a code and a note.
     const loop = async () => {
       const caseId = await f.approvedCase();
@@ -907,9 +954,8 @@ test("filing details stay with staff", async (t) => {
     });
 
     await t.test("naming a real case in the clearing setting frees none of its notes", async () => {
+      // The setting freed a sample's notes before 040; it must free nothing now.
       const caseId = await loop();
-      const attempt = (await f.sql("select is_fixture from (select fixture is_fixture from public.cases where id=$1) x", [caseId])).rows[0];
-      assert.equal(attempt.is_fixture, false);
       await assert.rejects(() =>
         f.sql(
           "with s as (select set_config('vitally.clearing_case',$1,true) v) delete from public.filing_notes where case_id=$1::uuid and (select count(*) from s)>=0",

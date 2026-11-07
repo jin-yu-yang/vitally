@@ -402,17 +402,17 @@ A `staff` member SHALL be able to read exactly the rows a presenter in the same 
 - **WHEN** a staff member has the work board open and another window claims a case
 - **THEN** the staff member's board shows the claim without a reload
 
-### Requirement: A staff account's screens have no persona picker or demo tools
-A `staff` account SHALL get the same staff screens as a presenter: the work board, the case pages, the office screens its capabilities allow. Its screens SHALL NOT show the persona picker, "Reset the sample cases" or "Load a sample checkpoint". They SHALL show "Signed in as <name>" with the staff member's person name where the presenter's "Acting as" appears. A staff window SHALL never save or restore a chosen persona, and SHALL ignore one left in its browser storage. Staff screens SHALL stay in English whatever language the browser chose.
+### Requirement: Staff screens have no persona picker or presenter controls
+A `staff` account SHALL get the staff screens: the work board, the case pages and the office screens its capabilities allow. Its screens SHALL NOT show a persona picker, "Reset the sample cases" or "Load a sample checkpoint". They SHALL show "Signed in as <name>" with the staff member's person name. A staff window SHALL never save or restore a chosen persona, and SHALL ignore one left in its browser storage. Staff screens SHALL stay in English whatever language the browser chose. No account SHALL be offered a persona picker, a sample reset or a checkpoint. A presenter gets only the plain screen set by capability `sign-in`.
 
 #### Scenario: A staff member signs in
 - **WHEN** Riley Park signs in with a staff account
 - **THEN** the work board opens with "Signed in as Riley Park", with no "Acting as" buttons and no reset or checkpoint controls
 
 #### Scenario: A leftover persona in browser storage
-- **WHEN** a browser that last ran a presenter window acting as Sam signs in as staff member Riley
+- **WHEN** a browser whose storage still holds a persona chosen as Sam, left by an earlier presenter window, signs in as staff member Riley
 - **THEN** Riley's window acts as Riley, never as Sam
 
-#### Scenario: A presenter's screens are unchanged
+#### Scenario: A presenter gets no staff screens
 - **WHEN** a presenter signs in
-- **THEN** the persona picker, reset and checkpoint controls appear as before this change
+- **THEN** the presenter sees only the plain "This account is no longer used" screen, with no persona picker, reset or checkpoint controls

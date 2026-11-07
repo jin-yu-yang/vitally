@@ -35,8 +35,6 @@ const CASE_ROW = Object.freeze({
   reference: "VT-ABCD-2345",
   workspace_id: "workspace-1",
   owner_user_id: "user-1",
-  fixture: false,
-  fixture_key: null,
   origin: "client",
   created_by_user_id: "user-1",
   created_by_person_id: null,
@@ -308,7 +306,6 @@ const RELATED_ROWS = Object.freeze({
       language: "Mandarin",
       contact_preference: "Prefers calls from the main office",
       resolution_note: null,
-      fixture: false,
       created_at: "2026-09-01T00:00:00Z",
       updated_at: "2026-09-01T00:00:00Z",
     },
@@ -547,17 +544,6 @@ test("a presenter's call still names the person the request carries", async () =
   assert.equal(client.rpcCalls[0].args.p_person_id, "person-x");
 });
 
-test("a staff member cannot reset fixtures or load a checkpoint", async () => {
-  const client = fakeClient({ access: "staff" });
-  const store = createStore(client);
-  await assert.rejects(() => store.resetFixtures({}), { code: "FORBIDDEN" });
-  await assert.rejects(
-    () => store.loadCheckpoint({ caseId: "c", expectedRevision: 1, checkpoint: "p" }),
-    { code: "FORBIDDEN" },
-  );
-  assert.equal(client.rpcCalls.length, 0);
-});
-
 test("no membership and no session are both FORBIDDEN", async () => {
   await assert.rejects(() => createStore(fakeClient({ access: null })).getPrincipal(), {
     code: "FORBIDDEN",
@@ -605,7 +591,6 @@ test("listCases maps rows to the Case scalars with no related tables", async () 
       reference: "VT-ABCD-2345",
       workspaceId: "workspace-1",
       ownerUserId: "user-1",
-      fixture: false,
       stage: "preparing",
       revision: 7,
       preparationVersion: 1,
@@ -759,7 +744,7 @@ test("an empty presenter list asks for no summaries at all", async () => {
   );
 });
 
-test("the workspace read carries the fixture generation", async () => {
+test("the workspace read carries the office's settings", async () => {
   const client = fakeClient({
     access: "presenter",
     rows: {
@@ -767,7 +752,6 @@ test("the workspace read carries the fixture generation", async () => {
         {
           id: "workspace-1",
           default_followup_person_id: "person-sam",
-          fixture_generation: "7",
           current_season: 2025,
           default_intake_version: 2,
         },
@@ -776,7 +760,6 @@ test("the workspace read carries the fixture generation", async () => {
   });
   assert.deepEqual(await createStore(client).getWorkspace(), {
     id: "workspace-1",
-    fixtureGeneration: 7,
     defaultFollowupPersonId: "person-sam",
     currentSeason: 2025,
     defaultIntakeVersion: 2,
@@ -790,7 +773,7 @@ test("the workspace read carries the fixture generation", async () => {
 test("the workspace read carries its default intake version as a number", async () => {
   // The version a new application starts at (spec 2026-09-30 §4.2). The
   // column is always 2 (migration 023), so there is no fallback.
-  const row = { id: "workspace-1", default_followup_person_id: null, fixture_generation: 1 };
+  const row = { id: "workspace-1", default_followup_person_id: null };
   const read = async (extra) =>
     (await createStore(fakeClient({ access: "presenter", rows: { workspaces: [{ ...row, ...extra }] } })).getWorkspace())
       .defaultIntakeVersion;
@@ -805,7 +788,7 @@ test("a workspace row without a season column reads as any season", async () => 
     access: "presenter",
     rows: {
       workspaces: [
-        { id: "workspace-1", default_followup_person_id: null, fixture_generation: 1 },
+        { id: "workspace-1", default_followup_person_id: null },
       ],
     },
   });
@@ -838,7 +821,6 @@ test("an applicant case read asks for no staff table at all", async () => {
     "documentsOrigin",
     "federalMethod",
     "federalResult",
-    "fixture",
     "history",
     "holdOrigin",
     "id",
@@ -1323,13 +1305,6 @@ test("every other RPC uses its documented signature", async () => {
     type: "CLAIM",
     note: null,
   });
-  await store.resetFixtures({ actionId: "action-3" });
-  await store.loadCheckpoint({
-    actionId: "action-4",
-    caseId: "case-1",
-    expectedRevision: 7,
-    checkpoint: "review_ready",
-  });
   assert.deepEqual(client.rpcCalls, [
     {
       name: "vitally_create_case",
@@ -1349,16 +1324,6 @@ test("every other RPC uses its documented signature", async () => {
         p_person_id: "person-sam",
         p_type: "CLAIM",
         p_note: null,
-      },
-    },
-    { name: "vitally_reset_fixtures", args: { p_action_id: "action-3" } },
-    {
-      name: "vitally_load_checkpoint",
-      args: {
-        p_action_id: "action-4",
-        p_case_id: "case-1",
-        p_expected_revision: 7,
-        p_checkpoint: "review_ready",
       },
     },
   ]);

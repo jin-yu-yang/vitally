@@ -38,9 +38,12 @@ export function writeLanguage(lang, { storage }) {
   }
 }
 
-// Staff and presenter screens are English whatever this browser chose.
+// Staff screens and a presenter's plain screen are English whatever this
+// browser chose.
 export const viewLang = (state) =>
-  isStaffWindow(state?.principal) ? "en" : isLang(state?.lang) ? state.lang : "en";
+  isStaffWindow(state?.principal) || state?.principal?.access === "presenter"
+    ? "en"
+    : isLang(state?.lang) ? state.lang : "en";
 
 // null params mean none. One pass, so a value that holds braces is never re-read.
 export const fill = (template, params) => {

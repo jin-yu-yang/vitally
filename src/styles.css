@@ -24,8 +24,6 @@
   --vt-error-bg: #fbeceb;
   --vt-error: #8a3b34;
   --vt-error-line: #efc9c5;
-  --vt-notice-bg: #efedfb;
-  --vt-notice: #4b3fa3;
   --vt-attention-bg: #faf0dd;
   /* Stage families: background / text */
   --vt-stage-intake-bg: #e6eefa;
@@ -2158,7 +2156,6 @@ textarea::placeholder {
   white-space: nowrap;
 }
 .connection-notice,
-.notice-banner,
 .problem-banner {
   display: flex;
   align-items: center;
@@ -2175,19 +2172,12 @@ textarea::placeholder {
   background: var(--vt-error-bg);
   color: var(--vt-error);
 }
-/* Nothing failed here: the demonstration cases were rebuilt. */
-.notice-banner {
-  background: var(--vt-notice-bg);
-  color: var(--vt-notice);
-}
 .connection-notice .icon,
-.notice-banner .icon,
 .problem-banner .icon {
   flex: none;
   width: 18px;
   height: 18px;
 }
-.notice-banner .btn.inline,
 .problem-banner .btn.inline {
   margin-left: auto;
   color: inherit;
@@ -2347,53 +2337,6 @@ textarea::placeholder {
 .client-shell .conflict-choices {
   margin-bottom: 16px;
 }
-/* The presenter's own panel: their controls, their persona, and which class
-   workspace and sample set is on the projector. */
-.presenter-panel {
-  margin-bottom: 20px;
-  border-color: var(--vt-primary);
-  box-shadow: inset 0 2px 0 var(--vt-primary);
-}
-.presenter-panel .section-head h2 {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.presenter-panel .connection-line {
-  font-size: 12px;
-  color: var(--vt-muted);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 12px;
-}
-.persona-block {
-  margin-bottom: 14px;
-}
-.persona-block h3 {
-  font-size: 13px;
-  margin: 0 0 4px;
-}
-.presenter-actions {
-  display: flex;
-  gap: 9px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
-}
-.persona-row {
-  display: flex;
-  gap: 9px;
-  flex-wrap: wrap;
-}
-.persona-row .btn small {
-  display: block;
-  font-size: 10px;
-  color: var(--vt-muted);
-}
-.persona-row .btn.selected {
-  border-color: var(--vt-primary);
-  box-shadow: inset 0 0 0 1px var(--vt-primary);
-}
 .setup-panel pre {
   background: #f2f5f2;
   border: 1px solid var(--vt-line);
@@ -2410,7 +2353,6 @@ textarea::placeholder {
 }
 @media (max-width: 760px) {
   .connection-notice,
-  .notice-banner,
   .problem-banner {
     padding: 10px 18px;
   }
@@ -2763,17 +2705,6 @@ textarea::placeholder {
   display: block;
   color: var(--vt-muted);
   font-size: 12px;
-}
-
-/* ---- Presenter controls as a slim strip (D10) ---- */
-.app-main .presenter-panel {
-  padding: 10px 16px;
-  border-radius: var(--vt-radius-sm);
-  border-color: var(--vt-line);
-  margin-bottom: 20px;
-}
-.app-main .presenter-panel .field-note {
-  display: none;
 }
 
 /* ---- The volunteer work board ---- */
@@ -3205,7 +3136,6 @@ textarea::placeholder {
    style. The banners come right after the client bar in page(). */
 .client-shell .btn.inline,
 .client-bar ~ .connection-notice .btn.inline,
-.client-bar ~ .notice-banner .btn.inline,
 .client-bar ~ .problem-banner .btn.inline {
   min-height: var(--vt-tap);
 }
@@ -3551,7 +3481,7 @@ textarea::placeholder {
   vertical-align: top;
 }
 
-/* ---- Every dialog's notes (presenter, help, sample data) ---- */
+/* ---- Every dialog's notes ---- */
 .modal .info-note {
   background: var(--vt-primary-soft);
   border-color: var(--vt-line);
@@ -3567,49 +3497,13 @@ textarea::placeholder {
 .modal .info-note strong {
   color: var(--vt-ink);
 }
-/* ---- The staff frame on tokens: the page overline and presenter strip ---- */
+/* ---- The staff frame on tokens: the page overline ---- */
 /* These change every staff screen (work board, case page, office screens) on
    purpose: part 1 ends with the whole staff frame on the --vt-* tokens. */
 .app-main .page-intro .overline,
 .app-main .muted,
 .app-main .field-note {
   color: var(--vt-muted);
-}
-.app-main .presenter-panel {
-  box-shadow: none;
-}
-.app-main .presenter-panel .section-head .muted,
-.app-main .presenter-panel .connection-line,
-.app-main .presenter-panel .persona-row .btn small {
-  color: var(--vt-muted);
-}
-.app-main .presenter-panel .connection-line .icon {
-  color: var(--vt-progress);
-}
-.app-main .presenter-panel .persona-row .btn small {
-  font-size: 11px;
-}
-.app-main .presenter-panel .persona-row .btn.selected {
-  border-color: var(--vt-primary);
-  box-shadow: inset 0 0 0 1px var(--vt-primary);
-}
-/* The sample-data button was drawn for the old dark demo bar; here it is a
-   plain text button on the strip's white surface. */
-.app-main .presenter-panel .btn.demo {
-  min-height: var(--vt-tap);
-  padding: 10px 12px;
-  font-size: 14px;
-  background: transparent;
-  border-color: transparent;
-  color: var(--vt-primary-hover);
-}
-.app-main .presenter-panel .btn.demo:hover:not(:disabled) {
-  background: var(--vt-primary-soft);
-  color: var(--vt-ink);
-}
-.app-main .presenter-panel .btn.demo .icon {
-  width: 16px;
-  height: 16px;
 }
 /* end PR 4 */
 

@@ -70,19 +70,18 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
     // a request, a document and client-visible progress.
     const draft = await f.draftCase(f.applicantA);
     const caseId = await f.readyCase();
-    await f.act(f.presenter, caseId, f.alex, "CLAIM_PREPARATION", {});
+    await f.act(f.preparer, caseId, "CLAIM_PREPARATION", {});
     await f.act(
-      f.presenter,
+      f.preparer,
       caseId,
-      f.alex,
       "REQUEST_DOCUMENT",
       f.sampleRequest,
     );
-    await f.act(f.applicantA, caseId, null, "RESPOND_DOCUMENT", {
+    await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
       filename: f.sampleFilename,
     });
     const other = await f.draftCase(f.applicantB);
-    await f.act(f.applicantB, other.caseId, null, "SUBMIT", { confirmed: true });
+    await f.act(f.applicantB, other.caseId, "SUBMIT", { confirmed: true });
 
     await t.test("the principal is the caller's own membership", async () => {
       assert.deepEqual(await applicant.getPrincipal(), {
@@ -135,7 +134,7 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
       const claimed = (await presenter.listCases()).find(
         (row) => row.id === caseId,
       );
-      assert.deepEqual(claimed.participants, [f.alex]);
+      assert.deepEqual(claimed.participants, [f.preparerId]);
       // One request, already answered and waiting on the preparer, so nothing
       // is open on the client's side.
       assert.equal(claimed.openRequests, 0);
@@ -149,7 +148,7 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
       assert.equal(unclaimed.openFollowups, 0);
       // The office's own escalation is counted, and it names who owes the call.
       const chased = await f.assistedCase();
-      await f.act(f.presenter, chased, f.alex, "ESCALATE_CONTACT", {
+      await f.act(f.preparer, chased, "ESCALATE_CONTACT", {
         reason: "No response to the document request.",
       });
       const waiting = (await presenter.listCases()).find(
@@ -157,8 +156,8 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
       );
       assert.equal(waiting.openRequests, 1);
       assert.equal(waiting.openFollowups, 1);
-      assert.deepEqual(waiting.followupAssigneeIds, [f.sam]);
-      assert.deepEqual(waiting.participants, [f.alex]);
+      assert.deepEqual(waiting.followupAssigneeIds, [f.siteCoordinatorId]);
+      assert.deepEqual(waiting.participants, [f.preparerId]);
       // The reviewer's call with the client, for Follow-ups: none before an
       // approval, pending after one, completed once the call is recorded.
       assert.equal(unclaimed.reviewContactStatus, null);
@@ -186,14 +185,12 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
           assert.ok(!(field in row), `${field} is absent for an applicant`);
     });
 
-    await t.test("the workspace read carries the fixture generation", async () => {
+    await t.test("the workspace read carries the office's settings", async () => {
       const workspace = await presenter.getWorkspace();
       assert.equal(workspace.id, f.workspaceId);
-      assert.equal(typeof workspace.fixtureGeneration, "number");
-      assert.ok(workspace.fixtureGeneration >= 0);
-      assert.equal(workspace.defaultFollowupPersonId, f.sam);
-      // The client reads their own workspace row too — it is how they learn
-      // the demonstration set changed — and it carries nothing private.
+      assert.equal(workspace.defaultFollowupPersonId, f.siteCoordinatorId);
+      // The client reads their own workspace row too, and it carries nothing
+      // private.
       assert.deepEqual(await createStore(f.applicantA).getWorkspace(), workspace);
     });
 
@@ -214,11 +211,11 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
       const staff = await presenter.getCase(caseId);
       for (const section of STAFF_SECTIONS)
         assert.ok(section in staff, section);
-      assert.deepEqual(staff.participants, [f.alex]);
+      assert.deepEqual(staff.participants, [f.preparerId]);
       assert.deepEqual(staff.reviews, []);
       assert.deepEqual(staff.followups, []);
       assert.ok(staff.internalHistory.length >= 4, "internal history is there");
-      assert.equal(staff.preparerId, f.alex);
+      assert.equal(staff.preparerId, f.preparerId);
       // The one mapping: the fixture helper is this same read.
       assert.deepEqual(await f.readStaffCase(caseId), staff);
     });
@@ -373,45 +370,6 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
       assert.equal(claimed.assigneeId, f.sam);
     });
 
-    await t.test("the adapter resets fixtures and loads a checkpoint", async () => {
-      // Migration 009 installs both. The adapter returns nothing from either —
-      // the browser reacts by re-reading — so what is asserted here is that
-      // the call is accepted and that the database really moved.
-      await presenter.resetFixtures({ actionId: crypto.randomUUID() });
-      const seeded = await f.readFixtureCases();
-      assert.equal(seeded.length, 10);
-      const target = seeded.find((row) => row.fixtureKey === "review_approved");
-      await presenter.loadCheckpoint({
-        actionId: crypto.randomUUID(),
-        caseId: target.id,
-        expectedRevision: target.revision,
-        checkpoint: "intake_ready",
-      });
-      const moved = (await f.readFixtureCases()).find(
-        (row) => row.fixtureKey === "review_approved",
-      );
-      assert.equal(moved.id, target.id, "a checkpoint keeps the case it moves");
-      assert.equal(moved.stage, "preparation_ready");
-      assert.equal(moved.revision, target.revision + 1);
-      // A checkpoint on a case a student created is refused as a validation
-      // failure, and an applicant may reset nothing at all.
-      const classCase = await presenter.getCase(caseId);
-      await assert.rejects(
-        () =>
-          presenter.loadCheckpoint({
-            actionId: crypto.randomUUID(),
-            caseId,
-            expectedRevision: classCase.revision,
-            checkpoint: "intake_ready",
-          }),
-        rejected("VALIDATION"),
-      );
-      await assert.rejects(
-        () => applicant.resetFixtures({ actionId: crypto.randomUUID() }),
-        rejected("FORBIDDEN"),
-      );
-    });
-
     await t.test("the Realtime publication is exactly what the adapter watches", async () => {
       // Migration 007 owns the published list; `SUBSCRIBED_TABLES` splits it by
       // access. Asserting they are the same set keeps them from drifting: an
@@ -464,7 +422,7 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
         // An action the applicant may take on their own case, which updates
         // the `cases` row and so must reach their own subscription.
         const save = () =>
-          f.act(f.applicantA, draft.caseId, null, "SAVE_ANSWERS", {
+          f.act(f.applicantA, draft.caseId, "SAVE_ANSWERS", {
             answers: { addr_city: "Philadelphia" },
           });
         // Realtime stops a tenant's Postgres Changes streaming once nothing is

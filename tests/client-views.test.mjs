@@ -55,7 +55,6 @@ const baseState = (overrides = {}) => ({
   busy: false,
   screen: "applications",
   selectedCaseId: null,
-  selectedPersonId: null,
   openPanels: [],
   lookup: "",
   dialog: null,
@@ -526,20 +525,19 @@ test("the setup-needed screen explains the configuration and holds no secrets", 
   assert.ok(!/data-case-action/.test(html));
 });
 
-test("a presenter gets the persona selector, the board and one case workspace", () => {
+test("a staff account gets the board and one case workspace, with no persona selector", () => {
   const cases = [
     caseRecord({ id: "case-a", reference: "VT-AB2C-DE3F", stage: "preparing", preparerId: "person-1" }),
   ];
   const staffState = (overrides = {}) =>
     baseState({
-      principal: { userId: "p1", workspaceId: "w1", access: "presenter" },
+      principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "person-1" },
       screen: "staff",
       cases,
       people: [
         { id: "person-1", name: "Alex", capabilities: ["prepare"] },
         { id: "person-2", name: "Morgan", capabilities: ["review"] },
       ],
-      selectedPersonId: "person-1",
       boardFilters: { status: "preparation" },
       ...overrides,
     });
@@ -548,7 +546,7 @@ test("a presenter gets the persona selector, the board and one case workspace", 
   assert.ok(board.includes(describeStage("preparing").label));
   assert.ok(board.includes("Alex"), "the preparer is named, not an id");
   assert.ok(!board.includes("person-1</"), "no person id is shown as a name");
-  assert.match(board, /data-action="select-person"/);
+  assert.doesNotMatch(board, /data-action="select-person"/);
   assert.match(board, /data-action="open-case" data-case-id="case-a"/);
 
   // Opening a case is the same screen function, with the workspace inside it.
@@ -569,9 +567,9 @@ test("a presenter gets the persona selector, the board and one case workspace", 
   assert.match(workspace, /Preparation milestones/);
   assert.match(workspace, /data-case-action="SUBMIT_REVIEW"/);
   assert.match(workspace, /data-action="open-board"/);
-  assert.match(workspace, /data-action="select-person"/);
+  assert.doesNotMatch(workspace, /data-action="select-person"/);
 
-  // The applicant never sees the persona selector or a staff screen.
+  // The applicant never sees a staff screen.
   const clientPage = page(baseState(), applicationsScreen(baseState()));
   assert.ok(!/data-action="select-person"/.test(clientPage));
   assert.ok(!clientPage.includes("Morgan"));
@@ -580,14 +578,13 @@ test("a presenter gets the persona selector, the board and one case workspace", 
 
 test("the staff workspace announces a failure once, beside the work", () => {
   const state = baseState({
-    principal: { userId: "p1", workspaceId: "w1", access: "presenter" },
+    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "person-1" },
     screen: "staff-case",
     error: {
       code: "CONFLICT",
       message: "Someone else changed this case. The newest version is shown — check it and try again.",
     },
     people: [{ id: "person-1", name: "Alex", capabilities: ["prepare"] }],
-    selectedPersonId: "person-1",
     savedCase: {
       ...caseRecord({ id: "case-a", stage: "preparing", preparerId: "person-1" }),
       participants: ["person-1"],
@@ -612,11 +609,10 @@ test("the staff workspace announces a failure once, beside the work", () => {
 
 test("an error shows inside the open dialog, and the banner steps aside", () => {
   const error = { code: "VALIDATION", message: "This checkpoint is not available." };
-  const presenter = { userId: "p1", workspaceId: "w1", access: "presenter" };
-  for (const name of ["help", "regenerate", "leave-add-case", "close-case", "reset-fixtures", "load-checkpoint", "print"]) {
+  for (const name of ["help", "regenerate", "leave-add-case", "close-case", "print"]) {
     const state = {
       ...baseState({ savedCase: caseRecord() }),
-      principal: ["reset-fixtures", "load-checkpoint"].includes(name) ? presenter : baseState().principal,
+      principal: baseState().principal,
       dialog: name,
       error,
       retryable: false,
@@ -632,13 +628,12 @@ test("an error shows inside the open dialog, and the banner steps aside", () => 
 
 test("a dialog on the case page holds the only copy of the error", () => {
   const state = baseState({
-    principal: { userId: "p1", workspaceId: "w1", access: "presenter" },
+    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "person-1" },
     screen: "staff-case",
     dialog: "close-case",
     error: { code: "SERVER_ERROR", message: "x" },
     retryable: false,
     people: [{ id: "person-1", name: "Alex", capabilities: ["prepare"] }],
-    selectedPersonId: "person-1",
     savedCase: {
       ...caseRecord({ id: "case-a", stage: "preparing", preparerId: "person-1" }),
       participants: ["person-1"],
@@ -1176,15 +1171,24 @@ const submitOf = (html) => {
 };
 const MEMBER = "000000000000000000000000000003e9"; // the sample's first household member
 
+test("the fiction toolbar shows only with the switch", () => {
+  const off = intakeScreen(v2State({ formSubstep: "about.address", demoTools: false }));
+  assert.doesNotMatch(off, /fill-fictional|regenerate-fictional|demo-fiction/);
+  assert.doesNotMatch(intakeScreen(v2State({ formSubstep: "about.address" })), /fill-fictional/, "absent means off");
+  const on = intakeScreen(v2State({ formSubstep: "about.address", demoTools: true }));
+  assert.match(on, /Fill fictional details/);
+  assert.match(on, /data-action="fill-fictional"/);
+  assert.match(on, /data-action="regenerate-fictional"/);
+  assert.match(on, /demo-fiction/);
+  assert.match(intakeScreen(v2State({ formSubstep: "about.address", demoTools: true, lang: "zh-Hans" })), /填入虚构资料/);
+});
+
 test("a version-2 draft gets the sub-step page: form, overline, title and count", () => {
   const html = intakeScreen(v2State({ formSubstep: "about.address" }));
   assert.match(html, /<form id="intake-v2-form" novalidate data-substep="about\.address">/);
   assert.match(html, /<span class="overline">STEP 1 OF 9 · ABOUT YOU<\/span><h1>Mailing address<\/h1><p class="substep-count">2 of 6<\/p>/);
   // The office card stays under the rail, and the chrome comes from client-views.
   assert.match(html, /class="sidebar-help"[\s\S]*class="office-contact"[\s\S]*tel:\+12159226156/);
-  assert.match(html, /Fill fictional details/);
-  assert.match(html, /data-action="fill-fictional"/);
-  assert.match(html, /data-action="regenerate-fictional"/);
   assert.match(html, /<span class="save-chip/);
   // Save & exit lives in the top bar; the form keeps Back and Continue.
   assert.doesNotMatch(html, /data-action="save-exit"/);

@@ -55,7 +55,7 @@ The full workflow described in the [approved design](docs/superpowers/specs/2026
 is implemented and tested against an isolated local Supabase stack: identity and case ownership,
 every workflow action (intake through closure, documents, admin follow-up, assistance, independent
 review and corrections), real email (OTP) sign-in, Realtime-driven shared state across two
-browsers, and ten seeded sample cases with presenter-only reset/checkpoint controls.
+browsers. No screen has reset or checkpoint controls; rehearsal cases come from `npm run seed:local`.
 
 You can already sign in by hand on the local stack with fictional rehearsal accounts (see
 [Run locally](#run-locally)).
@@ -168,7 +168,7 @@ roadmap of what separates the demo from the product described in [`docs/spec.md`
 ```text
 index.html, server.mjs   static entry page and local dev server (no build step)
 src/                     browser app: controller, Supabase store, auth, views, styles
-supabase/migrations/     database schema, row-level security, action functions, intake catalogue (001–039)
+supabase/migrations/     database schema, row-level security, action functions, intake catalogue (001–041)
 tests/                   unit tests (*.test.mjs), database suites, browser suites
 tools/                   vendor bundle and intake catalogue builds, guarded admin tooling (migrate, roster)
 docs/                    specs, plans, setup guide, developer guide, design, project documents

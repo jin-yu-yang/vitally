@@ -181,7 +181,7 @@ async function seedWorkflow(f, caseId) {
     ],
   );
   await f.sql(
-    "insert into public.assistance_items(id,workspace_id,title,fixture) values($1,$2,$3,true)",
+    "insert into public.assistance_items(id,workspace_id,title) values($1,$2,$3)",
     [
       seeded.standaloneAssistanceId,
       f.workspaceId,
@@ -191,7 +191,7 @@ async function seedWorkflow(f, caseId) {
   return seeded;
 }
 test("identity, references, ownership, and privileged setup on real Supabase", async (t) => {
-  const f = await createDatabaseFixture();
+  const f = await createDatabaseFixture({ roleAccounts: false });
   try {
     await t.test(
       "references are stable and unique; IDs and references do not authorize access",
@@ -244,20 +244,8 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
       },
     );
     await t.test(
-      "schema rejects inconsistent fixture markers and cross-workspace ownership",
+      "schema rejects cross-workspace ownership",
       async () => {
-        await f.sql("begin");
-        try {
-          await assert.rejects(
-            () =>
-              f.sql("update public.cases set fixture=true where id=$1", [
-                f.first.caseId,
-              ]),
-            (error) => error.code === "23514",
-          );
-        } finally {
-          await f.sql("rollback");
-        }
         await assert.rejects(
           () =>
             f.sql("update public.cases set owner_user_id=$1 where id=$2", [
@@ -296,7 +284,7 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
         );
         await assert.rejects(
           () =>
-            f.createCase(f.presenter, crypto.randomUUID(), {
+            f.createCaseAsPersona(f.presenter, crypto.randomUUID(), {
               mode: "assisted",
               personId: f.people.alex,
             }),
@@ -304,14 +292,14 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
         );
         await assert.rejects(
           () =>
-            f.createCase(f.applicantA, crypto.randomUUID(), {
+            f.createCaseAsPersona(f.applicantA, crypto.randomUUID(), {
               personId: f.people.sam,
             }),
           rejected("FORBIDDEN"),
         );
         await assert.rejects(
           () =>
-            f.createCase(f.applicantA, crypto.randomUUID(), {
+            f.createCaseAsPersona(f.applicantA, crypto.randomUUID(), {
               mode: "assisted",
               personId: f.people.sam,
             }),
@@ -319,13 +307,13 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
         );
         await assert.rejects(
           () =>
-            f.createCase(f.presenter, crypto.randomUUID(), {
+            f.createCaseAsPersona(f.presenter, crypto.randomUUID(), {
               mode: "assisted",
               personId: f.foreignPeople.sam,
             }),
           rejected("FORBIDDEN"),
         );
-        const assisted = await f.createCase(f.presenter, crypto.randomUUID(), {
+        const assisted = await f.createCaseAsPersona(f.presenter, crypto.randomUUID(), {
           mode: "assisted",
           personId: f.people.sam,
         });
@@ -406,7 +394,7 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
       },
     );
     await t.test(
-      "normal initializer preserves people, default, capabilities and binding; adds roster only explicitly",
+      "normal initializer preserves people, default and capabilities; adds roster only explicitly",
       async () => {
         const before = await f.snapshot();
         // One lock around the pair, not one each: the two calls must still race
@@ -457,16 +445,6 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
         );
         assert.deepEqual(added.people, f.people);
         assert.equal((await rows(f.unapproved, "memberships")).length, 1);
-        await f.withSetupLock(() =>
-          assert.rejects(
-            () =>
-              initializeWorkspace({
-                ...f.setup,
-                fixtureClientBindings: { preparation_ready: f.applicantBUserId },
-              }),
-            rejected("VALIDATION"),
-          ),
-        );
       },
     );
     await t.test(
@@ -475,7 +453,7 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
         const { data, error } = await f.service((admin) =>
           admin
             .from("cases")
-            .update({ fixture: true, fixture_key: "preparation_ready" })
+            .update({ answers: { tp_first_name: "Service" } })
             .eq("id", f.first.caseId)
             .select(),
         );
@@ -708,7 +686,7 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
   }
 });
 test("workflow records stay owner-visible, presenter-only, and write-protected", async (t) => {
-  const f = await createDatabaseFixture();
+  const f = await createDatabaseFixture({ roleAccounts: false });
   try {
     const submitted = await f.createCase(f.applicantA, crypto.randomUUID());
     const draft = await f.createCase(f.applicantA, crypto.randomUUID());
@@ -810,7 +788,6 @@ test("workflow records stay owner-visible, presenter-only, and write-protected",
         assert.equal(item.status, "open");
         assert.equal(item.revision, 1);
         assert.equal(item.assignee_person_id, null);
-        assert.equal(item.fixture, false);
         assert.equal(
           item.contact_preference,
           "Prefers calls from the main office.",
@@ -819,7 +796,6 @@ test("workflow records stay owner-visible, presenter-only, and write-protected",
           (row) => row.id === seeded.standaloneAssistanceId,
         );
         assert.equal(standalone.case_id, null);
-        assert.equal(standalone.fixture, true);
         for (const table of ["client_events", "case_events"])
           assert.deepEqual(
             await rows(f.presenter, table, { case_id: draft.caseId }),

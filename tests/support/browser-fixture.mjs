@@ -3,6 +3,7 @@ import { chromium, firefox } from "playwright";
 import { createClient } from "@supabase/supabase-js";
 import { createAppServer } from "../../server.mjs";
 import { NEUTRAL_SEND_MESSAGE } from "../../src/auth.mjs";
+import { isLoopbackUrl } from "../../src/loopback.mjs";
 import { assertTestTarget } from "../../tools/admin/test-target.mjs";
 import { createDatabaseFixture } from "./database-fixture.mjs";
 
@@ -144,26 +145,29 @@ export const SIGNED_IN_HEADING = "My applications";
  * `heading` is the signed-in screen's own heading; it defaults to the
  * applicant's, and a staff caller passes the one their principal lands on.
  * `.first()` because a staff screen names itself twice — once in the frame and
- * once in the panel — and a single match is unaffected by it.
+ * once in the panel — and a single match is unaffected by it. `windowState`
+ * is passed on to `assertStoredSession`.
  */
 export async function assertAuthenticatedUser(
   page,
   userId,
-  { timeout, heading = SIGNED_IN_HEADING } = {},
+  { timeout, heading = SIGNED_IN_HEADING, windowState = true } = {},
 ) {
   await page
     .getByRole("heading", { name: heading, exact: true })
     .first()
     .waitFor(timeout === undefined ? undefined : { timeout });
-  await assertStoredSession(page, userId);
+  await assertStoredSession(page, userId, { windowState });
 }
 
 /**
  * The session half of `assertAuthenticatedUser`, with no screen in it: the
  * SDK's stored session belongs to this user and carries an access token, and
  * the app wrote its window state. Only ids and booleans leave the page.
+ * `windowState: false` expects the opposite of the last: a presenter's window
+ * loads nothing, so it stores no window state either.
  */
-export async function assertStoredSession(page, userId) {
+export async function assertStoredSession(page, userId, { windowState = true } = {}) {
   const stored = await page.evaluate(
     ({ stateKey }) => {
       const key = Object.keys(localStorage).find((name) =>
@@ -199,8 +203,10 @@ export async function assertStoredSession(page, userId) {
   );
   assert.equal(
     stored.windowState,
-    true,
-    "the app stored no window state for the signed-in user",
+    windowState,
+    windowState
+      ? "the app stored no window state for the signed-in user"
+      : "the app stored a window state it should not have",
   );
 }
 
@@ -273,9 +279,10 @@ export async function submitVerificationCode({ page, code }) {
  * repeat-generation measurement), otherwise one is generated here. The returned
  * code is for a caller that needs to prove it cannot be reused — it must never
  * be logged. `heading` is the signed-in screen this actor lands on; a presenter
- * passes their own, and an applicant needs nothing.
+ * passes their own, and an applicant needs nothing. `windowState` is
+ * `assertStoredSession`'s: a presenter passes false.
  */
-export async function loginTestUser({ page, actor, fixture, otp, heading }) {
+export async function loginTestUser({ page, actor, fixture, otp, heading, windowState }) {
   const code = otp ?? (await fixture.generateOtp(actor.email));
   assert.match(String(code), /^[0-9]+$/);
   const { route, release } = await requestCode({
@@ -292,6 +299,7 @@ export async function loginTestUser({ page, actor, fixture, otp, heading }) {
     await assertAuthenticatedUser(page, actor.userId, {
       timeout: SIGNED_IN_TIMEOUT_MS,
       ...(heading === undefined ? {} : { heading }),
+      ...(windowState === undefined ? {} : { windowState }),
     });
     return { posts: route.posts, preflights: route.preflights, otp: code };
   } catch (error) {
@@ -347,6 +355,8 @@ export async function loginTestUserById({ page, actor, fixture, otp }) {
 
 export async function createBrowserFixture() {
   const target = await assertTestTarget();
+  // The database fixture's default: the Site Coordinator is the default
+  // follow-up person, as the seed (tools/admin/seed-cases.mjs) requires.
   const database = await createDatabaseFixture();
   const browsers = [];
   let server = null;
@@ -354,8 +364,12 @@ export async function createBrowserFixture() {
     // Ruling R45: the app is served in-process from the repository, configured
     // only with the guarded test target. No `.env.local` is ever written, and
     // port 0 keeps parallel runs and other sessions' servers out of the way.
+    if (!isLoopbackUrl(target.apiUrl)) {
+      throw new Error("The browser story needs a local (loopback) Supabase test target for the demo tools.");
+    }
     server = createAppServer({
       env: {
+        VITALLY_DEMO_TOOLS: "1",
         SUPABASE_URL: target.apiUrl,
         SUPABASE_PUBLISHABLE_KEY: target.publishableKey,
         AUTH_RESEND_COOLDOWN_SECONDS: String(APP_COOLDOWN_SECONDS),
@@ -387,9 +401,12 @@ export async function createBrowserFixture() {
     sessionStateKey,
   };
 
-  // One provisioned actor, by the name the database fixture uses.
+  // One provisioned actor, by the name the database fixture uses: one of its
+  // own actors (applicantA, presenter, …) or one of its role-named staff
+  // accounts (siteCoordinator, preparer, reviewer, intaker), whose address the
+  // fixture keeps under `roleAccounts`. Never logged.
   fixture.actor = (key) => {
-    const email = database[`${key}Email`];
+    const email = database[`${key}Email`] ?? database.roleAccounts?.[key]?.email;
     const userId = database[`${key}UserId`];
     assert.ok(
       email && userId,
@@ -444,8 +461,19 @@ export async function createBrowserFixture() {
       // language from `navigator.languages`, so a machine whose browser runs
       // in Chinese would otherwise start an English story in Chinese. The one
       // phase that works in Chinese asks for its own.
-      async newPage({ viewport = { width: 1280, height: 900 }, locale = "en-US" } = {}) {
+      //
+      // `permissions` are granted for the app's origin and `initScript` runs
+      // in every document, both before the first one loads (the story's
+      // clipboard check needs both on a window it signs in once).
+      async newPage({
+        viewport = { width: 1280, height: 900 },
+        locale = "en-US",
+        permissions = [],
+        initScript = null,
+      } = {}) {
         const context = await browser.newContext({ viewport, locale });
+        if (permissions.length) await context.grantPermissions(permissions, { origin: appOrigin });
+        if (initScript) await context.addInitScript(initScript);
         const page = await context.newPage();
         const errors = [];
         const pageErrors = [];

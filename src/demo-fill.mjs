@@ -7,17 +7,28 @@
 // The values are pure (testable in node); fillForm is the only DOM code.
 
 import { todayIso } from "./questionnaires.mjs";
+import { isLoopbackUrl } from "./loopback.mjs";
 
 export const DEMO_FILL_ACTION = "demo-fill";
 
 /**
- * The button, placed at the top of a form or dialog, for a presenter only.
- * Like the other demo tools ("Fill fictional details", the sample reset and
- * the checkpoints), a staff account never gets it: a real preparer, reviewer
- * or office worker must never fill a real case with made-up answers.
+ * The demo-tools switch, computed once at start-up: the server must have sent
+ * `demoTools: true` and the Supabase URL must be on this machine.
  */
-export const demoFillButton = (principal) =>
-  principal?.access === "presenter"
+export const demoToolsFromConfig = (config) =>
+  config?.demoTools === true && isLoopbackUrl(config?.supabaseUrl);
+
+/** Whether the controller's state has the demo tools switched on. */
+export const demoToolsOn = (state) => state?.demoTools === true;
+
+/**
+ * The button, placed at the top of a form or dialog, only when the demo-tools
+ * switch is on (`demoToolsOn(state)`). It follows the switch, not the account:
+ * on a real deployment the switch is off, so a real preparer, reviewer or
+ * office worker never gets a way to fill a case with made-up answers.
+ */
+export const demoFillButton = (enabled) =>
+  enabled === true
     ? `<button type="button" class="btn secondary demo-fill" data-action="${DEMO_FILL_ACTION}">Auto-fill fictional data</button>`
     : "";
 

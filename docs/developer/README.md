@@ -74,7 +74,7 @@ src/
   supabase-store.mjs       The only data adapter: reads, the 8 RPCs, Realtime, row mapping.
   auth.mjs                 Email one-time-code sign-in, resend cooldown, neutral messages.
   contact-log.mjs          The contact log's summary line, labels and New York time helpers.
-  contracts.mjs            Shared vocabulary: stages, actions, checkpoints, error codes.
+  contracts.mjs            Shared vocabulary: stages, actions, error codes.
   errors.mjs               The one mapper from database/transport errors to domain codes.
   domain.mjs               Stages, phases, stage wording.
   intake-catalogue-data.mjs  Generated: the version-2 question catalogue. Never edit by hand.
@@ -89,7 +89,6 @@ src/
   admin-views.mjs          The office's case page; admin eligibility rules.
   office-views.mjs         The office's Follow-ups queue and Add a case.
   pool-views.mjs           The office's case pool (every case, by phase).
-  presenter-views.mjs      Demo-only presenter panel: personas, reset, checkpoints.
   ui.mjs                   HTML helpers, escaping, labels, icons, focus preservation.
   sample-data.mjs          Fictional form filling for demos (version 2).
   styles.css               All styles.
@@ -99,17 +98,17 @@ src/
   vendor/pdfjs.mjs, vendor/pdfjs-worker.mjs
                            Committed copy of pdfjs-dist's legacy build (the shaded-section editor).
 supabase/
-  migrations/001-039       The whole schema, RLS, business logic and intake catalogue, in order.
+  migrations/001-041       The whole schema, RLS, business logic and intake catalogue, in order.
   test-stack.config.example.toml   Reference config for the local test stack.
 tools/
   admin/                   Privileged tooling: target guards, migrate, roster, workspace setup.
   build.mjs                Rebuilds the four files in src/vendor/.
   build-intake-catalogue.mjs  Builds the catalogue data module and its migration from docs/intake-questions.
 tests/
-  *.test.mjs               Unit tests (no network): 1418.
-  database*.mjs            Database tests against the local stack: 434.
+  *.test.mjs               Unit tests (no network): 1496.
+  database*.mjs            Database tests against the local stack: 441.
   auth-browser.mjs         Real sign-in in Chrome and Firefox: 20.
-  browser.mjs              The full demonstration story, two browsers, both directions: 77.
+  browser.mjs              The full demonstration story, two browsers, both directions: 83.
   support/                 Test fixtures: throwaway workspaces, browser helpers, cleanup.
 docs/
   setup.md                 How to run and test everything.
@@ -159,8 +158,6 @@ These are load-bearing. Changing any of them is an architecture decision, not a 
 | Receipt | The stored result of an accepted action, keyed by its action id, returned again on replay. |
 | Preparation version | Which hand-off to review this is; it moves each time a preparer submits or resubmits. |
 | Participation | The permanent record that a person helped prepare a case. It blocks them from reviewing it. |
-| Fixture / sample case | One of ten seeded demonstration cases, rebuilt by a presenter's reset. |
-| Generation | `workspaces.fixture_generation`, the counter a reset moves so every window reloads. |
 | Client number | `#001`-style number a case gets when it is submitted, one sequence per workspace and season (migration 010). |
 | Intake version | Which intake a case uses, fixed when it is created. `2`, the catalogue form of steps 0–9 with sub-steps, is the only version since migration 023 (the original four-step version 1 was removed). New cases take `workspaces.default_intake_version`. |
 | Catalogue | The version-2 questions (ids, types, options, show-if rules, standard and senior wording), built from `docs/intake-questions/` into `src/intake-catalogue-data.mjs` and the private `intake_fields` table. |

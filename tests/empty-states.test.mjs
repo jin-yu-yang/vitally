@@ -17,7 +17,8 @@ import { STATES, SENTENCES } from "./empty-states.states.mjs";
 // the Filing result and Rejected chips (change add-post-efiling-stages), and by
 // the Waiting for documents, Hold and Withdrawn chips (change add-hold-and-closing).
 // Both case pages' Intake answers tab gained the 13614-C shaded-section panel
-// on purpose (change add-preparer-13614c-fields).
+// on purpose (change add-preparer-13614c-fields). Both case headers read
+// "Signed in as" instead of "Acting as" on purpose (change remove-presenter-screens).
 //
 // The case pages print "Updated" with formatTime, in the machine's own time
 // zone, and the fixture was captured in New York. Node re-reads TZ when it is

@@ -395,12 +395,12 @@ test("the editor's save refuses what the rules refuse, and a save nobody sent", 
 });
 
 test("the editor goes when the sign-in or the open case does", () => {
-  const open = { principal: { access: "presenter" }, selectedCaseId: "case-a" };
+  const open = { principal: { access: "staff" }, selectedCaseId: "case-a" };
   assert.equal(editorGone(open, "case-a"), false);
   assert.equal(editorGone({ ...open, principal: null }, "case-a"), true, "signed out");
   assert.equal(editorGone({ ...open, principal: { access: "client" } }, "case-a"), true);
-  // A staff account is a staff window too (add-staff-identity): its editor stays open.
-  assert.equal(editorGone({ ...open, principal: { access: "staff" } }, "case-a"), false, "a staff account");
+  // A presenter is not a staff window (remove-presenter-screens): it has no editor.
+  assert.equal(editorGone({ ...open, principal: { access: "presenter" } }, "case-a"), true, "a presenter");
   assert.equal(editorGone({ ...open, principal: { access: "applicant" } }, "case-a"), true);
   assert.equal(editorGone({ ...open, selectedCaseId: null }, "case-a"), true, "the case was left");
   assert.equal(editorGone({ ...open, selectedCaseId: "case-b" }, "case-a"), true);

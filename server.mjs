@@ -2,6 +2,7 @@ import http from "node:http";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { isLoopbackUrl } from "./src/loopback.mjs";
 
 // The local demo server. It serves the browser files and one public
 // configuration document, and nothing else: the repository also holds
@@ -51,7 +52,8 @@ function cooldownSeconds(raw) {
     : DEFAULT_COOLDOWN_SECONDS;
 }
 
-// Exactly four keys, and never any other environment value. Everything else in
+// Four keys, plus `demoTools: true` only when VITALLY_DEMO_TOOLS=1 and the
+// Supabase URL is on this machine, and never any other environment value. Everything else in
 // the process environment — administrative keys, database URLs, SMTP
 // credentials — stays on the server side of this function.
 export function publicConfig(env) {
@@ -65,7 +67,20 @@ export function publicConfig(env) {
     authResendCooldownSeconds: cooldownSeconds(
       value(env, "AUTH_RESEND_COOLDOWN_SECONDS"),
     ),
+    ...(value(env, "VITALLY_DEMO_TOOLS") === "1" && isLoopbackUrl(supabaseUrl)
+      ? { demoTools: true }
+      : {}),
   };
+}
+
+// The switch is on, the project is configured, but its URL is not local, so
+// the switch has no effect. Used to warn once at start-up.
+export function demoToolsIgnored(env) {
+  return (
+    value(env, "VITALLY_DEMO_TOOLS") === "1" &&
+    publicConfig(env).configured &&
+    !isLoopbackUrl(value(env, "SUPABASE_URL"))
+  );
 }
 
 const served = (requested) =>
@@ -110,6 +125,10 @@ export function createAppServer({ env = process.env, root = DEFAULT_ROOT } = {})
 
 if (import.meta.filename === process.argv[1]) {
   const port = Number(process.env.PORT || 4173);
+  if (demoToolsIgnored(process.env))
+    console.warn(
+      "VITALLY_DEMO_TOOLS is ignored: the Supabase URL is not on this machine.",
+    );
   createAppServer().listen(port, "127.0.0.1", () =>
     console.log(`ViTally demo ready: http://127.0.0.1:${port}`),
   );

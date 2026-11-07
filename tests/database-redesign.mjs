@@ -88,11 +88,11 @@ const cardRows = async (f, caseId) =>
 const v2Case = (f, actor = f.applicantA, options = {}) =>
   f.createCase(actor, crypto.randomUUID(), { answers: {}, ...options });
 const visit = (f, caseId, visited, actor = f.applicantA) =>
-  f.act(actor, caseId, null, "SAVE_ANSWERS", { answers: {}, visited });
-const card = (f, actor, caseId, personId, slotId, status) =>
-  f.act(actor, caseId, personId, "SET_DOCUMENT_CARD", { slotId, status });
-const group = (f, actor, caseId, personId, slotId, grp) =>
-  f.act(actor, caseId, personId, "SET_DOCUMENT_GROUP", { slotId, group: grp });
+  f.act(actor, caseId, "SAVE_ANSWERS", { answers: {}, visited });
+const card = (f, actor, caseId, slotId, status) =>
+  f.act(actor, caseId, "SET_DOCUMENT_CARD", { slotId, status });
+const group = (f, actor, caseId, slotId, grp) =>
+  f.act(actor, caseId, "SET_DOCUMENT_GROUP", { slotId, group: grp });
 const readCards = async (client, caseId) => {
   const { data, error } = await client
     .from("case_document_cards")
@@ -104,19 +104,19 @@ const readCards = async (client, caseId) => {
 // A case the client has submitted, so staff can see it.
 async function submittedCase(f) {
   const { caseId } = await v2Case(f);
-  await f.act(f.applicantA, caseId, null, "SAVE_ANSWERS", { answers: completeAnswers() });
-  await f.act(f.applicantA, caseId, null, "SUBMIT", { confirmed: true });
+  await f.act(f.applicantA, caseId, "SAVE_ANSWERS", { answers: completeAnswers() });
+  await f.act(f.applicantA, caseId, "SUBMIT", { confirmed: true });
   return caseId;
 }
 
-// A submitted version-2 case Alex prepares and Morgan reviews.
+// A submitted version-2 case the Preparer prepares and the Reviewer reviews.
 async function claimedCase(f) {
   const caseId = await submittedCase(f);
-  await f.act(f.presenter, caseId, f.sam, "START_SCREENING", {});
-  await f.act(f.presenter, caseId, f.sam, "VERIFY_INTAKE", { checks: f.intakeChecks });
-  await f.act(f.presenter, caseId, f.alex, "CLAIM_PREPARATION", {});
-  await f.act(f.presenter, caseId, f.alex, "SUBMIT_REVIEW", { questionnaire: PREPARER });
-  await f.act(f.presenter, caseId, f.morgan, "CLAIM_REVIEW", {});
+  await f.act(f.siteCoordinator, caseId, "START_SCREENING", {});
+  await f.act(f.siteCoordinator, caseId, "VERIFY_INTAKE", { checks: f.intakeChecks });
+  await f.act(f.preparer, caseId, "CLAIM_PREPARATION", {});
+  await f.act(f.preparer, caseId, "SUBMIT_REVIEW", { questionnaire: PREPARER });
+  await f.act(f.reviewer, caseId, "CLAIM_REVIEW", {});
   return caseId;
 }
 
@@ -134,7 +134,7 @@ test("visits and document cards on the server", async (t) => {
         "about.you",
         "before.ready",
       ]);
-      await f.act(f.applicantA, caseId, null, "SAVE_ANSWERS", { answers: {} });
+      await f.act(f.applicantA, caseId, "SAVE_ANSWERS", { answers: {} });
       assert.deepEqual((await caseRow(f, caseId)).intake_visited, [
         "about.address",
         "about.you",
@@ -148,7 +148,7 @@ test("visits and document cards on the server", async (t) => {
       for (const visited of [["about.nowhere"], "about.you", [7], sixtyFive, [{}], ["About.you"]])
         await assert.rejects(visit(f, caseId, visited), rejected("VALIDATION"));
       await assert.rejects(
-        f.act(f.applicantA, caseId, null, "SAVE_ANSWERS", { answers: {}, visited: [], extra: 1 }),
+        f.act(f.applicantA, caseId, "SAVE_ANSWERS", { answers: {}, visited: [], extra: 1 }),
         rejected("VALIDATION"),
       );
       assert.deepEqual((await caseRow(f, caseId)).intake_visited, []);
@@ -165,7 +165,7 @@ test("visits and document cards on the server", async (t) => {
       );
       assert.deepEqual((await caseRow(f, caseId)).intake_visited, ["about.you", "gone.step"]);
       // A save without `visited` leaves the list as it is.
-      await f.act(f.applicantA, caseId, null, "SAVE_ANSWERS", { answers: {} });
+      await f.act(f.applicantA, caseId, "SAVE_ANSWERS", { answers: {} });
       assert.deepEqual((await caseRow(f, caseId)).intake_visited, ["about.you", "gone.step"]);
       await visit(f, caseId, ["before.ready"]);
       assert.deepEqual((await caseRow(f, caseId)).intake_visited, ["about.you", "before.ready"]);
@@ -174,7 +174,7 @@ test("visits and document cards on the server", async (t) => {
     await t.test("the client marks a card; the table names no person", async () => {
       const { caseId } = await v2Case(f);
       const before = await caseRow(f, caseId);
-      await card(f, f.applicantA, caseId, null, "w2.household", "later");
+      await card(f, f.applicantA, caseId, "w2.household", "later");
       assert.deepEqual(await cardRows(f, caseId), [
         { slot_id: "w2.household", status: "later", group_override: null },
       ]);
@@ -209,14 +209,14 @@ test("visits and document cards on the server", async (t) => {
 
     await t.test("Not done sets the status to null and keeps the row", async () => {
       const { caseId } = await v2Case(f);
-      await card(f, f.applicantA, caseId, null, "w2.household", "none");
-      await card(f, f.applicantA, caseId, null, "w2.household", "not_done");
+      await card(f, f.applicantA, caseId, "w2.household", "none");
+      await card(f, f.applicantA, caseId, "w2.household", "not_done");
       const rows = await cardRows(f, caseId);
       assert.equal(rows.length, 1);
       assert.equal(rows[0].status, null);
-      await card(f, f.applicantA, caseId, null, `ssn.hh.${HH_A}`, "later");
-      await card(f, f.applicantA, caseId, null, "ssn.tp", "none");
-      await card(f, f.applicantA, caseId, null, "ssn.sp", "none");
+      await card(f, f.applicantA, caseId, `ssn.hh.${HH_A}`, "later");
+      await card(f, f.applicantA, caseId, "ssn.tp", "none");
+      await card(f, f.applicantA, caseId, "ssn.sp", "none");
       assert.equal((await cardRows(f, caseId)).length, 4);
     });
 
@@ -238,65 +238,65 @@ test("visits and document cards on the server", async (t) => {
       ];
       for (const payload of bad)
         await assert.rejects(
-          f.act(f.applicantA, caseId, null, "SET_DOCUMENT_CARD", payload),
+          f.act(f.applicantA, caseId, "SET_DOCUMENT_CARD", payload),
           rejected("VALIDATION"),
           JSON.stringify(payload),
         );
       await assert.rejects(
-        f.act(f.applicantA, caseId, null, "SET_DOCUMENT_CARD", { slotId: "ssn.household", status: "later" }),
+        f.act(f.applicantA, caseId, "SET_DOCUMENT_CARD", { slotId: "ssn.household", status: "later" }),
         rejected("VALIDATION"),
       );
-      await card(f, f.applicantA, caseId, null, "photo_id.tp", "later");
+      await card(f, f.applicantA, caseId, "photo_id.tp", "later");
       assert.deepEqual(await cardRows(f, caseId).then((rows) => rows.length), 1);
       assert.equal(Number((await caseRow(f, caseId)).revision), Number(revision) + 1);
     });
 
     await t.test("staff may mark a card on an office draft and on a submitted case", async () => {
-      const office = await v2Case(f, f.presenter, { mode: "assisted", personId: f.sam });
-      await card(f, f.presenter, office.caseId, f.sam, "w2.household", "later");
+      const office = await v2Case(f, f.siteCoordinator, { mode: "assisted" });
+      await card(f, f.siteCoordinator, office.caseId, "w2.household", "later");
       assert.deepEqual(await cardRows(f, office.caseId), [
         { slot_id: "w2.household", status: "later", group_override: null },
       ]);
-      // Alex neither is nor will be this case's preparer here: refused for not
+      // The Preparer neither is nor will be this case's preparer here: refused for not
       // working on the case (018), not for lacking a capability.
       await assert.rejects(
-        card(f, f.presenter, office.caseId, f.alex, "w2.household", "none"),
+        card(f, f.preparer, office.caseId, "w2.household", "none"),
         rejected("FORBIDDEN"),
       );
       await assert.rejects(
-        group(f, f.presenter, office.caseId, f.alex, "w2.household", "needed"),
+        group(f, f.preparer, office.caseId, "w2.household", "needed"),
         rejected("FORBIDDEN"),
       );
       assert.equal((await cardRows(f, office.caseId)).length, 1);
       // Office staff may move a card on an office draft too.
-      await group(f, f.presenter, office.caseId, f.sam, "w2.household", "needed");
+      await group(f, f.siteCoordinator, office.caseId, "w2.household", "needed");
       assert.deepEqual(await cardRows(f, office.caseId), [
         { slot_id: "w2.household", status: "later", group_override: "needed" },
       ]);
       // The client cannot mark a card on a case that is not theirs.
       await assert.rejects(
-        card(f, f.applicantA, office.caseId, null, "w2.household", "none"),
+        card(f, f.applicantA, office.caseId, "w2.household", "none"),
         (error) => ["FORBIDDEN", "NOT_FOUND"].includes(error.code),
       );
 
       const caseId = await submittedCase(f);
-      await card(f, f.presenter, caseId, f.sam, "ssn.tp", "none");
+      await card(f, f.siteCoordinator, caseId, "ssn.tp", "none");
       assert.deepEqual(await cardRows(f, caseId), [
         { slot_id: "ssn.tp", status: "none", group_override: null },
       ]);
       // The client can still mark one after submitting.
-      await card(f, f.applicantA, caseId, null, "ssn.sp", "later");
+      await card(f, f.applicantA, caseId, "ssn.sp", "later");
       assert.equal((await cardRows(f, caseId)).length, 2);
     });
 
     await t.test("staff are refused on the client's unsent draft", async () => {
       const { caseId } = await v2Case(f);
-      for (const [person, type, payload] of [
-        [f.sam, "SET_DOCUMENT_CARD", { slotId: "w2.household", status: "later" }],
-        [f.sam, "SET_DOCUMENT_GROUP", { slotId: "w2.household", group: "needed" }],
+      for (const [client, type, payload] of [
+        [f.siteCoordinator, "SET_DOCUMENT_CARD", { slotId: "w2.household", status: "later" }],
+        [f.siteCoordinator, "SET_DOCUMENT_GROUP", { slotId: "w2.household", group: "needed" }],
       ])
         await assert.rejects(
-          f.act(f.presenter, caseId, person, type, payload),
+          f.act(client, caseId, type, payload),
           (error) => ["FORBIDDEN", "NOT_FOUND"].includes(error.code),
         );
       assert.deepEqual(await cardRows(f, caseId), []);
@@ -307,11 +307,11 @@ test("visits and document cards on the server", async (t) => {
       // was refused for lacking admin; now it is works_on_case that refuses him.
       const caseId = await submittedCase(f);
       await assert.rejects(
-        card(f, f.presenter, caseId, f.alex, "w2.household", "later"),
+        card(f, f.preparer, caseId, "w2.household", "later"),
         rejected("FORBIDDEN"),
       );
       await assert.rejects(
-        card(f, f.presenter, caseId, f.morgan, "w2.household", "later"),
+        card(f, f.reviewer, caseId, "w2.household", "later"),
         rejected("FORBIDDEN"),
       );
       assert.deepEqual(await cardRows(f, caseId), []);
@@ -321,11 +321,11 @@ test("visits and document cards on the server", async (t) => {
       const caseId = await claimedCase(f);
       const slot = `ssn.hh.${HH_A}`;
       // Alex as its preparer.
-      await card(f, f.presenter, caseId, f.alex, "w2.household", "later");
-      await group(f, f.presenter, caseId, f.alex, slot, "needed");
+      await card(f, f.preparer, caseId, "w2.household", "later");
+      await group(f, f.preparer, caseId, slot, "needed");
       // Morgan as its reviewer.
-      await card(f, f.presenter, caseId, f.morgan, "ssn.tp", "none");
-      await group(f, f.presenter, caseId, f.morgan, slot, "maybe");
+      await card(f, f.reviewer, caseId, "ssn.tp", "none");
+      await group(f, f.reviewer, caseId, slot, "maybe");
       assert.deepEqual(await cardRows(f, caseId), [
         { slot_id: slot, status: null, group_override: null },
         { slot_id: "ssn.tp", status: "none", group_override: null },
@@ -334,32 +334,32 @@ test("visits and document cards on the server", async (t) => {
       // Alex on a case he does not prepare is still refused, and nothing is written.
       const other = await submittedCase(f);
       await assert.rejects(
-        card(f, f.presenter, other, f.alex, "w2.household", "later"),
+        card(f, f.preparer, other, "w2.household", "later"),
         rejected("FORBIDDEN"),
       );
       await assert.rejects(
-        group(f, f.presenter, other, f.alex, "w2.household", "needed"),
+        group(f, f.preparer, other, "w2.household", "needed"),
         rejected("FORBIDDEN"),
       );
       assert.deepEqual(await cardRows(f, other), []);
       // Sam (office) may on any submitted case.
-      await card(f, f.presenter, other, f.sam, "w2.household", "later");
-      await group(f, f.presenter, other, f.sam, "w2.household", "needed");
+      await card(f, f.siteCoordinator, other, "w2.household", "later");
+      await group(f, f.siteCoordinator, other, "w2.household", "needed");
       assert.equal((await cardRows(f, other)).length, 1);
       // The client's own mark is unchanged.
-      await card(f, f.applicantA, other, null, "ssn.tp", "later");
+      await card(f, f.applicantA, other, "ssn.tp", "later");
       assert.equal((await cardRows(f, other)).length, 2);
     });
 
     await t.test("the preparer is refused once the case is closed", async () => {
       const caseId = await claimedCase(f);
-      await f.act(f.presenter, caseId, f.sam, "CLOSE_CASE", { confirmed: true, reason: "other", note: "Test close." });
+      await f.act(f.siteCoordinator, caseId, "CLOSE_CASE", { confirmed: true, reason: "other", note: "Test close." });
       await assert.rejects(
-        card(f, f.presenter, caseId, f.alex, "w2.household", "later"),
+        card(f, f.preparer, caseId, "w2.household", "later"),
         rejected("INVALID_TRANSITION"),
       );
       await assert.rejects(
-        group(f, f.presenter, caseId, f.morgan, "w2.household", "needed"),
+        group(f, f.reviewer, caseId, "w2.household", "needed"),
         rejected("INVALID_TRANSITION"),
       );
       assert.deepEqual(await cardRows(f, caseId), []);
@@ -369,24 +369,24 @@ test("visits and document cards on the server", async (t) => {
       const caseId = await submittedCase(f);
       const slot = `ssn.hh.${HH_A}`;
       const before = Number((await caseRow(f, caseId)).revision);
-      await group(f, f.presenter, caseId, f.sam, slot, "needed");
+      await group(f, f.siteCoordinator, caseId, slot, "needed");
       assert.deepEqual(await cardRows(f, caseId), [
         { slot_id: slot, status: null, group_override: "needed" },
       ]);
       assert.equal(Number((await caseRow(f, caseId)).revision), before + 1);
-      await group(f, f.presenter, caseId, f.sam, slot, "maybe");
+      await group(f, f.siteCoordinator, caseId, slot, "maybe");
       assert.deepEqual(await cardRows(f, caseId), [
         { slot_id: slot, status: null, group_override: null },
       ]);
       // Nothing left to move back down.
-      await assert.rejects(group(f, f.presenter, caseId, f.sam, slot, "maybe"), rejected("VALIDATION"));
+      await assert.rejects(group(f, f.siteCoordinator, caseId, slot, "maybe"), rejected("VALIDATION"));
       await assert.rejects(
-        group(f, f.presenter, caseId, f.sam, "w2.household", "maybe"),
+        group(f, f.siteCoordinator, caseId, "w2.household", "maybe"),
         rejected("VALIDATION"),
       );
       // A status mark keeps the override it sits beside.
-      await group(f, f.presenter, caseId, f.sam, "w2.household", "needed");
-      await card(f, f.presenter, caseId, f.sam, "w2.household", "later");
+      await group(f, f.siteCoordinator, caseId, "w2.household", "needed");
+      await card(f, f.siteCoordinator, caseId, "w2.household", "later");
       assert.deepEqual(
         (await cardRows(f, caseId)).find((row) => row.slot_id === "w2.household"),
         { slot_id: "w2.household", status: "later", group_override: "needed" },
@@ -398,7 +398,7 @@ test("visits and document cards on the server", async (t) => {
         { slotId: "w2.tp", group: "needed" },
       ])
         await assert.rejects(
-          f.act(f.presenter, caseId, f.sam, "SET_DOCUMENT_GROUP", payload),
+          f.act(f.siteCoordinator, caseId, "SET_DOCUMENT_GROUP", payload),
           rejected("VALIDATION"),
         );
     });
@@ -406,15 +406,15 @@ test("visits and document cards on the server", async (t) => {
     await t.test("SET_DOCUMENT_GROUP is for staff who work on the case only", async () => {
       const caseId = await submittedCase(f);
       await assert.rejects(
-        group(f, f.applicantA, caseId, null, "w2.household", "needed"),
+        group(f, f.applicantA, caseId, "w2.household", "needed"),
         rejected("FORBIDDEN"),
       );
       await assert.rejects(
-        group(f, f.presenter, caseId, f.alex, "w2.household", "needed"),
+        group(f, f.preparer, caseId, "w2.household", "needed"),
         rejected("FORBIDDEN"),
       );
       await assert.rejects(
-        group(f, f.presenter, caseId, f.morgan, "w2.household", "needed"),
+        group(f, f.reviewer, caseId, "w2.household", "needed"),
         rejected("FORBIDDEN"),
       );
       assert.deepEqual(await cardRows(f, caseId), []);
@@ -422,19 +422,19 @@ test("visits and document cards on the server", async (t) => {
 
     await t.test("both actions are refused on a closed case", async () => {
       const caseId = await submittedCase(f);
-      await group(f, f.presenter, caseId, f.sam, "w2.household", "needed");
-      await f.act(f.presenter, caseId, f.sam, "CLOSE_CASE", { confirmed: true, reason: "other", note: "Test close." });
+      await group(f, f.siteCoordinator, caseId, "w2.household", "needed");
+      await f.act(f.siteCoordinator, caseId, "CLOSE_CASE", { confirmed: true, reason: "other", note: "Test close." });
       assert.equal((await caseRow(f, caseId)).stage, "closed");
       await assert.rejects(
-        card(f, f.presenter, caseId, f.sam, "ssn.tp", "none"),
+        card(f, f.siteCoordinator, caseId, "ssn.tp", "none"),
         rejected("INVALID_TRANSITION"),
       );
       await assert.rejects(
-        group(f, f.presenter, caseId, f.sam, "w2.household", "maybe"),
+        group(f, f.siteCoordinator, caseId, "w2.household", "maybe"),
         rejected("INVALID_TRANSITION"),
       );
       await assert.rejects(
-        card(f, f.applicantA, caseId, null, "ssn.tp", "none"),
+        card(f, f.applicantA, caseId, "ssn.tp", "none"),
         rejected("INVALID_TRANSITION"),
       );
       assert.equal((await cardRows(f, caseId)).length, 1);
@@ -442,13 +442,13 @@ test("visits and document cards on the server", async (t) => {
 
     await t.test("who may read card rows", async () => {
       const { caseId } = await v2Case(f);
-      await card(f, f.applicantA, caseId, null, "w2.household", "later");
-      await card(f, f.applicantA, caseId, null, "ssn.tp", "none");
+      await card(f, f.applicantA, caseId, "w2.household", "later");
+      await card(f, f.applicantA, caseId, "ssn.tp", "none");
       assert.deepEqual(await readCards(f.applicantA, caseId), ["ssn.tp", "w2.household"]);
       assert.deepEqual(await readCards(f.applicantB, caseId), []);
       assert.deepEqual(await readCards(f.presenter, caseId), []);
-      await f.act(f.applicantA, caseId, null, "SAVE_ANSWERS", { answers: completeAnswers() });
-      await f.act(f.applicantA, caseId, null, "SUBMIT", { confirmed: true });
+      await f.act(f.applicantA, caseId, "SAVE_ANSWERS", { answers: completeAnswers() });
+      await f.act(f.applicantA, caseId, "SUBMIT", { confirmed: true });
       assert.deepEqual(await readCards(f.presenter, caseId), ["ssn.tp", "w2.household"]);
       assert.deepEqual(await readCards(f.applicantB, caseId), []);
     });

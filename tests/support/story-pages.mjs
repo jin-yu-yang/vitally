@@ -624,45 +624,11 @@ export const WORK_BOARD_HEADING = "Work board";
 export const OFFICE_BOARD_HEADING = "Office queue";
 
 /**
- * Act as one volunteer in this window, and wait for the screen to agree.
- *
- * One press, sent into a still page: a phase usually starts right after the
- * other window's work, whose redraw burst can replace the persona panel under
- * the press, and then nothing is chosen at all (seen on Firefox staff under
- * load, in "Sam records the call…" and "Morgan reviews…").
- */
-export async function choosePersona(page, personId) {
-  await waitForQuiet(page);
-  await page
-    .locator(`[data-action="select-person"][data-person-id="${personId}"]`)
-    .click({ timeout: CLICK_MS });
-  await waitFor(
-    page,
-    `the persona ${personId} to be the one this window acts as`,
-    (id) =>
-      document
-        .querySelector(`[data-action="select-person"][data-person-id="${id}"]`)
-        ?.getAttribute("aria-pressed") === "true",
-    personId,
-    RENDER_MS,
-  );
-}
-
-/** Which persona this window is acting as, read from the panel itself. */
-export const readPersona = (page) =>
-  page.evaluate(
-    () =>
-      document
-        .querySelector('[data-action="select-person"][aria-pressed="true"]')
-        ?.getAttribute("data-person-id") ?? null,
-  );
-
-/**
  * The name a staff account's sidebar says it is signed in as (OpenSpec change
  * add-staff-identity): its account row reads "Signed in as" in a `<small>`
- * and the person's name in a `<strong>`. Null when the row says anything else
- * (a presenter's row reads "Acting as this volunteer"), so a presenter window
- * can never pass for a staff one.
+ * and the person's name in a `<strong>`. Null when there is no such row (a
+ * presenter's plain screen has none), so a presenter window can never pass
+ * for a staff one.
  */
 export const readSignedInAs = (page) =>
   page.evaluate(() => {
@@ -670,9 +636,6 @@ export const readSignedInAs = (page) =>
     if (row?.querySelector("small")?.textContent.trim() !== "Signed in as") return null;
     return row.querySelector("strong")?.textContent.trim() ?? "";
   });
-
-export const readFixtureIndicator = (page) =>
-  page.locator('[data-role="fixture-indicator"]').innerText();
 
 /** Open one case from whichever board is on screen, by its reference. */
 export async function openCaseByReference(page, reference) {
@@ -847,34 +810,6 @@ export async function showBoardTab(page, value) {
     value,
     RENDER_MS,
   );
-}
-
-// ---------------------------------------------------------------------------
-// The presenter's own controls
-// ---------------------------------------------------------------------------
-
-/** Rebuild the sample cases through the panel, dialog and all. */
-export async function resetSampleCases(page, { expectedSamples = 10 } = {}) {
-  await clickAction(page, "open-reset-fixtures");
-  await clickAction(page, "confirm-reset-fixtures");
-  await waitFor(
-    page,
-    "the reset confirmation to close",
-    () => document.querySelector(".modal") === null,
-    undefined,
-    ARRIVAL_MS,
-  );
-  await waitFor(
-    page,
-    `the panel to report ${expectedSamples} sample cases`,
-    (count) =>
-      new RegExp(`sample set \\d+ · ${count} sample cases?`).test(
-        document.querySelector('[data-role="fixture-indicator"]')?.textContent ?? "",
-      ),
-    expectedSamples,
-    ARRIVAL_MS,
-  );
-  return await readFixtureIndicator(page);
 }
 
 // ---------------------------------------------------------------------------

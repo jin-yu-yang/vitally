@@ -15,7 +15,7 @@ Every failure SHALL be recorded and shown once, with `role="alert"`, in the firs
 The error SHALL offer Try again when it can be retried, and Dismiss. It SHALL stay until it is dismissed, retried, or replaced. One error SHALL show at a time: a newer error replaces an older one. When it replaces a failed save, the save chip SHALL say the answers are unsaved, and the draft SHALL be kept and sent with the next move or save. An error SHALL NOT appear as a toast.
 
 This SHALL hold for:
-- **a refusal** the window makes itself, for example "Open an application first.", "This step is not available.", "This request is no longer on screen.", "This checkpoint is not available.", or an action only the person running the session may take. These offer Dismiss only.
+- **a refusal** the window makes itself, for example "Open an application first.", "This step is not available.", or "This request is no longer on screen.". These offer Dismiss only.
 - **a draft 13614-C or Form 14446 that couldn't be built.** The error says "The draft could not be made. Try again." (or, for the font check, "The draft font could not be checked. Try again later."), and Try again builds the same draft again, in the same form and language. A draft that is then built clears that error.
 - **a shaded-section editor that couldn't be opened** (capability `shaded-section`). The error says "The editor could not be opened. Try again, or use Download to fill elsewhere.", in place on the staff case page, and Try again opens the editor again.
 - **an uploaded copy of the shaded section that couldn't be read or saved** (capability `shaded-section`). The error is in place beside the upload control, names the problem or the field, and offers Dismiss only.
@@ -28,8 +28,8 @@ On a client screen the error SHALL be in the screen's language.
 - **THEN** the case page shows the error in place with Try again and Dismiss, and no toast appears
 
 #### Scenario: A refusal inside a dialog
-- **WHEN** the presenter's checkpoint dialog asks for a checkpoint that is no longer available
-- **THEN** the dialog says "This checkpoint is not available." with Dismiss and no Try again, the problem banner shows nothing behind it, and no toast appears
+- **WHEN** a send from "Ask the preparer for corrections" is refused while the dialog is open
+- **THEN** the dialog shows the error itself, the problem banner shows nothing behind it, and no toast appears
 
 #### Scenario: A draft that couldn't be built
 - **WHEN** a client presses View Draft Form 14446 and the draft can't be built
@@ -132,7 +132,6 @@ While a staff list isn't loaded, its panel SHALL show its heading and that line 
 While a press is running, every action SHALL stay disabled as today. The button that was pressed SHALL also show a spinner beside its label and carry `aria-busy="true"`. This SHALL hold for:
 - the staff case actions and the client's Submit;
 - the office's help-request actions;
-- the presenter's reset and checkpoint;
 - Add a case's Save and Send.
 
 When the press ends, the spinner and `aria-busy` SHALL go. A client's move between sub-steps, and any other press, SHALL show no button spinner (the save chip says Saving). If the pressed button is no longer on screen after a redraw, no spinner SHALL be shown.
@@ -203,7 +202,7 @@ While a dialog is open, everything on the page behind it SHALL be inert: it can'
 - **THEN** the header, the page body and the footer are inert, and the dialog is not
 
 #### Scenario: The toast is never inert
-- **WHEN** the presenter confirms "Reset the sample cases" and the toast "The sample cases were rebuilt. Nothing else was touched." appears
+- **WHEN** a reviewer confirms "Ask the preparer for corrections" and the toast "The preparer was asked for corrections." appears
 - **THEN** the toast's live region is not inside anything inert
 
 #### Scenario: A notice while a dialog is open
@@ -213,33 +212,6 @@ While a dialog is open, everything on the page behind it SHALL be inert: it can'
 #### Scenario: Closing clears inert
 - **WHEN** a dialog closes
 - **THEN** nothing on the page is inert, and the opener holds the keyboard
-
-### Requirement: Every confirmation has the same shape
-Every confirmation dialog SHALL be built from one shared body. Its parts SHALL come in this order:
-- the dialog's own refusal, when it states one itself (the corrections dialog does);
-- a sentence saying what will happen;
-- an optional note, with an icon, saying what will not happen. The note SHALL come before the form, or inside the form just before the confirm control;
-- an optional form, holding its fields and the confirm control;
-- one confirm control, which sends the dialog's action;
-- one text button, outside any form, that closes the dialog without sending anything ("Keep it open", "Keep reviewing", "Keep them as they are", and so on).
-
-This SHALL hold for close case, ask the preparer for corrections, reset the sample cases, load a sample checkpoint (and its state with no sample cases), replace the fictional answers, leave Add a case without saving, ask for documents, put on hold, got in touch, and the client's withdraw. Building a dialog from the shared body SHALL NOT change its words, its action, the action's payload, or its controls' ids. The close-case dialog's own fields are set by capability `case-lifecycle` ("A closed case records why it closed").
-
-#### Scenario: Close case keeps its action and payload
-- **WHEN** the office confirms Close this case with the reason Duplicate, no note, and the "I understand" box ticked
-- **THEN** the action sent is `CLOSE_CASE` with that reason, no note and the confirmation, and the case closes
-
-#### Scenario: A note inside the form
-- **WHEN** the presenter opens "Load a sample checkpoint" with sample cases in the workspace
-- **THEN** its note sits inside the form, after the two choices and just before "Load this checkpoint", and "Leave this case as it is" sits outside the form
-
-#### Scenario: A refusal comes first
-- **WHEN** a send from "Ask the preparer for corrections" is refused
-- **THEN** the dialog's own error comes before its sentence, and the form, the confirm control and "Keep reviewing" follow as before
-
-#### Scenario: The keep button sends nothing
-- **WHEN** the office presses "Keep it open" in the close-case dialog
-- **THEN** the dialog closes, no action is sent, and the keyboard returns to "Close this case…"
 
 ### Requirement: An empty list says what is empty, in one of two shapes
 Once a list has loaded and has nothing to show, it SHALL show its empty state, built by one of two shared helpers:
@@ -274,3 +246,26 @@ The case pool's empty state SHALL show the folder icon and say "No cases yet thi
 #### Scenario: Nothing matches
 - **WHEN** an admin filters the case pool by a language no case speaks
 - **THEN** the pool says "No case matches these filters." with the folder icon, and Clear filters shows once, in the line above
+
+### Requirement: Every confirmation dialog has the same shape
+Every confirmation dialog SHALL be built from one shared body. Its parts SHALL come in this order:
+- the dialog's own refusal, when it states one itself (the corrections dialog does);
+- a sentence saying what will happen;
+- an optional note, with an icon, saying what will not happen. The note SHALL come before the form;
+- an optional form, holding its fields and the confirm control;
+- one confirm control, which sends the dialog's action;
+- one text button, outside any form, that closes the dialog without sending anything ("Keep it open", "Keep reviewing", "Keep them as they are", and so on).
+
+This SHALL hold for close case, ask the preparer for corrections, replace the fictional answers, leave Add a case without saving, ask for documents, put on hold, got in touch, and the client's withdraw. Building a dialog from the shared body SHALL NOT change its words, its action, the action's payload, or its controls' ids. The close-case dialog's own fields are set by capability `case-lifecycle` ("A closed case records why it closed").
+
+#### Scenario: Close case keeps its action and payload
+- **WHEN** the office confirms Close this case with the reason Duplicate, no note, and the "I understand" box ticked
+- **THEN** the action sent is `CLOSE_CASE` with that reason, no note and the confirmation, and the case closes
+
+#### Scenario: A refusal comes first
+- **WHEN** a send from "Ask the preparer for corrections" is refused
+- **THEN** the dialog's own error comes before its sentence, and the form, the confirm control and "Keep reviewing" follow as before
+
+#### Scenario: The keep button sends nothing
+- **WHEN** the office presses "Keep it open" in the close-case dialog
+- **THEN** the dialog closes, no action is sent, and the keyboard returns to "Close this case…"

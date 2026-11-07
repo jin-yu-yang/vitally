@@ -1,17 +1,23 @@
 import test from "node:test";
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import {
   parseRoster,
+  rosterNotes,
   parseRosterArgs,
   applyRoster,
 } from "../tools/admin/roster.mjs";
 
+const NOTE = "sampleCaseOwners is no longer used and was ignored.";
 const WORKSPACE = "3f1c2b4a-8d7e-4f60-9a1b-2c3d4e5f6a7b";
 const valid = () => ({
   workspaceId: WORKSPACE,
   presenters: ["  Presenter@Example.org "],
   applicants: ["client-a@example.org", "client-b@example.org"],
-  sampleCaseOwners: { preparation_ready: "Client-A@example.org" },
 });
 const invalid = (pattern) => (error) =>
   error.code === "ROSTER_INVALID" && pattern.test(error.message);
@@ -23,10 +29,18 @@ test("a roster is trimmed, lower-cased and kept in order", () => {
     applicants: ["client-a@example.org", "client-b@example.org"],
     staff: [],
     defaultFollowup: null,
-    sampleCaseOwners: { preparation_ready: "client-a@example.org" },
   });
-  const { sampleCaseOwners, ...bare } = valid();
-  assert.deepEqual(parseRoster(bare).sampleCaseOwners, {});
+});
+
+test("an old roster's sampleCaseOwners is ignored with a note", () => {
+  const old = { ...valid(), sampleCaseOwners: { preparation_ready: "client-a@example.org" } };
+  const parsed = parseRoster(old);
+  assert.equal("sampleCaseOwners" in parsed, false);
+  assert.deepEqual(rosterNotes(old), [NOTE]);
+  assert.deepEqual(rosterNotes(valid()), []);
+  assert.doesNotThrow(() => parseRoster({ ...valid(), sampleCaseOwners: "anything" }));
+  assert.doesNotThrow(() => parseRoster({ ...valid(), sampleCaseOwners: null }));
+  assert.deepEqual(rosterNotes({ ...valid(), sampleCaseOwners: null }), [NOTE]);
 });
 
 test("a malformed roster names the problem, never the address", () => {
@@ -51,16 +65,6 @@ test("a malformed roster names the problem, never the address", () => {
   assert.throws(() => parseRoster(twice), (error) =>
     invalid(/applicants\[0\] is already on the roster/)(error) &&
     !/presenter@/i.test(error.message),
-  );
-  assert.throws(
-    () => parseRoster({ ...valid(), sampleCaseOwners: { intake_ready: "client-a@example.org" } }),
-    invalid(/intake_ready is not a sample case/),
-  );
-  assert.throws(
-    () => parseRoster({ ...valid(), sampleCaseOwners: { review_ready: "presenter@example.org" } }),
-    (error) =>
-      invalid(/review_ready must name an applicant/)(error) &&
-      !error.message.includes("presenter@"),
   );
 });
 
@@ -150,9 +154,6 @@ test("missing accounts are created confirmed, and the workspace gets their ids",
         "00000000-0000-4000-8000-000000000001",
         "bbbbbbbb-0000-4000-8000-000000000002",
       ],
-      fixtureClientBindings: {
-        preparation_ready: "00000000-0000-4000-8000-000000000001",
-      },
       staff: [],
       defaultFollowup: null,
     },
@@ -358,4 +359,57 @@ test("a staff account failure names the position, not the address", async () => 
       /staff\[0\]/.test(error.message) &&
       !error.message.includes("@"),
   );
+});
+
+test("the example roster parses and names the role accounts", () => {
+  const example = JSON.parse(readFileSync("tools/admin/roster.example.json", "utf8"));
+  const roster = parseRoster({ ...example, workspaceId: WORKSPACE });
+  assert.deepEqual(
+    roster.staff.map(({ personKey, capabilities }) => [personKey, capabilities]),
+    [
+      ["site_coordinator", ["admin", "followup", "assist", "receive_documents"]],
+      ["preparer", ["prepare"]],
+      ["reviewer", ["review"]],
+      ["intaker", ["receive_documents", "assist"]],
+    ],
+  );
+  assert.equal(roster.defaultFollowup, "site_coordinator");
+  assert.deepEqual(roster.applicants, ["client-a@example.org"]);
+  assert.deepEqual(roster.presenters, ["presenter@example.org"]);
+});
+
+test("the roster command prints the sampleCaseOwners note once", () => {
+  const dir = mkdtempSync(join(tmpdir(), "roster-cli-"));
+  try {
+    const script = fileURLToPath(new URL("../tools/admin/roster.mjs", import.meta.url));
+    // No SUPABASE_* or database variables: the target check rejects the run
+    // after the note is printed, so nothing reaches a database.
+    const env = {
+      PATH: process.env.PATH,
+      SystemRoot: process.env.SystemRoot,
+      HOME: dir,
+      USERPROFILE: dir,
+    };
+    const run = (roster) => {
+      const file = join(dir, "roster.json");
+      writeFileSync(file, JSON.stringify(roster));
+      return spawnSync(
+        process.execPath,
+        [script, "--target", "test", "--roster", file],
+        { cwd: dir, env, encoding: "utf8" },
+      );
+    };
+    const withKey = run({
+      ...valid(),
+      workspaceId: crypto.randomUUID(),
+      sampleCaseOwners: { preparation_ready: "client-a@example.org" },
+    });
+    assert.match(withKey.stderr, /Roster failed \(TARGET_REJECTED\)/);
+    assert.equal(withKey.stdout.split(NOTE).length - 1, 1);
+    const without = run({ ...valid(), workspaceId: crypto.randomUUID() });
+    assert.match(without.stderr, /Roster failed \(TARGET_REJECTED\)/);
+    assert.equal(without.stdout.includes(NOTE), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

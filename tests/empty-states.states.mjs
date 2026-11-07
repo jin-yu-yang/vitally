@@ -32,7 +32,6 @@ const baseState = (overrides = {}) => ({
   busy: false,
   screen: "applications",
   selectedCaseId: null,
-  selectedPersonId: null,
   openPanels: [],
   lookup: "",
   dialog: null,

@@ -236,11 +236,10 @@ export function createShadedSave({ version: opened, check, save, storedVersion }
 }
 
 /**
- * Whether the open editor has lost its place: no staff window is signed in
- * any more (a sign-out in another tab; a presenter or a staff account, as
- * isStaffWindow says), or the case it was opened on is no longer the selected
- * one. A re-read that drops the record for a moment
- * keeps the selection, so it is not leaving.
+ * Whether the open editor has lost its place: no staff account is signed in
+ * any more (a sign-out in another tab, as isStaffWindow says), or the case it
+ * was opened on is no longer the selected one. A re-read that drops the
+ * record for a moment keeps the selection, so it is not leaving.
  */
 export function editorGone(state, caseId) {
   return !isStaffWindow(state?.principal) || state?.selectedCaseId !== caseId;

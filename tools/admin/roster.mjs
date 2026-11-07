@@ -17,16 +17,6 @@ import { assertTarget } from "./database.mjs";
 import { initializeWorkspace } from "./workspace-setup.mjs";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-// The six seeded cases a client account may own. The database accepts exactly
-// these keys (vitally_private.initialize_workspace, migration 001).
-export const SAMPLE_CASE_KEYS = Object.freeze([
-  "preparation_ready",
-  "waiting_documents",
-  "admin_followup",
-  "review_ready",
-  "corrections_required",
-  "review_approved",
-]);
 const LIST_PAGE_SIZE = 1000;
 
 const failure = (code, message) =>
@@ -128,26 +118,19 @@ export function parseRoster(raw) {
         throw invalid(`${field}[${index}] is already on the roster.`);
       seen.add(address);
     });
-  const owners = raw.sampleCaseOwners ?? {};
-  if (!owners || typeof owners !== "object" || Array.isArray(owners))
-    throw invalid("sampleCaseOwners must map sample case names to applicant addresses.");
-  const sampleCaseOwners = {};
-  for (const [key, value] of Object.entries(owners)) {
-    if (!SAMPLE_CASE_KEYS.includes(key))
-      throw invalid(`${key} is not a sample case. Use one of: ${SAMPLE_CASE_KEYS.join(", ")}.`);
-    const address = typeof value === "string" ? value.trim().toLowerCase() : "";
-    if (!applicants.includes(address))
-      throw invalid(`sampleCaseOwners.${key} must name an applicant on this roster.`);
-    sampleCaseOwners[key] = address;
-  }
   return {
     workspaceId: raw.workspaceId,
     presenters,
     applicants,
     staff,
     defaultFollowup,
-    sampleCaseOwners,
   };
+}
+
+export function rosterNotes(raw) {
+  return raw && typeof raw === "object" && "sampleCaseOwners" in raw
+    ? ["sampleCaseOwners is no longer used and was ignored."]
+    : [];
 }
 
 export function parseRosterArgs(argv) {
@@ -228,9 +211,6 @@ export async function applyRoster(
       capabilities,
     })),
     defaultFollowup: roster.defaultFollowup,
-    fixtureClientBindings: Object.fromEntries(
-      Object.entries(roster.sampleCaseOwners).map(([key, address]) => [key, ids.get(address)]),
-    ),
   });
   return {
     workspaceId: roster.workspaceId,
@@ -260,6 +240,7 @@ async function main() {
     throw failure("ROSTER_UNREADABLE", "The roster file could not be read as JSON.");
   }
   const roster = parseRoster(raw);
+  for (const note of rosterNotes(raw)) console.log(note);
   const approved = await assertTarget(target);
   const admin = createClient(approved.apiUrl, approved.adminKey, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },

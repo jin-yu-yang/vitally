@@ -12,7 +12,6 @@ import {
   resumeFromHoldDialogBody,
 } from "../src/admin-views.mjs";
 import { correctionsDialogBody } from "../src/staff-views.mjs";
-import { resetDialogBody, checkpointDialogBody } from "../src/presenter-views.mjs";
 import { dialog } from "../src/views.mjs";
 import { STATES } from "./confirm-dialogs.states.mjs";
 
@@ -32,8 +31,6 @@ const render = {
   putOnHoldDialogBody,
   resumeFromHoldDialogBody,
   correctionsDialogBody,
-  resetDialogBody,
-  checkpointDialogBody,
   dialog,
 };
 

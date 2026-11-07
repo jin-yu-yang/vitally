@@ -54,7 +54,7 @@ import {
   stageWork,
   isAvailableWork,
   boardFilters,
-  CHOOSE_PERSONA,
+  NO_LINKED_VOLUNTEER,
   materialsCard,
   staffEligibility,
 } from "./staff-views.mjs";
@@ -450,7 +450,7 @@ export function renderFollowups(cases = [], assistance = [], ui = {}) {
 
   return `<section class="panel office-queue" aria-labelledby="office-queue-title"><div class="section-head"><div><h2 id="office-queue-title" tabindex="-1">Office queue</h2> <span class="muted small">most urgent first</span></div><span class="muted small">${esc(counts.all)} open · ${esc(over3)} over 3 days</span></div>${seasonEnd}${toggles}${chips}${when(
     !person,
-    `<p class="staff-reason" role="note">${icon("user")} ${esc(CHOOSE_PERSONA)} Until then this queue is read-only.</p>`,
+    `<p class="staff-reason" role="note">${icon("user")} ${esc(NO_LINKED_VOLUNTEER)} Until then this queue is read-only.</p>`,
   )}${shown.length ? table : empty}<p class="field-note board-note">Waiting turns amber at 3 days and red at 5. This queue shows workflow only: no taxpayer names, no addresses and no document contents.</p></section>`;
 }
 
@@ -786,14 +786,14 @@ function createdBy(record, people) {
  * @param {object} ui `{ person, busy, officeSaving, draftAnswers, savedCase,
  *   openAddSubsteps, openPanels, addCaseShowMissing, revealed, dirty,
  *   saveState, conflict, error, retryable, people, demoTools }`, `demoTools`
- *   (a presenter's window) adds the Fill fictional details pill, `savedCase` decorated
+ *   (the demo-tools switch) adds the Fill fictional details pill, `savedCase` decorated
  *   (`decorateStaffCase`)
  */
 export function renderAddCaseV2(ui = {}) {
   const view = ui ?? {};
   const person = view.person ?? null;
   const off = view.busy ? "disabled" : "";
-  // The fill button is a demo tool: only a presenter's window carries it.
+  // The fill button is a demo tool: only a window with the switch on carries it.
   const pill = !view.demoTools
     ? ""
     : `<p class="fiction-pill">${icon("spark")} Fictional data only · ${button("Fill fictional details", "fill-assisted-intake", "text", off)}</p>`;

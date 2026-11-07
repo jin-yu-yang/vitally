@@ -398,17 +398,6 @@ test("a confirmation has one shape: lead, note, form or confirm, keep", () => {
     confirmBody({ lead: "L", form: { fields: "<i>f</i>" }, confirm, keep: "Keep it" }),
     `<p>L</p><form class="staff-form"><i>f</i>${confirm}</form>${keep}`,
   );
-  // A note can sit inside the form, after its fields (the checkpoint dialog).
-  assert.equal(
-    confirmBody({
-      lead: "L",
-      note: { icon: "help", html: "N", inForm: true },
-      form: { attrs: 'id="x-form" class="staff-form"', fields: "<i>f</i>" },
-      confirm,
-      keep: "Keep it",
-    }),
-    `<p>L</p><form id="x-form" class="staff-form"><i>f</i><div class="info-note">${icon("help")}<p>N</p></div>${confirm}</form>${keep}`,
-  );
   // Something said before everything else (the corrections dialog's refusal).
   assert.equal(
     confirmBody({ before: "<div>refused</div>", lead: "L", confirm, keep: "Keep it" }),
@@ -420,9 +409,21 @@ test("a confirmation has one shape: lead, note, form or confirm, keep", () => {
   assert.doesNotMatch(confirmBody({ confirm, keep: "Keep it" }), /undefined/);
 });
 
+test("a confirmation note always comes before the form", () => {
+  const html = confirmBody({
+    lead: "L",
+    note: { icon: "info", html: "n" },
+    form: { fields: "<input>" },
+    confirm: "<button>",
+    keep: "Keep",
+  });
+  assert.ok(html.indexOf('class="info-note"') >= 0);
+  assert.ok(html.indexOf('class="info-note"') < html.indexOf("<form"));
+});
+
 test("only the dialog and the live regions stay out of inert", () => {
   const el = (...names) => ({ classList: { contains: (name) => names.includes(name) } });
-  for (const name of ["modal-backdrop", "connection-notice", "notice-banner", "problem-banner"])
+  for (const name of ["modal-backdrop", "connection-notice", "problem-banner"])
     assert.equal(inertWhileDialog(el(name)), false, name);
   for (const name of ["skip", "client-header", "client-shell", "app-shell", "site-footer"])
     assert.equal(inertWhileDialog(el(name)), true, name);

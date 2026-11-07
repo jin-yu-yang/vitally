@@ -2,10 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { appShell, staffSidebar, staffScreen, page, clientHeader, languageSwitch, dialog, DRAWERS } from "../src/views.mjs";
+import { appShell, staffSidebar, staffScreen, presenterScreen, page, clientHeader, languageSwitch, dialog, DRAWERS } from "../src/views.mjs";
 import { icon, ICON_NAMES, describeFocus, focusSelectors } from "../src/ui.mjs";
 import { TEXT, SENTENCES } from "../src/client-text.mjs";
 import { toggleLabel } from "../src/sidebar-peek.mjs";
+import { isStaffWindow } from "../src/contracts.mjs";
 
 // Phase 0 of the redesign adds the frame without moving any screen into it,
 // so the one thing that must hold today is that a page without a sidebar is
@@ -54,13 +55,12 @@ test("the staff sidebar carries the logo, the one screen that exists, and the ac
   const office = staffSidebar({ screen: "staff-case" }, { id: "sam", name: "Sam", capabilities: ["admin"] }, true);
   assert.match(office, /Follow-ups/);
   assert.doesNotMatch(office, /aria-current/, "on a case, no nav item is current");
-  assert.match(staffSidebar({ screen: "staff" }, null, false), /No persona chosen/);
 });
 
-test("presenters get the sidebar; clients get the client top bar and shell", () => {
-  const presenter = page({ principal: { access: "presenter" }, connection: "online" }, "<main></main>");
-  assert.doesNotMatch(presenter, /class="client-bar"/);
-  assert.doesNotMatch(presenter, /class="client-shell"/);
+test("staff get the sidebar; clients get the client top bar and shell", () => {
+  const staffPage = page({ principal: { access: "staff" }, connection: "online" }, "<main></main>");
+  assert.doesNotMatch(staffPage, /class="client-bar"/);
+  assert.doesNotMatch(staffPage, /class="client-shell"/);
   const client = page({ principal: { access: "applicant" }, connection: "online", screen: "applications" }, "<main></main>");
   assert.match(client, /<header class="client-bar">/);
   assert.match(client, /<div class="client-shell"><main><\/main><\/div>/);
@@ -203,13 +203,13 @@ test("describeFocus brings the keyboard back to the pressed language button", ()
   assert.deepEqual(focusSelectors(focus), ['[data-action="set-language"][data-value="zh-Hans"]']);
 });
 
-test("the page frame speaks the view language: a client's, never a presenter's", () => {
+test("the page frame speaks the view language: a client's, never a staff account's", () => {
   const client = page({ principal: { access: "applicant" }, connection: "online", screen: "applications", lang: "zh-Hans" }, "<main></main>");
   assert.match(client, /^<a class="skip" href="#main">跳到主要内容<\/a>/);
   const signedOut = page({ principal: null, connection: "online", screen: "access", lang: "zh-Hans" }, "<main></main>");
   assert.match(signedOut, /^<a class="skip" href="#main">跳到主要内容<\/a>/);
-  const presenter = page({ principal: { access: "presenter" }, connection: "online", screen: "staff", lang: "zh-Hans" }, "<main></main>");
-  assert.match(presenter, /^<a class="skip" href="#main">Skip to content<\/a>/);
+  const staffPage = page({ principal: { access: "staff" }, connection: "online", screen: "staff", lang: "zh-Hans" }, "<main></main>");
+  assert.match(staffPage, /^<a class="skip" href="#main">Skip to content<\/a>/);
   assert.match(page({ principal: null, connection: "online", screen: "access" }, "<main></main>"), /Skip to content/);
 });
 
@@ -240,11 +240,10 @@ test("the client top bar, footer and dialogs speak the client's language", async
   } finally {
     setHantMap(null);
   }
-  // A presenter's help dialog and every staff dialog stay English.
-  const presenter = page({ principal: { access: "presenter" }, connection: "online", screen: "staff", dialog: "help", lang: "zh-Hans" }, "");
-  assert.match(presenter, /A real person can help\./);
-  assert.match(presenter, /aria-label="Close dialog"/);
-  assert.match(dialog({ dialog: "reset-fixtures", lang: "zh-Hans", principal: { access: "presenter" } }), /PRESENTER CONTROLS/);
+  // A staff account's help dialog and every staff dialog stay English.
+  const staffPage = page({ principal: { access: "staff" }, connection: "online", screen: "staff", dialog: "help", lang: "zh-Hans" }, "");
+  assert.match(staffPage, /A real person can help\./);
+  assert.match(staffPage, /aria-label="Close dialog"/);
 });
 
 test("the help dialog gives the office phone and email", () => {
@@ -293,11 +292,10 @@ const drawerCase = {
   followups: [{ id: "f1", status: "open", reason: "Ask for the W-2", assigneeId: "p-sam" }],
 };
 const drawerState = (over = {}) => ({
-  principal: { access: "presenter" },
+  principal: { access: "staff", personId: drawerSam.id },
   connection: "online",
   screen: "staff",
   people: [drawerSam],
-  selectedPersonId: drawerSam.id,
   cases: [],
   assistance: [],
   ...over,
@@ -339,7 +337,6 @@ test("the drawer is the modal frame at the edge, and each dialog names its place
   assert.match(help, /Resolve a help request/);
   assert.match(help, /data-assistance-action="RESOLVE" data-item-id="h1"/);
 
-  assert.match(dialog({ dialog: "reset-fixtures", cases: [] }), /PRESENTER CONTROLS/);
   assert.match(dialog({ dialog: "help" }), /ViTally · HERE TO HELP/);
   assert.doesNotMatch(dialog({ dialog: "help" }), /office-drawer/);
 });
@@ -396,6 +393,12 @@ test("app.mjs handles every version-2 action and no longer moves the form by ste
   assert.match(app, /kind === "14446" \? "draft14446\.tab_title" : "draft\.tab_title"/);
   assert.equal(TEXT["draft14446.tab_title"].en, "Draft Form 14446");
   assert.equal(TEXT["draft14446.tab_title"].zh, "14446 表草稿");
+  // The Exit Form's tabs, preparing and failed, are titled for it, never as
+  // the 13614-C draft (#122).
+  assert.match(app, /kind === "exit-form"\s*\? "Exit Form"/);
+  const exitTabs = app.match(/writeTab\(tab, "(?:Preparing the Exit Form|The Exit Form could not be made)[^"]*"[^)]*\)/g) ?? [];
+  assert.equal(exitTabs.length, 2, "both Exit Form tab texts");
+  for (const call of exitTabs) assert.match(call, /, "exit-form"\)$/, call);
   // The blocked-tab link goes with its URL (draft-pdf.mjs createDraftOffer),
   // and is offered after the build. It is kept outside the page and drawn
   // into #draft-ready after every render, so a redraw within its minute never
@@ -657,9 +660,8 @@ test("the part 4b2 block follows 4b's: icon-and-word marks, the phone bar and th
 
 const ADD_SAM = { id: "p-sam", name: "Sam", capabilities: ["admin", "followup", "assist", "receive_documents"] };
 const addState = (over = {}) => ({
-  principal: { userId: "p1", workspaceId: "w1", access: "presenter" },
+  principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: ADD_SAM.id },
   people: [ADD_SAM],
-  selectedPersonId: ADD_SAM.id,
   screen: "office-add-case",
   cases: [],
   assistance: [],
@@ -822,7 +824,7 @@ const STAFF_ONLY_TOASTS = Object.freeze([
   "The unsigned cases were closed as Dismissed.",
   // fillAssistedIntake: the office's fill on Add a case
   "Fictional details filled in. Nothing is saved yet.",
-  // runCaseAction SUBMIT, presenter branch only
+  // runCaseAction SUBMIT, staff branch only
   "The application is with the office. Record the intake checks next.",
   // runAssistanceAction RESOLVE: the office's help-request drawer
   "Say what you helped with before resolving this request.",
@@ -831,10 +833,6 @@ const STAFF_ONLY_TOASTS = Object.freeze([
   "The application is with the office.",
   "The draft is saved. Some answers still need attention before it can be sent.",
   "Confirm that you have checked these answers with the client first.",
-  // confirm-reset-fixtures: the presenter panel
-  "The sample cases were rebuilt. Nothing else was touched.",
-  // checkpoint-form: the presenter panel
-  "The sample case was moved to that point in the story.",
 ]);
 
 const appSource = () => readFileSync(fileURLToPath(new URL("../src/app.mjs", import.meta.url)), "utf8");
@@ -998,7 +996,7 @@ test("an unsent tick in a staff form is kept across a redraw, and goes when its 
   assert.match(app, /for \(const form of root\.querySelectorAll\("\.modal form"\)\) clearFormTicks\(form\);\s+controller\.closeDialog\(\);/);
 });
 
-test("unsent staff-form entries belong to the one signed in and the persona chosen", () => {
+test("unsent staff-form entries belong to the one signed in", () => {
   const app = appSource();
   // Like the draft link (showDraftLink → draftOffers.follow), checked on every
   // render: a sign-out from another tab or an expired session counts too.
@@ -1024,17 +1022,6 @@ test("unsent staff-form entries belong to the case they were typed on", () => {
     /draftsOwner = userId;\s+const state = controller\.getState\(\);\s+const caseId = state\.savedCase\?\.id \?\? state\.selectedCaseId \?\? null;\s+if \(caseId !== null && draftsCase !== null && caseId !== draftsCase\) formDrafts\.clear\(\);\s+if \(caseId !== null\) draftsCase = caseId;\s+for \(const \[id, value\] of formDrafts\)/,
   );
   assert.match(app, /let draftsCase = null;/);
-});
-
-// Choosing another persona is another person at the same keyboard; pressing
-// the one already chosen (its button is still live, aria-pressed) is nobody
-// new, so what was typed stays.
-test("choosing the persona already chosen keeps the unsent staff-form entries", () => {
-  const app = appSource();
-  assert.match(
-    app,
-    /case "select-person":\s+\/\/[^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*if \(target\.dataset\.personId !== controller\.getState\(\)\.selectedPersonId\) formDrafts\.clear\(\);\s+controller\.selectPerson\(target\.dataset\.personId\);/,
-  );
 });
 
 // Cleanup (messages): a press awaits the controller and then says how it went.
@@ -1162,18 +1149,18 @@ test("the safety net and the toast host (design D1, D4)", () => {
 test("a pressed control is found again after a redraw (design D5)", () => {
   const claim = { id: "", name: "", dataset: { caseAction: "CLAIM_PREPARATION", caseId: "case-7" }, tagName: "BUTTON" };
   const help = { id: "", name: "", dataset: { assistanceAction: "CLAIM", itemId: "help-3" }, tagName: "BUTTON" };
-  const checkpoint = { id: "checkpoint-submit", name: "", dataset: {}, tagName: "BUTTON" };
   assert.ok(focusSelectors(describeFocus(claim)).some((s) => s.includes('data-case-action="CLAIM_PREPARATION"') && s.includes('data-case-id="case-7"')));
   assert.ok(focusSelectors(describeFocus(help)).some((s) => s.includes('data-assistance-action="CLAIM"') && s.includes('data-item-id="help-3"')));
-  assert.deepEqual(focusSelectors(describeFocus(checkpoint)), ['[id="checkpoint-submit"]']);
+  // A pressed control that is known by its id is found again by that id.
+  const byId = { id: "save-draft-submit", name: "", dataset: {}, tagName: "BUTTON" };
+  assert.deepEqual(focusSelectors(describeFocus(byId)), ['[id="save-draft-submit"]']);
 });
 
 test("app.mjs marks only the allow-listed press while it runs (design D5)", () => {
   const app = appSource();
-  assert.match(app, /const BUSY_ACTIONS = Object\.freeze\(\["confirm-reset-fixtures", "save-office-draft", "send-office-draft"\]\);/);
+  assert.match(app, /const BUSY_ACTIONS = Object\.freeze\(\["save-office-draft", "send-office-draft"\]\);/);
   const allow = app.slice(app.indexOf("function busyControl("), app.indexOf("function busyControl(") + 600);
   assert.match(allow, /dataset\.caseAction \|\| control\.dataset\.assistanceAction/);
-  assert.match(allow, /control\.id === "checkpoint-submit"/);
   assert.match(allow, /BUSY_ACTIONS\.includes\(control\.dataset\.action\)/);
   assert.match(app, /pressed = null;\s*if \(busyControl\(target\)\) pressed = describeFocus\(target\);/);
   assert.match(app, /pressed = null;\s*if \(event\.submitter && busyControl\(event\.submitter\)\) pressed = describeFocus\(event\.submitter\);/);
@@ -1190,7 +1177,7 @@ test("app.mjs marks only the allow-listed press while it runs (design D5)", () =
 
 test("errors share one look (design D7)", () => {
   const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
-  for (const token of ["--vt-error-bg: #fbeceb", "--vt-error: #8a3b34", "--vt-notice-bg: #efedfb", "--vt-notice: #4b3fa3", "--vt-attention-bg: #faf0dd"])
+  for (const token of ["--vt-error-bg: #fbeceb", "--vt-error: #8a3b34", "--vt-attention-bg: #faf0dd"])
     assert.ok(css.includes(token), token);
   assert.match(css, /\.notice\.error p \{[^}]*color: var\(--vt-error\)/);
   assert.match(css, /\.office-drawer \.notice\.error/);
@@ -1299,4 +1286,79 @@ test("app.mjs opens, closes and announces the two e-file confirmations", () => {
   // The shared modal frame places both.
   assert.match(dialog({ dialog: "mark-ready-to-efile", savedCase: { reference: "VT-X" } }), /Mark ready to e-file\?/);
   assert.match(dialog({ dialog: "mark-efiled", savedCase: { reference: "VT-X" } }), /Mark e-filed\?/);
+});
+
+test("a presenter is not a staff window", () => {
+  assert.equal(isStaffWindow({ access: "presenter" }), false);
+  assert.equal(isStaffWindow({ access: "staff" }), true);
+  assert.equal(isStaffWindow({ access: "applicant" }), false);
+});
+
+test("the presenter screen says the account is no longer used", () => {
+  const html = presenterScreen({ principal: { access: "presenter" } });
+  assert.ok(html.includes("This account is no longer used"));
+  assert.ok(html.includes("Presenter mode has been removed. Ask your site coordinator for a staff account."));
+  assert.deepEqual([...html.matchAll(/data-action="([^"]+)"/g)].map((m) => m[1]), ["sign-out"]);
+  for (const gone of ["select-person", "open-reset-fixtures", "open-checkpoint", "Class workspace", "board-row"])
+    assert.ok(!html.includes(gone), gone);
+});
+
+test("a presenter gets the plain screen in a bare English frame", () => {
+  const state = { principal: { access: "presenter" }, connection: "online", screen: "presenter", lang: "zh-Hans" };
+  const html = page(state, presenterScreen(state));
+  assert.equal([...html.matchAll(/data-action="sign-out"/g)].length, 1);
+  for (const gone of ["set-language", "open-help", "open-applications", "client-bar", "client-shell", "site-footer", 'class="skip"'])
+    assert.ok(!html.includes(gone), gone);
+  assert.ok(!/[一-鿿]/.test(html), "no Chinese characters");
+  assert.ok(html.includes("This account is no longer used"));
+});
+
+test("a refusal shows in the error banner and the staff window stays usable", () => {
+  const state = {
+    principal: { access: "staff", personName: "Sam" },
+    connection: "online",
+    screen: "staff",
+    people: [],
+    cases: [],
+    assistance: [],
+    error: { code: "FORBIDDEN", message: "You do not have access to that." },
+  };
+  const html = page(state, staffScreen(state));
+  assert.match(html, /class="problem-banner"[\s\S]*You do not have access to that\./);
+  assert.match(html, /data-action="dismiss-error"/);
+  assert.match(html, /data-action="open-board"/, "the sidebar is still there");
+});
+
+test("no staff screen offers a persona, a reset or a checkpoint", () => {
+  const people = [{ id: "p-sam", name: "Sam", capabilities: ["prepare"] }];
+  const base = { principal: { access: "staff", personId: "p-sam", personName: "Sam" }, connection: "online", people, cases: [], assistance: [], demoTools: true };
+  const board = staffScreen({ ...base, screen: "staff" });
+  const casePage = staffScreen({
+    ...base,
+    screen: "staff-case",
+    savedCase: { id: "c1", reference: "VT-TEST-0001", stage: "preparing", revision: 1, answers: {} },
+  });
+  for (const html of [board, casePage])
+    for (const gone of ["select-person", "open-reset-fixtures", "open-checkpoint", "presenter-panel", "Class workspace"])
+      assert.ok(!html.includes(gone), gone);
+});
+
+test("a staff account's screens name it and act as no one", () => {
+  const sam = { id: "p-sam", name: "Sam", capabilities: ["admin"] };
+  const base = { principal: { access: "staff", personId: "p-sam", personName: "Sam" }, connection: "online", people: [sam], cases: [], assistance: [] };
+  const board = staffScreen({ ...base, screen: "staff" });
+  assert.match(board.match(/<div class="account-row">[\s\S]*?<\/span><\/div>/)[0].replace(/<[^>]+>/g, " ").replace(/\s+/g, " "), /Signed in as Sam/);
+  assert.doesNotMatch(board, /Presenter controls|No persona chosen|Acting as/);
+  const onCase = staffScreen({
+    ...base,
+    people: [{ id: "p-sam", name: "Sam", capabilities: ["prepare"] }],
+    screen: "staff-case",
+    savedCase: { id: "case-1", reference: "VT-AB2C-DE3F", stage: "preparation_ready", answers: {} },
+  });
+  assert.match(onCase, /Everything this case holds, and the work you may do on it\.</);
+  assert.doesNotMatch(onCase, /acting as/i);
+  // The Add a case fill pill follows the switch alone.
+  const add = { ...base, screen: "office-add-case", workspace: { defaultIntakeVersion: 2 }, officeDraft: true, draftAnswers: {} };
+  assert.match(staffScreen({ ...add, demoTools: true }), /data-action="fill-assisted-intake"/);
+  assert.doesNotMatch(staffScreen({ ...add, demoTools: false }), /fill-assisted-intake/);
 });

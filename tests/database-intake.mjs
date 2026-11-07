@@ -98,8 +98,8 @@ const contactRow = async (f, caseId) =>
 // keep the column default, 2.
 const v2Case = (f, actor = f.applicantA, options = {}) =>
   f.createCase(actor, crypto.randomUUID(), { answers: {}, ...options });
-const save = (f, caseId, answers, actor = f.applicantA, personId = null) =>
-  f.act(actor, caseId, personId, "SAVE_ANSWERS", { answers });
+const save = (f, caseId, answers, actor = f.applicantA) =>
+  f.act(actor, caseId, "SAVE_ANSWERS", { answers });
 
 test("version-2 intake: versions, answers, submit and contacts", async (t) => {
   const f = await createDatabaseFixture();
@@ -144,7 +144,7 @@ test("version-2 intake: versions, answers, submit and contacts", async (t) => {
       // as INVALID_TRANSITION, so the answer check still runs first.
       const v2 = await v2Case(f);
       await save(f, v2.caseId, completeAnswers());
-      await f.act(f.applicantA, v2.caseId, null, "SUBMIT", { confirmed: true });
+      await f.act(f.applicantA, v2.caseId, "SUBMIT", { confirmed: true });
       await assert.rejects(
         save(f, v2.caseId, { notAnAnswer: "x" }),
         rejected("VALIDATION"),
@@ -304,7 +304,7 @@ test("version-2 intake: versions, answers, submit and contacts", async (t) => {
     await t.test("version-2 SUBMIT checks required, visible fields only", async () => {
       const empty = await v2Case(f);
       await assert.rejects(
-        f.act(f.applicantA, empty.caseId, null, "SUBMIT", { confirmed: true }),
+        f.act(f.applicantA, empty.caseId, "SUBMIT", { confirmed: true }),
         rejected("VALIDATION"),
       );
 
@@ -324,11 +324,11 @@ test("version-2 intake: versions, answers, submit and contacts", async (t) => {
       const { tp_phone: phone, ...withoutPhone } = complete;
       await save(f, caseId, withoutPhone);
       await assert.rejects(
-        f.act(f.applicantA, caseId, null, "SUBMIT", { confirmed: true }),
+        f.act(f.applicantA, caseId, "SUBMIT", { confirmed: true }),
         rejected("VALIDATION"),
       );
       await save(f, caseId, { tp_phone: phone });
-      await f.act(f.applicantA, caseId, null, "SUBMIT", { confirmed: true });
+      await f.act(f.applicantA, caseId, "SUBMIT", { confirmed: true });
       const row = await caseRow(f, caseId);
       assert.equal(row.stage, "received");
       assert.ok(row.client_number > 0);
@@ -351,11 +351,11 @@ test("version-2 intake: versions, answers, submit and contacts", async (t) => {
       const { caseId } = await v2Case(f);
       await save(f, caseId, answers);
       await assert.rejects(
-        f.act(f.applicantA, caseId, null, "SUBMIT", { confirmed: true }),
+        f.act(f.applicantA, caseId, "SUBMIT", { confirmed: true }),
         rejected("VALIDATION"),
       );
       await save(f, caseId, { hh: [member()] });
-      await f.act(f.applicantA, caseId, null, "SUBMIT", { confirmed: true });
+      await f.act(f.applicantA, caseId, "SUBMIT", { confirmed: true });
       assert.equal((await caseRow(f, caseId)).stage, "received");
     });
 
@@ -369,10 +369,10 @@ test("version-2 intake: versions, answers, submit and contacts", async (t) => {
       const declined = completeAnswers({ gcf_consent: "no" });
       assert.equal("gcf_tp_signature" in declined, false);
 
-      const submitted = async (answers, actor = f.applicantA, personId = null, options = {}) => {
+      const submitted = async (answers, actor = f.applicantA, options = {}) => {
         const { caseId } = await v2Case(f, actor, options);
-        await save(f, caseId, answers, actor, personId);
-        await f.act(actor, caseId, personId, "SUBMIT", { confirmed: true });
+        await save(f, caseId, answers, actor);
+        await f.act(actor, caseId, "SUBMIT", { confirmed: true });
         return caseId;
       };
       await assert.rejects(submitted(noPrimary), rejected("VALIDATION"));
@@ -381,7 +381,7 @@ test("version-2 intake: versions, answers, submit and contacts", async (t) => {
         assert.equal((await caseRow(f, await submitted(answers))).stage, "received");
 
       // An office-filled application meets the same rule (act_submit runs intake_missing for both).
-      const byOffice = (answers) => submitted(answers, f.presenter, f.sam, { mode: "assisted", personId: f.sam });
+      const byOffice = (answers) => submitted(answers, f.siteCoordinator, { mode: "assisted" });
       await assert.rejects(byOffice(noPrimary), rejected("VALIDATION"));
       assert.equal((await caseRow(f, await byOffice(signedSingle))).stage, "screening");
     });
@@ -407,16 +407,15 @@ test("version-2 intake: versions, answers, submit and contacts", async (t) => {
       assert.deepEqual(await readContacts(f.applicantB, caseId), []);
       assert.deepEqual(await readContacts(f.presenter, caseId), []);
       await save(f, caseId, completeAnswers());
-      await f.act(f.applicantA, caseId, null, "SUBMIT", { confirmed: true });
+      await f.act(f.applicantA, caseId, "SUBMIT", { confirmed: true });
       const [seen] = await readContacts(f.presenter, caseId);
       assert.equal(seen.phone, "2155550100");
       assert.deepEqual(await readContacts(f.applicantB, caseId), []);
 
-      const assisted = await v2Case(f, f.presenter, {
+      const assisted = await v2Case(f, f.siteCoordinator, {
         mode: "assisted",
-        personId: f.sam,
       });
-      await save(f, assisted.caseId, { tp_phone: "2155550111" }, f.presenter, f.sam);
+      await save(f, assisted.caseId, { tp_phone: "2155550111" }, f.siteCoordinator);
       const [assistedRow] = await readContacts(f.presenter, assisted.caseId);
       assert.equal(assistedRow.phone, "2155550111");
       assert.deepEqual(await readContacts(f.applicantA, assisted.caseId), []);
@@ -752,22 +751,22 @@ test("contact and materials actions", async (t) => {
         [caseId, action],
       )
     ).rows;
-  const update = (caseId, payload, actor = f.applicantA, personId = null) =>
-    f.act(actor, caseId, personId, "UPDATE_CONTACT", payload);
-  const record = (caseId, received, actor = f.presenter, personId = f.sam) =>
-    f.act(actor, caseId, personId, "RECORD_MATERIALS", { received });
+  const update = (caseId, payload, actor = f.applicantA) =>
+    f.act(actor, caseId, "UPDATE_CONTACT", payload);
+  const record = (caseId, received, actor = f.siteCoordinator) =>
+    f.act(actor, caseId, "RECORD_MATERIALS", { received });
   // A version-2 case the applicant has submitted; staff can now see it.
   const submittedV2 = async () => {
     const { caseId } = await v2Case(f);
     await save(f, caseId, completeAnswers());
-    await f.act(f.applicantA, caseId, null, "SUBMIT", { confirmed: true });
+    await f.act(f.applicantA, caseId, "SUBMIT", { confirmed: true });
     return caseId;
   };
   // The same, verified by the office and waiting for a preparer.
   const readyV2 = async () => {
     const caseId = await submittedV2();
-    await f.act(f.presenter, caseId, f.sam, "START_SCREENING", {});
-    await f.act(f.presenter, caseId, f.sam, "VERIFY_INTAKE", {
+    await f.act(f.siteCoordinator, caseId, "START_SCREENING", {});
+    await f.act(f.siteCoordinator, caseId, "VERIFY_INTAKE", {
       checks: f.intakeChecks,
     });
     return caseId;
@@ -861,42 +860,42 @@ test("contact and materials actions", async (t) => {
       );
       // An applicant cannot speak as a staff person.
       await assert.rejects(
-        update(caseId, { bestContactNote: "Posing" }, f.applicantA, f.sam),
+        f.actAsPersona(f.applicantA, caseId, f.sam, "UPDATE_CONTACT", { bestContactNote: "Posing" }),
         rejected("FORBIDDEN"),
       );
       const submitted = await submittedV2();
       await assert.rejects(
-        update(submitted, { bestContactNote: "No person" }, f.presenter, null),
+        update(submitted, { bestContactNote: "No person" }, f.presenter),
         rejected("FORBIDDEN"),
       );
     });
 
     await t.test("office staff may update any case they can see", async () => {
       const caseId = await submittedV2();
-      await update(caseId, { bestContactNote: "Office called" }, f.presenter, f.sam);
+      await update(caseId, { bestContactNote: "Office called" }, f.siteCoordinator);
       assert.equal((await contactRow(f, caseId)).best_contact_note, "Office called");
       const [event] = await eventsOf(caseId, "UPDATE_CONTACT");
-      assert.equal(event.actor_person_id, f.sam);
+      assert.equal(event.actor_person_id, f.siteCoordinatorId);
     });
 
     await t.test("a volunteer only on a case they prepare or review", async () => {
       const caseId = await readyV2();
       // Unclaimed: neither volunteer may touch the contact row.
-      for (const volunteer of [f.alex, f.morgan])
+      for (const volunteer of [f.preparer, f.reviewer])
         await assert.rejects(
-          update(caseId, { bestContactNote: "Unclaimed" }, f.presenter, volunteer),
+          update(caseId, { bestContactNote: "Unclaimed" }, volunteer),
           rejected("FORBIDDEN"),
         );
-      await f.act(f.presenter, caseId, f.alex, "CLAIM_PREPARATION", {});
-      await update(caseId, { bestContactNote: "Preparer" }, f.presenter, f.alex);
+      await f.act(f.preparer, caseId, "CLAIM_PREPARATION", {});
+      await update(caseId, { bestContactNote: "Preparer" }, f.preparer);
       assert.equal((await contactRow(f, caseId)).best_contact_note, "Preparer");
       await assert.rejects(
-        update(caseId, { bestContactNote: "Not yet" }, f.presenter, f.morgan),
+        update(caseId, { bestContactNote: "Not yet" }, f.reviewer),
         rejected("FORBIDDEN"),
       );
-      await f.act(f.presenter, caseId, f.alex, "SUBMIT_REVIEW", { questionnaire: PREPARER });
-      await f.act(f.presenter, caseId, f.morgan, "CLAIM_REVIEW", {});
-      await update(caseId, { bestContactTime: ["weekend"] }, f.presenter, f.morgan);
+      await f.act(f.preparer, caseId, "SUBMIT_REVIEW", { questionnaire: PREPARER });
+      await f.act(f.reviewer, caseId, "CLAIM_REVIEW", {});
+      await update(caseId, { bestContactTime: ["weekend"] }, f.reviewer);
       assert.deepEqual((await contactRow(f, caseId)).best_contact_time, ["weekend"]);
     });
 
@@ -938,7 +937,7 @@ test("contact and materials actions", async (t) => {
       let rows = await materialRows(caseId);
       assert.deepEqual(rows.map((row) => row.item), ["photo_id", "w2"]);
       for (const row of rows) {
-        assert.equal(row.recorded_by_person_id, f.sam);
+        assert.equal(row.recorded_by_person_id, f.siteCoordinatorId);
         assert.equal(row.workspace_id, f.workspaceId);
         assert.ok(row.received_at instanceof Date);
       }
@@ -960,26 +959,26 @@ test("contact and materials actions", async (t) => {
       await record(caseId, ["photo_id", "w2"]);
       const [photoBefore] = await materialRows(caseId);
       assert.equal(photoBefore.item, "photo_id");
-      assert.equal(photoBefore.recorded_by_person_id, f.sam);
-      await f.act(f.presenter, caseId, f.alex, "CLAIM_PREPARATION", {});
-      await record(caseId, ["photo_id", "1099int"], f.presenter, f.alex);
+      assert.equal(photoBefore.recorded_by_person_id, f.siteCoordinatorId);
+      await f.act(f.preparer, caseId, "CLAIM_PREPARATION", {});
+      await record(caseId, ["photo_id", "1099int"], f.preparer);
       const rows = await materialRows(caseId);
       assert.deepEqual(rows.map((row) => row.item), ["1099int", "photo_id"]);
       const photo = rows.find((row) => row.item === "photo_id");
-      assert.equal(photo.recorded_by_person_id, f.sam);
+      assert.equal(photo.recorded_by_person_id, f.siteCoordinatorId);
       assert.equal(photo.received_at.getTime(), photoBefore.received_at.getTime());
       const added = rows.find((row) => row.item === "1099int");
-      assert.equal(added.recorded_by_person_id, f.alex);
+      assert.equal(added.recorded_by_person_id, f.preparerId);
       assert.ok(added.received_at > photoBefore.received_at);
     });
 
     await t.test("only staff who may act record materials", async () => {
       const caseId = await readyV2();
-      await assert.rejects(record(caseId, ["w2"], f.applicantA, null), rejected("FORBIDDEN"));
-      await assert.rejects(record(caseId, ["w2"], f.presenter, null), rejected("FORBIDDEN"));
-      await assert.rejects(record(caseId, ["w2"], f.presenter, f.alex), rejected("FORBIDDEN"));
-      await f.act(f.presenter, caseId, f.alex, "CLAIM_PREPARATION", {});
-      await record(caseId, ["w2"], f.presenter, f.alex);
+      await assert.rejects(record(caseId, ["w2"], f.applicantA), rejected("FORBIDDEN"));
+      await assert.rejects(record(caseId, ["w2"], f.presenter), rejected("FORBIDDEN"));
+      await assert.rejects(record(caseId, ["w2"], f.preparer), rejected("FORBIDDEN"));
+      await f.act(f.preparer, caseId, "CLAIM_PREPARATION", {});
+      await record(caseId, ["w2"], f.preparer);
       assert.deepEqual((await materialRows(caseId)).map((row) => row.item), ["w2"]);
       // A draft only its owner can see is not the office's to record on.
       const { caseId: draft } = await v2Case(f);
@@ -998,7 +997,7 @@ test("contact and materials actions", async (t) => {
         {},
       ])
         await assert.rejects(
-          f.act(f.presenter, caseId, f.sam, "RECORD_MATERIALS", payload),
+          f.act(f.siteCoordinator, caseId, "RECORD_MATERIALS", payload),
           rejected("VALIDATION"),
           JSON.stringify(payload),
         );

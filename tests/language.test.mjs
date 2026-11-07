@@ -42,6 +42,7 @@ test("a saved choice wins; blocked or odd storage means the default or English",
 });
 
 test("staff screens are English; everything else follows the chosen language", () => {
+  assert.equal(viewLang({ lang: "zh-Hans", principal: { access: "staff" } }), "en");
   assert.equal(viewLang({ lang: "zh-Hans", principal: { access: "presenter" } }), "en");
   assert.equal(viewLang({ lang: "zh-Hans", principal: { access: "applicant" } }), "zh-Hans");
   assert.equal(viewLang({ lang: "zh-Hant", principal: null }), "zh-Hant");

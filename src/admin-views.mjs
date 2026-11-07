@@ -37,7 +37,7 @@ import {
   REQUEST_STATUS,
   FOLLOWUP_STATUS,
   CONTACT_OUTCOME_LABELS,
-  CHOOSE_PERSONA,
+  NO_LINKED_VOLUNTEER,
   UNKNOWN_PERSON,
   contactsPanel,
   logContactForm,
@@ -160,7 +160,7 @@ export function adminEligibility({ caseRecord, followup, request, item } = {}, p
   // Persona first, then the capability: both are refused before any target is
   // inspected, so an ineligible persona learns nothing about the record.
   const gate = (capability) => {
-    if (!id) return refused(CHOOSE_PERSONA);
+    if (!id) return refused(NO_LINKED_VOLUNTEER);
     if (!has(capability)) return refused(NEEDS[capability]);
     return null;
   };
@@ -402,7 +402,7 @@ const requestById = (record, requestId) =>
 
 // How this case started. A staff-entered case has no client account at all, and
 // that is exactly how the database says so: `cases_origin_owner` (migration
-// 001) allows a null owner only for an assisted or fixture case. The Case the
+// 001) allows a null owner only for an assisted case (040 dropped the sample origin). The Case the
 // store maps carries no `origin` column, so the owner is what the browser
 // reads — and only an explicit `null` means it, because a record that simply
 // does not carry the field says nothing about who owns the case.
@@ -777,7 +777,7 @@ const clientName = (record) =>
 export function markReadyToEfileDialogBody(state = {}) {
   const record = state.savedCase ?? {};
   return confirmBody({
-    before: demoFillButton(state.principal),
+    before: demoFillButton(state.demoTools === true),
     lead: `Mark <strong>${esc(record.reference ?? "this case")}</strong> for <strong>${esc(
       clientName(record),
     )}</strong> as ready to e-file?`,
@@ -910,7 +910,7 @@ function efiledChoices(record) {
 export function markEfiledDialogBody(state = {}) {
   const record = state.savedCase ?? {};
   return confirmBody({
-    before: demoFillButton(state.principal),
+    before: demoFillButton(state.demoTools === true),
     lead: `Mark <strong>${esc(record.reference ?? "this case")}</strong> for <strong>${esc(
       clientName(record),
     )}</strong> as e-filed?`,
@@ -962,7 +962,7 @@ function resultFields(kind) {
 export function recordFilingResultDialogBody(state = {}) {
   const record = state.savedCase ?? {};
   return confirmBody({
-    before: demoFillButton(state.principal),
+    before: demoFillButton(state.demoTools === true),
     lead: `Record the filing result for <strong>${esc(
       record.reference ?? "this case",
     )}</strong> for <strong>${esc(clientName(record))}</strong>?`,
@@ -1001,7 +1001,7 @@ export function recordFilingResultDialogBody(state = {}) {
 export function returnToSigningDialogBody(state = {}) {
   const record = state.savedCase ?? {};
   return confirmBody({
-    before: demoFillButton(state.principal),
+    before: demoFillButton(state.demoTools === true),
     lead: `Return <strong>${esc(record.reference ?? "this case")}</strong> for <strong>${esc(
       clientName(record),
     )}</strong> to signing?`,

@@ -278,7 +278,7 @@ export function intakeScreen(state) {
   const record = state.savedCase;
   if (!record) return applicationsScreen(state);
   return record.stage === "draft"
-    ? intakeFormV2(state, { saveStatus, conflictForm, fictionalTools: fictionTools(viewLang(state)) })
+    ? intakeFormV2(state, { saveStatus, conflictForm, fictionalTools: state.demoTools === true ? fictionTools(viewLang(state)) : "" })
     : submittedV2(state);
 }
 

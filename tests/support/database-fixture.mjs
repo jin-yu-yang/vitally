@@ -1,8 +1,12 @@
 import { randomUUID, randomBytes } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { assertTestTarget } from "../../tools/admin/test-target.mjs";
 import { openDatabase, databaseError } from "../../tools/admin/database.mjs";
 import { initializeWorkspace } from "../../tools/admin/workspace-setup.mjs";
+import { resolveSeedTargets, seedCases } from "../../tools/admin/seed-cases.mjs";
 import { createAppError } from "../../src/errors.mjs";
 import { makeSampleAnswers } from "../../src/sample-data.mjs";
 import { createRun, ownedRun, saveRun, endRun } from "./run-manifest.mjs";
@@ -34,24 +38,6 @@ const SAMPLE_ASSISTANCE = Object.freeze({
   language: "Mandarin",
   contactPreference: "Prefers calls from the main office",
 });
-// The ten scenario keys the private binding table and `cases.fixture_key`
-// constrain (migration 001, widened to eight in 035 and ten in 036). They are stable names,
-// never case ids.
-const FIXTURE_KEYS = Object.freeze([
-  "preparation_ready",
-  "waiting_documents",
-  "admin_followup",
-  "review_ready",
-  "corrections_required",
-  "review_approved",
-  "rejected",
-  "accepted",
-  "on_hold",
-  "withdrawn",
-]);
-// The one key this fixture binds to applicant A through the shared
-// initializer, so a reset has a durable client binding to reapply.
-const BOUND_FIXTURE_KEY = "preparation_ready";
 // Actions whose payload names a related record. For compact tests only, an
 // omitted id falls back to the case's single current request or open follow-up;
 // the browser always sends the selected id (Ruling R20).
@@ -81,6 +67,14 @@ const STATE_TABLES = Object.freeze([
   "case_contacts",
   "case_document_cards",
   "case_materials",
+]);
+// The four staff accounts every fixture workspace gets (see the end of
+// createDatabaseFixture): [fixture field, person key, fictional name, capabilities].
+const ROLE_ACCOUNTS = Object.freeze([
+  ["siteCoordinator", "site_coordinator", "Avery Lin", ["admin", "followup", "assist", "receive_documents"]],
+  ["preparer", "preparer", "Taylor Brooks", ["prepare"]],
+  ["reviewer", "reviewer", "Jamie Ellis", ["review"]],
+  ["intaker", "intaker", "Rowan Price", ["receive_documents", "assist"]],
 ]);
 // One key for the advisory lock that keeps fixture workspace setup exclusive
 // across parallel test processes (see initializeOwned below).
@@ -166,7 +160,7 @@ export const SAMPLE_CONTACT = () => ({
 export const contactArgs = ({
   actionId = randomUUID(),
   caseId,
-  personId,
+  personId = null,
   followupId = null,
   entry,
 }) => ({
@@ -180,7 +174,7 @@ export const editContactArgs = ({
   actionId = randomUUID(),
   contactId,
   revision,
-  personId,
+  personId = null,
   entry,
 }) => ({
   p_action_id: actionId,
@@ -189,7 +183,17 @@ export const editContactArgs = ({
   p_person_id: personId,
   p_entry: entry,
 });
-export async function createDatabaseFixture({ afterInitialize } = {}) {
+// `siteCoordinatorFollowsUp: false` leaves Sam as the default follow-up
+// person: the sample-data tests (tests/database-fixtures.mjs) check the seeded
+// samples' follow-ups against the default the samples are written for.
+// `roleAccounts: false` adds no role accounts at all, for the tests whose
+// subject is the initializer's own workspace (exactly the three demonstration
+// people, Sam the default); their reads then go through the presenter.
+export async function createDatabaseFixture({
+  afterInitialize,
+  roleAccounts = true,
+  siteCoordinatorFollowsUp = true,
+} = {}) {
   const target = await assertTestTarget();
   const runManifest = await createRun(),
     run = ownedRun(runManifest);
@@ -231,11 +235,13 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
       await f.sql(SETUP_UNLOCK);
     }
   };
-  f.createCase = async (
-    actor,
-    actionId,
-    { mode = "client", personId = null, answers = {} } = {},
-  ) => {
+  // Every helper below acts as the signed-in account itself and sends
+  // `p_person_id: null`: a staff account always acts as its own person, and an
+  // applicant names no person. When the RPCs drop the parameter, only these
+  // helpers' internals change. The `...AsPersona` helpers further down keep the
+  // old explicit person for the tests whose subject is presenter or persona
+  // behaviour; they go away with presenter mode.
+  const createCase = async (actor, actionId, { mode = "client", personId = null, answers = {} } = {}) => {
     const { data, error } = await actor.rpc("vitally_create_case", {
       p_action_id: actionId,
       p_mode: mode,
@@ -245,15 +251,14 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
     if (error) throw databaseError(error);
     return data;
   };
+  f.createCase = (actor, actionId, { mode = "client", answers = {} } = {}) =>
+    createCase(actor, actionId, { mode, answers });
   // A draft with answers. Version 2 refuses a create that carries answers (011's
   // insert trigger, VT007), so the case is created empty and the answers are
   // saved straight after, as the client's own form does.
-  f.draftCase = async (
-    actor,
-    { mode = "client", personId = null, answers = makeSampleAnswers() } = {},
-  ) => {
-    const created = await f.createCase(actor, randomUUID(), { mode, personId, answers: {} });
-    await f.act(actor, created.caseId, personId, "SAVE_ANSWERS", { answers });
+  f.draftCase = async (actor, { mode = "client", answers = makeSampleAnswers() } = {}) => {
+    const created = await f.createCase(actor, randomUUID(), { mode, answers: {} });
+    await f.act(actor, created.caseId, "SAVE_ANSWERS", { answers });
     // The receipt is the create's (revision 1); the case is one ahead, at 2.
     return created;
   };
@@ -265,6 +270,9 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
       (await f.sql("select answers->>'service' as service from public.cases where id=$1", [caseId]))
         .rows[0]?.service,
     );
+  // The client staff reads go through: the Site Coordinator, or the presenter
+  // in a fixture made with `roleAccounts: false`.
+  const staffReader = () => f.siteCoordinator ?? f.presenter;
   // A row the caller cannot see is NOT_FOUND, never a raw SDK row-count error.
   const visibleRow = async (client, table, id) => {
     const { data, error } = await client.from(table).select("*").eq("id", id);
@@ -290,7 +298,7 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
       key === "requestId"
         ? ["document_requests", (row) => row.status !== "cancelled"]
         : ["admin_followups", (row) => row.status === "open"];
-    const rows = (await visibleRows(f.presenter, table, caseId)).filter(current);
+    const rows = (await visibleRows(staffReader(), table, caseId)).filter(current);
     if (rows.length !== 1)
       throw Object.assign(
         new Error(`Expected exactly one current ${table} row for the case.`),
@@ -298,7 +306,7 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
       );
     return rows[0].id;
   };
-  f.act = async (client, caseId, personId, type, payload = {}) => {
+  const act = async (client, caseId, personId, type, payload = {}) => {
     const related = RELATED_DEFAULTS[type];
     const body =
       related && !(related in payload)
@@ -316,16 +324,16 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
     if (error) throw createAppError(error);
     return data;
   };
+  f.act = (client, caseId, type, payload = {}) => act(client, caseId, null, type, payload);
   // `f.act` for the assistance entry point. Tests that need an explicit
   // revision (races, replays, invisible items) call `rpc` with assistanceArgs.
-  f.actAssistance = async (client, itemId, personId, type, note = null) => {
+  f.actAssistance = async (client, itemId, type, note = null) => {
     const current = await visibleRow(client, "assistance_items", itemId);
     const { data, error } = await client.rpc(
       "vitally_assistance_action",
       assistanceArgs({
         itemId,
         revision: Number(current.revision),
-        personId,
         type,
         note,
       }),
@@ -334,7 +342,7 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
     return data;
   };
   // A contact log entry, linked to a follow-up task when `followupId` is given.
-  f.logContact = async (client, caseId, personId, entry, followupId = null) => {
+  const logContact = async (client, caseId, personId, entry, followupId = null) => {
     const { data, error } = await client.rpc(
       "vitally_log_contact",
       contactArgs({ caseId, personId, followupId, entry }),
@@ -342,16 +350,17 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
     if (error) throw createAppError(error);
     return data;
   };
+  f.logContact = (client, caseId, entry, followupId = null) =>
+    logContact(client, caseId, null, entry, followupId);
   // The season-end close: `cases` is [{caseId, revision}].
   f.closeUnsigned = async (
     client,
-    personId,
     cases,
     { actionId = randomUUID(), confirmed = true } = {},
   ) => {
     const { data, error } = await client.rpc("vitally_close_unsigned", {
       p_action_id: actionId,
-      p_person_id: personId,
+      p_person_id: null,
       p_cases: cases,
       p_confirmed: confirmed,
     });
@@ -359,66 +368,66 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
     return data;
   };
   // An edit against the entry's current revision, as the caller reads it.
-  f.editContact = async (client, contactId, personId, entry) => {
+  f.editContact = async (client, contactId, entry) => {
     const current = await visibleRow(client, "contact_log", contactId);
     const { data, error } = await client.rpc(
       "vitally_edit_contact",
       editContactArgs({
         contactId,
         revision: Number(current.revision),
-        personId,
         entry,
       }),
     );
     if (error) throw createAppError(error);
     return data;
   };
+  // Legacy, presenter mode only: the caller names a person explicitly. Kept for
+  // the tests whose subject is presenter or persona behaviour (persona
+  // refusals, a client or staff member naming a person). These go away with
+  // presenter mode.
+  f.createCaseAsPersona = createCase;
+  f.actAsPersona = act;
+  f.logContactAsPersona = logContact;
   // An unclaimed case waiting for a preparer, built only through public actions.
   f.readyCase = async () => {
     const created = await f.draftCase(f.applicantA);
-    await f.act(f.applicantA, created.caseId, null, "SUBMIT", {
+    await f.act(f.applicantA, created.caseId, "SUBMIT", {
       confirmed: true,
     });
-    await f.act(f.presenter, created.caseId, f.sam, "START_SCREENING", {});
-    await f.act(f.presenter, created.caseId, f.sam, "VERIFY_INTAKE", {
+    await f.act(f.siteCoordinator, created.caseId, "START_SCREENING", {});
+    await f.act(f.siteCoordinator, created.caseId, "VERIFY_INTAKE", {
       checks: await f.checksFor(created.caseId),
     });
     return created.caseId;
   };
   f.sampleRequest = SAMPLE_REQUEST;
   f.sampleFilename = SAMPLE_FILENAME;
-  // An assisted case with no client owner, prepared by Alex and waiting on one
-  // open document request: the case the staff receipt action exists for.
+  // An assisted case with no client owner, prepared by the Preparer and waiting
+  // on one open document request: the case the staff receipt action exists for.
   f.assistedCase = async () => {
-    const created = await f.draftCase(f.presenter, { mode: "assisted", personId: f.sam });
-    await f.act(f.presenter, created.caseId, f.sam, "SUBMIT", {
+    const created = await f.draftCase(f.siteCoordinator, { mode: "assisted" });
+    await f.act(f.siteCoordinator, created.caseId, "SUBMIT", {
       confirmed: true,
     });
-    await f.act(f.presenter, created.caseId, f.sam, "VERIFY_INTAKE", {
+    await f.act(f.siteCoordinator, created.caseId, "VERIFY_INTAKE", {
       checks: await f.checksFor(created.caseId),
     });
-    await f.act(f.presenter, created.caseId, f.alex, "CLAIM_PREPARATION", {});
-    await f.act(
-      f.presenter,
-      created.caseId,
-      f.alex,
-      "REQUEST_DOCUMENT",
-      SAMPLE_REQUEST,
-    );
+    await f.act(f.preparer, created.caseId, "CLAIM_PREPARATION", {});
+    await f.act(f.preparer, created.caseId, "REQUEST_DOCUMENT", SAMPLE_REQUEST);
     return created.caseId;
   };
-  // A client case Alex has claimed and handed to review: preparation version 1,
-  // stage review_ready, no reviewer. Built only through public actions.
+  // A client case the Preparer has claimed and handed to review: preparation
+  // version 1, stage review_ready, no reviewer. Built only through public actions.
   f.preparedCase = async () => {
     const caseId = await f.readyCase();
-    await f.act(f.presenter, caseId, f.alex, "CLAIM_PREPARATION", {});
-    await f.act(f.presenter, caseId, f.alex, "SUBMIT_REVIEW", { questionnaire: PREPARER });
+    await f.act(f.preparer, caseId, "CLAIM_PREPARATION", {});
+    await f.act(f.preparer, caseId, "SUBMIT_REVIEW", { questionnaire: PREPARER });
     return caseId;
   };
   // A client case just submitted: stage received, no screening yet.
   f.submittedClientCase = async () => {
     const created = await f.draftCase(f.applicantA);
-    await f.act(f.applicantA, created.caseId, null, "SUBMIT", {
+    await f.act(f.applicantA, created.caseId, "SUBMIT", {
       confirmed: true,
     });
     return { caseId: created.caseId };
@@ -437,9 +446,9 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
   // office's go-over follow-up (design D5).
   f.approvedCase = async ({ wentOver = true } = {}) => {
     const caseId = await f.preparedCase();
-    await f.act(f.presenter, caseId, f.morgan, "CLAIM_REVIEW", {});
+    await f.act(f.reviewer, caseId, "CLAIM_REVIEW", {});
     const { wentOverOn, wentOverHow, ...rest } = REVIEWER;
-    await f.act(f.presenter, caseId, f.morgan, "APPROVE_REVIEW", {
+    await f.act(f.reviewer, caseId, "APPROVE_REVIEW", {
       questionnaire: wentOver ? REVIEWER : { ...rest, wentOver: false },
     });
     return caseId;
@@ -449,7 +458,7 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
   // questionnaire. No action produces this any more, so it is inserted directly.
   f.legacyApprovedCase = async () => {
     const caseId = await f.preparedCase();
-    await f.act(f.presenter, caseId, f.morgan, "CLAIM_REVIEW", {});
+    await f.act(f.reviewer, caseId, "CLAIM_REVIEW", {});
     await f.sql(
       "update public.reviews set status='approved',decided_at=now(),client_contact_status='pending' where case_id=$1 and status='active'",
       [caseId],
@@ -495,7 +504,7 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
   // the privileged connection; its case is built only through public actions.
   f.seedAssistance = async () => {
     const created = await f.draftCase(f.applicantA);
-    await f.act(f.applicantA, created.caseId, null, "SUBMIT", {
+    await f.act(f.applicantA, created.caseId, "SUBMIT", {
       confirmed: true,
     });
     const inserted = await f.sql(
@@ -511,11 +520,12 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
     );
     return { itemId: inserted.rows[0].id, caseId: created.caseId };
   };
-  // Staff reads go through the production adapter on the presenter's own
-  // client, so these helpers prove presenter visibility *and* exercise the one
-  // mapping the browser uses. A row the presenter cannot see is NOT_FOUND,
-  // exactly as it is for the application.
-  f.staffStore = () => createStore(f.presenter);
+  // Staff reads go through the production adapter on the Site Coordinator's
+  // own client, so these helpers prove staff visibility *and* exercise the one
+  // mapping the browser uses. A row staff cannot see is NOT_FOUND, exactly as
+  // it is for the application. (Since migration 038 staff see exactly what a
+  // presenter sees.)
+  f.staffStore = () => createStore(staffReader());
   // The assistance item as staff read it.
   f.readStaffAssistance = async (itemId) => {
     const item = (await f.staffStore().listAssistance()).find(
@@ -550,70 +560,6 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
         )
       ).rows[0].count,
     );
-  // ---- fixtures, resets and checkpoints (Task 9) -------------------------
-  //
-  // Everything a reset must leave alone is read through one set of helpers, so
-  // "preserved" means the same thing in every test: the same privileged
-  // connection, the same deterministic ordering, and values that are stable by
-  // construction rather than by luck.
-
-  f.fixtureKeys = FIXTURE_KEYS;
-  f.boundFixtureKey = BOUND_FIXTURE_KEY;
-
-  // A class-created application carried to the same place the demo's own
-  // cases sit: submitted, intake recorded, and claimed by a preparer whose
-  // participation the claim writes. Only public actions are used, so what this
-  // builds is exactly what a student would have built.
-  f.prepareClassCase = async (caseId, preparerId) => {
-    // A client's own draft is private to them, so the stage is read through
-    // the privileged connection rather than through a staff client that is
-    // not allowed to see it yet.
-    const [current] = (
-      await f.sql("select stage,answers from public.cases where id=$1", [caseId])
-    ).rows;
-    if (current?.stage === "draft" && Object.keys(current?.answers ?? {}).length === 0)
-      await f.act(f.applicantA, caseId, null, "SAVE_ANSWERS", {
-        answers: makeSampleAnswers(),
-      });
-    await f.act(f.applicantA, caseId, null, "SUBMIT", { confirmed: true });
-    await f.act(f.presenter, caseId, f.sam, "START_SCREENING", {});
-    await f.act(f.presenter, caseId, f.sam, "VERIFY_INTAKE", {
-      checks: await f.checksFor(caseId),
-    });
-    await f.act(f.presenter, caseId, preparerId, "CLAIM_PREPARATION", {});
-    return caseId;
-  };
-
-  // The workspace setup a reset must never touch. Deliberately excludes
-  // `workspaces.fixture_generation`, which a reset is *supposed* to move.
-  f.readStableSetup = async () => {
-    const people = (
-      await f.sql(
-        "select id,person_key,name,capabilities from public.people where workspace_id=$1 order by person_key",
-        [f.workspaceId],
-      )
-    ).rows.map((row) => ({ ...row, capabilities: [...row.capabilities].sort() }));
-    const memberships = (
-      await f.sql(
-        "select user_id,access,active from public.memberships where workspace_id=$1 order by user_id",
-        [f.workspaceId],
-      )
-    ).rows;
-    const bindings = (
-      await f.sql(
-        "select fixture_key,owner_user_id from vitally_private.fixture_client_bindings where workspace_id=$1 order by fixture_key",
-        [f.workspaceId],
-      )
-    ).rows;
-    const workspace = (
-      await f.sql(
-        "select default_followup_person_id from public.workspaces where id=$1",
-        [f.workspaceId],
-      )
-    ).rows;
-    return { people, memberships, bindings, workspace };
-  };
-
   // Every membership row this account holds anywhere, so a revoked or deleted
   // one is an empty array rather than a silent undefined.
   f.readMembership = async (userId) =>
@@ -624,49 +570,31 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
       )
     ).rows;
 
-  f.readFixtureCases = async () =>
-    (
-      await f.sql(
-        "select id,fixture_key,owner_user_id,stage,revision from public.cases where workspace_id=$1 and fixture order by fixture_key",
-        [f.workspaceId],
-      )
-    ).rows.map((row) => ({
-      id: row.id,
-      fixtureKey: row.fixture_key,
-      ownerUserId: row.owner_user_id,
-      stage: row.stage,
-      revision: Number(row.revision),
-    }));
-
-  f.readFixtureAssistance = async () =>
-    (
-      await f.sql(
-        "select * from public.assistance_items where workspace_id=$1 and fixture order by created_at,id",
-        [f.workspaceId],
-      )
-    ).rows.map(camelRow);
-
-  // The generation and the identities of everything a reset replaces: equal
-  // before and after means nothing was reseeded.
-  f.readFixtureState = async () => ({
-    generation: Number(
-      (
-        await f.sql("select fixture_generation from public.workspaces where id=$1", [
-          f.workspaceId,
-        ])
-      ).rows[0].fixture_generation,
-    ),
-    caseIds: (await f.readFixtureCases()).map((row) => row.id).sort(),
-    itemIds: (await f.readFixtureAssistance()).map((row) => row.id).sort(),
-  });
-
-  // A seeded workspace, through the one public path that seeds one.
-  f.seedFixtures = async (client = f.presenter) => {
-    const { data, error } = await client.rpc("vitally_reset_fixtures", {
-      p_action_id: randomUUID(),
+  // The seed command (tools/admin/seed-cases.mjs) against this workspace, on
+  // its own connection and run directory. Each `seed()` is one run: it removes
+  // the previous run's cases and help request, then builds a fresh set through
+  // the public actions. `close()` ends the connection and removes the run file.
+  f.seedRunner = async () => {
+    const runDir = await mkdtemp(path.join(tmpdir(), "seed-run-"));
+    const client = await openDatabase().catch(async (error) => {
+      await rm(runDir, { recursive: true, force: true });
+      throw error;
     });
-    if (error) throw createAppError(error);
-    return data;
+    return {
+      seed: async () =>
+        seedCases(
+          client,
+          await resolveSeedTargets(client, {
+            workspaceId: f.workspaceId,
+            clientAEmail: f.applicantAEmail,
+          }),
+          { runDir },
+        ),
+      close: async () => {
+        await client.end();
+        await rm(runDir, { recursive: true, force: true });
+      },
+    };
   };
 
   f.snapshot = async () => {
@@ -676,8 +604,6 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
         "select id,person_key,name,capabilities from public.people where workspace_id=$1 order by person_key",
       memberships:
         "select user_id,access,active from public.memberships where workspace_id=$1 order by user_id",
-      bindings:
-        "select fixture_key,owner_user_id from vitally_private.fixture_client_bindings where workspace_id=$1 order by fixture_key",
       workspace: "select * from public.workspaces where id=$1",
     }))
       out[name] = (await f.sql(sql, [f.workspaceId])).rows;
@@ -801,7 +727,6 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
       workspaceId: f.workspaceId,
       presenterUserIds: [f.presenterUserId],
       applicantUserIds: [f.applicantAUserId, f.applicantBUserId],
-      fixtureClientBindings: { preparation_ready: f.applicantAUserId },
     };
     const initializeOwned = async (setup) => {
       run.pendingWorkspaces.add(setup.workspaceId);
@@ -829,6 +754,9 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
     };
     // Workflow tests depend on the shared initializer's permanent people and
     // its default follow-up person; a partial workspace must fail, not skip.
+    // It runs before the role accounts are added (below), so the workspace
+    // still holds exactly the three demonstration people and Sam is still the
+    // default when it checks.
     const initializeVerified = async (setup) => {
       const { people } = await initializeOwned(setup);
       const workspace = (
@@ -853,11 +781,28 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
     f.initializeOwned = initializeOwned;
     f.people = await initializeVerified(f.setup);
     ({ alex: f.alex, morgan: f.morgan, sam: f.sam } = f.people);
+    // The staff accounts the workflow tests act as, one per role, made through
+    // the roster's own path. The Site Coordinator is the default follow-up
+    // person, as a site's lead would be. Fictional names only.
+    f.roleAccounts = {};
+    for (const [role, key, name, capabilities] of roleAccounts ? ROLE_ACCOUNTS : []) {
+      const member = await f.staff({ key, name, capabilities });
+      f.roleAccounts[role] = member;
+      f[role] = member.client;
+      f[`${role}Id`] = member.personId;
+      f[`${role}UserId`] = member.userId;
+    }
+    if (roleAccounts && siteCoordinatorFollowsUp)
+      await f.withSetupLock(() =>
+        f.sql("select vitally_private.set_default_followup($1,$2)", [
+          f.workspaceId,
+          "site_coordinator",
+        ]),
+      );
     f.foreignPeople = await initializeVerified({
       workspaceId: f.foreignWorkspaceId,
       presenterUserIds: [],
       applicantUserIds: [f.outsiderUserId],
-      fixtureClientBindings: {},
     });
     return f;
   } catch (error) {

@@ -168,7 +168,6 @@ the wide screen goes mostly unused.
 - **Success / available / complete**: `#e7f0e7` / `#628366`.
 - **Attention / corrections / waiting**: `#faf0dd` / `#a07c32`.
 - **Error**: `#faeee9` / `#a44d39`; error banner `#fbeceb` / `#8a3b34`.
-- **Notice banner**: `#efedfb` / `#4b3fa3`.
 
 ## 3. Typography Rules
 

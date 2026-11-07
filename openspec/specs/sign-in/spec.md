@@ -1,7 +1,7 @@
 # sign-in Specification
 
 ## Purpose
-Who a signed-in account acts as: a client; a presenter, the demonstration staff account that chooses a persona; or a staff member, who always acts as their own person, as the database decides from the signed-in account. It also covers how the roster creates staff accounts and chooses the default follow-up person, workspaces with staff and no presenter, and that sample cases and checkpoints stay presenter-only.
+Who a signed-in account acts as: a client; a presenter, the demonstration staff account that chooses a persona; or a staff member, who always acts as their own person, as the database decides from the signed-in account. It also covers how the roster creates staff accounts and chooses the default follow-up person, and workspaces with staff and no presenter.
 
 ## Requirements
 
@@ -101,7 +101,7 @@ The roster command SHALL never print an email address.
 - **THEN** the workspace also has Alex, Morgan and Sam, unlinked, with their usual capabilities
 
 ### Requirement: A workspace can have staff and no presenter
-A roster SHALL need at least one presenter or one staff member, and SHALL NOT require a presenter. A roster with no presenter SHALL name a `defaultFollowup`. A workspace with no presenter SHALL work for staff and clients. Nobody in it can reset sample cases or load checkpoints, because those stay presenter-only.
+A roster SHALL need at least one presenter or one staff member, and SHALL NOT require a presenter. A roster with no presenter SHALL name a `defaultFollowup`. A workspace with no presenter SHALL work for staff and clients.
 
 #### Scenario: A staff-only roster
 - **WHEN** a roster lists staff members and clients, no presenters, and a `defaultFollowup` naming a staff member with `followup`
@@ -134,9 +134,26 @@ The roster file SHALL accept an optional `defaultFollowup`, naming the `personKe
 - **WHEN** `defaultFollowup` names a staff member whose capabilities do not include `followup`
 - **THEN** the roster command refuses the roster, and the default does not change
 
-### Requirement: Sample cases and checkpoints stay presenter-only
-`vitally_reset_fixtures` and `vitally_load_checkpoint` SHALL refuse a `staff` member with `FORBIDDEN`, as they refuse a client.
+### Requirement: A presenter account gets a plain screen and no staff screens
+When an account whose membership has access `presenter` signs in, the app SHALL show one screen in English with:
+- the heading "This account is no longer used";
+- the text "Presenter mode has been removed. Ask your site coordinator for a staff account.";
+- a Sign out button.
 
-#### Scenario: A staff member tries to reset sample cases
-- **WHEN** a staff member calls `vitally_reset_fixtures`
-- **THEN** the call is refused with `FORBIDDEN`, and no sample case changes
+It SHALL show nothing else: no work board, case page, office screen, persona picker, sample reset, checkpoint or class-workspace indicator. The app SHALL load no cases, people, help requests or workspace details for a presenter, and SHALL start no live updates for one. Sign out SHALL work as it does for any account. This SHALL hold until presenter access is removed from the database.
+
+#### Scenario: A presenter signs in
+- **WHEN** the presenter signs in through the sign-in form
+- **THEN** the screen says "This account is no longer used" and "Presenter mode has been removed. Ask your site coordinator for a staff account.", with Sign out, and shows no board, no case and no presenter controls
+
+#### Scenario: Nothing is loaded for a presenter
+- **WHEN** a presenter's window is open on the plain screen and a case changes in the workspace
+- **THEN** the window shows no case data and its screen does not change
+
+#### Scenario: A presenter signs out
+- **WHEN** a presenter on the plain screen presses Sign out
+- **THEN** the window returns to the sign-in form
+
+#### Scenario: A staff member and a client are unchanged
+- **WHEN** a staff member or a client signs in
+- **THEN** they get their own screens as before

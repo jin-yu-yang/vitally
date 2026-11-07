@@ -1,7 +1,7 @@
 # client-intake Specification
 
 ## Purpose
-How a tax-season application's intake form is chosen and kept, and what it asks. It covers which intake version a new application gets, whether the client starts it or the office enters it for a walk-in client. It covers that an application keeps its version for life, and which version a workspace's sample cases are seeded in. It also covers what the form asks and requires before it can be submitted, whoever fills it: a household member's name, the Form 15080 signatures, and the Form 14446 signatures, whose dates fill themselves. It covers the virtual-process consent (Form 14446) that a client gives before the rest of the form opens, and the 14446 answers the sample cases carry. And it covers how the form's wording and options follow the client's marital status, so that a client who can't file with a spouse is never asked about one, and how a recently widowed client gives their late spouse's details, with the year of the death checked. It covers the client's service languages: the preferred one and any others they can be helped in, and how the progress page lists them. Finally, it covers how the client reviews and submits the application: the review step's alerts, which must be fixed before its summary and Submit pages appear, and the summary page itself, with its tools, collapsible sections and printout.
+How a tax-season application's intake form is chosen and kept, and what it asks. It covers which intake version a new application gets, whether the client starts it or the office enters it for a walk-in client. It covers that an application keeps its version for life. It also covers what the form asks and requires before it can be submitted, whoever fills it: a household member's name, the Form 15080 signatures, and the Form 14446 signatures, whose dates fill themselves. It covers the virtual-process consent (Form 14446) that a client gives before the rest of the form opens, and that fictional details leave the client's own 14446 answers alone. And it covers how the form's wording and options follow the client's marital status, so that a client who can't file with a spouse is never asked about one, and how a recently widowed client gives their late spouse's details, with the year of the death checked. It covers the client's service languages: the preferred one and any others they can be helped in, and how the progress page lists them. Finally, it covers how the client reviews and submits the application: the review step's alerts, which must be fixed before its summary and Submit pages appear, and the summary page itself, with its tools, collapsible sections and printout.
 
 ## Requirements
 
@@ -38,13 +38,6 @@ An application's intake version SHALL be fixed when the application is created. 
 #### Scenario: Changing an application's version directly is refused
 - **WHEN** an application's intake version is changed directly
 - **THEN** the change is refused and the version stays 2
-
-### Requirement: Sample cases are version 2
-Resetting a workspace's sample cases SHALL seed ten samples, every one a version-2 application, including the `rejected`, `accepted`, `on_hold` and `withdrawn` samples.
-
-#### Scenario: A reset seeds version-2 samples
-- **WHEN** the sample cases are reset in a workspace
-- **THEN** ten samples are seeded and every one is a version-2 application
 
 ### Requirement: A household member may have a middle name
 A household member SHALL have an optional middle name (`hh[i].middle_name`), asked between the first and last name in both the standard and senior versions of the form. Leaving it empty SHALL NOT block the member or the application. The member's summary line, shown in the client's review summary, the office's review and the staff answers panel, SHALL read first, middle and last name, separated by single spaces, skipping any part that is empty. Document cards SHALL keep the member's first and last name, as the taxpayer's and spouse's cards do.
@@ -436,21 +429,6 @@ When the client's 14446 signature (`vc_tp_signature`) goes from empty to filled 
 - **WHEN** a client who typed their own 14446 date then signs
 - **THEN** the date they typed is kept
 
-### Requirement: The sample cases include their Form 14446 answers
-Every seeded sample case SHALL carry a ticked `vc_agree`, a `vc_review`, a `vc_tp_signature` that is the sample client's own name, and a `vc_tp_date`, so that no sample has a 14446 answer missing. "Fill fictional details" SHALL NOT tick 0.4 or sign 1.5 for the client, and regenerating the fictional details SHALL keep the client's own 14446 answers.
-
-#### Scenario: A sample is complete
-- **WHEN** a workspace's sample cases are seeded
-- **THEN** each sample has nothing missing to submit, and the "preparation_ready" sample's 14446 signature reads "Mei Chen"
-
-#### Scenario: Regenerate keeps the consent
-- **WHEN** a client who ticked 0.4 and signed 1.5 regenerates the fictional details
-- **THEN** 0.4 is still ticked, and 1.5's answers are unchanged
-
-#### Scenario: Fill leaves the consent to the client
-- **WHEN** a client who hasn't ticked 0.4 uses "Fill fictional details"
-- **THEN** 0.4 is still unticked and 1.5's signatures are still empty
-
 ### Requirement: A client page never makes a draft 13614-C
 A draft Form 13614-C SHALL be made only for staff. When anyone who is not staff asks for one, for example with a button added to a client page, the page SHALL open no tab, build no draft, offer no link and show no error. A client SHALL still be able to make the draft Form 14446.
 
@@ -461,3 +439,14 @@ A draft Form 13614-C SHALL be made only for staff. When anyone who is not staff 
 #### Scenario: Staff are unaffected
 - **WHEN** the case's preparer presses View Draft 13614-C on the case page after the claim
 - **THEN** the draft 13614-C opens in its own tab, as before
+
+### Requirement: Fictional details leave the client's 14446 answers alone
+"Fill fictional details" SHALL NOT tick 0.4 or sign 1.5 for the client, and regenerating the fictional details SHALL keep the client's own 14446 answers.
+
+#### Scenario: Regenerate keeps the consent
+- **WHEN** a client who ticked 0.4 and signed 1.5 regenerates the fictional details
+- **THEN** 0.4 is still ticked, and 1.5's answers are unchanged
+
+#### Scenario: Fill leaves the consent to the client
+- **WHEN** a client who hasn't ticked 0.4 uses "Fill fictional details"
+- **THEN** 0.4 is still unticked and 1.5's signatures are still empty

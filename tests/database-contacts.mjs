@@ -12,7 +12,6 @@ import {
 // two RPCs, its staff-only tables, the move of the old follow-up attempts and
 // the refusal of RECORD_CONTACT.
 const ESCALATION_REASON = "No response to the document request.";
-const SEEDED_NOTE = "Called during office hours. No answer, so a message was left.";
 const ENTRY_FIELDS = [
   "direction",
   "contacted_at",
@@ -74,13 +73,13 @@ const caseCounts = async (f, caseId) => {
     clientEvents: Number(row.client_events),
   };
 };
-// A client case Alex prepares with one open document request and an open
-// follow-up task assigned to Sam (ESCALATE_CONTACT, as pendingCase does).
+// A client case the Preparer prepares with one open document request and an
+// open follow-up task assigned to the Site Coordinator (ESCALATE_CONTACT, as pendingCase does).
 async function followupCase(f) {
   const caseId = await f.readyCase();
-  await f.act(f.presenter, caseId, f.alex, "CLAIM_PREPARATION", {});
-  await f.act(f.presenter, caseId, f.alex, "REQUEST_DOCUMENT", f.sampleRequest);
-  await f.act(f.presenter, caseId, f.alex, "ESCALATE_CONTACT", {
+  await f.act(f.preparer, caseId, "CLAIM_PREPARATION", {});
+  await f.act(f.preparer, caseId, "REQUEST_DOCUMENT", f.sampleRequest);
+  await f.act(f.preparer, caseId, "ESCALATE_CONTACT", {
     reason: ESCALATION_REASON,
   });
   const [followup] = (
@@ -93,15 +92,15 @@ test("the contact log", async (t) => {
   const f = await createDatabaseFixture();
   try {
     await t.test("each staff persona logs a contact at any stage", async () => {
-      for (const [caseId, personId] of [
-        [await f.readyCase(), f.alex],
-        [await f.preparedCase(), f.morgan],
-        [await f.assistedCase(), f.sam],
+      for (const [caseId, account] of [
+        [await f.readyCase(), f.roleAccounts.preparer],
+        [await f.preparedCase(), f.roleAccounts.reviewer],
+        [await f.assistedCase(), f.roleAccounts.siteCoordinator],
       ]) {
         const before = await caseCounts(f, caseId);
         const entry = SAMPLE_CONTACT();
-        const args = contactArgs({ caseId, personId, entry });
-        const { data, error } = await f.presenter.rpc("vitally_log_contact", args);
+        const args = contactArgs({ caseId, entry });
+        const { data, error } = await account.client.rpc("vitally_log_contact", args);
         assert.equal(error, null);
         assert.equal(data.actionId, args.p_action_id);
         assert.equal(data.caseId, caseId);
@@ -112,8 +111,8 @@ test("the contact log", async (t) => {
         assert.equal(Number(row.revision), 1);
         assert.equal(row.edited_at, null);
         assert.equal(row.followup_id, null);
-        assert.equal(row.logged_by_person_id, personId);
-        assert.equal(row.logged_by_user_id, f.presenterUserId);
+        assert.equal(row.logged_by_person_id, account.personId);
+        assert.equal(row.logged_by_user_id, account.userId);
         assert.ok(Math.abs(row.logged_at.getTime() - Date.now()) < 60_000);
         assert.equal(row.contacted_at.getTime(), new Date(entry.contactedAt).getTime());
         assert.equal(row.direction, "outgoing");
@@ -129,8 +128,8 @@ test("the contact log", async (t) => {
         assert.equal(Number(first.version), 1);
         assert.equal(first.workspace_id, row.workspace_id);
         assert.equal(first.case_id, row.case_id);
-        assert.equal(first.edited_by_person_id, personId);
-        assert.equal(first.edited_by_user_id, f.presenterUserId);
+        assert.equal(first.edited_by_person_id, account.personId);
+        assert.equal(first.edited_by_user_id, account.userId);
         assert.equal(first.created_at.getTime(), row.logged_at.getTime());
         for (const field of ENTRY_FIELDS)
           assert.deepEqual(first[field], row[field], field);
@@ -141,7 +140,7 @@ test("the contact log", async (t) => {
     await t.test("a past contact time is kept", async () => {
       const caseId = await f.readyCase();
       const contactedAt = newYorkTime(-1, 14, 10);
-      const { contactId } = await f.logContact(f.presenter, caseId, f.alex, {
+      const { contactId } = await f.logContact(f.preparer, caseId, {
         ...SAMPLE_CONTACT(),
         contactedAt,
       });
@@ -171,7 +170,7 @@ test("the contact log", async (t) => {
         ]),
       ];
       for (const [direction, method, outcome] of allowed)
-        await f.logContact(f.presenter, caseId, f.alex, {
+        await f.logContact(f.preparer, caseId, {
           ...SAMPLE_CONTACT(),
           direction,
           method,
@@ -186,11 +185,10 @@ test("the contact log", async (t) => {
       ])
         await refuse(
           f,
-          f.presenter,
+          f.preparer,
           "vitally_log_contact",
           contactArgs({
             caseId,
-            personId: f.alex,
             entry: { ...SAMPLE_CONTACT(), direction, method, outcome },
           }),
           "VT007",
@@ -217,20 +215,20 @@ test("the contact log", async (t) => {
       ])
         await refuse(
           f,
-          f.presenter,
+          f.preparer,
           "vitally_log_contact",
-          contactArgs({ caseId, personId: f.alex, entry }),
+          contactArgs({ caseId, entry }),
           "VT007",
         );
       // The positive control: a named other within the limit.
-      const { contactId } = await f.logContact(f.presenter, caseId, f.alex, {
+      const { contactId } = await f.logContact(f.preparer, caseId, {
         ...base,
         withWhom: "other",
         otherName: "  Pat Example ",
       });
       assert.equal((await contactRow(f, contactId)).other_name, "Pat Example");
       // A blank name with the client is no name, not a refusal.
-      const blank = await f.logContact(f.presenter, caseId, f.alex, {
+      const blank = await f.logContact(f.preparer, caseId, {
         ...base,
         withWhom: "client",
         otherName: "  ",
@@ -240,7 +238,7 @@ test("the contact log", async (t) => {
 
     await t.test("an edit that breaks a rule is refused", async () => {
       const caseId = await f.readyCase();
-      const { contactId } = await f.logContact(f.presenter, caseId, f.alex, SAMPLE_CONTACT());
+      const { contactId } = await f.logContact(f.preparer, caseId, SAMPLE_CONTACT());
       const before = {
         row: await contactRow(f, contactId),
         versions: await versionRows(f, contactId),
@@ -253,9 +251,9 @@ test("the contact log", async (t) => {
       ])
         await refuse(
           f,
-          f.presenter,
+          f.preparer,
           "vitally_edit_contact",
-          editContactArgs({ contactId, revision: 1, personId: f.alex, entry }),
+          editContactArgs({ contactId, revision: 1, entry }),
           "VT007",
         );
       assert.deepEqual(
@@ -267,7 +265,7 @@ test("the contact log", async (t) => {
     await t.test("a blank note is stored as no note", async () => {
       const caseId = await f.readyCase();
       for (const note of ["   ", "", null]) {
-        const { contactId } = await f.logContact(f.presenter, caseId, f.alex, {
+        const { contactId } = await f.logContact(f.preparer, caseId, {
           ...SAMPLE_CONTACT(),
           note,
         });
@@ -295,9 +293,9 @@ test("the contact log", async (t) => {
       const draft = await f.draftCase(f.applicantA);
       await refuse(
         f,
-        f.presenter,
+        f.preparer,
         "vitally_log_contact",
-        contactArgs({ caseId: draft.caseId, personId: f.alex, entry: SAMPLE_CONTACT() }),
+        contactArgs({ caseId: draft.caseId, entry: SAMPLE_CONTACT() }),
         "VT002",
       );
       const other = await f.sql("select count(*)::int as n from public.contact_log where case_id in ($1,$2)", [
@@ -310,33 +308,33 @@ test("the contact log", async (t) => {
     await t.test("a contact linked to a task", async () => {
       const { caseId, followupId } = await followupCase(f);
       const entry = { ...SAMPLE_CONTACT(), outcome: "no_answer" };
-      const { contactId } = await f.logContact(f.presenter, caseId, f.sam, entry, followupId);
+      const { contactId } = await f.logContact(f.siteCoordinator, caseId, entry, followupId);
       assert.equal((await contactRow(f, contactId)).followup_id, followupId);
       await refuse(
         f,
-        f.presenter,
+        f.preparer,
         "vitally_log_contact",
-        contactArgs({ caseId, personId: f.alex, followupId, entry }),
+        contactArgs({ caseId, followupId, entry }),
         "VT001",
       );
       const other = await followupCase(f);
       await refuse(
         f,
-        f.presenter,
+        f.siteCoordinator,
         "vitally_log_contact",
-        contactArgs({ caseId, personId: f.sam, followupId: other.followupId, entry }),
+        contactArgs({ caseId, followupId: other.followupId, entry }),
         "VT001",
       );
-      await f.act(f.presenter, caseId, f.sam, "RESOLVE_FOLLOWUP", {
+      await f.act(f.siteCoordinator, caseId, "RESOLVE_FOLLOWUP", {
         followupId,
         outcome: "reached",
         note: "Spoke with the client.",
       });
       await refuse(
         f,
-        f.presenter,
+        f.siteCoordinator,
         "vitally_log_contact",
-        contactArgs({ caseId, personId: f.sam, followupId, entry }),
+        contactArgs({ caseId, followupId, entry }),
         "VT004",
       );
       // Resolving creates no log entry of its own.
@@ -355,9 +353,9 @@ test("the contact log", async (t) => {
         outcome: "sent",
         purpose: "request_documents",
       };
-      const { contactId } = await f.logContact(f.presenter, caseId, f.alex, sent);
+      const { contactId } = await f.logContact(f.preparer, caseId, sent);
       const logged = await contactRow(f, contactId);
-      const edited = await f.editContact(f.presenter, contactId, f.alex, {
+      const edited = await f.editContact(f.preparer, contactId, {
         ...sent,
         outcome: "replied",
       });
@@ -367,7 +365,7 @@ test("the contact log", async (t) => {
         caseId,
         revision: 2,
       });
-      const corrected = await f.editContact(f.presenter, contactId, f.sam, {
+      const corrected = await f.editContact(f.siteCoordinator, contactId, {
         ...sent,
         outcome: "replied",
         contactedAt: second,
@@ -378,27 +376,26 @@ test("the contact log", async (t) => {
       assert.ok(row.edited_at);
       assert.equal(row.outcome, "replied");
       assert.equal(row.contacted_at.getTime(), new Date(second).getTime());
-      assert.equal(row.logged_by_person_id, f.alex);
+      assert.equal(row.logged_by_person_id, f.preparerId);
       assert.equal(row.logged_at.getTime(), logged.logged_at.getTime());
       assert.equal(row.followup_id, null);
       const versions = await versionRows(f, contactId);
       assert.deepEqual(
         versions.map((v) => [Number(v.version), v.outcome, v.contacted_at.getTime(), v.edited_by_person_id]),
         [
-          [1, "sent", new Date(first).getTime(), f.alex],
-          [2, "replied", new Date(first).getTime(), f.alex],
-          [3, "replied", new Date(second).getTime(), f.sam],
+          [1, "sent", new Date(first).getTime(), f.preparerId],
+          [2, "replied", new Date(first).getTime(), f.preparerId],
+          [3, "replied", new Date(second).getTime(), f.siteCoordinatorId],
         ],
       );
       // The task link is fixed at logging: a linked entry stays linked.
       const linked = await f.logContact(
-        f.presenter,
+        f.siteCoordinator,
         caseId,
-        f.sam,
         { ...SAMPLE_CONTACT(), outcome: "no_answer" },
         followupId,
       );
-      await f.editContact(f.presenter, linked.contactId, f.sam, {
+      await f.editContact(f.siteCoordinator, linked.contactId, {
         ...SAMPLE_CONTACT(),
         outcome: "left_voicemail",
       });
@@ -407,9 +404,9 @@ test("the contact log", async (t) => {
 
     await t.test("another persona cannot edit", async () => {
       const caseId = await f.readyCase();
-      const { contactId } = await f.logContact(f.presenter, caseId, f.morgan, SAMPLE_CONTACT());
+      const { contactId } = await f.logContact(f.reviewer, caseId, SAMPLE_CONTACT());
       for (const [client, personId, code] of [
-        [f.presenter, f.alex, "VT001"],
+        [f.preparer, null, "VT001"],
         [f.presenter, null, "VT001"],
         [f.presenter, f.foreignPeople.sam, "VT001"],
         [f.applicantA, null, "VT001"],
@@ -424,34 +421,32 @@ test("the contact log", async (t) => {
         );
       await refuse(
         f,
-        f.presenter,
+        f.siteCoordinator,
         "vitally_edit_contact",
         editContactArgs({
           contactId: crypto.randomUUID(),
           revision: 1,
-          personId: f.sam,
           entry: SAMPLE_CONTACT(),
         }),
         "VT002",
       );
       assert.equal(Number((await contactRow(f, contactId)).revision), 1);
-      // An admin corrects someone else's entry; the logger stays Morgan.
-      await f.editContact(f.presenter, contactId, f.sam, { ...SAMPLE_CONTACT(), note: "Corrected." });
-      assert.equal((await contactRow(f, contactId)).logged_by_person_id, f.morgan);
+      // An admin corrects someone else's entry; the logger stays the Reviewer.
+      await f.editContact(f.siteCoordinator, contactId, { ...SAMPLE_CONTACT(), note: "Corrected." });
+      assert.equal((await contactRow(f, contactId)).logged_by_person_id, f.reviewerId);
     });
 
     await t.test("a stale edit is a conflict", async () => {
       const caseId = await f.readyCase();
-      const { contactId } = await f.logContact(f.presenter, caseId, f.morgan, SAMPLE_CONTACT());
-      await f.editContact(f.presenter, contactId, f.morgan, { ...SAMPLE_CONTACT(), note: "First." });
+      const { contactId } = await f.logContact(f.reviewer, caseId, SAMPLE_CONTACT());
+      await f.editContact(f.reviewer, contactId, { ...SAMPLE_CONTACT(), note: "First." });
       await refuse(
         f,
-        f.presenter,
+        f.siteCoordinator,
         "vitally_edit_contact",
         editContactArgs({
           contactId,
           revision: 1,
-          personId: f.sam,
           entry: { ...SAMPLE_CONTACT(), note: "Second." },
         }),
         "VT003",
@@ -462,15 +457,15 @@ test("the contact log", async (t) => {
 
     await t.test("a replay returns the same receipt", async () => {
       const caseId = await f.readyCase();
-      const args = contactArgs({ caseId, personId: f.alex, entry: SAMPLE_CONTACT() });
-      const one = await f.presenter.rpc("vitally_log_contact", args);
-      const two = await f.presenter.rpc("vitally_log_contact", args);
+      const args = contactArgs({ caseId, entry: SAMPLE_CONTACT() });
+      const one = await f.preparer.rpc("vitally_log_contact", args);
+      const two = await f.preparer.rpc("vitally_log_contact", args);
       assert.equal(one.error, null);
       assert.equal(two.error, null);
       assert.deepEqual(two.data, one.data);
       const count = await f.sql("select count(*)::int as n from public.contact_log where case_id=$1", [caseId]);
       assert.equal(count.rows[0].n, 1);
-      const { error } = await f.presenter.rpc("vitally_log_contact", {
+      const { error } = await f.preparer.rpc("vitally_log_contact", {
         ...args,
         p_entry: { ...args.p_entry, note: "Another note." },
       });
@@ -480,11 +475,10 @@ test("the contact log", async (t) => {
       const editArgs = editContactArgs({
         contactId: one.data.contactId,
         revision: 1,
-        personId: f.alex,
         entry: { ...args.p_entry, outcome: "no_answer" },
       });
-      const e1 = await f.presenter.rpc("vitally_edit_contact", editArgs);
-      const e2 = await f.presenter.rpc("vitally_edit_contact", editArgs);
+      const e1 = await f.preparer.rpc("vitally_edit_contact", editArgs);
+      const e2 = await f.preparer.rpc("vitally_edit_contact", editArgs);
       assert.equal(e1.error, null);
       assert.deepEqual(e2.data, e1.data);
       assert.equal((await versionRows(f, one.data.contactId)).length, 2);
@@ -492,7 +486,7 @@ test("the contact log", async (t) => {
 
     await t.test("nobody deletes or writes the tables directly", async () => {
       const caseId = await f.readyCase();
-      const { contactId } = await f.logContact(f.presenter, caseId, f.alex, SAMPLE_CONTACT());
+      const { contactId } = await f.logContact(f.preparer, caseId, SAMPLE_CONTACT());
       const before = {
         row: await contactRow(f, contactId),
         versions: await versionRows(f, contactId),
@@ -515,7 +509,7 @@ test("the contact log", async (t) => {
           workspace_id: f.workspaceId,
           case_id: caseId,
           logged_by_user_id: f.presenterUserId,
-          logged_by_person_id: f.alex,
+          logged_by_person_id: f.preparerId,
           direction: "outgoing",
           contacted_at: new Date().toISOString(),
           with_whom: "client",
@@ -530,7 +524,7 @@ test("the contact log", async (t) => {
           workspace_id: f.workspaceId,
           case_id: caseId,
           edited_by_user_id: f.presenterUserId,
-          edited_by_person_id: f.alex,
+          edited_by_person_id: f.preparerId,
           direction: "outgoing",
           contacted_at: new Date().toISOString(),
           with_whom: "client",
@@ -550,7 +544,7 @@ test("the contact log", async (t) => {
 
     await t.test("a client reads nothing", async () => {
       const caseId = await f.readyCase();
-      const { contactId } = await f.logContact(f.presenter, caseId, f.alex, SAMPLE_CONTACT());
+      const { contactId } = await f.logContact(f.preparer, caseId, SAMPLE_CONTACT());
       const own = await f.applicantA.from("cases").select("id").eq("id", caseId);
       assert.deepEqual(own.data, [{ id: caseId }]);
       for (const table of ["contact_log", "contact_log_versions"]) {
@@ -633,7 +627,7 @@ test("the contact log", async (t) => {
       const { caseId, followupId } = await followupCase(f);
       await assert.rejects(
         () =>
-          f.act(f.presenter, caseId, f.sam, "RECORD_CONTACT", {
+          f.act(f.siteCoordinator, caseId, "RECORD_CONTACT", {
             followupId,
             outcome: "no_answer",
             note: "Left a message.",
@@ -655,11 +649,10 @@ test("the contact log", async (t) => {
       });
       const stored = { actionId: args.p_action_id, caseId, revision: Number(revision) + 1 };
       await f.sql(
-        `insert into public.action_receipts(workspace_id,actor_user_id,action_id,operation,request_digest,actor_person_id,generation,target_id,receipt)
-         select $1,$2,$3,'RECORD_CONTACT',
+        `insert into public.action_receipts(workspace_id,actor_user_id,action_id,operation,request_digest,actor_person_id,target_id,receipt)
+         values($1,$2,$3,'RECORD_CONTACT',
           encode(extensions.digest(jsonb_build_object('operation','RECORD_CONTACT','caseId',$4::uuid,'expectedRevision',$5::bigint,'personId',$6::uuid,'payload',$7::jsonb)::text,'sha256'),'hex'),
-          $6,w.fixture_generation,$4,$8
-         from public.workspaces w where w.id=$1`,
+          $6,$4,$8)`,
         [
           f.workspaceId,
           f.presenterUserId,
@@ -676,62 +669,6 @@ test("the contact log", async (t) => {
       assert.deepEqual(data, stored);
     });
 
-    await t.test("the sample follow-up seeds a log entry", async () => {
-      await f.seedFixtures();
-      const byKey = Object.fromEntries((await f.readFixtureCases()).map((row) => [row.fixtureKey, row]));
-      const seededEntries = async (caseId) =>
-        (await f.sql("select * from public.contact_log where case_id=$1", [caseId])).rows;
-      const checkSeeded = async (caseId) => {
-        const [followup] = (
-          await f.sql("select id from public.admin_followups where case_id=$1", [caseId])
-        ).rows;
-        const entries = await seededEntries(caseId);
-        assert.equal(entries.length, 1);
-        const [entry] = entries;
-        assert.equal(entry.followup_id, followup.id);
-        assert.equal(entry.logged_by_person_id, f.sam);
-        assert.equal(entry.direction, "outgoing");
-        assert.equal(entry.method, "phone");
-        assert.equal(entry.with_whom, "client");
-        assert.equal(entry.purpose, "request_documents");
-        assert.equal(entry.outcome, "no_answer");
-        assert.equal(entry.note, SEEDED_NOTE);
-        assert.equal((await versionRows(f, entry.id)).length, 1);
-        const attempts = await f.sql("select count(*)::int as n from public.contact_attempts where case_id=$1", [caseId]);
-        assert.equal(attempts.rows[0].n, 0);
-      };
-      await checkSeeded(byKey.admin_followup.id);
-      // A checkpoint onto the follow-up scenario seeds it on another case too.
-      const target = byKey.waiting_documents;
-      await f.logContact(f.presenter, target.id, f.alex, SAMPLE_CONTACT());
-      const loaded = await f.presenter.rpc("vitally_load_checkpoint", {
-        p_action_id: crypto.randomUUID(),
-        p_case_id: target.id,
-        p_expected_revision: target.revision,
-        p_checkpoint: "admin_followup_needed",
-      });
-      assert.equal(loaded.error, null);
-      await checkSeeded(target.id);
-      // Loading another checkpoint clears the case's entries.
-      const back = await f.presenter.rpc("vitally_load_checkpoint", {
-        p_action_id: crypto.randomUUID(),
-        p_case_id: target.id,
-        p_expected_revision: loaded.data.revision,
-        p_checkpoint: "document_requested",
-      });
-      assert.equal(back.error, null);
-      assert.deepEqual(await seededEntries(target.id), []);
-      // A reset removes the old samples' entries with the samples.
-      const oldIds = Object.values(byKey).map((row) => row.id);
-      await f.seedFixtures();
-      const leftover = await f.sql(
-        "select count(*)::int as n from public.contact_log where case_id = any($1::uuid[])",
-        [oldIds],
-      );
-      assert.equal(leftover.rows[0].n, 0);
-      const fresh = Object.fromEntries((await f.readFixtureCases()).map((row) => [row.fixtureKey, row]));
-      await checkSeeded(fresh.admin_followup.id);
-    });
   } finally {
     await f.close();
   }

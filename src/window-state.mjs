@@ -1,8 +1,8 @@
 // Everything this browser window remembers by itself (Ruling R44). The
 // controller owns what the server said; this collaborator owns what *this
-// window* chose — which case is open, which screen it is on, which persona a
-// presenter is acting as, how the work board is filtered — plus the access
-// record that makes the resend cooldown survive a reload.
+// window* chose — which case is open, which screen it is on, how the work
+// board is filtered — plus the access record that makes the resend cooldown
+// survive a reload.
 //
 // Three rules it exists to keep:
 //
@@ -64,7 +64,6 @@ const asRevealedAnswers = (value) => {
 const FIELDS = Object.freeze({
   screen: asString,
   selectedCaseId: asString,
-  selectedPersonId: asString,
   formSubstep: asSubstep,
   openPanels: asNames,
   pendingCreateActionId: asString,
@@ -79,8 +78,8 @@ const FIELDS = Object.freeze({
  * @param {Storage} [options.sessionStorage] the window's session storage
  * @param {() => number} [options.clock]     current time in milliseconds
  * @returns {{
- *   read(userId: string, options?: {access?: string}): object|null,
- *   write(userId: string, value: object, options?: {access?: string}): void,
+ *   read(userId: string): object|null,
+ *   write(userId: string, value: object): void,
  *   clear(userId: string): void,
  *   readAccess(): object,
  *   writeAccess(record: object): void,
@@ -127,26 +126,20 @@ export function createWindowState({ sessionStorage, clock = () => Date.now() } =
     return result;
   };
 
-  // A staff account is its own person (add-staff-identity, D9): its window
-  // has no persona to remember, and one found in storage — left by a
-  // presenter window or written by hand — is never its to restore.
-  const forAccess = (saved, access) => {
-    if (saved && access === "staff") delete saved.selectedPersonId;
-    return saved;
-  };
-
   return {
     // What this user chose in this window, or null when nothing usable is
     // stored. Only the fields that were actually stored come back.
-    read(userId, { access } = {}) {
+    // A field no longer known — the persona an older presenter window
+    // stored, say — is dropped like any other unknown field.
+    read(userId) {
       if (!userId) return null;
-      const saved = forAccess(pick(readJson(windowStateKey(userId))), access);
+      const saved = pick(readJson(windowStateKey(userId)));
       return saved && Object.keys(saved).length ? saved : null;
     },
 
-    write(userId, value, { access } = {}) {
+    write(userId, value) {
       if (!userId) return;
-      writeJson(windowStateKey(userId), forAccess(pick(value), access) ?? {});
+      writeJson(windowStateKey(userId), pick(value) ?? {});
     },
 
     clear(userId) {

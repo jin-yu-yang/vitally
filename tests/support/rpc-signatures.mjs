@@ -49,29 +49,6 @@ export const RPC_SIGNATURES = Object.freeze([
       p_note: "",
     }),
   }),
-  Object.freeze({
-    name: "vitally_reset_fixtures",
-    // The demonstration set belongs to the presenter running the session, and
-    // its whole request is its own identity: there is nothing else to send.
-    signature: "vitally_reset_fixtures(uuid)",
-    authorized: (f) => f.presenter,
-    receiptKeys: Object.freeze(["actionId", "generation", "fixtureCaseIds"]),
-    args: () => ({ p_action_id: crypto.randomUUID() }),
-  }),
-  Object.freeze({
-    name: "vitally_load_checkpoint",
-    signature: "vitally_load_checkpoint(uuid,uuid,bigint,text)",
-    authorized: (f) => f.presenter,
-    receiptKeys: Object.freeze(["actionId", "caseId", "reference", "revision"]),
-    // A seeded fixture case at its current revision: a legitimate request, so
-    // only the missing session makes the anonymous call fail.
-    args: (context) => ({
-      p_action_id: crypto.randomUUID(),
-      p_case_id: context.fixtureCaseId,
-      p_expected_revision: context.fixtureRevision,
-      p_checkpoint: "ready_for_review",
-    }),
-  }),
   // The contact log (OpenSpec change add-contact-log): presenter work on any
   // case a presenter can open, under any persona.
   Object.freeze({
@@ -81,14 +58,14 @@ export const RPC_SIGNATURES = Object.freeze([
     receiptKeys: Object.freeze(["actionId", "contactId", "caseId", "revision"]),
     args: (context) => ({
       p_action_id: crypto.randomUUID(),
-      p_case_id: context.fixtureCaseId,
+      p_case_id: context.contactCaseId,
       p_person_id: context.assistPersonId,
       p_followup_id: null,
       p_entry: context.contactEntry,
     }),
   }),
   // The season-end close (OpenSpec change adjust-filing-to-pcdc): an admin
-  // closes the listed signing cases. The sample at Ready to exit is the target.
+  // closes the listed signing cases. An approved case is the target.
   Object.freeze({
     name: "vitally_close_unsigned",
     signature: "vitally_close_unsigned(uuid,uuid,jsonb,boolean)",

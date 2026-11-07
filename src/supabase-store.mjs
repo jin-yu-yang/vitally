@@ -53,8 +53,8 @@ export const SUBSCRIBED_TABLES = Object.freeze({
 // The two accesses that work cases: a presenter, and a signed-in staff member.
 const isStaffAccess = (access) => access === "presenter" || access === "staff";
 
-// INSERT and UPDATE only. A deleted row is never announced: fixture reset
-// removes cases wholesale, and a refresh is how the browser learns that.
+// INSERT and UPDATE only. A deleted row is never announced, and a refresh is
+// how the browser learns that.
 const WATCHED_EVENTS = Object.freeze(["INSERT", "UPDATE"]);
 
 const CONNECTION_STATES = Object.freeze({
@@ -73,14 +73,13 @@ export const camelRow = (row) =>
   );
 
 // The Case scalars of `contracts.mjs`. Deliberately narrower than the row:
-// origin, fixture_key and the created_by columns are storage detail and are
+// origin and the created_by columns are storage detail and are
 // not part of the browser Case.
 export const mapCase = (row) => ({
   id: row.id,
   reference: row.reference,
   workspaceId: row.workspace_id,
   ownerUserId: row.owner_user_id,
-  fixture: row.fixture,
   stage: row.stage,
   revision: Number(row.revision),
   preparationVersion: Number(row.preparation_version),
@@ -257,7 +256,6 @@ export const mapAssistance = (row) => ({
   resolutionNote: row.resolution_note,
   language: row.language,
   contactPreference: row.contact_preference,
-  fixture: row.fixture,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -377,11 +375,6 @@ export function createStore(client) {
 
   const access = async () => (await membership()).access;
 
-  // Presenter only: the demonstration's own controls.
-  const requirePresenter = async () => {
-    if ((await access()) !== "presenter") throw createAppError({ code: "VT001" });
-  };
-
   // Presenter or staff: the work board's reads.
   const requireStaffAccess = async () => {
     if (!isStaffAccess(await access())) throw createAppError({ code: "VT001" });
@@ -441,15 +434,13 @@ export function createStore(client) {
     },
 
     // The caller's own workspace row. RLS returns exactly the one workspace
-    // they are a member of, and the row carries the fixture generation — the
-    // number that moves when somebody rebuilds the demonstration cases.
+    // they are a member of.
     async getWorkspace() {
       const rows = await read(client.from("workspaces").select("*"));
       const row = rows[0];
       if (!row) throw createAppError({ code: "VT002" });
       return {
         id: row.id,
-        fixtureGeneration: Number(row.fixture_generation),
         defaultFollowupPersonId: row.default_followup_person_id,
         currentSeason: row.current_season == null ? null : Number(row.current_season),
         // The version a new application starts at (spec 2026-09-30 §4.2):
@@ -743,21 +734,6 @@ export function createStore(client) {
         p_person_id: await actingPerson(request),
         p_type: request.type,
         p_note: request.note ?? null,
-      });
-    },
-
-    async resetFixtures(request) {
-      await requirePresenter();
-      await call("vitally_reset_fixtures", { p_action_id: actionId(request) });
-    },
-
-    async loadCheckpoint(request) {
-      await requirePresenter();
-      await call("vitally_load_checkpoint", {
-        p_action_id: actionId(request),
-        p_case_id: request.caseId,
-        p_expected_revision: request.expectedRevision,
-        p_checkpoint: request.checkpoint,
       });
     },
 

@@ -363,7 +363,7 @@ test("empty and read-only states explain themselves", () => {
     [{ id: "h", status: "open", title: "Forms", createdAt: daysAgo(1) }],
     null,
   );
-  assert.match(noPerson, /Choose a volunteer persona to act as\./);
+  assert.match(noPerson, /This account isn(?:'|&#39;)t linked to a volunteer yet\. Ask your site coordinator\./);
   assert.deepEqual(actions(noPerson), []);
   assert.doesNotMatch(noPerson, /data-assistance-action/);
   assert.match(noPerson, /class="staff-reason"/);
@@ -894,12 +894,18 @@ test("the bottom bar: Cancel, Save draft, the confirmation and Send", () => {
   assert.match(addV2({ demoTools: true }), /data-action="fill-assisted-intake"/);
 });
 
+test("Add a case keeps its fill pill for a staff admin with the switch", () => {
+  const body = addV2({ demoTools: true });
+  assert.match(body, /data-action="fill-assisted-intake"/);
+  assert.doesNotMatch(addV2({ demoTools: false }), /fill-assisted-intake/);
+});
+
 test("the version-2 Add a case refuses a persona without the right", () => {
   const refused = addV2({ demoTools: true, person: { id: "p-al", name: "Alex", capabilities: ["prepare"] } });
   assert.match(refused, /staff-reason/);
   assert.doesNotMatch(refused, /<form/);
   assert.match(refused, /fill-assisted-intake/);
-  assert.match(addV2({ person: null }), /Choose a volunteer persona to act as\./);
+  assert.match(addV2({ person: null }), /This account isn(?:'|&#39;)t linked to a volunteer yet\. Ask your site coordinator\./);
 });
 
 // Fix round 1 (I1): a conflict on a saved office draft shows the shared choice

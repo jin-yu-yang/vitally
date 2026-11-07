@@ -68,26 +68,25 @@ const caseCount = async (f) =>
 // everything a closure has to cancel, keep, or leave alone.
 async function pendingCase(f) {
   const { itemId, caseId } = await f.seedAssistance();
-  await f.act(f.presenter, caseId, f.sam, "START_SCREENING", {});
-  await f.act(f.presenter, caseId, f.sam, "VERIFY_INTAKE", {
+  await f.act(f.siteCoordinator, caseId, "START_SCREENING", {});
+  await f.act(f.siteCoordinator, caseId, "VERIFY_INTAKE", {
     checks: f.intakeChecks,
   });
-  await f.act(f.presenter, caseId, f.alex, "CLAIM_PREPARATION", {});
-  await f.act(f.presenter, caseId, f.alex, "REQUEST_DOCUMENT", f.sampleRequest);
-  await f.act(f.presenter, caseId, f.alex, "ESCALATE_CONTACT", {
+  await f.act(f.preparer, caseId, "CLAIM_PREPARATION", {});
+  await f.act(f.preparer, caseId, "REQUEST_DOCUMENT", f.sampleRequest);
+  await f.act(f.preparer, caseId, "ESCALATE_CONTACT", {
     reason: ESCALATION_REASON,
   });
   const [task] = (
     await f.sql("select id from public.admin_followups where case_id=$1", [caseId])
   ).rows;
   await f.logContact(
-    f.presenter,
+    f.siteCoordinator,
     caseId,
-    f.sam,
     { ...SAMPLE_CONTACT(), outcome: "no_answer", note: "Left a message." },
     task.id,
   );
-  await f.act(f.presenter, caseId, f.alex, "REQUEST_DOCUMENT", {
+  await f.act(f.preparer, caseId, "REQUEST_DOCUMENT", {
     ...f.sampleRequest,
     title: "Second mileage record",
   });
@@ -95,7 +94,7 @@ async function pendingCase(f) {
   const answered = staff.requests.find(
     (request) => request.title === "Second mileage record",
   );
-  await f.act(f.applicantA, caseId, null, "RESPOND_DOCUMENT", {
+  await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
     requestId: answered.id,
     filename: f.sampleFilename,
   });
@@ -127,11 +126,11 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
           ["RESOLVE", 2],
         ]) {
           const actionId = crypto.randomUUID();
-          const result = await f.presenter.rpc("vitally_assistance_action", {
+          const result = await f.siteCoordinator.rpc("vitally_assistance_action", {
             p_action_id: actionId,
             p_item_id: itemId,
             p_expected_revision: revision,
-            p_person_id: f.sam,
+            p_person_id: null,
             p_type: type,
             p_note: type === "RESOLVE" ? RESOLUTION_NOTE : "",
           });
@@ -144,7 +143,7 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
           const item = await f.readStaffAssistance(itemId);
           assert.equal(item.status, type === "CLAIM" ? "assigned" : "resolved");
           assert.equal(item.revision, revision + 1);
-          assert.equal(item.assigneeId, f.sam);
+          assert.equal(item.assigneeId, f.siteCoordinatorId);
         }
         const resolved = await f.readStaffAssistance(itemId);
         assert.equal(resolved.resolutionNote, RESOLUTION_NOTE);
@@ -156,7 +155,6 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
           f.sampleAssistance.contactPreference,
         );
         assert.equal(resolved.caseId, caseId);
-        assert.equal(resolved.fixture, false);
         assert.equal(resolved.createdAt, initial.createdAt);
         assert.ok(resolved.updatedAt > initial.updatedAt);
         const after = await f.readStaffCase(caseId);
@@ -177,13 +175,12 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
         const attempts = [crypto.randomUUID(), crypto.randomUUID()];
         const results = await Promise.all(
           attempts.map((actionId) =>
-            f.presenter.rpc(
+            f.siteCoordinator.rpc(
               "vitally_assistance_action",
               assistanceArgs({
                 actionId,
                 itemId,
                 revision: 1,
-                personId: f.sam,
                 type: "CLAIM",
                 note: "",
               }),
@@ -199,7 +196,7 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
         const item = await f.readStaffAssistance(itemId);
         assert.equal(item.status, "assigned");
         assert.equal(item.revision, 2);
-        assert.equal(item.assigneeId, f.sam);
+        assert.equal(item.assigneeId, f.siteCoordinatorId);
         assert.equal(
           await f.receiptsFor(attempts[results.indexOf(lost[0])]),
           0,
@@ -220,9 +217,8 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
             "VT001",
           );
         const claimed = await f.actAssistance(
-          f.presenter,
+          f.siteCoordinator,
           itemId,
-          f.sam,
           "CLAIM",
         );
         assert.equal(claimed.revision, 2);
@@ -260,7 +256,7 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
         );
         const item = await f.readStaffAssistance(itemId);
         assert.equal(item.status, "assigned");
-        assert.equal(item.assigneeId, f.sam);
+        assert.equal(item.assigneeId, f.siteCoordinatorId);
         assert.equal(item.resolutionNote, null);
       },
     );
@@ -301,9 +297,8 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
           assert.equal(await f.receiptsFor(actionId), 0);
         assert.equal((await f.readStaffAssistance(itemId)).status, "open");
         const claimed = await f.actAssistance(
-          f.presenter,
+          f.siteCoordinator,
           itemId,
-          f.sam,
           "CLAIM",
         );
         assert.equal(claimed.revision, 2);
@@ -314,31 +309,29 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
       // Nothing to resolve before someone takes it.
       await refuseAssistance(
         f,
-        f.presenter,
+        f.siteCoordinator,
         {
           itemId,
           revision: 1,
-          personId: f.sam,
           type: "RESOLVE",
           note: RESOLUTION_NOTE,
         },
         "VT004",
       );
-      await f.actAssistance(f.presenter, itemId, f.sam, "CLAIM");
+      await f.actAssistance(f.siteCoordinator, itemId, "CLAIM");
       await refuseAssistance(
         f,
-        f.presenter,
-        { itemId, revision: 2, personId: f.sam, type: "CLAIM", note: "" },
+        f.siteCoordinator,
+        { itemId, revision: 2, type: "CLAIM", note: "" },
         "VT004",
       );
       // A stale revision answers before the status, and authority before both.
       await refuseAssistance(
         f,
-        f.presenter,
+        f.siteCoordinator,
         {
           itemId,
           revision: 1,
-          personId: f.sam,
           type: "RESOLVE",
           note: RESOLUTION_NOTE,
         },
@@ -351,27 +344,25 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
         "VT001",
       );
       await f.actAssistance(
-        f.presenter,
+        f.siteCoordinator,
         itemId,
-        f.sam,
         "RESOLVE",
         RESOLUTION_NOTE,
       );
       for (const spec of [
         {
           revision: 3,
-          personId: f.sam,
           type: "RESOLVE",
           note: "Helped again",
         },
-        { revision: 3, personId: f.sam, type: "CLAIM", note: "" },
+        { revision: 3, type: "CLAIM", note: "" },
       ])
-        await refuseAssistance(f, f.presenter, { ...spec, itemId }, "VT004");
+        await refuseAssistance(f, f.siteCoordinator, { ...spec, itemId }, "VT004");
       const item = await f.readStaffAssistance(itemId);
       assert.equal(item.status, "resolved");
       assert.equal(item.revision, 3);
       assert.equal(item.resolutionNote, RESOLUTION_NOTE);
-      assert.equal(item.assigneeId, f.sam);
+      assert.equal(item.assigneeId, f.siteCoordinatorId);
     });
     await t.test("the note follows the action type", async () => {
       const { itemId } = await f.seedAssistance();
@@ -392,17 +383,16 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
       ])
         await refuseAssistance(
           f,
-          f.presenter,
-          { ...spec, itemId, personId: f.sam },
+          f.siteCoordinator,
+          { ...spec, itemId },
           "VT007",
         );
       await refuseAssistance(
         f,
-        f.presenter,
+        f.siteCoordinator,
         {
           itemId: null,
           revision: 1,
-          personId: f.sam,
           type: "CLAIM",
           note: "",
         },
@@ -410,11 +400,10 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
       );
       assert.equal((await f.readStaffAssistance(itemId)).revision, 1);
       // A null note claims, and a full-length note resolves.
-      await f.actAssistance(f.presenter, itemId, f.sam, "CLAIM");
+      await f.actAssistance(f.siteCoordinator, itemId, "CLAIM");
       await f.actAssistance(
-        f.presenter,
+        f.siteCoordinator,
         itemId,
-        f.sam,
         "RESOLVE",
         "x".repeat(1000),
       );
@@ -481,7 +470,7 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
       "rejected assistance actions commit no receipt or change",
       async () => {
         const { itemId } = await f.seedAssistance();
-        await f.actAssistance(f.presenter, itemId, f.sam, "CLAIM");
+        await f.actAssistance(f.siteCoordinator, itemId, "CLAIM");
         const before = await f.stateSnapshot();
         // Assistance has no technical qualification, so VT006 is unreachable.
         const attempts = [
@@ -497,23 +486,22 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
           ],
           [f.applicantA, { revision: 2, type: "CLAIM", note: "" }, "VT002"],
           [
-            f.presenter,
+            f.siteCoordinator,
             {
               revision: 1,
-              personId: f.sam,
               type: "RESOLVE",
               note: RESOLUTION_NOTE,
             },
             "VT003",
           ],
           [
-            f.presenter,
-            { revision: 2, personId: f.sam, type: "CLAIM", note: "" },
+            f.siteCoordinator,
+            { revision: 2, type: "CLAIM", note: "" },
             "VT004",
           ],
           [
-            f.presenter,
-            { revision: 2, personId: f.sam, type: "RESOLVE", note: "   " },
+            f.siteCoordinator,
+            { revision: 2, type: "RESOLVE", note: "   " },
             "VT007",
           ],
         ];
@@ -521,7 +509,7 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
           await refuseAssistance(f, client, { ...spec, itemId }, code);
         assert.deepEqual(await f.stateSnapshot(), before);
         await assert.rejects(
-          () => f.actAssistance(f.presenter, itemId, f.alex, "RESOLVE", "x"),
+          () => f.actAssistance(f.preparer, itemId, "RESOLVE", "x"),
           rejected("FORBIDDEN"),
         );
       },
@@ -542,12 +530,12 @@ test("reminders record a simulated nudge on available work", async (t) => {
         assert.equal(before.lastRemindedAt, null);
         assert.equal(before.lastRemindedByPersonId, null);
         const cases = await caseCount(f);
-        const receipt = await f.act(f.presenter, caseId, f.sam, "REMIND", {});
+        const receipt = await f.act(f.siteCoordinator, caseId, "REMIND", {});
         assert.equal(receipt.caseId, caseId);
         assert.equal(receipt.revision, before.revision + 1);
         const after = await f.readStaffCase(caseId);
         assert.ok(after.lastRemindedAt);
-        assert.equal(after.lastRemindedByPersonId, f.sam);
+        assert.equal(after.lastRemindedByPersonId, f.siteCoordinatorId);
         // A reminder is a note to the office: nothing about the case moves.
         assert.equal(after.stage, "preparation_ready");
         assert.equal(after.preparerId, null);
@@ -559,11 +547,11 @@ test("reminders record a simulated nudge on available work", async (t) => {
         const event = after.internalHistory.at(-1);
         assert.equal(event.action, "REMIND");
         assert.deepEqual(event.detail, { simulated: true });
-        assert.equal(event.actorPersonId, f.sam);
+        assert.equal(event.actorPersonId, f.siteCoordinatorId);
         // No external message is ever sent, so the client sees nothing new.
         assert.deepEqual(after.history, before.history);
         // The work is still waiting, so it can be reminded again.
-        const again = await f.act(f.presenter, caseId, f.sam, "REMIND", {});
+        const again = await f.act(f.siteCoordinator, caseId, "REMIND", {});
         assert.equal(again.revision, before.revision + 2);
         const reminded = await f.readStaffCase(caseId);
         assert.ok(reminded.lastRemindedAt > after.lastRemindedAt);
@@ -586,12 +574,11 @@ test("reminders record a simulated nudge on available work", async (t) => {
       const remind = applyArgs({
         caseId,
         revision: 5,
-        personId: f.sam,
         type: "REMIND",
       });
-      const first = await f.presenter.rpc("vitally_apply_action", remind);
+      const first = await f.siteCoordinator.rpc("vitally_apply_action", remind);
       assert.equal(first.error, null);
-      const replay = await f.presenter.rpc("vitally_apply_action", remind);
+      const replay = await f.siteCoordinator.rpc("vitally_apply_action", remind);
       assert.equal(replay.error, null);
       assert.deepEqual(replay.data, first.data);
       const staff = await f.readStaffCase(caseId);
@@ -602,39 +589,39 @@ test("reminders record a simulated nudge on available work", async (t) => {
       );
     });
     await t.test("work nobody is waiting for takes no reminder", async () => {
-      const remind = { type: "REMIND", personId: f.sam, payload: {} };
+      const remind = { type: "REMIND", payload: {} };
       // A claimed case is somebody's work already.
       const claimed = await f.readyCase();
-      await f.act(f.presenter, claimed, f.alex, "CLAIM_PREPARATION", {});
+      await f.act(f.preparer, claimed, "CLAIM_PREPARATION", {});
       await refuseAction(
         f,
-        f.presenter,
+        f.siteCoordinator,
         { ...remind, caseId: claimed, revision: 6 },
         "VT004",
       );
       // Intake that has not been verified is not on anyone's queue yet.
       const created = await f.draftCase(f.applicantA);
-      await f.act(f.applicantA, created.caseId, null, "SUBMIT", {
+      await f.act(f.applicantA, created.caseId, "SUBMIT", {
         confirmed: true,
       });
       await refuseAction(
         f,
-        f.presenter,
+        f.siteCoordinator,
         { ...remind, caseId: created.caseId, revision: 3 },
         "VT004",
       );
       // An assisted draft has no queue either; a client draft is invisible.
-      const assisted = await f.draftCase(f.presenter, { mode: "assisted", personId: f.sam });
+      const assisted = await f.draftCase(f.siteCoordinator, { mode: "assisted" });
       await refuseAction(
         f,
-        f.presenter,
+        f.siteCoordinator,
         { ...remind, caseId: assisted.caseId, revision: 2 },
         "VT004",
       );
       const draft = await f.draftCase(f.applicantA);
       await refuseAction(
         f,
-        f.presenter,
+        f.siteCoordinator,
         { ...remind, caseId: draft.caseId, revision: 2 },
         "VT002",
       );
@@ -662,14 +649,14 @@ test("reminders record a simulated nudge on available work", async (t) => {
       ])
         await refuseAction(
           f,
-          f.presenter,
-          { ...remind, personId: f.sam, payload },
+          f.siteCoordinator,
+          { ...remind, payload },
           "VT007",
         );
       const before = await f.readStaffCase(caseId);
       assert.equal(before.lastRemindedAt, null);
       assert.equal(before.revision, 5);
-      await f.act(f.presenter, caseId, f.sam, "REMIND", {});
+      await f.act(f.siteCoordinator, caseId, "REMIND", {});
       assert.ok((await f.readStaffCase(caseId)).lastRemindedAt);
     });
   } finally {
@@ -697,9 +684,8 @@ test("closure cancels pending work without erasing its history", async (t) => {
         const item = await f.readStaffAssistance(pending.itemId);
         assert.equal(before.stage, "preparing");
         const closed = await f.act(
-          f.presenter,
+          f.siteCoordinator,
           pending.caseId,
-          f.sam,
           "CLOSE_CASE",
           { reason: "other", note: CLOSURE_REASON, confirmed: true },
         );
@@ -724,14 +710,14 @@ test("closure cancels pending work without erasing its history", async (t) => {
         assert.equal(after.followups[0].resolvedAt, null);
         assert.deepEqual(await contacts(), contactsBefore);
         // The people who did the work stay on the record.
-        assert.equal(after.preparerId, f.alex);
-        assert.deepEqual(after.participants, [f.alex]);
+        assert.equal(after.preparerId, f.preparerId);
+        assert.deepEqual(after.participants, [f.preparerId]);
         assert.equal(after.intakeVerified, true);
         assert.equal(after.answers.tp_first_name, before.answers.tp_first_name);
         const event = after.internalHistory.at(-1);
         assert.equal(event.action, "CLOSE_CASE");
         assert.deepEqual(event.detail, { reason: "other", note: CLOSURE_REASON });
-        assert.equal(event.actorPersonId, f.sam);
+        assert.equal(event.actorPersonId, f.siteCoordinatorId);
         // The client is told plainly, without the internal reason.
         const message = after.history.at(-1);
         assert.equal(message.action, "CLOSE_CASE");
@@ -746,7 +732,7 @@ test("closure cancels pending work without erasing its history", async (t) => {
       "every case action after closure is an invalid transition",
       async () => {
         const pending = await pendingCase(f);
-        await f.act(f.presenter, pending.caseId, f.sam, "CLOSE_CASE", {
+        await f.act(f.siteCoordinator, pending.caseId, "CLOSE_CASE", {
           reason: "other",
           note: CLOSURE_REASON,
           confirmed: true,
@@ -763,21 +749,19 @@ test("closure cancels pending work without erasing its history", async (t) => {
           ],
           [f.applicantA, { type: "SUBMIT", payload: { confirmed: true } }],
           [
-            f.presenter,
+            f.siteCoordinator,
             {
-              personId: f.sam,
               type: "VERIFY_INTAKE",
               payload: { checks: f.intakeChecks },
             },
           ],
           [
-            f.presenter,
-            { personId: f.alex, type: "CLAIM_PREPARATION", payload: {} },
+            f.preparer,
+            { type: "CLAIM_PREPARATION", payload: {} },
           ],
           [
-            f.presenter,
+            f.preparer,
             {
-              personId: f.alex,
               type: "REQUEST_DOCUMENT",
               payload: f.sampleRequest,
             },
@@ -793,17 +777,15 @@ test("closure cancels pending work without erasing its history", async (t) => {
             },
           ],
           [
-            f.presenter,
+            f.preparer,
             {
-              personId: f.alex,
               type: "VERIFY_DOCUMENT",
               payload: { requestId: pending.answeredRequestId },
             },
           ],
           [
-            f.presenter,
+            f.preparer,
             {
-              personId: f.alex,
               type: "ESCALATE_CONTACT",
               payload: {
                 requestId: pending.openRequestId,
@@ -812,9 +794,8 @@ test("closure cancels pending work without erasing its history", async (t) => {
             },
           ],
           [
-            f.presenter,
+            f.siteCoordinator,
             {
-              personId: f.sam,
               type: "RESOLVE_FOLLOWUP",
               payload: {
                 followupId: pending.followupId,
@@ -823,11 +804,10 @@ test("closure cancels pending work without erasing its history", async (t) => {
               },
             },
           ],
-          [f.presenter, { personId: f.sam, type: "REMIND", payload: {} }],
+          [f.siteCoordinator, { type: "REMIND", payload: {} }],
           [
-            f.presenter,
+            f.siteCoordinator,
             {
-              personId: f.sam,
               type: "CLOSE_CASE",
               payload: { reason: "other", note: "Closing again", confirmed: true },
             },
@@ -844,20 +824,18 @@ test("closure cancels pending work without erasing its history", async (t) => {
         // refuses every request (design D12).
         const linked = contactArgs({
           caseId: pending.caseId,
-          personId: f.sam,
           followupId: pending.followupId,
           entry: SAMPLE_CONTACT(),
         });
-        const refusedLink = await f.presenter.rpc("vitally_log_contact", linked);
+        const refusedLink = await f.siteCoordinator.rpc("vitally_log_contact", linked);
         assert.equal(refusedLink.error?.code, "VT004");
         assert.equal(await f.receiptsFor(linked.p_action_id), 0);
         await refuseAction(
           f,
-          f.presenter,
+          f.siteCoordinator,
           {
             caseId: pending.caseId,
             revision,
-            personId: f.sam,
             type: "RECORD_CONTACT",
             payload: {
               followupId: pending.followupId,
@@ -877,7 +855,6 @@ test("closure cancels pending work without erasing its history", async (t) => {
         const close = {
           caseId,
           revision: 5,
-          personId: f.sam,
           type: "CLOSE_CASE",
         };
         for (const payload of [
@@ -892,12 +869,12 @@ test("closure cancels pending work without erasing its history", async (t) => {
           { reason: "other", note: CLOSURE_REASON, confirmed: true, force: true },
           { reason: 12, confirmed: true },
         ])
-          await refuseAction(f, f.presenter, { ...close, payload }, "VT007");
+          await refuseAction(f, f.siteCoordinator, { ...close, payload }, "VT007");
         assert.equal(
           (await f.readStaffCase(caseId)).stage,
           "preparation_ready",
         );
-        await f.act(f.presenter, caseId, f.sam, "CLOSE_CASE", {
+        await f.act(f.siteCoordinator, caseId, "CLOSE_CASE", {
           reason: "other",
           note: "x".repeat(1000),
           confirmed: true,
@@ -927,18 +904,18 @@ test("closure cancels pending work without erasing its history", async (t) => {
         const draft = await f.draftCase(f.applicantA);
         await refuseAction(
           f,
-          f.presenter,
-          { ...close, caseId: draft.caseId, revision: 2, personId: f.sam },
+          f.siteCoordinator,
+          { ...close, caseId: draft.caseId, revision: 2 },
           "VT002",
         );
         // An assisted draft, a received case and preparation-ready work close.
-        const assisted = await f.draftCase(f.presenter, { mode: "assisted", personId: f.sam });
+        const assisted = await f.draftCase(f.siteCoordinator, { mode: "assisted" });
         const received = await f.draftCase(f.applicantA);
-        await f.act(f.applicantA, received.caseId, null, "SUBMIT", {
+        await f.act(f.applicantA, received.caseId, "SUBMIT", {
           confirmed: true,
         });
         for (const id of [assisted.caseId, received.caseId, caseId]) {
-          await f.act(f.presenter, id, f.sam, "CLOSE_CASE", payload);
+          await f.act(f.siteCoordinator, id, "CLOSE_CASE", payload);
           assert.equal((await f.readStaffCase(id)).stage, "closed");
         }
         // review_approved cannot be reached until Task 4 adds the review

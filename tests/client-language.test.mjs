@@ -188,9 +188,6 @@ const STATES = {
   }),
   "the frame: reconnecting": baseState({ connection: "reconnecting", cases: [draftCase] }),
   "the frame: offline": baseState({ connection: "offline", cases: [draftCase] }),
-  "the frame: the notice banner": baseState({
-    notice: "Sample cases were reset. The one you had open is no longer there.",
-  }),
   "the frame: the problem banner": baseState({
     error: { code: "SERVER_ERROR", message: "Something went wrong. Please try again." },
     retryable: true,
@@ -249,13 +246,12 @@ test("English is the default: the same states render in English without a langua
   }
 });
 
-test("a presenter's frame stays English whatever the browser chose", () => {
-  const presenter = baseState({
-    principal: { userId: "p", workspaceId: "w1", access: "presenter" },
+test("a staff account's frame stays English whatever the browser chose", () => {
+  const staffPage = baseState({
+    principal: { userId: "p", workspaceId: "w1", access: "staff" },
     dialog: "help",
-    notice: "Sample cases were reset.",
   });
-  assert.equal(views.page({ ...presenter, lang: "zh-Hans" }, ""), views.page(presenter, ""));
+  assert.equal(views.page({ ...staffPage, lang: "zh-Hans" }, ""), views.page(staffPage, ""));
 });
 
 test("the code step's first draw uses the countdown keys app.mjs patches in place", () => {
@@ -541,27 +537,26 @@ test("old simulated line keeps its 简体", () => {
 const source = (path) => readFileSync(new URL(`../src/${path}`, import.meta.url), "utf8");
 const literal = (text) => JSON.parse(text);
 
-test("every errors.mjs, controller, auth and notice sentence is a SENTENCES key", () => {
+test("every errors.mjs, controller, auth and message-constant sentence is a SENTENCES key", () => {
   const wanted = new Set(["Something went wrong.", "Please try again."]);
   // errors.mjs: SAFE_MESSAGES
   const errors = /const SAFE_MESSAGES = Object\.freeze\(\{([\s\S]*?)\}\);/.exec(source("errors.mjs"))[1];
   const safe = [...errors.matchAll(/:\s*("(?:[^"\\]|\\.)*")/g)].map((m) => literal(m[1]));
   assert.equal(safe.length, 9);
   safe.forEach((s) => wanted.add(s));
-  // controller.mjs: literal controllerError and requirePresenter sentences, *_NOTICE and the client conflict messages
+  // controller.mjs: literal controllerError sentences, *_MESSAGE constants and the client conflict messages
   const controller = source("controller.mjs");
   const errorsThrown = [...controller.matchAll(/(?:controllerError|refuse)\(\s*"[A-Z_]+"\s*,\s*("(?:[^"\\]|\\.)*")/g)].map((m) => literal(m[1]));
-  assert.ok(errorsThrown.length >= 12);
+  assert.ok(errorsThrown.length >= 9);
   errorsThrown.forEach((s) => wanted.add(s));
-  [...controller.matchAll(/requirePresenter\(\s*("(?:[^"\\]|\\.)*")/g)].forEach((m) => wanted.add(literal(m[1])));
   // The fallbacks a sign-in error falls back on when it carries no message
   const fallbacks = [...controller.matchAll(/message:\s*[\w?.]+\s*\?\?\s*("(?:[^"\\]|\\.)*")/g)].map((m) => literal(m[1]));
   assert.ok(fallbacks.includes("Sign-in could not be completed."));
   fallbacks.forEach((s) => wanted.add(s));
   const constants = [...controller.matchAll(/const (\w+_(?:NOTICE|MESSAGE)) =\s*("(?:[^"\\]|\\.)*")/g)];
-  const notices = constants.filter(([, name]) => name.endsWith("_NOTICE"));
-  assert.ok(notices.length >= 2);
-  for (const [, name, text] of constants) if (!/^(STAFF|ASSISTANCE)_/.test(name)) wanted.add(literal(text));
+  const clientConstants = constants.filter(([, name]) => !/^(STAFF|ASSISTANCE)_/.test(name));
+  assert.ok(clientConstants.length >= 1, "the client constants must not all be filtered out");
+  for (const [, , text] of clientConstants) wanted.add(literal(text));
   // auth.mjs: the neutral message and every authError sentence
   wanted.add(NEUTRAL_SEND_MESSAGE);
   const auth = [...source("auth.mjs").matchAll(/authError\(\s*"[A-Z_]+"\s*,\s*("(?:[^"\\]|\\.)*")/g)].map((m) => literal(m[1]));

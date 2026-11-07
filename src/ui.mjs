@@ -397,9 +397,9 @@ export function dialogFocusTarget(controls = [], container = null) {
 export function confirmBody({ before = "", lead, note = null, form = null, confirm, keep }) {
   const said = note ? `<div class="info-note">${icon(note.icon)}<p>${note.html}</p></div>` : "";
   const action = form
-    ? `<form ${form.attrs ?? 'class="staff-form"'}>${form.fields}${note?.inForm ? said : ""}${confirm}</form>`
+    ? `<form ${form.attrs ?? 'class="staff-form"'}>${form.fields}${confirm}</form>`
     : confirm;
-  return `${before}${lead ? `<p>${lead}</p>` : ""}${note && !note.inForm ? said : ""}${action}${button(keep, "close-dialog", "text")}`;
+  return `${before}${lead ? `<p>${lead}</p>` : ""}${note ? said : ""}${action}${button(keep, "close-dialog", "text")}`;
 }
 
 // While a dialog is open everything behind it is inert, except the dialog and
@@ -412,7 +412,6 @@ export function confirmBody({ before = "", lead, note = null, form = null, confi
 const STAYS_REACHABLE = Object.freeze([
   "modal-backdrop",
   "connection-notice",
-  "notice-banner",
   "problem-banner",
 ]);
 export const inertWhileDialog = (element) =>

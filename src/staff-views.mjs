@@ -289,7 +289,7 @@ export function decorateStaffCase(caseRecord, people = []) {
 const PREPARATION_WORK_STAGES = Object.freeze(["preparing", "corrections_required"]);
 const UNSETTLED_REQUEST_STATUSES = Object.freeze(["open", "awaiting_verification"]);
 
-export const CHOOSE_PERSONA = "Choose a volunteer persona to act as.";
+export const NO_LINKED_VOLUNTEER = "This account isn't linked to a volunteer yet. Ask your site coordinator.";
 
 export const CONTACT_NOT_SHOWN =
   "Contact details are shown to the office, and to the preparer and reviewer once the case is claimed.";
@@ -334,7 +334,7 @@ export function staffEligibility(caseRecord, person) {
   const reviewAvailable = stage === "review_ready" && !record.reviewerId;
 
   const claimPreparation = () => {
-    if (!id) return refused(CHOOSE_PERSONA);
+    if (!id) return refused(NO_LINKED_VOLUNTEER);
     if (stage !== "preparation_ready")
       return refused("This case is not waiting to be claimed for preparation.");
     if (record.preparerId)
@@ -344,7 +344,7 @@ export function staffEligibility(caseRecord, person) {
   };
 
   const claimReview = () => {
-    if (!id) return refused(CHOOSE_PERSONA);
+    if (!id) return refused(NO_LINKED_VOLUNTEER);
     if (stage !== "review_ready")
       return refused("This case is not waiting for an independent reviewer.");
     if (record.reviewerId)
@@ -358,7 +358,7 @@ export function staffEligibility(caseRecord, person) {
   // Document work and both hand-offs: the case's current preparer, with the
   // participation the claim created.
   const preparationWork = () => {
-    if (!id) return refused(CHOOSE_PERSONA);
+    if (!id) return refused(NO_LINKED_VOLUNTEER);
     if (!PREPARATION_WORK_STAGES.includes(stage))
       return refused("Preparation work happens while this case is being prepared.");
     if (!canPrepare) return refused("Needs preparation eligibility.");
@@ -372,7 +372,7 @@ export function staffEligibility(caseRecord, person) {
   };
 
   const reviewDecision = () => {
-    if (!id) return refused(CHOOSE_PERSONA);
+    if (!id) return refused(NO_LINKED_VOLUNTEER);
     if (stage !== "reviewing")
       return refused("No review is open on this case right now.");
     if (participant)
@@ -384,7 +384,7 @@ export function staffEligibility(caseRecord, person) {
   };
 
   const reviewContact = () => {
-    if (!id) return refused(CHOOSE_PERSONA);
+    if (!id) return refused(NO_LINKED_VOLUNTEER);
     if (stage !== "review_approved")
       return refused("The client conversation is recorded after the review is approved.");
     if (participant)
@@ -412,7 +412,7 @@ export function staffEligibility(caseRecord, person) {
   // The office verifies the documents it asked for at intake (Waiting for
   // documents, and a Hold that came from it); the preparer's loop is unchanged.
   const verifyIntakeDocument = () => {
-    if (!id) return refused(CHOOSE_PERSONA);
+    if (!id) return refused(NO_LINKED_VOLUNTEER);
     if (stage !== "awaiting_documents" && !(stage === "on_hold" && holdKind(record) === "documents"))
       return refused("Preparation work happens while this case is being prepared.");
     if (!capabilities.includes("admin")) return refused("Needs office administrator access.");
@@ -690,7 +690,7 @@ export function renderStaffBoard(cases = [], people = [], ui = {}) {
     chosen.service,
   )}</div>${when(
     !person,
-    `<p class="staff-reason" role="note">${icon("user")} ${esc(CHOOSE_PERSONA)} Until then this board is read-only.</p>`,
+    `<p class="staff-reason" role="note">${icon("user")} ${esc(NO_LINKED_VOLUNTEER)} Until then this board is read-only.</p>`,
   )}${body}<p class="field-note board-note">${icon("lock")} This board shows workflow only: no taxpayer names, no addresses and no document contents. Submitted, approved and closed cases are not on these tabs; find one by its Application ID. Phone numbers stay masked: on cases you work on, hover over or tab to a number to see it.</p></section>`;
 }
 
@@ -855,14 +855,13 @@ export function lifecycleBar(subject) {
 const namePill = (role, id, name, personId) =>
   `<span class="name-pill"><small>${role}</small> ${who(id, name, personId)}</span>`;
 
-// Who this window is: a staff account is its own person and reads "Signed in
-// as" (add-staff-identity, D9); a presenter reads the persona it acts as.
-const whoThisWindowIs = (person, principal) =>
-  principal?.access === "staff"
-    ? `Signed in as ${person?.name ?? principal.personName ?? ""}.`
-    : person?.name
-      ? `Acting as ${person.name}.`
-      : CHOOSE_PERSONA;
+// Who this window is: only a staff screen shows the case header, and a staff
+// account is its own person, so it reads "Signed in as" (add-staff-identity,
+// D9), or says the account has no volunteer behind it yet.
+const whoThisWindowIs = (person, principal) => {
+  const name = person?.name ?? principal?.personName;
+  return name ? `Signed in as ${name}.` : NO_LINKED_VOLUNTEER;
+};
 
 export function caseHeader(record, person, principal = null) {
   return `<section class="panel staff-header" aria-labelledby="case-title"><div class="case-title-row"><h2 id="case-title" tabindex="-1">${esc(record.reference ?? "This case")}</h2><div class="case-client-number">${esc(record.clientNumber == null ? clientNumberLabel(record) : `Client ${formatClientNumber(record.clientNumber)}`)}</div>${stageBadge(record.stage, "en", { record })}<span class="case-people">${namePill("Preparer", record.preparerId, record.preparerName, person?.id)}${namePill("Reviewer", record.reviewerId, record.reviewerName, person?.id)}</span></div>${lifecycleBar(record)}<p class="field-note">${esc(
@@ -1169,7 +1168,7 @@ const EDITOR_BROWSERS =
 const DOWNLOAD_NOTE = "Open it in Chrome or the free Adobe Acrobat Reader, not macOS Preview.";
 
 export function shadedPanel(record, rights, ui = {}) {
-  const decision = rights?.shadedSection ?? refused(CHOOSE_PERSONA);
+  const decision = rights?.shadedSection ?? refused(NO_LINKED_VOLUNTEER);
   const error = ui?.error?.place === SHADED_UPLOAD ? ui.error : null;
   const editorError = ui?.error?.place === SHADED_EDITOR ? ui.error : null;
   const editorNotice = editorError
@@ -1443,7 +1442,7 @@ export function nextStep(record, rights, ui = {}) {
       break;
     case "preparing":
       body = rights.preparationWork.allowed
-        ? `${blocked}<form class="staff-form q-form">${demoFillButton(ui.principal)}${preparerForm(record, null, ui)}${caseSubmit(
+        ? `${blocked}<form class="staff-form q-form">${demoFillButton(ui.demoTools === true)}${preparerForm(record, null, ui)}${caseSubmit(
             `${icon("check")} Record that preparation is complete in TaxSlayer`,
             "SUBMIT_REVIEW",
             "primary",
@@ -1457,7 +1456,7 @@ export function nextStep(record, rights, ui = {}) {
         `<div class="notice amber" role="note">${icon("help")}<div><h3>Corrections the reviewer asked for</h3><p>${esc(corrections?.findings)}</p><small>${esc(corrections?.reviewerName ?? "")} · version ${esc(corrections?.preparationVersion)} · ${esc(formatTime(corrections?.decidedAt))}</small></div></div>`,
       )}${
         rights.preparationWork.allowed
-          ? `${blocked}<form class="staff-form q-form">${demoFillButton(ui.principal)}${textarea(
+          ? `${blocked}<form class="staff-form q-form">${demoFillButton(ui.demoTools === true)}${textarea(
               "What you corrected in TaxSlayer",
               "resolution",
               "",
@@ -1486,7 +1485,7 @@ export function nextStep(record, rights, ui = {}) {
         "preparationVersion",
       );
       body = rights.reviewDecision.allowed
-        ? `${when(version > 1, submissionComparison(previous, current, version))}<form class="staff-form q-form">${demoFillButton(ui.principal)}${reviewerForm(
+        ? `${when(version > 1, submissionComparison(previous, current, version))}<form class="staff-form q-form">${demoFillButton(ui.demoTools === true)}${reviewerForm(
             record,
             ui,
           )}<div class="next-step-actions">${caseSubmit(
@@ -1509,7 +1508,7 @@ export function nextStep(record, rights, ui = {}) {
         ? `<p class="muted">${esc(line)}</p>`
         : approved?.clientContactStatus === "pending"
           ? rights.reviewContact.allowed
-            ? `<form class="staff-form">${demoFillButton(ui.principal)}${select(
+            ? `<form class="staff-form">${demoFillButton(ui.demoTools === true)}${select(
                 "What happened",
                 "outcome",
                 "",
@@ -2111,7 +2110,7 @@ export function contactsPanel(record, person, ui = {}) {
     contacts.length,
     button("Copy all", "copy-all-contacts", "secondary"),
   )}</div>${
-    person ? logContactForm(record, person, view) : explain({ allowed: false, reason: CHOOSE_PERSONA })
+    person ? logContactForm(record, person, view) : explain({ allowed: false, reason: NO_LINKED_VOLUNTEER })
   }${
     contacts.length
       ? `<ol class="contact-list">${contacts.map((contact) => contactItem(record, contact, person, view)).join("")}</ol>`

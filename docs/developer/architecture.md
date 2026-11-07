@@ -60,12 +60,12 @@ erDiagram
 - **Person** (`public.people`): a staff member with capabilities. Every staff action names the
   person it is done as, and the database checks that person's capabilities.
 
-**Presenter accounts are not linked to people.** A presenter account chooses a persona in the
-presenter panel and acts as Alex, Morgan or Sam, so one group member can demonstrate every role.
-The database still enforces each persona's capabilities and independence rules, so the workflow
-rules are real, but the question "is this account allowed to act as Alex?" is answered only by
-"it is a presenter". This is the most important demo-only shortcut, and it stays for the classroom
-demonstration.
+**Presenter accounts are not linked to people.** A presenter who signs in now gets one plain
+screen, "This account is no longer used", and the app reads nothing for it. There is no presenter
+panel and no persona to choose. The database still has the persona rule: a presenter's RPC call
+may name any person as `p_person_id` (the app never sends one now), and the question "is this
+account allowed to act as Alex?" is answered only by "it is a presenter". That rule stays in the
+database until #136 removes the presenter role.
 
 **Staff accounts are linked.** A `staff` membership has exactly one `people` row with a matching
 `user_id`, created from the roster. The database, not the browser, decides who is acting: every
@@ -183,9 +183,8 @@ hint: it takes the table and row id, decides what might be stale (the list, the 
 assistance list), and **re-reads through the normal RLS-scoped queries**. It never trusts event
 payloads as data. Realtime applies RLS too, so a client never receives another client's event.
 
-Deletes are never published, because a deleted row cannot be checked against RLS. The only bulk
-delete, the presenter's sample reset, announces itself by incrementing
-`workspaces.fixture_generation`; every window watching the workspace re-reads everything.
+Deletes are never published, because a deleted row cannot be checked against RLS. Nothing in the
+app deletes in bulk, so no event announces one.
 
 ## How sign-in works
 
@@ -214,7 +213,6 @@ reload. Details in [Front end: sign-in](frontend.md#sign-in) and
 | Committed, pinned Supabase SDK bundle | Works from any static host, reproducible | Must be rebuilt by hand on upgrade | Replaced by a normal build if a framework is adopted |
 | Presenter personas | One person can demonstrate every role | Not a real staff identity model | **No.** Replaced by `staff` accounts once presenter mode is removed |
 | `staff` accounts linked to a person, acting person decided by the database | The browser never claims an identity; receipts and history name the real person | Two staff paths (presenter and staff) until presenter mode goes | Yes |
-| Sample cases, reset and checkpoints in the database | Repeatable demonstrations | Demo-only functions and columns in the schema | **No.** Remove or restrict to non-production environments |
 
 ## Real versus simulated
 

@@ -124,7 +124,6 @@ const staffCase = (overrides = {}) =>
       reference: "VT-AB2C-DE3F",
       workspaceId: "w1",
       ownerUserId: "owner-1",
-      fixture: false,
       stage: "preparing",
       revision: 5,
       preparationVersion: 0,
@@ -583,7 +582,7 @@ test("the board refuses a self-review with the same words the case does", () => 
 
 test("a presenter with no persona reads the board and acts on nothing", () => {
   const html = board({ person: null });
-  assert.match(html, /Choose a volunteer persona to act as\./);
+  assert.match(html, /This account isn(?:'|&#39;)t linked to a volunteer yet\. Ask your site coordinator\./);
   assert.match(html, /read-only/i);
   assert.doesNotMatch(html, /data-case-action=/);
   // Filters and navigation still work without a persona.
@@ -592,7 +591,7 @@ test("a presenter with no persona reads the board and acts on nothing", () => {
 
   const one = renderStaffCase(staffCase({ stage: "preparation_ready", preparerId: null }), null);
   assert.doesNotMatch(one, /data-case-action=/);
-  assert.match(one, /Choose a volunteer persona to act as\./);
+  assert.match(one, /This account isn(?:'|&#39;)t linked to a volunteer yet\. Ask your site coordinator\./);
 });
 
 test("the preparer's documents and hand-off, and nobody else's", () => {
@@ -1162,7 +1161,7 @@ test("eligibility answers the same way for a board row and a full case", () => {
     "reviewContact",
   ]) {
     assert.equal(nobody[decision].allowed, false, decision);
-    assert.match(nobody[decision].reason, /Choose a volunteer persona/);
+    assert.match(nobody[decision].reason, /isn't linked to a volunteer yet/);
   }
 });
 
@@ -1477,11 +1476,11 @@ test("the case header names the case, its stage and its people", () => {
   assert.match(html, /<ol class="lifecycle"/);
   assert.match(html, /Preparer<\/small> Alex/);
   assert.match(html, /Reviewer<\/small> <strong class="you">You<\/strong>/);
-  assert.match(html, /Acting as Morgan\./);
-  assert.match(caseHeader(staffCase(), null), /Choose a volunteer persona to act as\./);
+  assert.match(html, /Signed in as Morgan\./);
+  assert.match(caseHeader(staffCase(), null), /This account isn(?:'|&#39;)t linked to a volunteer yet\. Ask your site coordinator\./);
 });
 
-test("a staff account's case header says who is signed in, a presenter's who it acts as", () => {
+test("a staff account's case header says who is signed in", () => {
   const riley = { id: "riley", name: "Riley Park", capabilities: ["prepare"] };
   const staff = caseHeader(staffCase(), riley, { access: "staff", personId: "riley", personName: "Riley Park" });
   assert.match(staff, /Signed in as Riley Park\./);
@@ -1491,12 +1490,6 @@ test("a staff account's case header says who is signed in, a presenter's who it 
     caseHeader(staffCase(), null, { access: "staff", personId: "riley", personName: "Riley Park" }),
     /Signed in as Riley Park\./,
   );
-  // A presenter's header is as it was, with or without the principal.
-  const presenter = { access: "presenter" };
-  assert.equal(caseHeader(staffCase(), MORGAN, presenter), caseHeader(staffCase(), MORGAN));
-  assert.match(caseHeader(staffCase(), MORGAN, presenter), /Acting as Morgan\./);
-  assert.doesNotMatch(caseHeader(staffCase(), MORGAN, presenter), /Signed in as/);
-  assert.match(caseHeader(staffCase(), null, presenter), /Choose a volunteer persona to act as\./);
 });
 
 test("case details keep the rows the story and the office read", () => {
@@ -1510,6 +1503,14 @@ test("case details keep the rows the story and the office read", () => {
 // ---------------------------------------------------------------------------
 // "Your next step", the corrections dialog and the tabbed case page (Task 3)
 // ---------------------------------------------------------------------------
+
+test("the preparer questionnaire's auto-fill button follows the switch, not the account", () => {
+  const record = staffCase({ stage: "preparing" });
+  const step = (ui, principal) => nextStep(record, staffEligibility(record, ALEX), { principal, ...ui });
+  assert.match(step({ demoTools: true }, { access: "staff" }), /data-action="demo-fill"/, "staff account, switch on");
+  assert.doesNotMatch(step({ demoTools: false }, { access: "presenter" }), /demo-fill/, "presenter, switch off");
+  assert.doesNotMatch(step({}, { access: "presenter" }), /demo-fill/, "presenter, no switch given");
+});
 
 test("your next step offers the one action that fits, or says who the case waits on", () => {
   const step = (overrides, person) => {
@@ -1548,7 +1549,7 @@ test("your next step offers the one action that fits, or says who the case waits
   assert.doesNotMatch(step({ stage: "received" }, ALEX), /data-case-action=/);
   assert.match(step({ stage: "received" }, ALEX), /<h2 id="next-step-title" tabindex="-1">Your next step<\/h2>/);
   // No persona.
-  assert.match(step({ stage: "preparing" }, null), /Choose a volunteer persona to act as\./);
+  assert.match(step({ stage: "preparing" }, null), /This account isn(?:'|&#39;)t linked to a volunteer yet\. Ask your site coordinator\./);
   // A case returned to signing after a rejection: no review conversation is due.
   const returned = step({ stage: "review_approved", federalMethod: "efile", stateMethod: "efile" }, MORGAN);
   assert.match(returned, /The client signs again\. The office then marks it ready to e-file\./);
@@ -2497,7 +2498,7 @@ test("an empty log", () => {
   // No persona: the reason, not a form the database would refuse.
   const nobody = contactsPanel(staffCase(), null, {});
   assert.doesNotMatch(nobody, /<form/);
-  assert.match(nobody, /Choose a volunteer persona to act as\./);
+  assert.match(nobody, /This account isn(?:'|&#39;)t linked to a volunteer yet\. Ask your site coordinator\./);
 });
 
 test("the form's button groups and defaults", () => {

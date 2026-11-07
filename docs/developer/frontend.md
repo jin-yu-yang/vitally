@@ -38,7 +38,7 @@ The front end **predicts** what a person may do so it can show the right buttons
 ```mermaid
 flowchart TD
   app["app.mjs<br/>bootstrap + DOM events"] --> controller["controller.mjs<br/>all state"]
-  app --> views["views.mjs, client-views.mjs,<br/>staff-views.mjs, admin-views.mjs,<br/>office-views.mjs, pool-views.mjs,<br/>presenter-views.mjs"]
+  app --> views["views.mjs, client-views.mjs,<br/>staff-views.mjs, admin-views.mjs,<br/>office-views.mjs, pool-views.mjs"]
   app --> caseActions["case-actions.mjs<br/>payload builders"]
   views --> intakeForm["intake-form.mjs<br/>version-2 renderer, draft rules"]
   intakeForm --> catalogue["intake-catalogue.mjs<br/>catalogue rules"]
@@ -90,13 +90,13 @@ fields:
 
 | Field | Meaning |
 | --- | --- |
-| `session`, `principal` | Sign-in status (`unknown`, `none`, `present`) and `{userId, workspaceId, access, email, personId, personName}`. `access` is `applicant`, `presenter` or `staff`; `personId` and `personName` are a staff account's own roster person, null for the other two |
+| `session`, `principal` | Sign-in status (`unknown`, `none`, `present`) and `{userId, workspaceId, access, email, personId, personName}`. `access` is `applicant`, `presenter` or `staff` (a `presenter` gets one plain screen and nothing is loaded for it); `personId` and `personName` are a staff account's own roster person, null for the other two |
 | `connection` | `online`, `reconnecting`, `offline` |
 | `cases`, `people`, `assistance`, `workspace` | Lists for the current screen (people, assistance and workspace for staff windows only) |
 | `savedCase` | The open case exactly as the server last returned it |
 | `draftAnswers`, `dirty`, `editBaseRevision`, `conflict`, `saveState` | The intake form's unsaved edits, kept apart from `savedCase` |
 | `formSubstep`, `visitedSubsteps`, `returnToSummary`, `revealed` | The sub-step on screen; the sub-steps left at least once, plus `review.submit` once Continue on 9.2 has earned it (stored on the server as `cases.intake_visited`, so their marks follow the client); whether a summary Change is open; and the ids whose invalid value is shown ([below](#the-version-2-intake-form)) |
-| `screen`, `selectedCaseId`, `selectedPersonId`, `openPanels`, `boardFilters`, `caseTab`, `sidebarOpen` | Window-local navigation, remembered per window |
+| `screen`, `selectedCaseId`, `openPanels`, `boardFilters`, `caseTab`, `sidebarOpen` | Window-local navigation, remembered per window |
 | `boardSearchDraft` | The work board's half-typed search, kept so a redraw doesn't blank it |
 | `busy`, `error`, `retryable`, `notice`, `dialog` | What the page should show right now |
 
@@ -107,21 +107,18 @@ sign-in (`sendCode`, `verifyCode`, `editAuthEmail`, `editAuthCode`, `restartSign
 `moveSubstep`, `openForChange`, `backToSummary`, `setRailExpanded`, `setSummaryShut`,
 `revealInvalid`, `guardSubmit`, `removeMember`), document cards (`setDocumentCard`,
 `setDocumentGroup`), the office's Add a case (`openAddCase`, `toggleAddSubstep`,
-`saveOfficeDraft`), assistance (`runAssistanceAction`), presenter tools (`selectPerson`,
-`resetFixtures`, `loadCheckpoint`), language (`setLanguage`, `adoptLanguage`), and navigation
+`saveOfficeDraft`), assistance (`runAssistanceAction`), language (`setLanguage`, `adoptLanguage`), and navigation
 (`navigate`, `togglePanel`, `setBoardFilter`, `clearBoardFilters`,
 `setBoardSearchDraft`, `toggleSidebar`, `setCaseTab`, `setLookup`, `openDialog`, `closeDialog`,
 `dismissError`, `clearError`).
 
-Two questions are kept apart (add-staff-identity D9). `presenter()` is the demonstration's own:
-the persona picker, sample reset and checkpoints. **`staffWindow()`** is everything a staff screen
-does (its reads, its eligibility rules and its actions), true for a `presenter` or a `staff`
-account (`isStaffWindow` in [`src/contracts.mjs`](../../src/contracts.mjs) says the same for the
-views). Only who is acting differs, and **`actingPersonId(personId)`** decides it: a staff account
-is always `principal.personId`, whatever is passed in; a presenter sends the persona it chose (or
-the one an action names); a client sends none. The persona actions (`selectPerson`) are refused for
-a staff account, and the store sends `p_person_id: null` for staff, so the browser never claims an
-identity; the database resolves it ([Database: who is acting](database.md#who-is-acting)).
+**`staffWindow()`** is everything a staff screen does (its reads, its eligibility rules and its
+actions), true only for a `staff` account (`isStaffWindow` in [`src/contracts.mjs`](../../src/contracts.mjs)
+says the same for the views). The person acting is always the account's own `principal.personId`; a
+client sends none. The store sends `p_person_id: null`, so the browser never claims an identity; the
+database resolves it ([Database: who is acting](database.md#who-is-acting)). A `presenter` is not a
+staff window: it gets one bare English screen (`presenterScreen` in `views.mjs`) and nothing is
+loaded for it.
 
 Three rules the controller keeps:
 
@@ -142,10 +139,12 @@ Three rules the controller keeps:
 | --- | --- |
 | Signed out | Email and code form ([`client-views.mjs`](../../src/client-views.mjs) `accessScreen`); "cannot reach the server" and "no access" screens ([`views.mjs`](../../src/views.mjs)) |
 | Applicant | `applications` (list and lookup by Application ID), `reference` (new ID to keep), `intake` (the sub-step form, built by `src/intake-views.mjs`), `progress` (status, client number, requests, send document) |
-| Staff window, volunteer persona | `staff`: the work board; `staff-case`: the case page with its tabs ([`staff-views.mjs`](../../src/staff-views.mjs)) |
-| Staff window, `admin` persona | `staff`: the Follow-ups queue ([`office-views.mjs`](../../src/office-views.mjs)); `office-cases`: the case pool ([`pool-views.mjs`](../../src/pool-views.mjs)); `office-add-case`: Add a case for a walk-in client ([`office-views.mjs`](../../src/office-views.mjs)); `staff-case`: the office's case page ([`admin-views.mjs`](../../src/admin-views.mjs)) |
-| Every presenter | The presenter panel on top ([`presenter-views.mjs`](../../src/presenter-views.mjs), demo only), and an "Auto-fill fictional data" button at the top of each questionnaire, the review-contact form and the filing dialogs (Mark ready to e-file, Mark e-filed, Record filing result, Return to signing). [`src/demo-fill.mjs`](../../src/demo-fill.mjs) fills the form with fictional values that the form's own payload builder accepts. It never overwrites typed text or a defaulted choice, and it sends nothing: the form's own button still submits. `demoFillButton(principal)` renders nothing for anyone but a presenter, and the `demo-fill` handler in `app.mjs` checks again |
-| Staff account | The same staff screens, with no persona picker: the sidebar and the case page header say "Signed in as <name>", and the person is the account's own (`staffScreen` in `views.mjs` picks the office screens when that person has `admin`, and the volunteer work board otherwise, exactly as for a persona). No sample reset, no checkpoints, no "Fill fictional details" pill (a presenter-only tool, including the office's Add a case pill), and no "Auto-fill fictional data" button. Always English |
+| Staff window, volunteer account | `staff`: the work board; `staff-case`: the case page with its tabs ([`staff-views.mjs`](../../src/staff-views.mjs)) |
+| Staff window, `admin` account | `staff`: the Follow-ups queue ([`office-views.mjs`](../../src/office-views.mjs)); `office-cases`: the case pool ([`pool-views.mjs`](../../src/pool-views.mjs)); `office-add-case`: Add a case for a walk-in client ([`office-views.mjs`](../../src/office-views.mjs)); `staff-case`: the office's case page ([`admin-views.mjs`](../../src/admin-views.mjs)) |
+| Presenter | One bare English screen: "This account is no longer used", the text "Presenter mode has been removed. Ask your site coordinator for a staff account." and Sign out (`presenterScreen` in `views.mjs`). No header, panel, persona picker, sample reset or checkpoints. The presenter gets only this plain screen. |
+| Staff account | The staff screens: the sidebar and the case page header say "Signed in as <name>", and the person is the account's own (`staffScreen` in `views.mjs` picks the office screens when that person has `admin`, and the volunteer work board otherwise). Always English |
+
+**Fill tools.** They follow the demo-tools switch. Three controls exist: the staff "Auto-fill fictional data" button, the client intake's fiction toolbar and the office's Add a case "Fill fictional details" pill. With the switch on, an "Auto-fill fictional data" button appears at the top of each questionnaire, the review-contact form and the filing dialogs (Mark ready to e-file, Mark e-filed, Record filing result, Return to signing). [`src/demo-fill.mjs`](../../src/demo-fill.mjs) fills the form with fictional values that the form's own payload builder accepts. It never overwrites typed text or a defaulted choice, and it sends nothing: the form's own button still submits. `demoFillButton(enabled)` renders nothing when the switch (`state.demoTools`) is off, and the `demo-fill` handler in `app.mjs` checks `demoToolsOn` again. The switch is on only when `/public-config.json` sends `demoTools: true` (`server.mjs` does so only with `VITALLY_DEMO_TOOLS=1` and a loopback `SUPABASE_URL`) and the config's `supabaseUrl` is loopback. When on, these controls show to whoever is on that screen; when off, to no one
 
 `staffScreen` in [`views.mjs`](../../src/views.mjs) wraps staff screens in the app shell
 (sidebar plus corner toggle). The collapsed sidebar peeks over the page, without pushing it,
@@ -153,7 +152,7 @@ while a mouse rests on the toggle, and closes 300 ms after the pointer leaves th
 sidebar, unless keyboard focus is in the sidebar or a dialog is open (focus on the toggle never
 holds it); a click pins it. [`src/sidebar-peek.mjs`](../../src/sidebar-peek.mjs)
 decides, and `app.mjs` applies the peek in place after every render, so a realtime redraw keeps
-it. An office screen chosen while a volunteer persona is active shows
+it. An office screen chosen while a volunteer account is acting shows
 the work board instead. A version-2 case's page reads its answers by sub-step, with the contact,
 materials and document-checklist cards, and Add a case follows the workspace's version
 ([below](#staff-views-and-add-a-case-version-2)).
@@ -184,7 +183,7 @@ compensate, all in `app.mjs` and [`ui.mjs`](../../src/ui.mjs):
   without a rebuild, so they never interrupt typing.
 - **Dialogs** take focus when they open and return it to the control that opened them. Tab stays
   inside, also from the dialog itself, and Escape closes. While one is open, every child of `#app`
-  is `inert` except the dialog and the live regions (connection notice, notice banner, problem
+  is `inert` except the dialog and the live regions (connection notice and problem
   banner); the toast sits outside `#app`. Every confirmation's body is built with `confirmBody`
   (`src/ui.mjs`), which takes the confirm control ready-made, so the dialog keeps its own action
   and payload.
@@ -302,7 +301,7 @@ volunteer and office pages):
 - **Materials received** (D9): the eleven `MATERIALS_ITEMS`, saved with RECORD_MATERIALS by
   anyone who passes `canSeeContact`, read-only for everyone else.
 - **The draft** buttons (`draftTools` in `src/staff-views.mjs`: the 13614-C in three languages and the Form 14446 in two, after the claim), only for people who pass
-  `canSeeContact`, because the draft prints the phones. `viewDraft` (`app.mjs`) makes a 13614-C only for a staff window (`isStaffWindow`: a presenter or a staff account); for anyone else it returns before any tab opens, with no tab, link or error. `writeTab(tab, text, kind)` titles the tab by form: `draft.tab_title` ("Draft 13614-C") or `draft14446.tab_title` ("Draft Form 14446").
+  `canSeeContact`, because the draft prints the phones. `viewDraft` (`app.mjs`) makes a 13614-C only for a staff window (`isStaffWindow`: a staff account); for anyone else it returns before any tab opens, with no tab, link or error. `writeTab(tab, text, kind)` titles the tab by form: `draft.tab_title` ("Draft 13614-C"), `draft14446.tab_title` ("Draft Form 14446"), or "Exit Form" for `kind: "exit-form"` (staff only, so English), which both the Exit Form's preparing and failed tabs pass (#122).
 
 The contact and materials forms read multi-value checkboxes with `formValuesWithLists`
 (`src/form-values.mjs`); `Object.fromEntries(new FormData(form))` would keep only the last box.
@@ -341,8 +340,8 @@ Result uses, so a value left in a hidden field is never sent.
   missing or invalid answers saves the draft and is refused: "Needs an answer" shows, every part
   that counts opens, and the keyboard goes to the count.
 - Leaving with unsaved answers (Cancel, the breadcrumb's Work board, "Back to Follow-ups", or
-  the sidebar's Work board and All cases) asks "Leave without saving?" first; Sign out and the
-  persona switch leave without asking. The guard also covers `open-add-case`, though that button
+  the sidebar's Work board and All cases) asks "Leave without saving?" first; Sign out leaves
+  without asking. The guard also covers `open-add-case`, though that button
   isn't shown on the page. A conflict with another window shows the shared reconcile choice.
 - The same redraw rules as the client's form bind `#add-case-v2-form`.
 
@@ -402,11 +401,11 @@ both the volunteer and office pages; handlers in `src/app.mjs`):
   not. It also lists the browsers the editor works in: Chrome and Edge 125 or later, Firefox ESR
   or later, Safari 18 or later. In any other browser, download and upload still work.
 - The three handlers in `app.mjs` (`openEditor`, `downloadShadedCopy`, `uploadShadedCopy`) and
-  `editorGone` run for any staff window (`isStaffWindow`: a presenter or a staff account), the
+  `editorGone` run for any staff window (`isStaffWindow`: a staff account), the
   rule every other staff screen uses (#103). Who may fill is still `staffEligibility` alone,
-  which for a staff account reads the account's own person. The browser story runs these tools
-  as a presenter only, so a check that tests `access === "presenter"` here would pass every suite
-  and still lock out a real preparer.
+  which for a staff account reads the account's own person. The browser story downloads,
+  uploads and fills the section in the editor as staff accounts (the Preparer, Taylor Brooks, in
+  the main story, and Riley Park), and checks that a field is as tall as its cell.
 - `downloadShadedCopy` builds the editing copy and saves it as `13614-C-shaded-<reference>.pdf`.
 - Beside the Download button the panel says to open the copy in Chrome or the free Adobe Acrobat
   Reader, not macOS Preview (`.shaded-download-note`).
@@ -459,7 +458,7 @@ with pdf.js in a full-screen layer, so the preparer types straight onto the form
   latest." Save keeps the editor open.
 - **Leaving.** While there are unsaved changes, `beforeunload` guards the tab. The editor closes
   by itself (`editorGone`, checked in `render()`) when the case is no longer the selected one or
-  no staff window is signed in (a presenter or a staff account), for example after a sign-out in
+  no staff window is signed in (a staff account), for example after a sign-out in
   another tab, without a prompt.
 - **Field size.** pdf.js sizes each annotation input at `height: 100%` of its section, so the
   page's global field rule (padding, `min-height: var(--vt-tap)`, radius) must not reach it: it
@@ -570,7 +569,7 @@ that has methods was returned to signing, and its message asks the client to sig
 - **The badge.** `stageBadge(stage, lang, { audience })` in [`ui.mjs`](../../src/ui.mjs) shows
   `label` for `audience: "staff"` (the default) and `clientLabel` for `audience: "client"`. The
   client's screens (the applications list, the progress page and its review panel) pass
-  `"client"`; every staff, office and presenter screen leaves the default.
+  `"client"`; every staff and office screen leaves the default.
 - **The staff lifecycle bar** (`lifecycleBar` in `staff-views.mjs`) lists ten steps with staff
   labels: `received`, `screening`, `preparation_ready`, `preparing`, `review_ready`, `reviewing`,
   `review_approved`, `ready_to_efile`, `efiled`, `accepted`. Accepted is the end: an accepted case
@@ -597,9 +596,9 @@ that has methods was returned to signing, and its message asks the client to sig
 
 An admin opening a `received` case's page starts its screening. `startScreeningIfDue` in
 [`controller.mjs`](../../src/controller.mjs) sends `START_SCREENING` (empty payload) when all of
-these hold: the open case is at `received`, the screen is `staff-case`, the selected persona has
+these hold: the open case is at `received`, the screen is `staff-case`, the acting person has
 the `admin` capability, and nothing else is busy or pending. It runs after a case is opened
-(`selectCase`), after a reload on a case page, after the persona changes (`selectPerson`), after a
+(`selectCase`), after a reload on a case page, after a
 refresh or reconnect, and when a busy action ends. Nothing is pressed, so:
 
 - **No refusal is shown.** A race ("another admin got there first", a stale revision) re-reads the
@@ -763,8 +762,8 @@ and `unloadedLine`, so a client's own text goes through `esc` first. The work bo
 
 **Busy buttons.** While a press runs, `markPressed` in `app.mjs` gives the pressed control
 `.is-busy`, `aria-busy="true"` and a spinner, and finds it again after every redraw. Only presses
-that hold the buttons are marked: a workflow or assistance action, the checkpoint submit, and the
-`BUSY_ACTIONS` allow-list (`confirm-reset-fixtures`, `save-office-draft`, `send-office-draft`). A
+that hold the buttons are marked: a workflow or assistance action and the
+`BUSY_ACTIONS` allow-list (`save-office-draft`, `send-office-draft`). A
 sub-step move is never marked; the save chip says Saving.
 
 **The connection notice and "back online".** `connectionNotice` in `views.mjs` shows while the
@@ -782,7 +781,7 @@ re-reads it:
 - a `cases` event: the list;
 - any event about the open case (its requests, documents, history, reviews): that case;
 - an `assistance_items` event: the assistance list;
-- a `workspaces` event (a sample reset, or a change to the workspace row such as its intake
+- a `workspaces` event (a change to the workspace row, such as its intake
   version): everything, with a notice if the open case vanished.
 
 `case_contacts`, `case_materials`, `contact_log` and `contact_log_versions` events carry a case id
@@ -790,7 +789,7 @@ like the other child tables, so they re-read the open case. That is how a contac
 window shows in another.
 
 Connection status (`online`, `reconnecting`, `offline`) comes from the channel and shows in the
-page header and presenter panel. On reconnect, window focus and the browser's `online` event, the
+page header. On reconnect, window focus and the browser's `online` event, the
 controller refreshes.
 
 ## The contact log
@@ -836,17 +835,17 @@ There are no passwords anywhere in the app.
 ## Window state
 
 [`src/window-state.mjs`](../../src/window-state.mjs) stores per-window navigation (screen, open
-case, form step, persona, board filters, case tab, whether the sidebar is open, and a version-2
+case, form step, board filters, case tab, whether the sidebar is open, and a version-2
 case's visited steps and revealed errors) in `sessionStorage` under a key that includes the user
 id. Each field has its own shape check (`FIELDS`); a malformed one is dropped, and the visited
 steps are ignored unless they belong to the open case. Two windows can show different things; two accounts in one browser never share a view; signing
-out clears it. It never stores codes, tokens or answers. It never keeps a persona for a staff account, which has no choice to remember.
+out clears it. It never stores codes, tokens or answers. A `selectedPersonId` left in storage by an older build is ignored.
 
 ## Client languages
 
 Every client screen is in English, Simplified Chinese (简体) or Traditional Chinese (繁體), chosen
 with the switch in the client bar and saved per browser in `localStorage["vitally.lang"]`. A first
-visit takes its language from `navigator.languages`. Staff screens (a presenter's or a staff account's) are always
+visit takes its language from `navigator.languages`. Staff screens are always
 English. Traditional is derived at build time with OpenCC `tw`, characters only (common Taiwan
 character forms, no phrase or vocabulary conversion), and is fetched only when 繁體 is chosen or
 a staff member makes the 繁體 draft 13614-C, which leaves the screen's language as it is (the Form 14446 never loads it). A saved 繁體 waits at
@@ -917,9 +916,9 @@ the keyboard stays on the pressed one.
 
 | Suite | Command | What it tests |
 | --- | --- | --- |
-| Unit (1418) | `npm test` | Controller against doubles, renderers as strings, payload builders, eligibility, store mapping, auth, focus logic. No browser, no network |
+| Unit (1496) | `npm test` | Controller against doubles, renderers as strings, payload builders, eligibility, store mapping, auth, focus logic. No browser, no network |
 | Sign-in gate (20) | `npm run test:auth-browser` | Real sign-in through the real form in Chrome and Firefox against the local stack |
-| Story (77) | `npm run test:browser` | The full demonstration in two browsers at once, both engine orders, plus regressions (conflicts, offline retry, privacy, keyboard). The story's workspace is on version 2, and one phase works in Chinese in its own `zh-CN` context (every other context is pinned to `en-US`). `loginTestUserById` in `tests/support/browser-fixture.mjs` signs in without English locators. On a busy machine a Firefox-staff wait can time out ([setup](../setup.md#5-tests)); run it again |
+| Story (83) | `npm run test:browser` | The full demonstration in two browsers at once, both engine orders, plus regressions (conflicts, offline retry, privacy, keyboard). The main story signs in as the role-named staff accounts (Site Coordinator, Preparer, Reviewer), each once in a window of its own, and takes its cases from the seed module (`tools/admin/seed-cases.mjs`); no step signs in as the presenter except the one that checks its plain screen. The story's workspace is on version 2, and one phase works in Chinese in its own `zh-CN` context (every other context is pinned to `en-US`). `loginTestUserById` in `tests/support/browser-fixture.mjs` signs in without English locators. On a busy machine a Firefox-staff wait can time out ([setup](../setup.md#5-tests)); run it again |
 
 Run the browser suites with the `PATH` prefix from [`docs/setup.md`](../setup.md#5-tests). The
 story writes screenshots to `artifacts/browser/` (git-ignored). Helpers for driving the pages are in

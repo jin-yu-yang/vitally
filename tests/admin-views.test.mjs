@@ -60,7 +60,6 @@ const officeCase = (overrides = {}) =>
       reference: "VT-AB2C-DE3F",
       workspaceId: "w1",
       ownerUserId: null,
-      fixture: false,
       stage: "preparing",
       revision: 5,
       preparationVersion: 0,
@@ -778,7 +777,7 @@ test("a window with no persona is offered nothing at all", () => {
   assert.deepEqual(caseActions(html), []);
   assert.doesNotMatch(html, /data-assistance-action/);
   assert.doesNotMatch(html, /data-action="open-close-case"/);
-  assert.match(html, /Choose a volunteer persona to act as\./);
+  assert.match(html, /This account isn(?:'|&#39;)t linked to a volunteer yet\. Ask your site coordinator\./);
 });
 
 test("a persona without the office roles gets explanations, not office actions", () => {
@@ -863,14 +862,13 @@ test("adminEligibility answers about a target it was not given", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Routing: which workspace a persona gets (Ruling R55)
+// Routing: which workspace a staff member gets (Ruling R55)
 // ---------------------------------------------------------------------------
 
-test("the persona decides which workspace a presenter is in", () => {
+test("the staff member's own person decides which workspace they are in", () => {
   const state = {
-    principal: { userId: "p1", workspaceId: "w1", access: "presenter" },
+    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "sam" },
     people: PEOPLE,
-    selectedPersonId: "sam",
     cases: [boardCase()],
     assistance: [item({ assigneeId: "sam", status: "assigned" })],
     savedCase: null,
@@ -891,7 +889,7 @@ test("the persona decides which workspace a presenter is in", () => {
   assert.doesNotMatch(office, /Work board<\/h2>/);
 
   // Anyone else keeps the preparation and review board.
-  const preparer = staffScreen({ ...state, selectedPersonId: "alex" });
+  const preparer = staffScreen({ ...state, principal: { ...state.principal, personId: "alex" } });
   assert.match(preparer, /VOLUNTEER WORKSPACE/);
   assert.match(preparer, /Work board<\/h2>/);
   assert.doesNotMatch(preparer, /Office queue/);
@@ -904,11 +902,11 @@ test("the persona decides which workspace a presenter is in", () => {
   };
   assert.match(staffScreen(onCase), /data-case-action="VERIFY_INTAKE"/);
   assert.doesNotMatch(
-    staffScreen({ ...onCase, selectedPersonId: "alex" }),
+    staffScreen({ ...onCase, principal: { ...onCase.principal, personId: "alex" } }),
     /data-case-action="VERIFY_INTAKE"/,
   );
-  // And with no persona chosen at all, the preparation board, read-only.
-  const none = staffScreen({ ...state, selectedPersonId: null });
+  // And with no person on the account at all, the preparation board, read-only.
+  const none = staffScreen({ ...state, principal: { ...state.principal, personId: null } });
   assert.match(none, /Work board<\/h2>/);
   assert.deepEqual(caseActions(none), []);
 });
@@ -934,11 +932,10 @@ test("the office case page uses the same header and five tabs", () => {
   assert.match(html, /id="case-panel-history"[^>]*hidden>[\s\S]*History/);
 });
 
-test("the office pool and the add-a-case page route by persona, and the sidebar follows", () => {
+test("the office pool and the add-a-case page route by the staff member's person, and the sidebar follows", () => {
   const state = {
-    principal: { userId: "p1", workspaceId: "w1", access: "presenter" },
+    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "sam" },
     people: PEOPLE,
-    selectedPersonId: "sam",
     cases: [boardCase()],
     assistance: [],
     savedCase: null,
@@ -960,8 +957,8 @@ test("the office pool and the add-a-case page route by persona, and the sidebar 
   assert.doesNotMatch(navItem(pool, "Follow-ups"), /aria-current/);
   assert.match(navItem(pool, "Follow-ups"), /data-action="open-board"/);
 
-  // A volunteer chosen while the pool is open gets the work board.
-  const volunteer = staffScreen({ ...state, selectedPersonId: "alex" });
+  // A volunteer whose window was left on the pool gets the work board.
+  const volunteer = staffScreen({ ...state, principal: { ...state.principal, personId: "alex" } });
   assert.match(volunteer, /Work board<\/h2>/);
   assert.doesNotMatch(volunteer, /Case pool/);
   assert.match(navItem(volunteer, "Work board"), /aria-current="page"/);
@@ -974,23 +971,22 @@ test("the office pool and the add-a-case page route by persona, and the sidebar 
 
 test("the staff sidebar nav holds nothing but its buttons", () => {
   const state = {
-    principal: { userId: "p1", workspaceId: "w1", access: "presenter" },
-    people: PEOPLE, selectedPersonId: "sam", cases: [], assistance: [],
+    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "sam" },
+    people: PEOPLE, cases: [], assistance: [],
     savedCase: null, screen: "staff", boardFilters: {}, openPanels: [],
     draftAnswers: {}, busy: false, error: null, retryable: false,
   };
-  for (const selectedPersonId of ["sam", "alex"]) {
-    const html = staffScreen({ ...state, selectedPersonId });
+  for (const personId of ["sam", "alex"]) {
+    const html = staffScreen({ ...state, principal: { ...state.principal, personId: personId } });
     const nav = html.match(/<nav class="sidebar-nav"[^>]*>(.*?)<\/nav>/s)[1];
-    assert.equal(nav.replace(/<button[^>]*>.*?<\/button>/gs, "").trim(), "", selectedPersonId);
+    assert.equal(nav.replace(/<button[^>]*>.*?<\/button>/gs, "").trim(), "", personId);
   }
 });
 
 test("the volunteer board searches client numbers in the workspace's current season", () => {
   const state = {
-    principal: { userId: "p1", workspaceId: "w1", access: "presenter" },
+    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "alex" },
     people: PEOPLE,
-    selectedPersonId: "alex",
     workspace: { currentSeason: 2025 },
     cases: [
       boardCase({ id: "case-now", reference: "VT-NOWW-2025", clientNumber: 93, season: 2025 }),

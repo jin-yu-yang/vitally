@@ -32,12 +32,12 @@ test("the main chain's new stages against real Supabase", async (t) => {
       async () => {
         const { caseId } = await f.submittedClientCase();
         assert.equal(await stageOf(caseId), "received");
-        await f.act(f.presenter, caseId, f.sam, "START_SCREENING", {});
+        await f.act(f.siteCoordinator, caseId, "START_SCREENING", {});
         assert.equal(await stageOf(caseId), "screening");
         assert.ok((await f.clientMessages(caseId)).includes(SCREENING_LINE));
         const staff = await f.readStaffCase(caseId);
         assert.equal(staff.internalHistory.at(-1).action, "START_SCREENING");
-        assert.equal(staff.internalHistory.at(-1).actorPersonId, f.sam);
+        assert.equal(staff.internalHistory.at(-1).actorPersonId, f.siteCoordinatorId);
         assert.deepEqual(staff.internalHistory.at(-1).detail, {});
       },
     );
@@ -46,21 +46,21 @@ test("the main chain's new stages against real Supabase", async (t) => {
       const { caseId } = await f.submittedClientCase();
       for (const personId of [f.alex, f.morgan, null])
         await assert.rejects(
-          () => f.act(f.presenter, caseId, personId, "START_SCREENING", {}),
+          () => f.actAsPersona(f.presenter, caseId, personId, "START_SCREENING", {}),
           rejected("FORBIDDEN"),
         );
       // The client cannot start the office's screening either.
       await assert.rejects(
-        () => f.act(f.applicantA, caseId, null, "START_SCREENING", {}),
+        () => f.act(f.applicantA, caseId, "START_SCREENING", {}),
         rejected("FORBIDDEN"),
       );
       await assert.rejects(
-        () => f.act(f.presenter, caseId, f.sam, "START_SCREENING", { x: 1 }),
+        () => f.act(f.siteCoordinator, caseId, "START_SCREENING", { x: 1 }),
         rejected("VALIDATION"),
       );
-      await f.act(f.presenter, caseId, f.sam, "START_SCREENING", {});
+      await f.act(f.siteCoordinator, caseId, "START_SCREENING", {});
       await assert.rejects(
-        () => f.act(f.presenter, caseId, f.sam, "START_SCREENING", {}),
+        () => f.act(f.siteCoordinator, caseId, "START_SCREENING", {}),
         rejected("INVALID_TRANSITION"),
       );
     });
@@ -69,15 +69,15 @@ test("the main chain's new stages against real Supabase", async (t) => {
       const { caseId } = await f.submittedClientCase();
       await assert.rejects(
         () =>
-          f.act(f.presenter, caseId, f.sam, "VERIFY_INTAKE", {
+          f.act(f.siteCoordinator, caseId, "VERIFY_INTAKE", {
             checks: f.intakeChecks,
           }),
         rejected("INVALID_TRANSITION"),
       );
       assert.equal(await stageOf(caseId), "received");
       // Positive control: the same checks succeed once screening has started.
-      await f.act(f.presenter, caseId, f.sam, "START_SCREENING", {});
-      await f.act(f.presenter, caseId, f.sam, "VERIFY_INTAKE", {
+      await f.act(f.siteCoordinator, caseId, "START_SCREENING", {});
+      await f.act(f.siteCoordinator, caseId, "VERIFY_INTAKE", {
         checks: f.intakeChecks,
       });
       assert.equal(await stageOf(caseId), "preparation_ready");
@@ -86,11 +86,10 @@ test("the main chain's new stages against real Supabase", async (t) => {
     await t.test(
       "an office case lands in screening with a client number",
       async () => {
-        const created = await f.draftCase(f.presenter, {
+        const created = await f.draftCase(f.siteCoordinator, {
           mode: "assisted",
-          personId: f.sam,
         });
-        await f.act(f.presenter, created.caseId, f.sam, "SUBMIT", {
+        await f.act(f.siteCoordinator, created.caseId, "SUBMIT", {
           confirmed: true,
         });
         assert.equal(await stageOf(created.caseId), "screening");
@@ -105,10 +104,10 @@ test("the main chain's new stages against real Supabase", async (t) => {
         );
         // It has already been screened, so the office goes straight to the checks.
         await assert.rejects(
-          () => f.act(f.presenter, created.caseId, f.sam, "START_SCREENING", {}),
+          () => f.act(f.siteCoordinator, created.caseId, "START_SCREENING", {}),
           rejected("INVALID_TRANSITION"),
         );
-        await f.act(f.presenter, created.caseId, f.sam, "VERIFY_INTAKE", {
+        await f.act(f.siteCoordinator, created.caseId, "VERIFY_INTAKE", {
           checks: f.intakeChecks,
         });
         assert.equal(await stageOf(created.caseId), "preparation_ready");
@@ -133,13 +132,13 @@ test("the main chain's new stages against real Supabase", async (t) => {
     await t.test("signing and e-filing, admin only, confirmed only", async () => {
       const caseId = await f.approvedCase();
       await assert.rejects(
-        () => f.act(f.presenter, caseId, f.sam, "MARK_EFILED", EFILED),
+        () => f.act(f.siteCoordinator, caseId, "MARK_EFILED", EFILED),
         rejected("INVALID_TRANSITION"),
       );
       for (const personId of [f.alex, f.morgan, null])
         await assert.rejects(
           () =>
-            f.act(f.presenter, caseId, personId, "MARK_READY_TO_EFILE", CONFIRMED),
+            f.actAsPersona(f.presenter, caseId, personId, "MARK_READY_TO_EFILE", CONFIRMED),
           rejected("FORBIDDEN"),
         );
       for (const payload of [
@@ -149,31 +148,31 @@ test("the main chain's new stages against real Supabase", async (t) => {
         { confirmed: true, x: 1 },
       ])
         await assert.rejects(
-          () => f.act(f.presenter, caseId, f.sam, "MARK_READY_TO_EFILE", payload),
+          () => f.act(f.siteCoordinator, caseId, "MARK_READY_TO_EFILE", payload),
           rejected("VALIDATION"),
         );
-      await f.act(f.presenter, caseId, f.sam, "MARK_READY_TO_EFILE", CONFIRMED);
+      await f.act(f.siteCoordinator, caseId, "MARK_READY_TO_EFILE", CONFIRMED);
       assert.equal(await stageOf(caseId), "ready_to_efile");
       assert.ok((await f.clientMessages(caseId)).includes(SIGNED_LINE));
       for (const personId of [f.alex, f.morgan, null])
         await assert.rejects(
-          () => f.act(f.presenter, caseId, personId, "MARK_EFILED", EFILED),
+          () => f.actAsPersona(f.presenter, caseId, personId, "MARK_EFILED", EFILED),
           rejected("FORBIDDEN"),
         );
       await assert.rejects(
-        () => f.act(f.presenter, caseId, f.sam, "MARK_EFILED", {}),
+        () => f.act(f.siteCoordinator, caseId, "MARK_EFILED", {}),
         rejected("VALIDATION"),
       );
-      await f.act(f.presenter, caseId, f.sam, "MARK_EFILED", EFILED);
+      await f.act(f.siteCoordinator, caseId, "MARK_EFILED", EFILED);
       assert.equal(await stageOf(caseId), "efiled");
       assert.ok((await f.clientMessages(caseId)).includes(EFILED_LINE));
       await assert.rejects(
-        () => f.act(f.presenter, caseId, f.sam, "MARK_EFILED", EFILED),
+        () => f.act(f.siteCoordinator, caseId, "MARK_EFILED", EFILED),
         rejected("INVALID_TRANSITION"),
       );
       await assert.rejects(
         () =>
-          f.act(f.presenter, caseId, f.sam, "MARK_READY_TO_EFILE", CONFIRMED),
+          f.act(f.siteCoordinator, caseId, "MARK_READY_TO_EFILE", CONFIRMED),
         rejected("INVALID_TRANSITION"),
       );
     });
@@ -182,15 +181,15 @@ test("the main chain's new stages against real Supabase", async (t) => {
       const caseId = await f.legacyApprovedCase();
       await assert.rejects(
         () =>
-          f.act(f.presenter, caseId, f.sam, "MARK_READY_TO_EFILE", CONFIRMED),
+          f.act(f.siteCoordinator, caseId, "MARK_READY_TO_EFILE", CONFIRMED),
         rejected("INVALID_TRANSITION"),
       );
       assert.equal(await stageOf(caseId), "review_approved");
-      await f.act(f.presenter, caseId, f.morgan, "RECORD_REVIEW_CONTACT", {
+      await f.act(f.reviewer, caseId, "RECORD_REVIEW_CONTACT", {
         outcome: "reached",
         note: CALL_NOTE,
       });
-      await f.act(f.presenter, caseId, f.sam, "MARK_READY_TO_EFILE", CONFIRMED);
+      await f.act(f.siteCoordinator, caseId, "MARK_READY_TO_EFILE", CONFIRMED);
       assert.equal(await stageOf(caseId), "ready_to_efile");
     });
 
@@ -199,7 +198,7 @@ test("the main chain's new stages against real Supabase", async (t) => {
       const { revision } = await f.readStaffCase(caseId);
       await assert.rejects(
         () =>
-          f.act(f.presenter, caseId, f.sam, "MARK_READY_TO_EFILE", CONFIRMED),
+          f.act(f.siteCoordinator, caseId, "MARK_READY_TO_EFILE", CONFIRMED),
         rejected("INVALID_TRANSITION"),
       );
       assert.equal(await stageOf(caseId), "review_approved");
@@ -216,18 +215,18 @@ test("the main chain's new stages against real Supabase", async (t) => {
               [caseId],
             )
           ).rows;
-          await f.act(f.presenter, caseId, task.assignee_person_id, "RESOLVE_FOLLOWUP", {
+          await f.act(f.siteCoordinator, caseId, "RESOLVE_FOLLOWUP", {
             followupId: task.id,
             outcome,
             note: "Fictional: went over the return by phone.",
           });
-          await f.act(f.presenter, caseId, f.sam, "MARK_READY_TO_EFILE", CONFIRMED);
+          await f.act(f.siteCoordinator, caseId, "MARK_READY_TO_EFILE", CONFIRMED);
           assert.equal(await stageOf(caseId), "ready_to_efile");
         },
       );
     await t.test("a yes approval is not held up", async () => {
       const caseId = await f.approvedCase();
-      await f.act(f.presenter, caseId, f.sam, "MARK_READY_TO_EFILE", CONFIRMED);
+      await f.act(f.siteCoordinator, caseId, "MARK_READY_TO_EFILE", CONFIRMED);
       assert.equal(await stageOf(caseId), "ready_to_efile");
     });
 
@@ -235,23 +234,23 @@ test("the main chain's new stages against real Supabase", async (t) => {
       "closing: allowed during screening, refused after review",
       async () => {
         const { caseId: screening } = await f.submittedClientCase();
-        await f.act(f.presenter, screening, f.sam, "START_SCREENING", {});
-        await f.act(f.presenter, screening, f.sam, "CLOSE_CASE", CLOSURE);
+        await f.act(f.siteCoordinator, screening, "START_SCREENING", {});
+        await f.act(f.siteCoordinator, screening, "CLOSE_CASE", CLOSURE);
         assert.equal(await stageOf(screening), "closed");
 
         const caseId = await f.approvedCase();
         await assert.rejects(
-          () => f.act(f.presenter, caseId, f.sam, "CLOSE_CASE", CLOSURE),
+          () => f.act(f.siteCoordinator, caseId, "CLOSE_CASE", CLOSURE),
           rejected("INVALID_TRANSITION"),
         );
-        await f.act(f.presenter, caseId, f.sam, "MARK_READY_TO_EFILE", CONFIRMED);
+        await f.act(f.siteCoordinator, caseId, "MARK_READY_TO_EFILE", CONFIRMED);
         await assert.rejects(
-          () => f.act(f.presenter, caseId, f.sam, "CLOSE_CASE", CLOSURE),
+          () => f.act(f.siteCoordinator, caseId, "CLOSE_CASE", CLOSURE),
           rejected("INVALID_TRANSITION"),
         );
-        await f.act(f.presenter, caseId, f.sam, "MARK_EFILED", EFILED);
+        await f.act(f.siteCoordinator, caseId, "MARK_EFILED", EFILED);
         await assert.rejects(
-          () => f.act(f.presenter, caseId, f.sam, "CLOSE_CASE", CLOSURE),
+          () => f.act(f.siteCoordinator, caseId, "CLOSE_CASE", CLOSURE),
           rejected("INVALID_TRANSITION"),
         );
         assert.equal(await stageOf(caseId), "efiled");
@@ -267,13 +266,12 @@ test("the main chain's new stages against real Supabase", async (t) => {
       // (MARK_READY_TO_EFILE): both are INVALID_TRANSITION, VT004.
       for (const type of ["MARK_EFILED", "MARK_READY_TO_EFILE"]) {
         const actionId = crypto.randomUUID();
-        const { error } = await f.presenter.rpc(
+        const { error } = await f.siteCoordinator.rpc(
           "vitally_apply_action",
           applyArgs({
             actionId,
             caseId,
             revision,
-            personId: f.sam,
             type,
             payload: type === "MARK_EFILED" ? EFILED : CONFIRMED,
           }),

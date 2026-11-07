@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream, PDFRef, decodePDFRawStream } from "pdf-lib";
@@ -13,6 +14,8 @@ import {
   submitVerificationCode,
 } from "./support/browser-fixture.mjs";
 import { applyArgs } from "./support/database-fixture.mjs";
+import { openDatabase } from "../tools/admin/database.mjs";
+import { SEED_SCENARIOS, resolveSeedTargets, seedCases } from "../tools/admin/seed-cases.mjs";
 import {
   ARRIVAL_MS,
   CLICK_MS,
@@ -31,7 +34,6 @@ import {
   capture,
   caseActionCount,
   chooseAnswer,
-  choosePersona,
   clearToast,
   clickAction,
   clickCaseActionUntil,
@@ -52,13 +54,10 @@ import {
   readAlerts,
   readBoardTotals,
   readClientPlace,
-  readFixtureIndicator,
-  readPersona,
   readSignedInAs,
   readWindowState,
   rebuiltBy,
   redactAddresses,
-  resetSampleCases,
   revealCaseControl,
   screenshotDir,
   showBoardTab,
@@ -114,9 +113,10 @@ const SHOTS = screenshotDir(ROOT);
 
 // Enough for a database fixture, two engines, every window and tab the story
 // opens and the whole story with its regressions, on a slower machine too
-// (a clean permutation takes about 7–9 minutes). A run that reaches this has
-// stopped, not slowed.
-const PERMUTATION_TIMEOUT_MS = 900_000;
+// (a clean order took about 12–15 minutes in November 2026, with the slower
+// one close to the old 15-minute limit; see #126). A run that reaches this
+// has stopped, not slowed.
+const PERMUTATION_TIMEOUT_MS = 1_200_000;
 
 // The fictional text this story types. Every sentence is invented, names a
 // fictional person or a simulated step, and carries no address or contact
@@ -158,6 +158,30 @@ const CONTROLS = Object.freeze(["BUTTON", "INPUT", "TEXTAREA", "SELECT", "A"]);
 // The city a draft is saved with before Save & exit, to see it come back.
 const RETURN_CITY = "Comebackton";
 
+// The names the database fixture gives its role-named staff accounts (#132),
+// as their pages say "Signed in as". Fictional people only.
+const ROLE_NAMES = Object.freeze({
+  siteCoordinator: "Avery Lin",
+  preparer: "Taylor Brooks",
+  reviewer: "Jamie Ellis",
+});
+// How a contact line names the Preparer (staffShortName in src/contact-log.mjs).
+const PREPARER_SHORT_NAME = "Taylor B.";
+
+// Notes what a page writes to the clipboard, once the real write resolved:
+// Playwright's Firefox has no clipboard permission to grant, so the contact
+// log phase reads this back in both engines (and the real clipboard too in
+// Chrome). Installed on the Site Coordinator's window before it loads.
+const NOTE_COPIES = () => {
+  const clipboard = navigator.clipboard;
+  if (!clipboard?.writeText) return;
+  const write = clipboard.writeText.bind(clipboard);
+  clipboard.writeText = async (text) => {
+    await write(text);
+    (window.__copied ??= []).push(String(text));
+  };
+};
+
 // ---------------------------------------------------------------------------
 // Server-side reads — the receipts and rows a screen cannot show
 // ---------------------------------------------------------------------------
@@ -168,14 +192,14 @@ const one = async (fixture, text, values) =>
 const caseById = (fixture, id) =>
   one(
     fixture,
-    "select id,reference,stage,revision,preparer_id,reviewer_id,owner_user_id,fixture,answers,intake_verified from public.cases where id=$1",
+    "select id,reference,stage,revision,preparer_id,reviewer_id,owner_user_id,answers,intake_verified from public.cases where id=$1",
     [id],
   );
 
 const caseByReference = (fixture, reference) =>
   one(
     fixture,
-    "select id,reference,stage,revision,preparer_id,reviewer_id,owner_user_id,fixture,answers from public.cases where workspace_id=$1 and reference=$2",
+    "select id,reference,stage,revision,preparer_id,reviewer_id,owner_user_id,answers from public.cases where workspace_id=$1 and reference=$2",
     [fixture.database.workspaceId, reference],
   );
 
@@ -189,14 +213,6 @@ const workspaceCaseCount = async (fixture) =>
       )
     ).count,
   );
-
-const fixtureCases = async (fixture) =>
-  (
-    await fixture.database.sql(
-      "select id,fixture_key,reference,stage,owner_user_id from public.cases where workspace_id=$1 and fixture order by fixture_key",
-      [fixture.database.workspaceId],
-    )
-  ).rows;
 
 // Receipts are the server's own record that an action landed exactly once.
 const receiptCount = async (fixture, caseId, operation) =>
@@ -255,8 +271,8 @@ const domainCode = (error) =>
  * A page in its own context, with its own console and page-error record. A
  * visible toast never blocks one of its actions (`guardToast`).
  */
-async function openWindow(engine, { viewport = DESKTOP } = {}) {
-  const win = await engine.newPage({ viewport });
+async function openWindow(engine, { viewport = DESKTOP, ...options } = {}) {
+  const win = await engine.newPage({ viewport, ...options });
   await guardToast(win.page);
   return win;
 }
@@ -273,6 +289,53 @@ async function openTab(context, appOrigin) {
   });
   await page.goto(appOrigin);
   return { page, errors, pageErrors };
+}
+
+// What a presenter account gets once it has signed in (#134): one plain
+// English screen with Sign out, and nothing of a staff window.
+const PRESENTER_HEADING = "This account is no longer used";
+const PRESENTER_TEXT = "Presenter mode has been removed. Ask your site coordinator for a staff account.";
+
+/**
+ * The presenter signs in through the real form with `loginTestUser`: the same
+ * intercepted send, the same real verification, the same 30-second wait and
+ * the same proof of the SDK's session. Only the window state differs: the
+ * controller loads nothing for a presenter, so the window stores nothing
+ * either, and that is asserted.
+ */
+async function signInPresenter({ page, actor, fixture }) {
+  await loginTestUser({ page, actor, fixture, heading: PRESENTER_HEADING, windowState: false });
+}
+
+/** The presenter's plain screen is on show, with no board, picker, reset, checkpoint or indicator. */
+async function assertPresenterScreen(page) {
+  await waitForText(page, PRESENTER_HEADING, RENDER_MS);
+  const screen = await page.evaluate(() => ({
+    heading: document.querySelector("#main h1")?.textContent.trim() ?? null,
+    text: document.querySelector("#main .page-intro p")?.textContent.trim() ?? null,
+    actions: [...document.querySelectorAll("#app [data-action]")].map((node) => node.dataset.action),
+    board: document.querySelectorAll(".staff-board, .board-row, #office-queue-title, #case-title").length,
+    sidebar: document.querySelectorAll(".sidebar-account").length,
+    personas: document.querySelectorAll('[data-action="select-person"], #persona-title').length,
+    reset: document.querySelectorAll('[data-action="open-reset-fixtures"]').length,
+    checkpoint: document.querySelectorAll('[data-action="open-checkpoint"]').length,
+    indicator: document.querySelectorAll('[data-role="fixture-indicator"]').length,
+  }));
+  assert.deepEqual(
+    screen,
+    {
+      heading: PRESENTER_HEADING,
+      text: PRESENTER_TEXT,
+      actions: ["sign-out"],
+      board: 0,
+      sidebar: 0,
+      personas: 0,
+      reset: 0,
+      checkpoint: 0,
+      indicator: 0,
+    },
+    "the presenter window shows more than the plain screen",
+  );
 }
 
 /**
@@ -691,8 +754,8 @@ const DRAFT_NOT_MADE = "The draft could not be made. Try again.";
 // ---------------------------------------------------------------------------
 
 async function runPermutation(t, roles) {
-  // The story's workspace is version 2, the column default: its samples, its
-  // client forms and Add a case all follow.
+  // The story's workspace is version 2, the column default: its seeded cases,
+  // its client forms and Add a case all follow.
   const fixture = await createBrowserFixture();
   const evidence = {
     roles,
@@ -730,7 +793,11 @@ async function runPermutation(t, roles) {
   // Hoisted so the evidence can still be gathered from them when a phase throws.
   let client = null;
   let staff = null;
+  let roleWins = null;
   let classCase = null;
+  // The seed's run directory: both seed runs share it, so the second one
+  // replaces exactly the set the first one recorded.
+  let seedRunDir = null;
   // What a workflow interaction is waited for, as one of three rendered facts.
   const expectation = (expect) =>
     expect.badge
@@ -866,81 +933,216 @@ async function runPermutation(t, roles) {
     const applicantA = fixture.actor("applicantA");
     const applicantB = fixture.actor("applicantB");
     const presenter = fixture.actor("presenter");
-    const { alex, morgan, sam } = fixture.database;
+    // A demonstration persona's person, for the leftover-persona check: a
+    // stored persona is ignored by every account (#134).
+    const { sam } = fixture.database;
+    // The role-named staff accounts the main story signs in as (#132): the
+    // Preparer takes Alex's steps, the Reviewer Morgan's, and the Site
+    // Coordinator Sam's office work and follow-ups.
+    const { siteCoordinatorId, preparerId, reviewerId } = fixture.database;
+    const ROLES = Object.freeze(["siteCoordinator", "preparer", "reviewer"]);
+    const roleHeading = Object.freeze({
+      siteCoordinator: OFFICE_BOARD_HEADING,
+      preparer: WORK_BOARD_HEADING,
+      reviewer: WORK_BOARD_HEADING,
+    });
 
     const clientWin = await openWindow(clientEngine);
+    // The presenter's window: it shows the plain screen, and nothing else (#134).
     const staffWin = await openWindow(staffEngine);
+    // One window per role account, each in its own context, signed in once.
+    roleWins = {
+      siteCoordinator: await openWindow(staffEngine, {
+        permissions: roles.staff === "chrome" ? ["clipboard-read", "clipboard-write"] : [],
+        initScript: NOTE_COPIES,
+      }),
+      preparer: await openWindow(staffEngine),
+      reviewer: await openWindow(staffEngine),
+    };
     client = clientWin.page;
-    staff = staffWin.page;
+    const presenterPage = staffWin.page;
+    staff = roleWins.preparer.page;
+
+    // Which window the story drives now. A window just chosen may be on
+    // another screen, so a case is reached the way a person would: back to
+    // that window's own board, then the case's link.
+    const onCase = async (page, role, reference) => {
+      const title = await page.evaluate(() => document.querySelector("#case-title")?.textContent.trim() ?? null);
+      if (title === reference) return;
+      await openBoard(page, roleHeading[role]);
+      await openCaseByReference(page, reference);
+    };
+    const use = async (role, reference = null) => {
+      staff = roleWins[role].page;
+      if (reference) await onCase(staff, role, reference);
+      return staff;
+    };
+
+    // One run of the seed on the story's own workspace and run directory,
+    // as the accounts the story's windows are signed in as.
+    const runSeed = async () => {
+      const db = await openDatabase();
+      try {
+        const targets = await resolveSeedTargets(db, {
+          workspaceId: fixture.database.workspaceId,
+          clientAEmail: applicantA.email,
+        });
+        assert.deepEqual(
+          [targets.siteCoordinator.personId, targets.preparer.personId, targets.reviewer.personId, targets.clientA.userId],
+          [siteCoordinatorId, preparerId, reviewerId, applicantA.userId],
+          "the seed acts as other accounts than the story signs in as",
+        );
+        return await seedCases(db, targets, { runDir: seedRunDir });
+      } finally {
+        await db.end();
+      }
+    };
+    // A seed run's cases, by scenario, as { id, reference, stage }: every
+    // scenario, all in the story's workspace, and
+    // the ones later phases start from at the stage they are named for.
+    const seededCases = async (result) => {
+      assert.deepEqual(Object.keys(result.caseIdsByScenario).sort(), [...SEED_SCENARIOS].sort());
+      const rows = (
+        await fixture.database.sql(
+          "select id,reference,stage from public.cases where workspace_id=$1 and id = any($2::uuid[])",
+          [fixture.database.workspaceId, Object.values(result.caseIdsByScenario)],
+        )
+      ).rows;
+      assert.equal(rows.length, 11, "a seeded case is not in the story's workspace");
+      const cases = Object.fromEntries(
+        Object.entries(result.caseIdsByScenario).map(([scenario, id]) => {
+          const { reference, stage } = rows.find((row) => row.id === id);
+          return [scenario, { id, reference, stage }];
+        }),
+      );
+      for (const scenario of ["preparation_ready", "review_ready", "review_approved", "rejected", "on_hold"])
+        assert.equal(cases[scenario].stage, scenario, `the seeded ${scenario} case is at ${cases[scenario].stage}`);
+      return cases;
+    };
 
     // Named here so later phases can read what the story produced.
     let classReference = null;
-    let samples = [];
+    // The seeded case of each scenario, as { id, reference, stage }: the
+    // first seed run's, and from the second run on, that run's.
+    let seeded = null;
+    // The help request the first seed run made, the only one on the queue.
+    let seededHelpId = null;
+    // How many cases a staff board counts once the seed has run.
+    let boardTotal = null;
 
     await phase("both windows sign in with a generated code and real verification", async () => {
       await loginTestUser({ page: client, actor: applicantA, fixture });
-      await loginTestUser({
-        page: staff,
-        actor: presenter,
-        fixture,
-        heading: WORK_BOARD_HEADING,
-      });
+      // The presenter signs in through the same real form and gets the plain
+      // screen: no board, no picker, no reset, no checkpoint and no
+      // indicator (#134).
+      await signInPresenter({ page: presenterPage, actor: presenter, fixture });
+      await assertPresenterScreen(presenterPage);
+      // Its Sign out works. The account signs in again in a fresh document (the
+      // auth module's resend cooldown lives in the one it signed out of), to
+      // the same plain screen, which the last staff phase reads once more.
+      await clickAction(presenterPage, "sign-out");
+      await waitForText(presenterPage, "Sign in with your email", RENDER_MS);
+      await presenterPage.goto(fixture.appOrigin);
+      await signInPresenter({ page: presenterPage, actor: presenter, fixture });
+      await assertPresenterScreen(presenterPage);
+      for (const role of ROLES) {
+        const page = roleWins[role].page;
+        await loginTestUser({ page, actor: fixture.actor(role), fixture, heading: roleHeading[role] });
+        assert.equal(await readSignedInAs(page), ROLE_NAMES[role], `the ${role} window is signed in as someone else`);
+      }
       // From here on, every notice either window shows is recorded — including
       // the ones the next re-read erases before anybody could read them.
       await watchAlerts(client);
-      await watchAlerts(staff);
-      evidence.story.signIn = "applicant A in the client window, the presenter in the staff window";
+      await watchAlerts(presenterPage);
+      for (const role of ROLES) await watchAlerts(roleWins[role].page);
+      evidence.story.signIn =
+        "applicant A in the client window, the Site Coordinator, Preparer and Reviewer each in a staff window of their own, and the presenter on the plain screen, signed out and in again";
     });
 
-    await phase("the presenter's reset leaves exactly the ten seeded cases", async () => {
-      evidence.story.indicatorBefore = await readFixtureIndicator(staff);
-      evidence.story.indicatorAfter = await resetSampleCases(staff);
-      // The confirmation's toast reaches the live region, outside anything
-      // inert, though the dialog closed only a moment ago (screen-states).
+    // The story's workspace starts with no cases: nothing in the app makes
+    // sample cases any more (#134, #135).
+    await phase("the board starts with no cases", async () => {
+      const page = await use("preparer");
       await waitFor(
-        staff,
-        "the reset's toast, outside anything inert",
-        () => {
-          const toast = document.querySelector("#toast");
-          return /sample cases were rebuilt/.test(toast?.textContent ?? "") && !toast.closest("[inert]");
-        },
+        page,
+        "the Preparer's board to count no cases",
+        () => /Showing 0 of 0 cases/.test(document.querySelector(".staff-board .section-head")?.textContent ?? ""),
         undefined,
-        RENDER_MS,
+        ARRIVAL_MS,
       );
-      evidence.story.resetToast = "announced in #toast, outside anything inert";
-      const totals = await readBoardTotals(staff);
-      assert.equal(totals.total, 10);
-      assert.equal(await staff.locator(".board-row").count(), totals.shown);
-      samples = await fixtureCases(fixture);
-      assert.equal(samples.length, 10);
-      assert.deepEqual(
-        samples.map((row) => row.fixture_key).sort(),
-        [...fixture.database.fixtureKeys].sort(),
+      const totals = await readBoardTotals(page);
+      assert.deepEqual(totals, { shown: 0, total: 0 }, "the Preparer's board starts with cases on it");
+      assert.equal(await page.locator(".board-row").count(), totals.shown);
+      assert.equal(
+        Number(
+          (await one(fixture, "select count(*)::int as count from public.cases where workspace_id=$1", [
+            fixture.database.workspaceId,
+          ])).count,
+        ),
+        0,
+        "the story's workspace starts with cases in it",
       );
-      // The samples follow the workspace's version (migration 019).
+      evidence.story.startingBoard = totals;
+    });
+
+    // The main story's cases come from the seed (#132), run on the story's own
+    // workspace with a run file of its own: the accounts it acts as are the
+    // ones the story's windows are signed in as.
+    await phase("the seed builds its eleven cases in the story's workspace", async () => {
+      const page = await use("preparer");
+      const boardCounts = (total) =>
+        waitFor(
+          page,
+          `the Preparer's board to count ${total} cases`,
+          (wanted) =>
+            new RegExp(`of ${wanted} cases`).test(document.querySelector(".staff-board .section-head")?.textContent ?? ""),
+          total,
+          ARRIVAL_MS,
+        );
+      await boardCounts(0);
+      const before = (await readBoardTotals(page)).total;
+      assert.equal(before, 0, "the Preparer's board counts cases before the seed");
+      seedRunDir = await mkdtemp(path.join(os.tmpdir(), "vitally-story-seed-"));
+      const result = await runSeed();
+      assert.equal(result.casesCreated, 11);
+      assert.equal(result.casesRemoved, 0);
+      seeded = await seededCases(result);
+      seededHelpId = result.assistanceId;
+      // The seeded cases follow the workspace's version (migration 019).
       assert.equal(
         Number(
           (
             await one(fixture, "select intake_version from public.cases where id=$1", [
-              samples[0].id,
+              seeded.preparation_ready.id,
             ])
           ).intake_version,
         ),
         2,
-        "a version-2 workspace's sample is not on version 2",
+        "a version-2 workspace's seeded case is not on version 2",
       );
-      await shoot(staff, "staff-board-eight-cases");
+      // The board shows them with no reload: the Preparer's window counts
+      // every seeded case and finds one by its Application ID.
+      boardTotal = before + result.casesCreated;
+      await boardCounts(boardTotal);
+      await shoot(page, "staff-board-eight-cases");
+      await findOnBoard(page, seeded.preparation_ready.reference);
+      evidence.story.seed = {
+        casesCreated: result.casesCreated,
+        boardTotal,
+        stages: Object.fromEntries(Object.entries(seeded).map(([scenario, row]) => [scenario, row.stage])),
+      };
     });
 
     await phase("a new application is submitted and reaches the staff board", async () => {
+      // The Preparer's work board is the staff board here.
+      await use("preparer");
       classReference = await startApplication(client);
       assert.match(classReference, REFERENCE_PATTERN);
       classCase = await caseByReference(fixture, classReference);
       assert.ok(classCase, "the generated reference names no case");
       assert.equal(classCase.owner_user_id, applicantA.userId);
-      assert.equal(classCase.fixture, false);
       // A client's own draft is theirs alone: the staff board cannot see it yet.
-      assert.equal((await readBoardTotals(staff)).total, 10);
+      assert.equal((await readBoardTotals(staff)).total, boardTotal);
       assert.equal(
         Number(
           (await one(fixture, "select intake_version from public.cases where id=$1", [classCase.id]))
@@ -956,8 +1158,9 @@ async function runPermutation(t, roles) {
       await waitFor(
         staff,
         "the board to count the new application",
-        () => /of 11 cases/.test(document.querySelector(".staff-board .section-head")?.textContent ?? ""),
-        undefined,
+        (wanted) =>
+          new RegExp(`of ${wanted} cases`).test(document.querySelector(".staff-board .section-head")?.textContent ?? ""),
+        boardTotal + 1,
         ARRIVAL_MS,
       );
       await findOnBoard(staff, classReference);
@@ -1038,12 +1241,12 @@ async function runPermutation(t, roles) {
         ARRIVAL_MS,
       );
       evidence.story.clientNumber = clientNumber;
-      assert.equal((await readBoardTotals(staff)).total, 11);
+      assert.equal((await readBoardTotals(staff)).total, boardTotal + 1);
       evidence.story.reference = "matched REFERENCE_PATTERN and arrived on the board";
     });
 
     await phase(
-      "staff persona switches and a staff reload leave the client window where it was",
+      "a staff reload leaves the client window where it was",
       async () => {
         const before = await readClientPlace(client, applicantA.userId);
         assert.equal(before.stored.screen, "progress");
@@ -1056,16 +1259,29 @@ async function runPermutation(t, roles) {
         );
         evidence.windowIsolation.clientBefore = before.stored;
 
-        await choosePersona(staff, alex);
-        await waitForText(staff, WORK_BOARD_HEADING, RENDER_MS);
-        await choosePersona(staff, sam);
-        await waitForText(staff, OFFICE_BOARD_HEADING, RENDER_MS);
-        await choosePersona(staff, morgan);
-        await waitForText(staff, WORK_BOARD_HEADING, RENDER_MS);
+        // The Preparer's window goes to the new case's History tab and
+        // reloads: it comes back to the same case and tab, and the client
+        // window does not move.
+        await use("preparer", classReference);
+        await waitForCaseWorkspace(staff, classReference);
+        await openCaseTab(staff, "history");
         await staff.reload();
-        await waitForText(staff, WORK_BOARD_HEADING, ARRIVAL_MS);
+        await waitForCaseWorkspace(staff, classReference, ARRIVAL_MS);
         await watchAlerts(staff);
-        assert.equal(await readPersona(staff), morgan, "the staff window forgot its own persona");
+        const kept = await staff.evaluate(() => ({
+          title: document.querySelector("#case-title")?.textContent.trim() ?? null,
+          historyShown: document.getElementById("case-panel-history")?.hidden === false,
+        }));
+        const keptState = await readWindowState(staff, fixture.actor("preparer").userId);
+        assert.deepEqual(
+          { ...kept, selectedCaseId: keptState?.selectedCaseId, caseTab: keptState?.caseTab },
+          { title: classReference, historyShown: true, selectedCaseId: classCase.id, caseTab: "history" },
+          "the staff window did not keep its own case and tab",
+        );
+        evidence.windowIsolation.staffReload = "the Preparer's window kept its own case and tab";
+        // Back to Overview and the board, as the next phases expect it.
+        await openCaseTab(staff, "overview");
+        await openBoard(staff, WORK_BOARD_HEADING);
 
         const after = await readClientPlace(client, applicantA.userId);
         assert.deepEqual(after, before, "the staff window moved the client window");
@@ -1074,8 +1290,8 @@ async function runPermutation(t, roles) {
         // The office opens it from its own queue — an intake row, and a case
         // at `received` is claimable by nobody, so this row's way in is the
         // only control on any office screen that reaches it. Opening its page
-        // as an admin is what starts screening.
-        await choosePersona(staff, sam);
+        // as an admin is what starts screening: the Site Coordinator's window.
+        await use("siteCoordinator");
         await waitForText(staff, OFFICE_BOARD_HEADING, RENDER_MS);
         const arrived = staff
           .locator('tr.queue-row[data-kind="intake"]')
@@ -1098,7 +1314,7 @@ async function runPermutation(t, roles) {
           "the Follow-ups queue started screening before anyone opened the case",
         );
         await openCaseByReference(staff, classReference);
-        // Sam's open starts screening, quietly: the badge moves in this window
+        // The Site Coordinator's open starts screening, quietly: the badge moves in this window
         // and the client's, and the client's history says what happened.
         await waitForBadge(staff, "Screening in progress");
         await waitForBadge(client, "Being reviewed");
@@ -1114,12 +1330,11 @@ async function runPermutation(t, roles) {
           const second = await openTab(adminContext, fixture.appOrigin);
           await loginTestUser({
             page: second.page,
-            actor: presenter,
+            actor: fixture.actor("siteCoordinator"),
             fixture,
-            heading: WORK_BOARD_HEADING,
+            heading: OFFICE_BOARD_HEADING,
           });
           await watchAlerts(second.page);
-          await choosePersona(second.page, sam);
           await waitForText(second.page, OFFICE_BOARD_HEADING, RENDER_MS);
           await openCaseByReference(second.page, classReference);
           await waitForBadge(second.page, "Screening in progress");
@@ -1173,8 +1388,8 @@ async function runPermutation(t, roles) {
       },
     );
 
-    await phase("Alex claims preparation and requests the sample mileage record", async () => {
-      await choosePersona(staff, alex);
+    await phase("the Preparer claims preparation and requests the sample mileage record", async () => {
+      await use("preparer", classReference);
       await waitForText(staff, "Preparation milestones", RENDER_MS);
 
       // ---- The version-2 answers, before the claim (D5) ----------------
@@ -1227,7 +1442,7 @@ async function runPermutation(t, roles) {
       await shootWithoutSidebar(staff, "staff-contact-hidden");
 
       await act(staff, "CLAIM_PREPARATION", {
-        detail: { label: "Preparer", value: "Alex" },
+        detail: { label: "Preparer", value: ROLE_NAMES.preparer },
       });
       await waitForBadge(client, "Being prepared");
 
@@ -1427,11 +1642,10 @@ async function runPermutation(t, roles) {
       await waitFor(
         staff,
         "the shaded save in the internal history",
-        () =>
-          document
-            .querySelector('#case-panel-history [data-role="internal-history"]')
-            ?.textContent.includes("Alex saved the shaded section · W-2s, W-2s #.") ?? false,
-        undefined,
+        (wanted) =>
+          document.querySelector('#case-panel-history [data-role="internal-history"]')?.textContent.includes(wanted) ??
+          false,
+        `${ROLE_NAMES.preparer} saved the shaded section · W-2s, W-2s #.`,
         ARRIVAL_MS,
       );
       assert.doesNotMatch(
@@ -1549,11 +1763,10 @@ async function runPermutation(t, roles) {
       await waitFor(
         staff,
         "the editor's save in the internal history",
-        () =>
-          document
-            .querySelector('#case-panel-history [data-role="internal-history"]')
-            ?.textContent.includes("Alex saved the shaded section · Row 1: Qualifying child or dependent, Income notes.") ?? false,
-        undefined,
+        (wanted) =>
+          document.querySelector('#case-panel-history [data-role="internal-history"]')?.textContent.includes(wanted) ??
+          false,
+        `${ROLE_NAMES.preparer} saved the shaded section · Row 1: Qualifying child or dependent, Income notes.`,
         ARRIVAL_MS,
       );
       await openCaseTab(staff, "intake");
@@ -1597,12 +1810,12 @@ async function runPermutation(t, roles) {
       await materials.locator('button[data-case-action="RECORD_MATERIALS"]').click({ timeout: CLICK_MS });
       await waitFor(
         staff,
-        "both materials recorded by Alex",
-        () =>
+        "both materials recorded by the Preparer",
+        (name) =>
           [...document.querySelectorAll("#case-panel-intake #materials-form .material-recorded")].filter((note) =>
-            note.textContent.includes("Recorded by Alex"),
+            note.textContent.includes(`Recorded by ${name}`),
           ).length === 2,
-        undefined,
+        ROLE_NAMES.preparer,
         ARRIVAL_MS,
       );
       assert.deepEqual(
@@ -1754,7 +1967,7 @@ async function runPermutation(t, roles) {
       const rowOf = (slot) => `#case-panel-documents #doc-${slot.replace(/\./g, "-")}`;
       const groupOf = (slot) =>
         staff.evaluate((selector) => document.querySelector(`${selector} .doc-group`)?.textContent.trim() ?? null, rowOf(slot));
-      await choosePersona(staff, sam);
+      await use("siteCoordinator", classReference);
       await waitForCaseWorkspace(staff, classReference);
       await openCaseTab(staff, "documents");
       await staff
@@ -1793,11 +2006,11 @@ async function runPermutation(t, roles) {
       await moveCard(childSsn, "maybe", "Maybe needed");
       assert.equal((await cardRow(fixture, classCase.id, childSsn))?.group_override, null);
       evidence.story.staffChecklist = { moved: childSsn, dontHave: "photo_id.tp" };
-      await choosePersona(staff, alex);
+      await use("preparer", classReference);
       await waitForCaseWorkspace(staff, classReference);
     });
 
-    await phase("Alex asks the office to contact the client", async () => {
+    await phase("the Preparer asks the office to contact the client", async () => {
       await actForm(
         staff,
         "ESCALATE_CONTACT",
@@ -1811,8 +2024,8 @@ async function runPermutation(t, roles) {
       );
     });
 
-    await phase("Sam logs a contact on the task and resolves it; Alex stays the preparer", async () => {
-      await choosePersona(staff, sam);
+    await phase("the Site Coordinator logs a contact on the task and resolves it; the Preparer stays the preparer", async () => {
+      await use("siteCoordinator");
       // The contact goes through the queue's Log contact drawer; the resolution
       // below goes through the case page's Follow-up tab, so both stay covered.
       await openBoard(staff, OFFICE_BOARD_HEADING);
@@ -1847,11 +2060,11 @@ async function runPermutation(t, roles) {
         window.__drawerBeforeChange = document.querySelector(".modal.office-drawer");
         return { id: field.id, value: field.value, caret: field.selectionStart };
       });
-      // A no-op update on a sample case: the staff window re-reads its list and
+      // A no-op update on a seeded case: the staff window re-reads its list and
       // re-renders, exactly as it does for another window's work, and nothing
       // the drawer shows has moved.
       await fixture.database.sql("update public.cases set revision=revision where id=$1", [
-        samples[0].id,
+        seeded.admin_followup.id,
       ]);
       await waitFor(
         staff,
@@ -1966,7 +2179,7 @@ async function runPermutation(t, roles) {
       );
       evidence.regressions.logCallDrawer = { attempt, afterAttempt, escape: "back on the row" };
 
-      // The Resolve a help request drawer: Sam takes the sample help request
+      // The Resolve a help request drawer: the Site Coordinator takes a help request
       // on the queue, resolves it there, and the row leaves the queue with the
       // keyboard on the queue's title rather than on the page.
       const helpClaim = staff
@@ -1974,6 +2187,13 @@ async function runPermutation(t, roles) {
         .first();
       await helpClaim.waitFor({ state: "visible", timeout: RENDER_MS });
       const helpItemId = await helpClaim.getAttribute("data-item-id");
+      // The workspace has no sample help requests: the seed's is the only row.
+      assert.equal(
+        await staff.locator('tr.queue-row[data-kind="help"]').count(),
+        1,
+        "the queue lists another help request than the seed's",
+      );
+      assert.equal(helpItemId, seededHelpId, "the queue's help request is not the seed's");
       const helpRevision = async () =>
         Number(
           (
@@ -2144,9 +2364,9 @@ async function runPermutation(t, roles) {
         { "How it ended": "reached", "What the office concluded": RESOLUTION_NOTE },
         { badge: "Resolved" },
       );
-      await waitForDetail(staff, "Preparer", "Alex");
+      await waitForDetail(staff, "Preparer", ROLE_NAMES.preparer);
       const row = await caseById(fixture, classCase.id);
-      assert.equal(row.preparer_id, alex, "the office's work moved the preparer");
+      assert.equal(row.preparer_id, preparerId, "the office's work moved the preparer");
       assert.equal(row.stage, "preparing");
       // Resolving logs nothing, and a resolved task takes no more contacts.
       assert.equal(
@@ -2170,36 +2390,25 @@ async function runPermutation(t, roles) {
     });
 
     await phase("the contact log: two windows, a text and its edit, a correction, Copy and Copy all", async () => {
-      // Two presenter windows in one new context, as in "two presenter windows
-      // in one browser": Alex in the first, Sam in the second. Chrome grants
-      // this context the clipboard and the story reads it back. Playwright's
-      // Firefox has no clipboard permission to grant, so in both engines the
-      // page's own writeText is wrapped to note what it wrote — only once the
-      // real write has resolved.
-      const context = await staffEngine.browser.newContext({ viewport: DESKTOP, locale: "en-US" });
+      // Two staff windows, each its own account: the Preparer in the first,
+      // the Site Coordinator in the second. Chrome granted the Site
+      // Coordinator's context the clipboard and the story reads it back.
+      // Playwright's Firefox has no clipboard permission to grant, so in both
+      // engines that window's own writeText notes what it wrote (NOTE_COPIES)
+      // — only once the real write has resolved.
       const realClipboard = roles.staff === "chrome";
-      try {
-        if (realClipboard)
-          await context.grantPermissions(["clipboard-read", "clipboard-write"], {
-            origin: fixture.appOrigin,
-          });
-        await context.addInitScript(() => {
-          const clipboard = navigator.clipboard;
-          if (!clipboard?.writeText) return;
-          const write = clipboard.writeText.bind(clipboard);
-          clipboard.writeText = async (text) => {
-            await write(text);
-            (window.__copied ??= []).push(String(text));
-          };
-        });
-        const alexWin = await openTab(context, fixture.appOrigin);
-        await loginTestUser({ page: alexWin.page, actor: presenter, fixture, heading: WORK_BOARD_HEADING });
-        const samWin = await openTab(context, fixture.appOrigin);
-        await waitForText(samWin.page, WORK_BOARD_HEADING, ARRIVAL_MS);
-        const win1 = alexWin.page;
+      {
+        const alexWin = roleWins.preparer;
+        const samWin = roleWins.siteCoordinator;
+        const morganWin = roleWins.reviewer;
+        // Only what this phase causes is checked against its own windows.
+        const marks = new Map([alexWin, samWin, morganWin].map((win) => [win, win.errors.length]));
+        const sinceMark = (win) => ({ errors: win.errors.slice(marks.get(win)), pageErrors: win.pageErrors });
+        let win1 = alexWin.page;
         const win2 = samWin.page;
-        await watchAlerts(win1);
-        await watchAlerts(win2);
+        await win2.evaluate(() => {
+          window.__copied = [];
+        });
         const NEW = "contact-new";
         const lineOf = (page, id) => page.locator(`[id="contact-${id}-line"]`).textContent();
         const entryId = async (note) =>
@@ -2280,14 +2489,11 @@ async function runPermutation(t, roles) {
             .waitFor({ state: "visible", timeout: RENDER_MS });
         };
 
-        // Both windows on the class case's Contacts tab; a persona switch
-        // keeps the case and goes back to its Overview.
-        await choosePersona(win1, alex);
-        await openCaseByReference(win1, classReference);
+        // Both windows on the class case's Contacts tab, each reached from its
+        // own board if it is somewhere else.
+        await onCase(win1, "preparer", classReference);
         await openCaseTab(win1, "contacts");
-        await choosePersona(win2, alex);
-        await openCaseByReference(win2, classReference);
-        await choosePersona(win2, sam);
+        await onCase(win2, "siteCoordinator", classReference);
         await waitForCaseWorkspace(win2, classReference);
         await openCaseTab(win2, "contacts");
         // The office's drawer contact is here too, marked with its task.
@@ -2369,7 +2575,7 @@ async function runPermutation(t, roles) {
         const sentLine = await lineOf(win1, alexId);
         assert.match(sentLine, CONTACT_LINE);
         assert.ok(
-          sentLine.includes("— Alex → client") &&
+          sentLine.includes(`— ${PREPARER_SHORT_NAME} → client`) &&
             sentLine.endsWith(`, text — Request documents — Sent. Note: ${ALEX_TEXT_NOTE}`),
           `Alex's text reads ${JSON.stringify(sentLine)}`,
         );
@@ -2414,10 +2620,13 @@ async function runPermutation(t, roles) {
           ARRIVAL_MS,
         );
 
-        // Alex opens Edit again and the window becomes Morgan's: Morgan neither
-        // sees Alex's open form nor gets an Edit on Alex's entry.
+        // The Preparer opens Edit again and the story moves to the Reviewer's
+        // window: the Reviewer neither sees the Preparer's open form nor gets
+        // an Edit on the Preparer's entry.
         await openEdit(win1, alexId);
-        await choosePersona(win1, morgan);
+        const preparerPage = win1;
+        win1 = morganWin.page;
+        await onCase(win1, "reviewer", classReference);
         await waitForCaseWorkspace(win1, classReference);
         await openCaseTab(win1, "contacts");
         await win1.locator(`[id="contact-${alexId}"]`).waitFor({ state: "visible", timeout: RENDER_MS });
@@ -2431,6 +2640,73 @@ async function runPermutation(t, roles) {
           0,
           "Morgan is offered Edit on Alex's entry",
         );
+        // The same check inside one window, where it can fail: the person
+        // changes there. An admin — the only kind of account offered Edit on
+        // the Preparer's entry — opens Edit in a window of its own and signs
+        // out, and the Reviewer signs in in that window through the real
+        // form: the open form went with the sign-out, and the Reviewer gets
+        // no Edit (#134). Supabase's sign-out ends every session of the
+        // account that signs out, so the admin is one of its own, Quinn Harper,
+        // made for this check alone and signed in nowhere else; the Site
+        // Coordinator's window keeps its session. The Reviewer signing in
+        // ends nothing.
+        const switchStarted = Date.now();
+        const switchAdminAccount = await fixture.database.staff({
+          key: "switch_admin",
+          name: "Quinn Harper",
+          capabilities: ["admin"],
+        });
+        const switchAdminActor = { key: "switch_admin", email: switchAdminAccount.email, userId: switchAdminAccount.userId };
+        const switchWin = await openWindow(staffEngine);
+        try {
+          const shared = switchWin.page;
+          await loginTestUser({ page: shared, actor: switchAdminActor, fixture, heading: OFFICE_BOARD_HEADING });
+          assert.equal(await readSignedInAs(shared), "Quinn Harper", "the switch window is signed in as someone else");
+          await watchAlerts(shared);
+          // From the office's case pool, which lists every open case.
+          await clickAction(shared, "open-cases");
+          await waitForText(shared, "Case pool", RENDER_MS);
+          await openCaseByReference(shared, classReference);
+          await openCaseTab(shared, "contacts");
+          await openEdit(shared, alexId);
+          await clickAction(shared, "sign-out");
+          await waitForText(shared, "Sign in with your email", RENDER_MS);
+          assert.equal(
+            await shared.locator(`form.contact-form[data-contact-id="${alexId}"]`).count(),
+            0,
+            "the admin's open edit form outlived the sign-out",
+          );
+          // A fresh document, as after any sign-out: the auth module's resend
+          // cooldown lives in the one it signed out of.
+          await shared.goto(fixture.appOrigin);
+          await loginTestUser({ page: shared, actor: fixture.actor("reviewer"), fixture, heading: WORK_BOARD_HEADING });
+          await watchAlerts(shared);
+          assert.equal(await readSignedInAs(shared), ROLE_NAMES.reviewer, "the switched window is signed in as someone else");
+          await openCaseByReference(shared, classReference);
+          await waitForCaseWorkspace(shared, classReference);
+          await openCaseTab(shared, "contacts");
+          await shared.locator(`[id="contact-${alexId}"]`).waitFor({ state: "visible", timeout: RENDER_MS });
+          assert.equal(
+            await shared.locator(`form.contact-form[data-contact-id="${alexId}"]`).count(),
+            0,
+            "the Reviewer sees the edit form the admin left open in the same window",
+          );
+          assert.equal(
+            await shared.locator(`[id="contact-${alexId}"] [data-action="toggle-contact-edit"]`).count(),
+            0,
+            "the Reviewer is offered Edit on the Preparer's entry in the same window",
+          );
+          assertConsoleQuiet(switchWin, { name: "contact log sign-out window" });
+        } finally {
+          await switchWin.context.close();
+        }
+        evidence.story.signOutEditSwitchMs = Date.now() - switchStarted;
+        // The Preparer puts the open form away again, so its window carries no
+        // edit of an entry somebody else is about to correct.
+        await clickAction(preparerPage, "toggle-contact-edit", { attributes: `[data-contact-id="${alexId}"]` });
+        await preparerPage
+          .locator(`form.contact-form[data-contact-id="${alexId}"]`)
+          .waitFor({ state: "detached", timeout: RENDER_MS });
 
         // Sam, an admin, corrects Alex's entry; it still says Alex logged it,
         // and Morgan's window shows the correction.
@@ -2446,7 +2722,10 @@ async function runPermutation(t, roles) {
           "Sam's correction",
         );
         const correctedLine = await lineOf(win2, alexId);
-        assert.ok(correctedLine.includes("— Alex → client"), `the correction changed the logger: ${correctedLine}`);
+        assert.ok(
+          correctedLine.includes(`— ${PREPARER_SHORT_NAME} → client`),
+          `the correction changed the logger: ${correctedLine}`,
+        );
         assert.equal(
           (await win2.locator(`[id="contact-${alexId}"] .contact-versions summary`).innerText()).trim(),
           "Earlier versions (2)",
@@ -2457,7 +2736,7 @@ async function runPermutation(t, roles) {
             "select logged_by_person_id::text as logger,revision::int,outcome from public.contact_log where id=$1",
             [alexId],
           ),
-          { logger: alex, revision: 3, outcome: "replied" },
+          { logger: preparerId, revision: 3, outcome: "replied" },
           "Sam's correction did not keep Alex as the logger",
         );
         await waitFor(
@@ -2546,8 +2825,9 @@ async function runPermutation(t, roles) {
         for (const secret of [CONTACT_NOTE, SAM_CONTACT_NOTE, ALEX_TEXT_NOTE, SAM_CORRECTION_NOTE, INCOMING_NOTE])
           assert.ok(!seen.includes(secret), `a contact note reached the client window: ${secret.slice(0, 24)}…`);
 
-        assertConsoleQuiet(alexWin, { name: "contact log window 1" });
-        assertConsoleQuiet(samWin, { name: "contact log window 2" });
+        assertConsoleQuiet(sinceMark(alexWin), { name: "contact log window 1" });
+        assertConsoleQuiet(sinceMark(samWin), { name: "contact log window 2" });
+        assertConsoleQuiet(sinceMark(morganWin), { name: "contact log window 1, the Reviewer's" });
         evidence.story.contactLog = {
           entries: ordered.length,
           liveWindow: alexKept,
@@ -2555,8 +2835,6 @@ async function runPermutation(t, roles) {
           clipboard: realClipboard ? "read back from the real clipboard" : "the page's own writeText, resolved",
           copyAll: lines.length,
         };
-      } finally {
-        await context.close();
       }
     });
 
@@ -2580,11 +2858,11 @@ async function runPermutation(t, roles) {
         );
       }
       await waitForText(client, SAMPLE_DOCUMENT_FILENAME, RENDER_MS);
-      await choosePersona(staff, alex);
+      await use("preparer", classReference);
       await waitForBadge(staff, "Received, not verified yet");
     });
 
-    await phase("Alex verifies the document and records preparation complete", async () => {
+    await phase("the Preparer verifies the document and records preparation complete", async () => {
       await act(staff, "VERIFY_DOCUMENT", { badge: "Verified" });
       const today = todayIso();
       await actQuestionnaire(
@@ -2615,13 +2893,15 @@ async function runPermutation(t, roles) {
         confirmed_method: "phone",
         ready_on: today,
       });
-      assert.equal(row.preparer_id, alex);
+      assert.equal(row.preparer_id, preparerId);
       assert.equal(row.reviewer_id, null);
     });
 
-    await phase("Morgan reviews: a finding, Alex's resubmission, then approval", async () => {
-      await choosePersona(staff, morgan);
-      await act(staff, "CLAIM_REVIEW", { detail: { label: "Reviewer", value: "Morgan" } });
+    await phase("the Reviewer reviews: a finding, the Preparer's resubmission, then approval", async () => {
+      await use("reviewer", classReference);
+      // The Reviewer's window was last on the Contacts tab; the claim is on Overview.
+      await openCaseTab(staff, "overview");
+      await act(staff, "CLAIM_REVIEW", { detail: { label: "Reviewer", value: ROLE_NAMES.reviewer } });
       await waitForBadge(staff, "Review in progress");
       // Corrections are asked for in a dialog; its form is the payload.
       await clickAction(staff, "open-request-corrections");
@@ -2631,6 +2911,21 @@ async function runPermutation(t, roles) {
         { "Corrections to send back to the preparer": FINDINGS },
         { badge: "Corrections requested" },
       );
+      // The confirmation's toast reaches the live region, outside anything
+      // inert, though the dialog closed only a moment ago (screen-states).
+      await waitFor(
+        staff,
+        "the corrections toast, outside anything inert",
+        () => {
+          const toast = document.querySelector("#toast");
+          return (
+            (toast?.textContent ?? "").includes("The preparer was asked for corrections.") && !toast.closest("[inert]")
+          );
+        },
+        undefined,
+        RENDER_MS,
+      );
+      evidence.story.correctionsToast = "announced in #toast, outside anything inert";
       await waitForBadge(client, "Being corrected");
       const duringCorrections = await pageText(client);
       assert.ok(
@@ -2638,7 +2933,7 @@ async function runPermutation(t, roles) {
         "the reviewer's findings reached the client window",
       );
 
-      await choosePersona(staff, alex);
+      await use("preparer", classReference);
       await waitForText(staff, "Corrections the reviewer asked for", RENDER_MS);
       // The resubmit form starts from the earlier answers; only the TaxSlayer
       // date is reset to today.
@@ -2672,7 +2967,7 @@ async function runPermutation(t, roles) {
         "the resubmission did not store its own questionnaire",
       );
 
-      await choosePersona(staff, morgan);
+      await use("reviewer", classReference);
       await act(staff, "CLAIM_REVIEW", { badge: "Review in progress" });
       // The reviewer form is in "Your next step", above Approve, never in a
       // dialog. Local SIT gets an amount and nothing else: the approval is
@@ -2738,7 +3033,7 @@ async function runPermutation(t, roles) {
         (await one(fixture, "select signing_plan from public.cases where id=$1", [classCase.id])).signing_plan,
         "go_over_first",
       );
-      assert.equal(row.reviewer_id, morgan);
+      assert.equal(row.reviewer_id, reviewerId);
       const answered = await one(
         fixture,
         "select went_over, sign_method, exit_form from public.reviewer_questionnaires where case_id=$1",
@@ -2756,12 +3051,13 @@ async function runPermutation(t, roles) {
       );
       assert.equal(goOver.status, "open");
       assert.equal(goOver.reason, "Go over the return with the client: the reviewer did not.");
-      assert.equal(goOver.assignee_person_id, sam);
+      // The workspace's default follow-up person: the Site Coordinator.
+      assert.equal(goOver.assignee_person_id, siteCoordinatorId);
       assert.equal(goOver.request_id, null);
       // The reviewer's next step reads the go-over line and has no call to record.
       await waitForText(staff, "The office will go over the return with the client.", RENDER_MS);
       assert.equal(await caseActionCount(staff, "RECORD_REVIEW_CONTACT"), 0, "an approval left the review-contact step pending");
-      assert.equal(row.preparer_id, alex);
+      assert.equal(row.preparer_id, preparerId);
       evidence.story.reviewVersions = await eventCount(
         fixture,
         classCase.id,
@@ -2813,7 +3109,8 @@ async function runPermutation(t, roles) {
     });
 
     await phase("a second case takes the short path: claim review, approve", async () => {
-      const short = samples.find((row) => row.fixture_key === "review_ready");
+      const short = seeded.review_ready;
+      await use("reviewer");
       await openBoard(staff, WORK_BOARD_HEADING);
       await showBoardTab(staff, "review");
       // Claimed from the board row itself, which names the case it belongs to.
@@ -2829,7 +3126,7 @@ async function runPermutation(t, roles) {
               .click({ timeout: CLICK_MS });
           },
           ready: HAS_DETAIL,
-          arg: { label: "Reviewer", value: "Morgan" },
+          arg: { label: "Reviewer", value: ROLE_NAMES.reviewer },
           what: "the claimed review, in its own case workspace",
           safeToRepeat: await unmovedSince(short.id),
         }),
@@ -2880,11 +3177,14 @@ async function runPermutation(t, roles) {
       // Chrome only: Firefox may download a blob PDF instead of opening it.
       let exitForm = `not run: the staff engine is ${roles.staff}, which may download the PDF instead of opening it`;
       if (roles.staff === "chrome") {
-        const sample = samples.find((row) => row.fixture_key === "review_approved");
+        // The class case: its review was approved a moment ago with a Federal
+        // amount. The seeded review_approved case's Exit Form records none
+        // (tools/admin/seed-values.mjs), so it has no amount to print.
+        const sample = { id: classCase.id, reference: classReference };
         const before = await caseById(fixture, sample.id);
         const expected = await one(
           fixture,
-          "select c.season,c.client_number,c.answers->>'tp_first_name' first_name,c.answers->>'tp_last_name' last_name,q.exit_form from public.cases c join public.reviewer_questionnaires q on q.case_id=c.id where c.id=$1",
+          "select c.season,c.client_number,c.answers->>'tp_first_name' first_name,c.answers->>'tp_last_name' last_name,c.answers->>'sp_first_name' sp_first_name,c.answers->>'sp_last_name' sp_last_name,q.exit_form from public.cases c join public.reviewer_questionnaires q on q.case_id=c.id where c.id=$1",
           [sample.id],
         );
         const wrongFont = { on: false };
@@ -2899,8 +3199,11 @@ async function runPermutation(t, roles) {
                 headers: { "content-type": "font/ttf", "access-control-allow-origin": "*" },
                 body: wrongFont.on ? Buffer.from("not the pinned font") : bytes,
               });
-            await staff.route(url, handler);
-            fontRoutes.push([url, handler]);
+            // Both windows this phase presses in: the Reviewer's and the Site Coordinator's.
+            for (const page of [roleWins.reviewer.page, roleWins.siteCoordinator.page]) {
+              await page.route(url, handler);
+              fontRoutes.push([page, url, handler]);
+            }
           }
           const press = async () => {
             await revealCaseControl(staff, '[data-action="view-exit-form"]');
@@ -2911,7 +3214,7 @@ async function runPermutation(t, roles) {
           };
 
           // The reviewer opens it: one page, the case's own header and amount.
-          await choosePersona(staff, morgan);
+          await use("reviewer");
           await openBoard(staff, WORK_BOARD_HEADING);
           await openCaseByReference(staff, sample.reference);
           const popup = await press();
@@ -2921,7 +3224,11 @@ async function runPermutation(t, roles) {
           for (const wanted of [
             String(expected.season),
             String(expected.client_number),
-            `${expected.first_name} ${expected.last_name}`,
+            // The class case is a married couple's, so the Exit Form names
+            // both, as src/exit-form.mjs joins them.
+            expected.sp_first_name
+              ? `${expected.first_name} ${expected.last_name} & ${expected.sp_first_name} ${expected.sp_last_name}`
+              : `${expected.first_name} ${expected.last_name}`,
             `$${expected.exit_form.federal.amount}`,
           ])
             assert.ok(strings.includes(wanted), `the Exit Form does not print ${JSON.stringify(wanted)}: ${JSON.stringify(strings)}`);
@@ -2936,7 +3243,7 @@ async function runPermutation(t, roles) {
 
           // The office's form can't be made: the tab and the error notice say so,
           // and Try again makes it once the cause is gone.
-          await choosePersona(staff, sam);
+          await use("siteCoordinator");
           await openBoard(staff, OFFICE_BOARD_HEADING);
           await openCaseByReference(staff, sample.reference);
           wrongFont.on = true;
@@ -3016,7 +3323,7 @@ async function runPermutation(t, roles) {
           };
         } finally {
           await staff.evaluate(() => { if (window.__vitallyOpen) window.open = window.__vitallyOpen; }).catch(() => {});
-          for (const [url, handler] of fontRoutes) await staff.unroute(url, handler).catch(() => {});
+          for (const [page, url, handler] of fontRoutes) await page.unroute(url, handler).catch(() => {});
         }
       }
       evidence.story.exitForm = exitForm;
@@ -3026,13 +3333,13 @@ async function runPermutation(t, roles) {
     await phase("the office records signing and e-filing, and the client sees each step", async () => {
       // The class case's approval settled the reviewer's call itself, so the
       // office never records one; its go-over task holds the signature back
-      // until it is resolved. The review_approved sample is seeded as a
+      // until it is resolved. The seeded review_approved case is a
       // questionnaire Yes approval, so its row offers the mark.
       const approved = await caseById(fixture, classCase.id);
       assert.equal(approved.stage, "review_approved");
       assert.equal(await eventCount(fixture, classCase.id, "RECORD_REVIEW_CONTACT"), 0);
-      const callPending = samples.find((row) => row.fixture_key === "review_approved");
-      assert.ok(callPending, "the review_approved sample is missing");
+      const callPending = seeded.review_approved;
+      assert.ok(callPending, "the seeded review_approved case is missing");
       // The dialogs name the client as the case page does: first and last name.
       const clientName = [approved.answers?.tp_first_name, approved.answers?.tp_last_name]
         .map((part) => String(part ?? "").trim())
@@ -3086,10 +3393,10 @@ async function runPermutation(t, roles) {
           ARRIVAL_MS,
         );
 
-      await choosePersona(staff, sam);
+      await use("siteCoordinator");
       await openBoard(staff, OFFICE_BOARD_HEADING);
 
-      // ---- The review_approved sample: its call is settled, nothing to go over
+      // ---- The seeded review_approved case: its call is settled, nothing to go over
       const pendingRow = queueRow("signing", callPending.reference);
       await pendingRow.waitFor({ state: "visible", timeout: RENDER_MS });
       assert.equal(
@@ -3103,7 +3410,7 @@ async function runPermutation(t, roles) {
       );
 
       // ---- A Yes approval is not held up: the short case may be marked now --
-      const shortCase = samples.find((row) => row.fixture_key === "review_ready");
+      const shortCase = seeded.review_ready;
       const shortRow = queueRow("signing", shortCase.reference);
       await shortRow.waitFor({ state: "visible", timeout: RENDER_MS });
       assert.equal(
@@ -3306,8 +3613,8 @@ async function runPermutation(t, roles) {
       );
       const efiled = await caseById(fixture, classCase.id);
       assert.equal(efiled.stage, "efiled");
-      assert.equal(efiled.preparer_id, alex);
-      assert.equal(efiled.reviewer_id, morgan);
+      assert.equal(efiled.preparer_id, preparerId);
+      assert.equal(efiled.reviewer_id, reviewerId);
       assert.equal(await eventCount(fixture, classCase.id, "MARK_EFILED"), 1);
       await toastSaid("Marked e-filed. The client was told.");
       assert.equal(
@@ -3575,16 +3882,16 @@ async function runPermutation(t, roles) {
     const draftWin = await openWindow(clientEngine);
 
     await phase("two simultaneous claims leave exactly one owner", async () => {
-      const target = samples.find((row) => row.fixture_key === "preparation_ready");
+      const target = seeded.preparation_ready;
+      // A second window of the Preparer's own account.
       await loginTestUser({
         page: staffB.page,
-        actor: presenter,
+        actor: fixture.actor("preparer"),
         fixture,
         heading: WORK_BOARD_HEADING,
       });
       await watchAlerts(staffB.page);
-      await choosePersona(staffB.page, alex);
-      await choosePersona(staff, alex);
+      await use("preparer");
       await openBoard(staff, WORK_BOARD_HEADING);
       await openCaseByReference(staff, target.reference);
       await openCaseByReference(staffB.page, target.reference);
@@ -3621,8 +3928,8 @@ async function runPermutation(t, roles) {
         [true, true],
         "both windows must press their own claim for this to be a race",
       );
-      await waitForDetail(staff, "Preparer", "Alex");
-      await waitForDetail(staffB.page, "Preparer", "Alex");
+      await waitForDetail(staff, "Preparer", ROLE_NAMES.preparer);
+      await waitForDetail(staffB.page, "Preparer", ROLE_NAMES.preparer);
       const said = await Promise.all(
         windows.map(async (page, index) =>
           ((await readAlerts(page)) ?? []).slice(mark[index]),
@@ -3690,7 +3997,7 @@ async function runPermutation(t, roles) {
           caseId: classCase.id,
           revision: 1,
           type: "CLAIM_PREPARATION",
-          personId: alex,
+          personId: preparerId,
         }),
       );
       assert.ok(forged.error, "another applicant acted on a case that is not theirs");
@@ -3716,7 +4023,7 @@ async function runPermutation(t, roles) {
           actionId,
           caseId: classCase.id,
           revision: Number(current.revision),
-          personId: sam,
+          personId: siteCoordinatorId,
           type: "VERIFY_INTAKE",
           payload: {
             // The class case is not an online one, so the three checks.
@@ -3902,13 +4209,13 @@ async function runPermutation(t, roles) {
       );
       evidence.regressions.saveAndReturn =
         "saved, signed out, signed back in, reopened from the list with the same answers";
-      // Left on the sub-step the reset phase reads a field from.
+      // Left on the sub-step the second seed run's phase reads a field from.
     });
 
     await phase("a dialog takes the keyboard and gives it back", async () => {
       // Run while the client window is quiet: a dialog is about the keyboard,
       // and a page that is rebuilding itself is a different question (see the
-      // reset phase below, which measures exactly that).
+      // second seed run's phase below, which measures exactly that).
       const where = () =>
         client.evaluate(() => ({
           inModal: Boolean(document.activeElement?.closest(".modal")),
@@ -3985,7 +4292,7 @@ async function runPermutation(t, roles) {
           .filter(
             (child) =>
               !child.inert &&
-              !["modal-backdrop", "connection-notice", "notice-banner", "problem-banner"].some((name) =>
+              !["modal-backdrop", "connection-notice", "problem-banner"].some((name) =>
                 child.classList.contains(name),
               ),
           )
@@ -4143,8 +4450,8 @@ async function runPermutation(t, roles) {
       // this window has open (also on its board), from outside the window.
       // Delegated listeners on root never see events from the removed nodes,
       // so the peek's pointer zone stays "sidebar".
-      const bumped = samples.find((row) => row.fixture_key === "preparation_ready");
-      assert.ok(bumped, "the preparation_ready sample is missing");
+      const bumped = seeded.preparation_ready;
+      assert.ok(bumped, "the seeded preparation_ready case is missing");
       await waitForQuiet(staff);
       await staff.evaluate(() => document.querySelector("#main")?.setAttribute("data-peek-marker", "1"));
       await fixture.database.sql("update public.cases set revision = revision + 1 where id=$1", [bumped.id]);
@@ -4263,7 +4570,7 @@ async function runPermutation(t, roles) {
     });
 
     await phase("the office takes in a walk-in client's application and its document", async () => {
-      await choosePersona(staff, sam);
+      await use("siteCoordinator");
       await openBoard(staff, OFFICE_BOARD_HEADING);
       await clickAction(staff, "open-add-case");
       await staff.locator("#add-case-v2-form").waitFor({ state: "visible", timeout: RENDER_MS });
@@ -4472,9 +4779,9 @@ async function runPermutation(t, roles) {
       await staff.locator('.add-case-side button[data-case-action="RECORD_MATERIALS"]').click({ timeout: CLICK_MS });
       await waitFor(
         staff,
-        "the photo ID recorded by Sam",
-        () => /Recorded by Sam/.test(document.querySelector('label[for="field-materials-photo_id"]')?.textContent ?? ""),
-        undefined,
+        "the photo ID recorded by the Site Coordinator",
+        (name) => (document.querySelector('label[for="field-materials-photo_id"]')?.textContent ?? "").includes(`Recorded by ${name}`),
+        ROLE_NAMES.siteCoordinator,
         ARRIVAL_MS,
       );
       assert.deepEqual(
@@ -4610,11 +4917,11 @@ async function runPermutation(t, roles) {
         onAssisted,
       );
 
-      await choosePersona(staff, alex);
+      await use("preparer", assistedReference);
       await act(
         staff,
         "CLAIM_PREPARATION",
-        { detail: { label: "Preparer", value: "Alex" } },
+        { detail: { label: "Preparer", value: ROLE_NAMES.preparer } },
         onAssisted,
       );
       await actForm(
@@ -4628,7 +4935,7 @@ async function runPermutation(t, roles) {
         onAssisted,
       );
 
-      await choosePersona(staff, sam);
+      await use("siteCoordinator", assistedReference);
       await waitForText(staff, "Documents the office took in", RENDER_MS);
       await act(
         staff,
@@ -4646,45 +4953,60 @@ async function runPermutation(t, roles) {
         filename: SAMPLE_DOCUMENT_FILENAME,
       });
 
-      await choosePersona(staff, alex);
+      await use("preparer", assistedReference);
       await act(staff, "VERIFY_DOCUMENT", { badge: "Verified" }, onAssisted);
       await shoot(staff, "office-board-assisted");
       evidence.regressions.assistedReceipt =
         "created, submitted, verified intake, claimed, requested, staff-recorded, verified";
     });
 
-    await phase("two presenter windows in one browser keep their own persona", async () => {
+    await phase("two windows of one staff account in one browser keep their own place", async () => {
       // English, as every context but the Chinese phase's (spec 2026-10-05 §6).
       const context = await staffEngine.browser.newContext({ viewport: DESKTOP, locale: "en-US" });
       try {
+        const preparerActor = fixture.actor("preparer");
         const tabOne = await openTab(context, fixture.appOrigin);
         await loginTestUser({
           page: tabOne.page,
-          actor: presenter,
+          actor: preparerActor,
           fixture,
           heading: WORK_BOARD_HEADING,
         });
         // The same account, the same origin, the same storage: a second window.
         const tabTwo = await openTab(context, fixture.appOrigin);
         await waitForText(tabTwo.page, WORK_BOARD_HEADING, ARRIVAL_MS);
-        await choosePersona(tabOne.page, alex);
-        await choosePersona(tabTwo.page, morgan);
-        await openCaseByReference(tabTwo.page, classReference);
+        // Each window on a case of its own: the class case on Overview in the
+        // first, the seeded review_ready case on History in the second.
+        const other = seeded.review_ready.reference;
+        await openCaseByReference(tabOne.page, classReference);
+        await openCaseByReference(tabTwo.page, other);
+        await openCaseTab(tabTwo.page, "history");
         await tabOne.page.reload();
         await tabTwo.page.reload();
-        await waitForText(tabOne.page, WORK_BOARD_HEADING, ARRIVAL_MS);
-        await waitForCaseWorkspace(tabTwo.page, classReference);
-        assert.equal(await readPersona(tabOne.page), alex);
-        assert.equal(await readPersona(tabTwo.page), morgan);
-        assert.equal(
-          await tabOne.page.locator("#case-title").count(),
-          0,
-          "the first window followed the second one into a case",
+        await waitForCaseWorkspace(tabOne.page, classReference, ARRIVAL_MS);
+        await waitForCaseWorkspace(tabTwo.page, other, ARRIVAL_MS);
+        const place = async (page) => {
+          const shown = await page.evaluate(() => ({
+            title: document.querySelector("#case-title")?.textContent.trim() ?? null,
+            tab: document.querySelector('.case-tab[aria-selected="true"]')?.dataset.value ?? null,
+          }));
+          const stored = await readWindowState(page, preparerActor.userId);
+          return { ...shown, selectedCaseId: stored?.selectedCaseId ?? null, caseTab: stored?.caseTab ?? null };
+        };
+        assert.deepEqual(
+          await place(tabOne.page),
+          { title: classReference, tab: "overview", selectedCaseId: classCase.id, caseTab: "overview" },
+          "the first window followed the second one into its case",
         );
-        assertConsoleQuiet(tabOne, { name: "presenter tab 1" });
-        assertConsoleQuiet(tabTwo, { name: "presenter tab 2" });
-        evidence.windowIsolation.presenterTabs =
-          "one BrowserContext, one account, two personas and two places, each surviving its own reload";
+        assert.deepEqual(
+          await place(tabTwo.page),
+          { title: other, tab: "history", selectedCaseId: seeded.review_ready.id, caseTab: "history" },
+          "the second window followed the first one into its case",
+        );
+        assertConsoleQuiet(tabOne, { name: "Preparer tab 1" });
+        assertConsoleQuiet(tabTwo, { name: "Preparer tab 2" });
+        evidence.windowIsolation.staffTabs =
+          "one BrowserContext, one staff account, two cases and two tabs, each surviving its own reload";
       } finally {
         await context.close();
       }
@@ -4753,10 +5075,27 @@ async function runPermutation(t, roles) {
       }
     });
 
-    await phase("a reset rebuilds the samples and leaves the class's own work alone", async () => {
-      const before = await fixtureCases(fixture);
+    await phase("a second seed run replaces its set and leaves the class's own work alone", async () => {
+      // Everything in the workspace no seed run made: the class's own cases
+      // and help requests, which the second run must leave as they are.
+      const firstRun = Object.values(seeded).map((row) => row.id);
+      const notSeeded = async (caseIds, helpIds) => ({
+        cases: (
+          await fixture.database.sql(
+            "select id,reference,stage,owner_user_id from public.cases where workspace_id=$1 and not (id = any($2::uuid[])) order by id",
+            [fixture.database.workspaceId, caseIds],
+          )
+        ).rows,
+        help: (
+          await fixture.database.sql(
+            "select id,status from public.assistance_items where workspace_id=$1 and not (id = any($2::uuid[])) order by id",
+            [fixture.database.workspaceId, helpIds],
+          )
+        ).rows,
+      });
+      const othersBefore = await notSeeded(firstRun, [seededHelpId]);
       // Two things this phase asserts about the client window while somebody
-      // else rebuilds the sample cases underneath it. Both were defects this
+      // else replaces the seeded cases underneath it. Both were defects this
       // story found; both are fixed, and this is what pins them (Ruling R65).
       //
       // (1) A refusal the person has not dismissed. The save below is refused
@@ -4770,31 +5109,46 @@ async function runPermutation(t, roles) {
       const refusalBefore = await alertText(client);
       assert.ok(refusalBefore, "the refused save said nothing at all");
       await clientWin.context.unroute(apiTraffic, refuse);
-      // (2) Where the keyboard is when the rebuild arrives.
+      // (2) Where the keyboard is when the replacement arrives.
       await client.locator('[data-action="open-help"]').first().focus();
-      await choosePersona(staff, sam);
-      await openBoard(staff, OFFICE_BOARD_HEADING);
-      const indicator = await resetSampleCases(staff);
-      const after = await fixtureCases(fixture);
-      assert.equal(after.length, 10);
+      // The seed again, on the same workspace and run directory as the first
+      // run: it removes exactly the eleven cases that run recorded and builds
+      // a fresh set.
+      const result = await runSeed();
+      assert.equal(result.casesRemoved, 11, "the second seed run removed another set than the first run's");
+      assert.equal(result.casesCreated, 11);
+      const fresh = await seededCases(result);
       assert.equal(
-        after.filter((row) => before.some((old) => old.id === row.id)).length,
+        Object.values(fresh).filter((row) => firstRun.includes(row.id)).length,
         0,
-        "a reset kept an old sample case id",
+        "the second seed run kept a case id of the first",
+      );
+      assert.equal(
+        Number(
+          (
+            await one(fixture, "select count(*)::int as count from public.cases where id = any($1::uuid[])", [firstRun])
+          ).count,
+        ),
+        0,
+        "a case of the first seed run is still there",
       );
       assert.deepEqual(
-        after.map((row) => row.fixture_key).sort(),
-        before.map((row) => row.fixture_key).sort(),
+        await notSeeded(Object.values(fresh).map((row) => row.id), [result.assistanceId]),
+        othersBefore,
+        "the second seed run changed something its run file does not list",
       );
+      // From here on the story works with the second run's cases.
+      seeded = fresh;
+      seededHelpId = result.assistanceId;
       const kept = await caseById(fixture, classCase.id);
       assert.equal(kept.reference, classReference);
       assert.equal(kept.owner_user_id, applicantA.userId);
-      // Taken through filing by the office earlier in the story; a reset leaves it there.
+      // Taken through filing by the office earlier in the story; a seed run leaves it there.
       assert.equal(kept.stage, "accepted");
       // Both measurements are about what the *client* window does when the
       // change reaches it, so they wait for the sign that it has: the refused
       // save left the connection notice on screen, and the re-read that
-      // handles the reset is what takes it away again.
+      // handles the replacement is what takes it away again.
       const reconnected = await client
         .waitForFunction(
           () =>
@@ -4806,9 +5160,11 @@ async function runPermutation(t, roles) {
         )
         .then(() => true)
         .catch(() => false);
-      const reset = {
-        indicator,
+      const rerun = {
+        casesRemoved: result.casesRemoved,
+        casesCreated: result.casesCreated,
         keptClassCase: "same reference, same owner, same stage",
+        keptOthers: `${othersBefore.cases.length} cases and ${othersBefore.help.length} help requests not in the run file, unchanged`,
         clientRecovered: reconnected,
         keyboardBeforeSharedUpdate: "open-help",
         keyboardAfterSharedUpdate: await client.evaluate(
@@ -4820,26 +5176,26 @@ async function runPermutation(t, roles) {
         refusalBefore,
         refusalAfter: await alertText(client),
       };
-      reset.refusalKept = reset.refusalAfter === refusalBefore;
-      evidence.regressions.reset = reset;
-      // Both checks below are about what the reset did to the client window,
-      // so they mean nothing until the reset has reached it. This is the sign
+      rerun.refusalKept = rerun.refusalAfter === refusalBefore;
+      evidence.regressions.secondSeed = rerun;
+      // Both checks below are about what the seed run did to the client
+      // window, so they mean nothing until it has reached it. This is the sign
       // that it did: the connection notice the refused save left behind is
-      // gone, which only the re-read that handles the reset can do.
+      // gone, which only the re-read that handles the change can do.
       assert.equal(
-        reset.clientRecovered,
+        rerun.clientRecovered,
         true,
-        "the client window never re-read after the reset, so the checks below prove nothing",
+        "the client window never re-read after the second seed run, so the checks below prove nothing",
       );
       assert.equal(
-        reset.keyboardAfterSharedUpdate,
-        reset.keyboardBeforeSharedUpdate,
+        rerun.keyboardAfterSharedUpdate,
+        rerun.keyboardBeforeSharedUpdate,
         "a shared update took the keyboard away from the control it was on",
       );
       assert.equal(
-        reset.refusalKept,
+        rerun.refusalKept,
         true,
-        `a refusal nobody had dismissed was changed by a background update: ${JSON.stringify(reset.refusalAfter)}`,
+        `a refusal nobody had dismissed was changed by a background update: ${JSON.stringify(rerun.refusalAfter)}`,
       );
       // The client's own window still lists their own application, unchanged.
       await clickAction(client, "open-applications");
@@ -4848,17 +5204,19 @@ async function runPermutation(t, roles) {
 
     // D5 on the board: a claim unlocks the row's phone where the claimer is
     // looking, with no reload. A board claim moves the claiming window to the
-    // case, so a second window of the same persona watches the row; it finds
+    // case, so a second window of the same account watches the row; it finds
     // the case by search, which spans every stage, so the row stays listed
     // when the claim moves it off the Available tab.
     await phase("a claim unlocks the phone on the board in another window", async () => {
-      const target = (await fixtureCases(fixture)).find((row) => row.fixture_key === "preparation_ready");
-      assert.ok(target, "the preparation_ready sample is missing");
+      // The first run's preparation_ready case was claimed in the race above,
+      // so the unclaimed one is the second seed run's.
+      const target = seeded.preparation_ready;
+      assert.ok(target, "the second seed run's preparation_ready case is missing");
+      assert.equal((await caseById(fixture, target.id)).stage, "preparation_ready");
       const maskId = `board-phone-${target.id}`;
       const watcher = await openWindow(staffEngine);
-      await loginTestUser({ page: watcher.page, actor: presenter, fixture, heading: WORK_BOARD_HEADING });
+      await loginTestUser({ page: watcher.page, actor: fixture.actor("preparer"), fixture, heading: WORK_BOARD_HEADING });
       await watchAlerts(watcher.page);
-      await choosePersona(watcher.page, alex);
       await openBoard(watcher.page);
       await findOnBoard(watcher.page, target.reference);
       const rowMask = (page) =>
@@ -4887,8 +5245,8 @@ async function runPermutation(t, roles) {
       assert.doesNotMatch(before.html, SAMPLE_PHONE, "a locked row carries the number");
       assert.doesNotMatch(before.html, /2155550\d\d\d/, "a locked row carries the stored number");
 
-      // 2. Alex claims from the board in the other window.
-      await choosePersona(staff, alex);
+      // 2. The Preparer claims from the board in their other window.
+      await use("preparer");
       await openBoard(staff);
       await findOnBoard(staff, target.reference);
       await waitForQuiet(staff);
@@ -4973,7 +5331,7 @@ async function runPermutation(t, roles) {
       await watcher.context.close();
     });
 
-    // After the reset, which compares case sets. The case it makes is never
+    // After the second seed run, which compares case sets. The case it makes is never
     // opened on a staff screen.
     //
     // Typing rule: text goes in with `fill`, or `focus` then the keyboard.
@@ -6939,7 +7297,7 @@ async function runPermutation(t, roles) {
       const reference = evidence.story.chinese.reference;
       holdCase = await caseByReference(fixture, reference);
       assert.equal(holdCase.stage, "received");
-      await choosePersona(staff, sam);
+      await use("siteCoordinator");
       await openBoard(staff, OFFICE_BOARD_HEADING);
       await openCaseByReference(staff, reference);
       await waitForBadge(staff, "Screening in progress");
@@ -7073,9 +7431,9 @@ async function runPermutation(t, roles) {
     });
 
     await phase("the office closes a Hold from a Follow-ups row and filters the Closed tab by reason", async () => {
-      const onHold = (await fixtureCases(fixture)).find((row) => row.fixture_key === "on_hold");
-      const withdrawnSample = (await fixtureCases(fixture)).find((row) => row.fixture_key === "withdrawn");
-      assert.ok(onHold && withdrawnSample, "the on_hold or withdrawn sample is missing");
+      const onHold = seeded.on_hold;
+      const withdrawnSample = seeded.withdrawn;
+      assert.ok(onHold && withdrawnSample, "the seeded on_hold or withdrawn case is missing");
       await openBoard(staff, OFFICE_BOARD_HEADING);
       await openFromRow("hold", onHold.reference, "open-close-case", "#field-close-close-note");
       // Other needs a note: the dialog refuses without one.
@@ -7140,10 +7498,15 @@ async function runPermutation(t, roles) {
     await phase("a claimed case is withdrawn by the client, and the office is told", async () => {
       const reference = evidence.story.chinese.reference;
       const page = hansWin.page;
-      await choosePersona(staff, alex);
+      await use("preparer");
       await openBoard(staff, WORK_BOARD_HEADING);
       await openCaseByReference(staff, reference);
-      await act(staff, "CLAIM_PREPARATION", { detail: { label: "Preparer", value: "Alex" } }, { caseId: holdCase.id });
+      await act(
+        staff,
+        "CLAIM_PREPARATION",
+        { detail: { label: "Preparer", value: ROLE_NAMES.preparer } },
+        { caseId: holdCase.id },
+      );
       assert.equal(await stageOf(holdCase.id), "preparing");
       await hansStatus(page, describeStage("preparing", hansLang).clientMessage, "the status to read Preparing in 简体");
 
@@ -7190,12 +7553,12 @@ async function runPermutation(t, roles) {
       );
 
       // The office: Closed · Withdrawn in the pool, and the notice in Follow-ups.
-      await choosePersona(staff, sam);
+      await use("siteCoordinator");
       await openBoard(staff, OFFICE_BOARD_HEADING);
       const notice = officeRow("withdrawn", reference);
       await notice.waitFor({ state: "visible", timeout: RENDER_MS });
       const told = (await notice.locator(".queue-needed").innerText()).trim();
-      assert.match(told, /^The client withdrew; tell Alex.* to stop work\.$/);
+      assert.equal(told, `The client withdrew; tell ${ROLE_NAMES.preparer} to stop work.`);
       await clickAction(staff, "open-cases");
       await waitForText(staff, "Case pool", RENDER_MS);
       await showPoolTab("closed");
@@ -7261,13 +7624,13 @@ async function runPermutation(t, roles) {
     });
 
     await phase("season-end close: the unsigned cases are closed as Dismissed, and the rest are left alone", async () => {
-      await choosePersona(staff, sam);
+      await use("siteCoordinator");
       await openBoard(staff, OFFICE_BOARD_HEADING);
-      await resetSampleCases(staff);
-      const fresh = await fixtureCases(fixture);
-      const held = fresh.find((row) => row.fixture_key === "review_approved");
-      const returned = fresh.find((row) => row.fixture_key === "rejected");
-      assert.ok(held && returned, "the review_approved or rejected sample is missing");
+      // The seeded review_approved and rejected cases, as they are now: no
+      // earlier phase moved either.
+      const held = await caseById(fixture, seeded.review_approved.id);
+      const returned = await caseById(fixture, seeded.rejected.id);
+      assert.ok(held && returned, "the seeded review_approved or rejected case is missing");
       assert.equal(held.stage, "review_approved");
       assert.equal(returned.stage, "rejected");
 
@@ -7426,7 +7789,8 @@ async function runPermutation(t, roles) {
     // person, work one case in two engines. Neither chooses a persona; the
     // server names whoever is signed in, and the independence rule holds
     // between the accounts. Last before the console check, so the two new
-    // people in the roster reach no earlier phase.
+    // people in the roster reach no earlier phase (the contact log's own
+    // admin, Quinn Harper, is the only other person added to it).
     await phase("two staff accounts work one case, each signed in as themselves", async () => {
       // A call made from this test process (not a page wait, which has its
       // own timeout) has no timeout of its own; a stuck one fails here by
@@ -7460,14 +7824,10 @@ async function runPermutation(t, roles) {
       const caseId = await within("building a case ready for preparation", fixture.database.readyCase());
       const { reference } = await caseById(fixture, caseId);
 
-      // The presenter's own screens are as they were (A presenter's screens
-      // are unchanged): the picker, the reset and the checkpoints.
-      for (const action of ["select-person", "open-reset-fixtures", "open-checkpoint"])
-        assert.ok(
-          (await staff.locator(`[data-action="${action}"]`).count()) > 0,
-          `the presenter window lost its ${action} control`,
-        );
-      assert.equal(await readSignedInAs(staff), null, "the presenter window reads as a staff account");
+      // The presenter's window still shows the plain screen (a presenter
+      // gets the plain message), and reads as no staff account.
+      await assertPresenterScreen(presenterPage);
+      assert.equal(await readSignedInAs(presenterPage), null, "the presenter window reads as a staff account");
 
       const rileyWin = await openWindow(staffEngine);
       const jordanWin = await openWindow(clientEngine);
@@ -7475,7 +7835,7 @@ async function runPermutation(t, roles) {
       const jordan = jordanWin.page;
       try {
         // A leftover persona: this window's storage says Sam before Riley
-        // signs in, as a presenter window acting as Sam would have left it.
+        // signs in, as a presenter window acting as Sam used to leave it.
         await riley.evaluate(
           ([key, personId]) => sessionStorage.setItem(key, JSON.stringify({ selectedPersonId: personId })),
           [fixture.sessionStateKey(rileyAccount.userId), sam],
@@ -7506,7 +7866,12 @@ async function runPermutation(t, roles) {
             `${name}'s window shows a presenter control`,
           );
         }
-        assert.equal(await readPersona(riley), null);
+        // No persona button is pressed in Riley's window.
+        assert.equal(
+          await riley.locator('[data-action="select-person"][aria-pressed="true"]').count(),
+          0,
+          "Riley's window acts as a persona",
+        );
         // The stored persona was never restored, and is not written back.
         assert.equal(
           (await readWindowState(riley, rileyAccount.userId))?.selectedPersonId,
@@ -7552,6 +7917,51 @@ async function runPermutation(t, roles) {
         assert.equal((await caseById(fixture, caseId)).preparer_id, rileyAccount.personId);
         // Live updates: the claim reaches Jordan's board without a reload.
         await jordanRow("Riley Park");
+
+        // The shaded section, as a staff account (#103): its tools once did
+        // nothing for one while every presenter run passed. A field is as tall
+        // as its cell: the page's field rule once made one 44px, and the text
+        // typed in it landed on the row below.
+        const rowOneChild = riley.locator(
+          '.shaded-editor [name="form1[0].page1[0].namesOf[0].Row1[0].qualifyingChildDependent[0]"]',
+        );
+        const rileyEditorButton = (which) => riley.locator(`.shaded-editor [data-editor="${which}"]`);
+        await openCaseTab(riley, "intake");
+        await waitForQuiet(riley);
+        await riley.locator('#case-panel-intake [data-action="open-shaded-editor"]').click({ timeout: CLICK_MS });
+        await riley.locator('.shaded-editor[data-ready="true"]').waitFor({ timeout: ARRIVAL_MS });
+        await rowOneChild.fill("Yes");
+        const rowOneHeights = await rowOneChild.evaluate((input) => ({
+          input: input.getBoundingClientRect().height,
+          cell: input.closest("section").getBoundingClientRect().height,
+        }));
+        assert.ok(
+          Math.abs(rowOneHeights.input - rowOneHeights.cell) <= 1,
+          `a shaded field is not as tall as its cell: ${JSON.stringify(rowOneHeights)}`,
+        );
+        await rileyEditorButton("save").click({ timeout: CLICK_MS });
+        await waitFor(
+          riley,
+          "Saved in Riley's editor",
+          () => document.querySelector(".shaded-editor #shaded-editor-status")?.textContent.trim() === "Saved",
+          undefined,
+          ARRIVAL_MS,
+        );
+        assert.deepEqual(
+          (
+            await fixture.database.sql("select fields,version from public.preparer_shaded_fields where case_id=$1", [caseId])
+          ).rows.map((row) => ({ fields: row.fields, version: Number(row.version) })),
+          [{ fields: { household1QualifyingChild: "yes" }, version: 1 }],
+        );
+        await rileyEditorButton("close").click({ timeout: CLICK_MS });
+        await waitFor(
+          riley,
+          "Riley's editor to close",
+          () => !document.querySelector(".shaded-editor") && !document.querySelector("#app").inert,
+          undefined,
+          ARRIVAL_MS,
+        );
+
         await actQuestionnaire(
           riley,
           "SUBMIT_REVIEW",
@@ -7704,23 +8114,20 @@ async function runPermutation(t, roles) {
         assertConsoleQuiet(rileyWin, { name: "Riley's staff window", allow: REFUSAL_LINES });
         assertConsoleQuiet(jordanWin, { name: "Jordan's staff window", allow: REFUSAL_LINES });
         evidence.story.staffAccounts =
-          "Riley Park (prepare, review) and Jordan Lee (review) signed in through the real form in two engines; Signed in as, no presenter controls; a leftover Sam persona ignored; Riley prepared, Jordan's board followed live, Riley's own review refused (SELF_REVIEW), Jordan claimed and approved; history, receipts and events name each";
+          "Riley Park (prepare, review) and Jordan Lee (review) signed in through the real form in two engines; Signed in as, no presenter controls; a leftover Sam persona ignored; the presenter window on the plain screen before and after a reload; Riley prepared and filled the shaded section in the editor, a field as tall as its cell; Jordan's board followed live, Riley's own review refused (SELF_REVIEW), Jordan claimed and approved; history, receipts and events name each";
       } finally {
         await rileyWin.context.close();
         await jordanWin.context.close();
       }
-      // The two accounts' people are claimed now, so a presenter's picker (read
-      // again on a reload) offers neither: choosing one could only be refused.
-      await staff.reload();
-      await staff.locator('[data-action="select-person"]').first().waitFor({ timeout: ARRIVAL_MS });
-      const claimed = await staff.evaluate(() =>
-        [...document.querySelectorAll('[data-action="select-person"]')].map((button) => button.textContent),
-      );
-      assert.ok(claimed.length > 0, "the presenter's picker emptied");
+      // Read again on a reload, the presenter's window is still the plain
+      // screen: nothing there offers the two accounts' people, or anyone.
+      await presenterPage.reload();
+      await assertPresenterScreen(presenterPage);
+      await watchAlerts(presenterPage);
       for (const name of ["Riley Park", "Jordan Lee"])
         assert.ok(
-          !claimed.some((text) => text.includes(name)),
-          `the presenter's picker still offers ${name}`,
+          !(await presenterPage.locator("#app").innerText()).includes(name),
+          `the presenter window names ${name}`,
         );
     });
 
@@ -7737,6 +8144,12 @@ async function runPermutation(t, roles) {
           name: "staff window",
           allow: REFUSAL_LINES,
         }),
+        ...Object.fromEntries(
+          ROLES.map((role) => [
+            role,
+            assertConsoleQuiet(roleWins[role], { name: `${role} staff window`, allow: REFUSAL_LINES }),
+          ]),
+        ),
         clientB: assertConsoleQuiet(clientB, {
           name: "second applicant window",
           allow: REFUSAL_LINES,
@@ -7764,6 +8177,13 @@ async function runPermutation(t, roles) {
       evidence.alerts = {
         client: client ? await readAlerts(client) : null,
         staff: staff ? await readAlerts(staff) : null,
+        ...(roleWins
+          ? Object.fromEntries(
+              await Promise.all(
+                Object.entries(roleWins).map(async ([role, win]) => [role, await readAlerts(win.page).catch(() => null)]),
+              ),
+            )
+          : {}),
       };
       if (classCase) evidence.classCase = await caseById(fixture, classCase.id);
     } catch (error) {
@@ -7772,6 +8192,7 @@ async function runPermutation(t, roles) {
     // The one place the whole record is printed, and so the one place worth
     // masking as a whole: anything read off a page reaches this line.
     t.diagnostic(redactAddresses(`evidence ${JSON.stringify(evidence)}`));
+    if (seedRunDir) await rm(seedRunDir, { recursive: true, force: true }).catch(() => {});
     await fixture.close();
   }
 }

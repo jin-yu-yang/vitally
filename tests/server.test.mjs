@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { readdirSync } from "node:fs";
-import { createAppServer } from "../server.mjs";
+import { createAppServer, publicConfig, demoToolsIgnored } from "../server.mjs";
 
 // A configured environment carrying one extra secret, so every response can be
 // checked for leaking it. The values are fictional.
@@ -105,16 +105,17 @@ test("serves the pdf.js vendor files", async () => {
   });
 });
 
-test("the public config carries the four documented keys and nothing else", async () => {
+test("the public config carries the four documented keys, plus demoTools only when switched on locally", async () => {
+  const FOUR = [
+    "authResendCooldownSeconds",
+    "configured",
+    "supabasePublishableKey",
+    "supabaseUrl",
+  ];
   await withServer(CONFIGURED, async (port) => {
     const response = await request(port, "/public-config.json");
     const config = JSON.parse(response.body);
-    assert.deepEqual(Object.keys(config).toSorted(), [
-      "authResendCooldownSeconds",
-      "configured",
-      "supabasePublishableKey",
-      "supabaseUrl",
-    ]);
+    assert.deepEqual(Object.keys(config).toSorted(), FOUR);
     assert.deepEqual(config, {
       configured: true,
       supabaseUrl: CONFIGURED.SUPABASE_URL,
@@ -122,6 +123,26 @@ test("the public config carries the four documented keys and nothing else", asyn
       authResendCooldownSeconds: 65,
     });
   });
+  const on = publicConfig({ ...CONFIGURED, VITALLY_DEMO_TOOLS: "1" });
+  assert.deepEqual(Object.keys(on).toSorted(), [...FOUR, "demoTools"].toSorted());
+  assert.equal(on.demoTools, true);
+  assert.equal(demoToolsIgnored({ ...CONFIGURED, VITALLY_DEMO_TOOLS: "1" }), false);
+  const word = publicConfig({ ...CONFIGURED, VITALLY_DEMO_TOOLS: "true" });
+  assert.equal("demoTools" in word, false);
+  const hosted = {
+    ...CONFIGURED,
+    SUPABASE_URL: "https://abcd.supabase.co",
+    VITALLY_DEMO_TOOLS: "1",
+  };
+  assert.equal("demoTools" in publicConfig(hosted), false);
+  assert.equal(demoToolsIgnored(hosted), true);
+  assert.deepEqual(
+    publicConfig({
+      SUPABASE_URL: CONFIGURED.SUPABASE_URL,
+      VITALLY_DEMO_TOOLS: "1",
+    }),
+    { configured: false },
+  );
 });
 
 test("an unconfigured server starts and reports the absence", async () => {

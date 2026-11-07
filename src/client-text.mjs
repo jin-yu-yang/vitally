@@ -16,7 +16,7 @@ export const TEXT = Object.freeze({
   "frame.help": { en: "Need help?", zh: "需要帮助？" },
   "frame.save_exit": { en: "Save & exit", zh: "保存并退出" },
   "frame.sign_out": { en: "Sign out", zh: "退出登录" },
-  // The connection, notice and problem banners (views.mjs)
+  // The connection and problem banners (views.mjs)
   "frame.reconnecting": { en: "The connection dropped and is being retried. What you see may be out of date, and actions cannot be confirmed until it is back.", zh: "连接中断了，正在重试。您看到的内容可能不是最新的，连接恢复前无法确认任何操作。" },
   "frame.offline": { en: "No connection to the server. You can read this page, but nothing can be saved or sent until the connection returns.", zh: "无法连接到服务器。您可以阅读此页，但连接恢复前无法保存或发送任何内容。" },
   "frame.try_again": { en: "Try again", zh: "再试一次" },
@@ -474,23 +474,15 @@ export const SENTENCES = Object.freeze({
   "Sign-in could not be completed. Please try again.": "无法完成登录。请再试一次。",
   // controller.mjs: the sign-in fallback when an error carries no message
   "Sign-in could not be completed.": "无法完成登录。",
-  // controller.mjs: the conflict messages a client sees, and the notices (*_NOTICE)
+  // controller.mjs: the conflict messages a client sees
   "Someone else changed this application. The newest version is shown — check it and try again.": "其他人修改了这份申请。现在显示的是最新版本，请检查后再试一次。",
   "Someone else changed this application while you were editing. Choose which answers to keep.": "您编辑期间，其他人修改了这份申请。请选择要保留哪些回答。",
-  "Sample cases were reset.": "示例申请已重置。",
-  "Sample cases were reset. The one you had open is no longer there.": "示例申请已重置。您刚才打开的那一份已不存在。",
   // controller.mjs: controllerError sentences (several are staff-only; they cost nothing)
   "Only a volunteer can start an assisted application.": "只有志愿者才能开始协助申请。",
-  "Choose a volunteer persona to act as.": "请选择要扮演的志愿者身份。",
   "Open an application first.": "请先打开一份申请。",
   "This application changed again. Check the newest values and choose once more.": "这份申请又有了变化。请查看最新内容后再选择一次。",
   "This step is not available.": "无法进行这一步。",
   "This request is no longer on screen.": "这项请求已不在页面上。",
-  "This checkpoint is not available.": "无法使用这个检查点。",
-  "This sample case is no longer on screen.": "这份示例申请已不在页面上。",
-  "Checkpoints belong to the sample cases only.": "只有示例申请才有检查点。",
-  "Only the person running the session can reset the sample cases.": "只有本场演示的负责人才能重置示例申请。",
-  "Only the person running the session can load a checkpoint.": "只有本场演示的负责人才能载入检查点。",
   // The application history: every client_events sentence the migrations write (spec §3.3);
   // the request line ("A volunteer requested a document: …") is historyLine's
   "Application received. A volunteer will check your information and documents.": "已收到申请。志愿者会核对您的信息和文件。",

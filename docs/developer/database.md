@@ -18,14 +18,13 @@ it. Run everything described here against the local stack from [`docs/setup.md`]
 - [Check order and error codes](#check-order-and-error-codes)
 - [Concurrency and idempotency](#concurrency-and-idempotency)
 - [Realtime](#realtime)
-- [Sample cases, reset and checkpoints (demo only)](#sample-cases-reset-and-checkpoints-demo-only)
 - [Changing the database](#changing-the-database)
 - [Recipes](#recipes)
 - [Testing](#testing)
 
 ## Migrations
 
-The schema is thirty-nine plain SQL files in [`supabase/migrations/`](../../supabase/migrations/), applied
+The schema is forty-one plain SQL files in [`supabase/migrations/`](../../supabase/migrations/), applied
 in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 
 | File | Adds |
@@ -69,6 +68,8 @@ in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 | `037_adjust_filing_to_pcdc.sql` | Hand-written: a paper return is "given to the client" at `MARK_EFILED` (stored result `given_to_client`, no date; the old `mailed` is renamed and its date dropped); all four federal/state method pairs are allowed; `RECORD_FILING_RESULT` takes e-filed returns only and `MARK_EFILED` moves the case straight to `accepted` when no e-filed return waits; the client line of `MARK_READY_TO_EFILE` no longer names Form 8879; the new RPC `vitally_close_unsigned`; the `rejected` sample's fix note is the site coordinator's |
 | `038_staff_identity.sql` | Hand-written: the `staff` membership access and `people.user_id`, with a commit-time check that links them; `vitally_private.acting_person`, which the six entry points that take a person now call first; `staff` accepted wherever staff behaviour is decided (21 policies, `lock_case`, `lock_assistance_item`, `contact_person`, `check_operation_authority`'s guard, assisted mode and the two contact-log checks); the private `add_staff_member` and `set_default_followup`; `initialize_workspace` re-runs once staff exist. The header holds the inventory of every `'presenter'` check and what was decided for each |
 | `039_preparer_shaded_fields.sql` | Hand-written: the shaded section of Form 13614-C, filled by the case's preparer: the staff-only `preparer_shaded_fields` table (one row per case, in the Realtime publication), `vitally_private.check_preparer_fields`, and the `SAVE_PREPARER_FIELDS` action with its version guard; the sample cases that have a preparer questionnaire get a fictional shaded row |
+| `040_remove_sample_case_tools.sql` | Hand-written: the sample cases, the reset and checkpoint functions and their helpers, `vitally_private.fixture_client_bindings`, `cases.fixture`, `cases.fixture_key`, `assistance_items.fixture`, `workspaces.fixture_generation` and `action_receipts.generation` are removed; `origin` accepts only `client` and `assisted`; `initialize_workspace` loses its bindings parameter. No `CASCADE`: each dependent is dropped or rewritten by name |
+| `041_resolve_go_over_during_hold.sql` | Hand-written: `act_resolve_followup` copied from 033; resolving a `go_over_return` task while the case is `on_hold` with `hold_origin = 'review_approved'` also switches `signing_plan` to the reviewer's method, as at Ready to exit (#171) |
 **Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
 never edit an applied one.** The build writes a file only when the hash differs from the newest
 catalogue migration's. The hash covers the catalogue and `LOADER_VERSION` in
@@ -105,36 +106,36 @@ catalogue migration's. The hash covers the catalogue and `LOADER_VERSION` in
   Only migrations not yet on `main` may be changed; never 001–014.
 
 Later migrations replace earlier functions with `create or replace`. When you need the current
-version of a function, use the **last** file that defines it:
+version of a function, use the **last** file that defines it. Migration 040 dropped the sample
+functions (`seed_fixtures`, `apply_fixture_scenario`, `fixture_history`, `fixture_answers_v2`,
+`fixture_contact_v2`, `fixture_keys`, `checkpoint_scenario`), `new_reference`,
+`backfill_client_numbers` and `version_one_blocks`, `version_one_disposable`, `version_one_blockers`;
+do not copy them from older files:
 
 | Function | Current definition |
 | --- | --- |
-| `public.vitally_apply_action`, `vitally_private.check_operation_authority`, `check_payload`, `apply_fixture_scenario`, `check_preparer_fields`, `act_save_preparer_fields` | `039_preparer_shaded_fields.sql` |
+| `public.vitally_apply_action`, `vitally_private.check_operation_authority`, `check_payload`, `check_preparer_fields`, `act_save_preparer_fields` | `039_preparer_shaded_fields.sql` |
 | `vitally_private.acting_person`, `check_staff_links`, `add_staff_member`, `set_default_followup` | `038_staff_identity.sql` |
-| `vitally_private.lock_case`, `lock_assistance_item`, `contact_person`, `initialize_workspace` | `038_staff_identity.sql` |
+| `vitally_private.lock_case`, `lock_assistance_item`, `contact_person` | `038_staff_identity.sql` |
+| `vitally_private.filing_notes_append_only`, `reserve_receipt`, `initialize_workspace` (without the bindings parameter), `public.vitally_create_case` (answers must be `{}`) | `040_remove_sample_case_tools.sql` |
 | `public.vitally_log_contact`, `vitally_edit_contact` | `038_staff_identity.sql` |
 | `vitally_private.check_authority`, `receive_document`, `act_verify_document` | `036_hold_and_closing.sql` |
 | `vitally_private.act_verify_intake` | `034_screening_checks.sql` |
-| `vitally_private.act_submit_review`, `act_resubmit_review`, `act_approve_review`, `act_resolve_followup` | `033_review_questionnaires.sql` |
+| `vitally_private.act_submit_review`, `act_resubmit_review`, `act_approve_review` | `033_review_questionnaires.sql` |
+| `vitally_private.act_resolve_followup` | `041_resolve_go_over_during_hold.sql` |
 | `vitally_private.check_related`, `act_save_answers` | `023_remove_intake_v1.sql` |
 | `vitally_private.put_intake_field`, `load_intake_catalogue`, `check_intake_value` | `015_intake_loader.sql` |
 | `vitally_private.commit_action` | `008_case_timestamps.sql` |
-| `public.vitally_create_case` (answers must be `{}`) | `038_staff_identity.sql` |
 | `vitally_private.cases_intake_version_insert` | `023_remove_intake_v1.sql` |
 | `vitally_private.act_update_contact` | `023_remove_intake_v1.sql` |
 | `vitally_private.act_submit`, `act_start_screening` | `032_screening_and_efiling_stages.sql` |
 | `vitally_private.act_close_case` | `036_hold_and_closing.sql` |
 | `vitally_private.act_request_documents_at_intake`, `act_put_on_hold`, `act_resume_from_hold`, `act_withdraw` | `036_hold_and_closing.sql` |
-| `vitally_private.act_mark_ready_to_efile`, `fixture_history`, `act_mark_efiled`, `act_record_filing_result`, `filing_line`, `efiled_line` | `037_adjust_filing_to_pcdc.sql` |
+| `vitally_private.act_mark_ready_to_efile`, `act_mark_efiled`, `act_record_filing_result`, `filing_line`, `efiled_line` | `037_adjust_filing_to_pcdc.sql` |
 | `vitally_private.act_return_to_signing` | `035_post_efiling_stages.sql` |
 | `public.vitally_close_unsigned` | `038_staff_identity.sql` |
-| `vitally_private.version_one_blocks`, `version_one_disposable`, `version_one_blockers` | `023_remove_intake_v1.sql` |
 | `vitally_private.load_intake_catalogue`, `check_intake_value`, `intake_holds`, `intake_missing` | `011_intake_v2.sql` |
 | `vitally_private.works_on_case` | `013_contact_materials.sql` |
-| `vitally_private.fixture_answers_v2` | `036_hold_and_closing.sql` |
-| `vitally_private.fixture_contact_v2` | `019_fixtures_v2.sql` |
-| `vitally_private.fixture_keys` | `036_hold_and_closing.sql` |
-| `vitally_private.seed_fixtures` | `023_remove_intake_v1.sql` |
 | `public.vitally_assistance_action` | `038_staff_identity.sql` |
 
 To list every function with its file and line:
@@ -184,10 +185,10 @@ erDiagram
 
 | Table | Purpose | Notable columns and rules |
 | --- | --- | --- |
-| `workspaces` | One site's data set | `default_followup_person_id` (who gets escalations), `fixture_generation` (moves on every sample reset), `current_season` (010), `default_intake_version` (011; new cases take it; default 2 since 020, and only 2 since 023) |
+| `workspaces` | One site's data set | `default_followup_person_id` (who gets escalations), `current_season` (010), `default_intake_version` (011; new cases take it; default 2 since 020, and only 2 since 023) |
 | `memberships` | Account access to a workspace | `access` is `applicant`, `presenter` or `staff` (038); `active`; **one active membership per account** (unique index). A `staff` membership has exactly one linked `people` row |
 | `people` | Staff members | `person_key` (`alex`, `morgan`, `sam`, or a roster staff member's own key), `name`, `capabilities` from `prepare`, `review`, `admin`, `followup`, `receive_documents`, `assist`, `user_id` (038; the staff account that is this person, null for the three demo personas; unique per workspace; composite foreign key to `memberships(workspace_id, user_id)`) |
-| `cases` | One client application | `reference` (`VT-XXXX-XXXX`, unique), `origin` (`client`, `assisted`, `fixture`), `owner_user_id` (the client account; null for assisted and unbound sample cases), `answers` (JSON object: the catalogue ids with structured values: strings, arrays, household member objects; never the contact fields), `stage`, `revision`, `preparation_version`, `intake_verified`, `preparer_id`, `reviewer_id`, `last_reminded_*`, `created_at`, `updated_at`, `season` and `client_number` (010; assigned on submit, never changed), `intake_version` (011; copied from the workspace on insert, never changed; only 2 since 023), `intake_visited` (017; the sub-steps the client has opened, a union of what each save sends), `signing_plan` and `signing_appointment_at` (033; the only part of a questionnaire a client reads: how and when to sign), `federal_method` and `state_method` (035; `efile` or `paper`; both null or any of the four pairs, 037), `federal_result` and `state_result` (035; `accepted` or `rejected` for an e-filed return, `given_to_client` (037, was `mailed`) for a paper one; null until its method is set and answered). A client reads these four columns and nothing else about a filing, `documents_origin` and `hold_origin` (036; the stage a documents request came from and the case returns to, `screening` or `preparation_ready`, and where a hold came from, `awaiting_documents` or `review_approved`; both null otherwise, and both cleared when the case returns), `closing_reason` (036; one of `out_of_scope`, `no_need_to_file`, `duplicate`, `dismissed`, `withdrawn`, `other`; null for a case closed before 036 and for any open case. A client reads the reason's key and never a note) |
+| `cases` | One client application | `reference` (`VT-XXXX-XXXX`, unique), `origin` (`client`, `assisted`), `owner_user_id` (the client account; null for assisted cases), `answers` (JSON object: the catalogue ids with structured values: strings, arrays, household member objects; never the contact fields), `stage`, `revision`, `preparation_version`, `intake_verified`, `preparer_id`, `reviewer_id`, `last_reminded_*`, `created_at`, `updated_at`, `season` and `client_number` (010; assigned on submit, never changed), `intake_version` (011; copied from the workspace on insert, never changed; only 2 since 023), `intake_visited` (017; the sub-steps the client has opened, a union of what each save sends), `signing_plan` and `signing_appointment_at` (033; the only part of a questionnaire a client reads: how and when to sign), `federal_method` and `state_method` (035; `efile` or `paper`; both null or any of the four pairs, 037), `federal_result` and `state_result` (035; `accepted` or `rejected` for an e-filed return, `given_to_client` (037, was `mailed`) for a paper one; null until its method is set and answered). A client reads these four columns and nothing else about a filing, `documents_origin` and `hold_origin` (036; the stage a documents request came from and the case returns to, `screening` or `preparation_ready`, and where a hold came from, `awaiting_documents` or `review_approved`; both null otherwise, and both cleared when the case returns), `closing_reason` (036; one of `out_of_scope`, `no_need_to_file`, `duplicate`, `dismissed`, `withdrawn`, `other`; null for a case closed before 036 and for any open case. A client reads the reason's key and never a note) |
 | `action_receipts` | One row per accepted or in-flight action | Unique `(workspace_id, actor_user_id, action_id)`; `request_digest` (SHA-256 of the envelope); `receipt` (the stored result). No foreign key to the target, so receipts outlive deleted cases |
 | `preparation_participants` | Who ever prepared a case | Primary key `(case_id, person_id)`. Written on a preparation claim and never removed. Blocks self-review |
 | `document_requests` | A preparer asking for a document | `status`: `open` → `awaiting_verification` → `verified`, or `cancelled` on closure |
@@ -204,13 +205,12 @@ erDiagram
 | `preparer_shaded_fields` | The shaded section of Form 13614-C (039) | One row per case (`case_id` unique): `fields` (a flat, sparse JSON object keyed by the 106 field keys of `src/shaded-fields.mjs`; blank means absent), `version` (counts saves, from 1), `updated_by_person_id`. A check constraint runs `check_preparer_fields`. Staff-only (033's select, widened to `staff` as 038 widened the others, and never a client's unsent draft); written only by SAVE_PREPARER_FIELDS; published to Realtime |
 | `filing_attempts` | One row per filing of a case (035) | Unique `(case_id, attempt)`; `filed_at`, `filed_by`. Staff-only (013's presenter-only select); written only by MARK_EFILED; not in the Realtime publication, so a `cases` update triggers the staff reload |
 | `filing_returns` | The federal and the state return of one attempt (035) | Unique `(case_id, attempt, return_kind)`; `method`, `result`, `answered_on` (the acknowledgment date; null for a return given to the client), `reject_code` (1–40 characters), `recorded_by`. Staff-only; written by MARK_EFILED and RECORD_FILING_RESULT; not in the publication. A reject code never reaches a client |
-| `filing_notes` | What the office fixed after a rejection (035) | `case_id`, `attempt`, `note` (1–1000), `recorded_by`, `recorded_at`. Staff-only, **append-only**: a `before update or delete` trigger refuses any change, the service role included. Two exceptions: a note goes with its whole case (a sample reset, or a case or workspace delete), and a sample's checkpoint reload clears the notes of that one sample case. Written by RECORD_FILING_RESULT's `fixNote`; not in the publication |
+| `filing_notes` | What the office fixed after a rejection (035) | `case_id`, `attempt`, `note` (1–1000), `recorded_by`, `recorded_at`. Staff-only, **append-only**: a `before update or delete` trigger refuses any change, the service role included. One exception: a note goes with its whole case (a case or workspace delete). Written by RECORD_FILING_RESULT's `fixNote`; not in the publication |
 | `case_document_cards` | The state of a version-2 case's document cards | Primary key `(case_id, slot_id)`; `status` is `later`, `none`, or null for "Not done"; `group_override` is null or `needed` (staff moved a Maybe card up). One row per card someone has marked; written only by SET_DOCUMENT_CARD and SET_DOCUMENT_GROUP; never deleted. **No person column**: the client reads these rows and Realtime sends them whole; who changed a card is in `case_events`. Published to Realtime (insert and update) |
 | `vitally_private.intake_fields` | The version-2 question catalogue | Private; one row per question and per household sub-field (`hh.dob`), with type, options, required flag and show-if rule. Loaded (replaced whole) by each catalogue migration through `load_intake_catalogue`; read by the server-side answer checks. It holds no wording |
 | `vitally_private.intake_substeps` | The version-2 sub-steps, in order | Private; one row per catalogue sub-step (id, step, position), loaded with the catalogue through 015's `load_intake_catalogue`; read by SAVE_ANSWERS' `visited` check |
 | `assistance_items` | Requests for help with forms, beside the tax workflow | Own `revision`; `status`: `open` → `assigned` → `resolved`; optional `case_id`; `language`, `contact_preference` |
 | `vitally_private.schema_migrations` | Migration ledger | `name`, `digest` (SHA-256 of the file) |
-| `vitally_private.fixture_client_bindings` | Which client account owns which sample case | Demo only |
 | `vitally_private.test_workspaces` | Workspaces created by test runs | Test only |
 
 Every text column has a length check, and every status column has an allowed-values check. To see
@@ -279,8 +279,6 @@ caller itself, and returns a JSON receipt.
 | `vitally_assistance_action(p_action_id uuid, p_item_id uuid, p_expected_revision bigint, p_person_id uuid, p_type text, p_note text)` | `CLAIM` or `RESOLVE` an assistance item | `{actionId, itemId, revision}` |
 | `vitally_log_contact(p_action_id uuid, p_case_id uuid, p_person_id uuid, p_followup_id uuid, p_entry jsonb)` | Log a contact on a case, optionally linked to an open follow-up task | `{actionId, contactId, caseId, revision}` |
 | `vitally_edit_contact(p_action_id uuid, p_contact_id uuid, p_expected_revision bigint, p_person_id uuid, p_entry jsonb)` | Edit a logged contact; appends a version | `{actionId, contactId, caseId, revision}` |
-| `vitally_reset_fixtures(p_action_id uuid)` | Demo only: rebuild the ten sample cases | `{actionId, generation, fixtureCaseIds}` |
-| `vitally_load_checkpoint(p_action_id uuid, p_case_id uuid, p_expected_revision bigint, p_checkpoint text)` | Demo only: move one sample case to a story point | `{actionId, caseId, reference, revision}` |
 | `vitally_close_unsigned(p_action_id uuid, p_person_id uuid, p_cases jsonb, p_confirmed boolean)` | Season end (037): close the listed signing cases as Dismissed, all or nothing ([below](#season-end-close)) | `{actionId, cases: [{caseId, reference, revision}]}` |
 
 `p_person_id` is the staff person the caller acts as. Applicants must send `null`. Presenters send
@@ -312,8 +310,7 @@ contact log all name the staff member's own person.
 | `staff` | anyone else | `FORBIDDEN` |
 
 A presenter cannot act as a staff member's person: otherwise presenter mode would be a way around
-real identity in a workspace that has both. `vitally_reset_fixtures` and `vitally_load_checkpoint`
-stay presenter-only; a staff account gets `FORBIDDEN`. (`seed_fixtures` is private: no browser role can call it.)
+real identity in a workspace that has both.
 
 **The link.** `people.user_id` joins a person to the `staff` account that is that person (unique per
 workspace; the demo personas stay null). A deferred constraint trigger,
@@ -461,7 +458,7 @@ admin-only actions and one submit rule shape the earlier stages:
   Any rejected return moves the case to `rejected`; every e-filed return accepted moves it to
   `accepted`; otherwise it stays at `efiled`. At `rejected` it stays offered while a return is
   still waiting. A fix note (`fixNote`) is allowed only when the case is, or becomes, `rejected`.
-  A case e-filed before 035 has null methods and is treated as both e-filed. A paper return filed under 035 that still waits for a result (no result) is left as it is, and a sample reset clears it.
+  A case e-filed before 035 has null methods and is treated as both e-filed. A paper return filed under 035 that still waits for a result (no result) is left as it is.
 - `RETURN_TO_SIGNING` moves `rejected` to `review_approved`, and is refused until every return has
   an answer. The methods and results are kept: "returned to signing" is `review_approved` with
   `federal_method` set, so no preparation or review pass repeats and the client signs again.
@@ -491,7 +488,7 @@ shorthands in the table:
 | `VERIFY_DOCUMENT` | Presenter + person | `preparing`, `corrections_required` | Current preparer; request `awaiting_verification` | Request → `verified` | Yes |
 | `ESCALATE_CONTACT` | Presenter + person | `preparing`, `corrections_required` | Current preparer; request `open`; no open task | Follow-up assigned to the workspace's default follow-up person | No |
 | `RECORD_CONTACT` | Presenter + `followup` person | (any; task must be open) | Assignee; task `open` | Refused since 031 (`VALIDATION`); contacts are logged with `vitally_log_contact` | No |
-| `RESOLVE_FOLLOWUP` | Presenter + `followup` person | (any; task must be open) | Assignee; task `open` | Task → `resolved`; (033) a `go_over_return` task also turns the case's `go_over_first` signing plan into the reviewer's signing method | No |
+| `RESOLVE_FOLLOWUP` | Presenter + `followup` person | (any; task must be open) | Assignee; task `open` | Task → `resolved`; (033) a `go_over_return` task also turns the case's `go_over_first` signing plan into the reviewer's signing method, (041) also while the case is on a Hold from `review_approved` | No |
 | `SUBMIT_REVIEW` | Presenter + person | `preparing` | Current preparer; intake verified; no unsettled request | Version + 1; → `review_ready`; active review superseded | Yes |
 | `CLAIM_REVIEW` | Presenter + person | `review_ready`, no reviewer | Not a participant (`SELF_REVIEW`); `review` | → `reviewing`; sets reviewer; new `active` review | Yes |
 | `REQUEST_CORRECTIONS` | Presenter + person | `reviewing` | Current reviewer; review at current version | Review → `corrections_requested` with findings; → `corrections_required`; reviewer cleared | Yes (no findings) |
@@ -583,7 +580,6 @@ The browser side is in [Front end](frontend.md#the-shaded-section-of-the-13614-c
 - **History.** `case_events` records `SAVE_PREPARER_FIELDS` with `detail.changed`, the sorted keys
   whose value differs from before (never the values) and `detail.version`. The staff history shows
   the field labels. No `client_events` row is written, so a client sees nothing.
-- **Fixtures.** See [Sample cases](#sample-cases-reset-and-checkpoints-demo-only).
 
 ## Season-end close
 
@@ -646,8 +642,6 @@ stage. It lives beside the case workflow, not inside it:
   cannot write to the retired table. It stays in the action list because removing it would mean
   redefining the shared action code. A replay of an old accepted request still returns its receipt,
   since receipts are checked before the handler. The reviewer's `RECORD_REVIEW_CONTACT` is separate and unchanged.
-- **Sample cases.** The `admin_followup` fixture seeds a linked log entry instead of an attempt
-  (see [Sample cases](#sample-cases-reset-and-checkpoints-demo-only)).
 
 The screens are described in [Front end: the contact log](frontend.md#the-contact-log).
 
@@ -692,8 +686,8 @@ exceptions from an application path; the browser would show them as `SERVER_ERRO
   with the same digest returns the stored receipt without re-running anything, even if the case
   was deleted since. The same id with a different digest is `VALIDATION`.
 - **Nothing partial.** Any raise rolls back the whole call, including the receipt reservation.
-- **Workspace setup and reset** take a transaction-scoped advisory lock per workspace, so two
-  presenters resetting at once serialize instead of colliding.
+- **Workspace setup** takes a transaction-scoped advisory lock per workspace, so two setups at once
+  serialize instead of colliding.
 
 ## Realtime
 
@@ -711,37 +705,9 @@ changed" hints and re-reads. If you add a table the browser should watch, add it
 publication in a new migration **and** to `SUBSCRIBED_TABLES` in
 [`src/supabase-store.mjs`](../../src/supabase-store.mjs); a test asserts the two lists match.
 
-## Sample cases, reset and checkpoints (demo only)
+## Sample cases (removed)
 
-Migration 009 seeds six sample cases, one per story point (`preparation_ready`,
-`waiting_documents`, `admin_followup`, `review_ready`, `corrections_required`,
-`review_approved`), with fictional answers and history. Migration 035 adds two more, `rejected`
-(both returns e-filed, federal accepted, state rejected, with a fictional reject code and fix
-note) and `accepted` (both e-filed, both accepted), so a reset seeds eight. Each has its own
-filing attempt and return rows. Migration 036 adds `on_hold` (a documents hold with a note) and
-`withdrawn` (closed by the client), so a reset now seeds ten.
-
-- **Reset** (`vitally_reset_fixtures`, presenters only) deletes only rows marked `fixture`,
-  increments `workspaces.fixture_generation`, and reseeds. Class-created cases, accounts, people
-  and receipts are untouched. Reseeded cases get new ids and references.
-- **Checkpoint** (`vitally_load_checkpoint`, presenters only) rewrites one sample case's workflow
-  records to a named story point: `intake_ready`, `document_requested`, `admin_followup_needed`,
-  `ready_for_review`, `corrections_required`. The case keeps its id, reference and owner.
-- **Bindings** (`vitally_private.fixture_client_bindings`) let a client account own a sample case
-  after every reset. The roster command sets them from `sampleCaseOwners`.
-- **The samples are version 2** (019; 023 removed 009's version-1 samples). Each is inserted
-  empty (011's insert trigger allows nothing else), then gets its answers from `fixture_answers_v2` and a `case_contacts` row from
-  `fixture_contact_v2` (phones `2155550101`–`06`, best time weekday evenings) before its scenario
-  is applied. Their household member carries a fixed `member_id`. 023 deleted every version-1
-  sample and seeds nothing itself: a workspace has no samples again until the next reset.
-- **The shaded section on the samples (039).** Each sample that has a preparer questionnaire also gets a `preparer_shaded_fields` row (version 1, saved by Alex) with fictional values: a W-2 and a 1099-INT with counts, the standard deduction, an income note, and the first household row's five cells when the sample has a household member. A reset or a checkpoint deletes the case's shaded row with its other workflow records, then seeds it again where the scenario has one.
-- **A checkpoint clears office work on the sample:** its `case_materials` and
-  `case_document_cards` rows go with the rest of its workflow records; its `case_contacts` row stays.
-- **A reset or checkpoint clears the sample's contact log** with the rest of its work (031 redefines
-  `apply_fixture_scenario`, copied whole from 019). The `admin_followup` scenario seeds one linked
-  log entry (Sam, outgoing, phone, no answer) where it used to seed a `contact_attempts` row.
-
-None of this belongs in production. See the [roadmap](production-roadmap.md#5-demo-only-parts).
+Migration 040 (#135) removed the sample cases, the presenter reset, the checkpoints and the client bindings. A workspace starts with no cases; rehearsal cases come from `npm run seed:local` (see [Back end](backend.md)). Migrations 009 to 039 above still describe how the sample machinery was built.
 
 ## Changing the database
 
@@ -847,7 +813,7 @@ and a case is created with no answers (`vitally_create_case` refuses any other `
 
 ## Testing
 
-The database suite (`tests/database*.mjs`, 434 tests) runs against the local stack only. Each test
+The database suite (`tests/database*.mjs`, 441 tests) runs against the local stack only. Each test
 file builds a throwaway workspace with fresh synthetic accounts through
 [`tests/support/database-fixture.mjs`](../../tests/support/database-fixture.mjs) and deletes it
 afterwards, so tests are independent and leave your rehearsal workspace alone.
@@ -861,12 +827,11 @@ What the suite covers, by file:
 | `database-documents.mjs` | Requests, responses, verification, follow-up tasks |
 | `database-assistance.mjs` | Assistance items, reminders, closure |
 | `database-review.mjs` | Review, corrections, independence, reassignment |
-| `database-fixtures.mjs` | Sample seeding, reset, checkpoints |
 | `database-client-numbers.mjs` | Client numbers: assignment on submit, seasons, no reuse, the backfill |
 | `database-intake.mjs` | Intake versions, the catalogue load, version-2 saves and submits, contact details, materials, and the browser-against-database comparison of every check |
 | `database-redesign.mjs` | Visits, `case_document_cards` and the two card actions (017), and who may mark and move cards (018) |
-| `database-intake-default.mjs` | The column default, new applications on version 2, version-2 samples, and a checkpoint that clears materials and card marks (019) |
-| `database-intake-v1-removed.mjs` | Migration 023: the guard's predicates and count, every workspace on 2, both `CHECK`s refusing 1, an application's fixed version, a create that carries answers refused, the dropped functions, and a reset's eight version-2 samples |
+| `database-intake-default.mjs` | The column default, new applications on version 2, the seed's answers passing the field checks, and version-2 round trips (019, 020) |
+| `database-intake-v1-removed.mjs` | Migration 023: the guard's predicates and count, every workspace on 2, both `CHECK`s refusing 1, an application's fixed version, a create that carries answers refused, the dropped functions, and the seed's submitted case (no screening detail in its submit history) |
 | `database-season-close.mjs` | `vitally_close_unsigned`: closing signing cases as Dismissed, all or nothing, refusals, replay, the receipt, and that unlisted cases are left alone |
 | `database-realtime.mjs` | Realtime privacy between clients and for staff tables |
 | `database-store.mjs` | The browser's data adapter against the real database |

@@ -1,7 +1,7 @@
 # shaded-section Specification
 
 ## Purpose
-The preparer's part of Form 13614-C, the shaded section "To be completed by certified volunteer": its 106 fields and the values each one allows, who may save it and at which stages, how a save replaces the section and how a stale save is refused, the staff history line that names the changed fields, the editing copy and the two ways to fill it (the editor on the case page, and download and upload), who can read the saved values (staff only), and the fictional samples.
+The preparer's part of Form 13614-C, the shaded section "To be completed by certified volunteer": its 106 fields and the values each one allows, who may save it and at which stages, how a save replaces the section and how a stale save is refused, the staff history line that names the changed fields, the editing copy and the two ways to fill it (the editor on the case page, and download and upload), and who can read the saved values (staff only).
 
 ## Requirements
 
@@ -200,10 +200,3 @@ The shaded-section editor SHALL support Chrome and Edge 125 or later, Firefox ES
 #### Scenario: The editor can't load
 - **WHEN** the editor's files fail to load after the preparer presses "Fill the shaded section"
 - **THEN** the case page says the editor couldn't open and to use "Download to fill elsewhere", and the download and upload tools are still offered
-
-### Requirement: Sample cases carry a fictional shaded section
-Every sample case that is seeded with a preparer questionnaire SHALL also be seeded with a fictional saved shaded section that follows every rule above. No sample case SHALL show the preparer's "I have completed the shaded parts" beside an empty section.
-
-#### Scenario: A sample case at Pending review
-- **WHEN** a workspace's sample cases are seeded
-- **THEN** the sample case at Pending review has a saved shaded section, and its staff draft shows those values

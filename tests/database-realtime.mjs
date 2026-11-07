@@ -178,12 +178,12 @@ const assertHealthy = (...watches) => {
 
 async function preparedCase(f, client) {
   const created = await f.draftCase(client);
-  await f.act(client, created.caseId, null, "SUBMIT", { confirmed: true });
-  await f.act(f.presenter, created.caseId, f.sam, "START_SCREENING", {});
-  await f.act(f.presenter, created.caseId, f.sam, "VERIFY_INTAKE", {
+  await f.act(client, created.caseId, "SUBMIT", { confirmed: true });
+  await f.act(f.siteCoordinator, created.caseId, "START_SCREENING", {});
+  await f.act(f.siteCoordinator, created.caseId, "VERIFY_INTAKE", {
     checks: f.intakeChecks,
   });
-  await f.act(f.presenter, created.caseId, f.alex, "CLAIM_PREPARATION", {});
+  await f.act(f.preparer, created.caseId, "CLAIM_PREPARATION", {});
   return created.caseId;
 }
 
@@ -191,7 +191,7 @@ async function preparedCase(f, client) {
 // in the message the client is allowed to read.
 async function openRequest(f, owner) {
   const text = marker();
-  await f.act(f.presenter, owner.caseId, f.alex, "REQUEST_DOCUMENT", {
+  await f.act(f.preparer, owner.caseId, "REQUEST_DOCUMENT", {
     title: "Mileage record",
     message: text,
   });
@@ -205,7 +205,7 @@ async function openRequest(f, owner) {
 }
 
 async function respondTo(f, owner, requestId) {
-  await f.act(owner.client, owner.caseId, null, "RESPOND_DOCUMENT", {
+  await f.act(owner.client, owner.caseId, "RESPOND_DOCUMENT", {
     requestId,
     filename: f.sampleFilename,
   });
@@ -248,7 +248,7 @@ const MATRIX = Object.freeze([
     markerOf: (row) => row.answers?.addr_city,
     commit: async (f, owner) => {
       const text = marker();
-      const receipt = await f.act(owner.client, owner.draftId, null, "SAVE_ANSWERS", {
+      const receipt = await f.act(owner.client, owner.draftId, "SAVE_ANSWERS", {
         answers: { addr_city: text },
       });
       return { id: owner.draftId, marker: text, revision: receipt.revision };
@@ -303,7 +303,7 @@ const MATRIX = Object.freeze([
     markerOf: (row) => row.message,
     commit: async (f, owner) => {
       const text = marker();
-      await f.act(f.presenter, owner.caseId, f.alex, "REQUEST_DOCUMENT", {
+      await f.act(f.preparer, owner.caseId, "REQUEST_DOCUMENT", {
         title: text,
         message: "Please add the fictional sample.",
       });
@@ -353,7 +353,7 @@ const INTERNAL = Object.freeze([
     identity: (row) => row.id,
     commit: async (f, owner) => {
       await f.sql("delete from public.preparer_shaded_fields where case_id=$1", [owner.caseId]);
-      await f.act(f.presenter, owner.caseId, f.alex, "SAVE_PREPARER_FIELDS", {
+      await f.act(f.preparer, owner.caseId, "SAVE_PREPARER_FIELDS", {
         basedOnVersion: 0,
         fields: { incomeW2s: true, incomeNotes: marker() },
       });
@@ -367,7 +367,7 @@ const INTERNAL = Object.freeze([
     table: "case_events",
     identity: (row) => row.id,
     commit: async (f, owner) => {
-      await f.act(f.presenter, owner.caseId, f.alex, "REQUEST_DOCUMENT", {
+      await f.act(f.preparer, owner.caseId, "REQUEST_DOCUMENT", {
         title: "Mileage record",
         message: marker(),
       });
@@ -385,8 +385,8 @@ const INTERNAL = Object.freeze([
     identity: (row) => `${row.case_id}:${row.person_id}`,
     commit: async (f) => {
       const caseId = await f.readyCase();
-      await f.act(f.presenter, caseId, f.alex, "CLAIM_PREPARATION", {});
-      return { id: `${caseId}:${f.alex}` };
+      await f.act(f.preparer, caseId, "CLAIM_PREPARATION", {});
+      return { id: `${caseId}:${f.preparerId}` };
     },
   },
   {
@@ -395,7 +395,7 @@ const INTERNAL = Object.freeze([
     commit: async (f, owner) => {
       const caseId = await preparedCase(f, owner.client);
       const request = await openRequest(f, { ...owner, caseId });
-      await f.act(f.presenter, caseId, f.alex, "ESCALATE_CONTACT", {
+      await f.act(f.preparer, caseId, "ESCALATE_CONTACT", {
         requestId: request.id,
         reason: "No response to the document request.",
       });
@@ -413,7 +413,7 @@ const INTERNAL = Object.freeze([
     commit: async (f, owner) => {
       const caseId = await preparedCase(f, owner.client);
       const request = await openRequest(f, { ...owner, caseId });
-      await f.act(f.presenter, caseId, f.alex, "ESCALATE_CONTACT", {
+      await f.act(f.preparer, caseId, "ESCALATE_CONTACT", {
         requestId: request.id,
         reason: "No response to the document request.",
       });
@@ -423,9 +423,8 @@ const INTERNAL = Object.freeze([
         ])
       ).rows;
       const { contactId } = await f.logContact(
-        f.presenter,
+        f.siteCoordinator,
         caseId,
-        f.sam,
         {
           ...SAMPLE_CONTACT(),
           outcome: "no_answer",
@@ -441,7 +440,7 @@ const INTERNAL = Object.freeze([
     identity: (row) => `${row.contact_id}:${row.version}`,
     commit: async (f, owner) => {
       const caseId = await preparedCase(f, owner.client);
-      const { contactId } = await f.logContact(f.presenter, caseId, f.alex, SAMPLE_CONTACT());
+      const { contactId } = await f.logContact(f.preparer, caseId, SAMPLE_CONTACT());
       return { id: `${contactId}:1` };
     },
   },
@@ -450,7 +449,7 @@ const INTERNAL = Object.freeze([
     identity: (row) => row.id,
     commit: async (f) => {
       const caseId = await f.preparedCase();
-      await f.act(f.presenter, caseId, f.morgan, "CLAIM_REVIEW", {});
+      await f.act(f.reviewer, caseId, "CLAIM_REVIEW", {});
       const [row] = (
         await f.sql("select id from public.reviews where case_id=$1", [caseId])
       ).rows;
@@ -474,7 +473,7 @@ const INTERNAL = Object.freeze([
     identity: (row) => row.id,
     commit: async (f) => {
       const caseId = await f.preparedCase();
-      await f.act(f.presenter, caseId, f.morgan, "CLAIM_REVIEW", {});
+      await f.act(f.reviewer, caseId, "CLAIM_REVIEW", {});
       const [review] = (
         await f.sql("select id from public.reviews where case_id=$1", [caseId])
       ).rows;
@@ -482,7 +481,7 @@ const INTERNAL = Object.freeze([
         await f.sql(
           `insert into public.reviewer_questionnaires(workspace_id,case_id,review_id,answered_by_person_id,completed_on,pa_forgiveness,went_over,sign_method,exit_form)
            values($1,$2,$3,$4,'2026-02-11','eligible',false,'portal','{"federal":null,"state":null,"local":[]}') returning id`,
-          [f.workspaceId, caseId, review.id, f.morgan],
+          [f.workspaceId, caseId, review.id, f.reviewerId],
         )
       ).rows;
       return { id: row.id };
@@ -556,7 +555,7 @@ test("Realtime carries one applicant's rows to that applicant only", async (t) =
     await withDeadline(keepalive.subscribed, "the keepalive channel never subscribed");
     // One repeatable change with a revision on it, so each attempt is its own.
     const saveFor = async (owner) => {
-      const receipt = await f.act(owner.client, owner.draftId, null, "SAVE_ANSWERS", {
+      const receipt = await f.act(owner.client, owner.draftId, "SAVE_ANSWERS", {
         answers: { addr_city: marker() },
       });
       return { id: receipt.caseId, revision: receipt.revision };
@@ -566,7 +565,7 @@ test("Realtime carries one applicant's rows to that applicant only", async (t) =
     // A private client draft is invisible to staff by design, so the keepalive
     // control moves a case the presenter may actually read.
     const bumpStaffCase = async (owner) => {
-      const receipt = await f.act(f.presenter, owner.caseId, f.alex, "REQUEST_DOCUMENT", {
+      const receipt = await f.act(f.preparer, owner.caseId, "REQUEST_DOCUMENT", {
         title: "Mileage record",
         message: marker(),
       });
@@ -789,14 +788,17 @@ test("Realtime carries one applicant's rows to that applicant only", async (t) =
             ["caseId", "eventType", "id", "table"],
             "a change carries identifiers only",
           );
-        // And the shared generation signal arrives as what it is: a workspace
-        // row moved, with no case behind it. This is what tells the browser to
-        // re-read its own lists after somebody resets the demonstration.
-        await f.seedFixtures();
+        // And a workspace update arrives as what it is: a workspace row moved,
+        // with no case behind it. This is what tells the browser to re-read
+        // its own lists when the office's settings change.
+        await f.sql(
+          "update public.workspaces set default_followup_person_id=default_followup_person_id where id=$1",
+          [f.workspaceId],
+        );
         const signal = await awaitChange(
           "A",
           (change) => change.table === "workspaces",
-          "the shared generation signal",
+          "the workspace update",
         );
         assert.deepEqual(signal, {
           table: "workspaces",
@@ -809,54 +811,53 @@ test("Realtime carries one applicant's rows to that applicant only", async (t) =
       }
     });
 
-    await t.test("the shared generation signal reaches every member", async () => {
+    await t.test("a workspace update reaches every member and carries nothing private", async () => {
       const bindings = [{ event: "UPDATE", table: "workspaces" }];
-      const staff = watchTable(f.presenter, bindings, "presenter/workspaces");
+      const staff = watchTable(f.siteCoordinator, bindings, "staff/workspaces");
       const client = watchTable(f.applicantA, bindings, "A/workspaces");
       try {
-        await withDeadline(staff.subscribed, "the presenter never subscribed");
+        await withDeadline(staff.subscribed, "the staff member never subscribed");
         await withDeadline(client.subscribed, "the applicant never subscribed");
-        // A reset is the only thing that moves the generation, and it is
-        // repeatable, so it is its own control.
-        const control = await controlUntilSeen(
+        // A settings column set to its own value: a real UPDATE of the
+        // workspace row that changes nothing, so it is repeatable and is its
+        // own control.
+        const ofWorkspace = (row) => row.id === f.workspaceId;
+        await controlUntilSeen(
           staff,
           async () => {
-            const receipt = await f.seedFixtures();
-            return { id: f.workspaceId, generation: Number(receipt.generation) };
+            await f.sql(
+              "update public.workspaces set default_followup_person_id=default_followup_person_id where id=$1",
+              [f.workspaceId],
+            );
+            return { id: f.workspaceId };
           },
-          (change) => (row) =>
-            row.id === change.id && Number(row.fixture_generation) === change.generation,
-          "the generation signal",
+          () => ofWorkspace,
+          "the workspace update",
         );
-        const generation = control.produced.at(-1).generation;
-        const onStaff = await staff.waitFor(
-          (row) => Number(row.fixture_generation) === generation,
-          `generation ${generation}`,
-        );
-        const onClient = await client.waitFor(
-          (row) => Number(row.fixture_generation) === generation,
-          `generation ${generation}`,
-        );
+        const onStaff = await staff.waitFor(ofWorkspace, "the workspace update on staff");
+        const onClient = await client.waitFor(ofWorkspace, "the workspace update on the client");
         // Both members get the same row, and the row says nothing private: a
-        // workspace id, the default follow-up person, a number, the
-        // current season, which is only a year (migration 010), and the
-        // intake version new cases take (migration 011).
+        // workspace id, the default follow-up person, the current season,
+        // which is only a year (migration 010), and the intake version new
+        // cases take (migration 011).
         for (const seen of [onStaff, onClient]) {
           assert.equal(seen.eventType, "UPDATE");
           assert.deepEqual(Object.keys(seen.new).toSorted(), [
             "current_season",
             "default_followup_person_id",
             "default_intake_version",
-            "fixture_generation",
             "id",
           ]);
           assert.equal(seen.new.id, f.workspaceId);
-          assert.equal(Number(seen.new.fixture_generation), generation);
         }
         // No case id or case content travels with it, on either channel.
-        const fixtures = new Set((await f.readFixtureCases()).map((row) => row.id));
+        const caseIds = new Set(
+          (await f.sql("select id from public.cases where workspace_id=$1", [f.workspaceId])).rows.map(
+            (row) => row.id,
+          ),
+        );
         for (const seen of [...staff.rows(), ...client.rows()]) {
-          assert.ok(!fixtures.has(seen.id), "a case id travelled with the signal");
+          assert.ok(!caseIds.has(seen.id), "a case id travelled with the update");
           assert.equal(seen.answers, undefined);
           assert.equal(seen.reference, undefined);
         }
@@ -912,7 +913,7 @@ test("Realtime carries one applicant's rows to that applicant only", async (t) =
       });
     }
 
-    await t.test("a reset publishes no deletion an applicant could read", async () => {
+    await t.test("a seed re-run publishes no deletion an applicant could read", async () => {
       // The publication carries INSERT and UPDATE only (migration 007). A
       // deleted row cannot be authorized through the row-level security state
       // it no longer has, so it is never offered to anybody — which this asks
@@ -925,48 +926,52 @@ test("Realtime carries one applicant's rows to that applicant only", async (t) =
       assert.deepEqual(publication, [
         { pubinsert: true, pubupdate: true, pubdelete: false, pubtruncate: false },
       ]);
-      await f.seedFixtures();
+      const runner = await f.seedRunner();
       // One channel, two bindings: the deletions this test is asking about,
       // and the updates that prove the channel kept delivering.
-      const watch = watchTable(
-        f.applicantA,
-        [
-          { event: "DELETE", table: "cases" },
-          { event: "UPDATE", table: "cases" },
-        ],
-        "A/cases delete",
-      );
+      let watch = null;
       try {
+        const first = await runner.seed();
+        watch = watchTable(
+          f.applicantA,
+          [
+            { event: "DELETE", table: "cases" },
+            { event: "UPDATE", table: "cases" },
+          ],
+          "A/cases delete",
+        );
         await withDeadline(watch.subscribed, "A never subscribed for deletions");
-        // Control first: this channel is delivering before the reset runs.
+        // Control first: this channel is delivering before the re-run.
         const before = await controlUntilSeen(
           watch,
           () => saveFor(owners.A),
           savedCase,
-          "A's pre-reset control",
+          "A's pre-re-run control",
         );
         assert.ok(before.seen);
         // Everything from here on was committed after the channel was proved
-        // to be delivering, so what it carries is this reset's own traffic.
+        // to be delivering, so what it carries is this re-run's own traffic.
         const from = watch.payloads.length;
-        const doomed = new Set((await f.readFixtureCases()).map((row) => row.id));
-        const bound = (await f.readFixtureCases()).find(
-          (row) => row.fixtureKey === f.boundFixtureKey,
-        );
+        const doomed = new Set(Object.values(first.caseIdsByScenario));
+        const [owned] = (
+          await f.sql("select owner_user_id from public.cases where id=$1", [
+            first.caseIdsByScenario.client_received,
+          ])
+        ).rows;
         assert.equal(
-          bound.ownerUserId,
+          owned.owner_user_id,
           f.applicantAUserId,
           "A owns one of the doomed rows",
         );
-        // Another presenter resets the fixtures, deleting the case A owns.
-        await f.seedFixtures();
+        // The seed runs again, deleting the first run's cases, A's among them.
+        await runner.seed();
         // Two ordered fences afterwards: the channel has been offered
         // everything committed before them, the deletion included.
         for (const attempt of [1, 2]) {
           const fence = await saveFor(owners.A);
           await watch.waitFor(
             savedCase(fence),
-            `A's post-reset ordered fence ${attempt}`,
+            `A's post-re-run ordered fence ${attempt}`,
           );
         }
         const deletions = watch.payloads.filter(
@@ -982,7 +987,8 @@ test("Realtime carries one applicant's rows to that applicant only", async (t) =
         }
         assertHealthy(watch);
       } finally {
-        watch.stop();
+        watch?.stop();
+        await runner.close();
       }
     });
   } finally {
@@ -1001,7 +1007,7 @@ test("realtime carries no code", async () => {
   let watch = null;
   try {
     const caseId = await f.approvedCase();
-    const act = (type, payload) => f.act(f.presenter, caseId, f.sam, type, payload);
+    const act = (type, payload) => f.act(f.siteCoordinator, caseId, type, payload);
     await act("MARK_READY_TO_EFILE", { confirmed: true });
     await act("MARK_EFILED", { confirmed: true, methods: { federal: "efile", state: "efile" } });
     watch = watchTable(

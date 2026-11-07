@@ -31,7 +31,6 @@ test("choices are stored per user and restored as they were", () => {
   window.write("user-1", {
     screen: "staff-case",
     selectedCaseId: "case-a",
-    selectedPersonId: "alex",
     openPanels: ["confirmed"],
     pendingCreateActionId: "action-1",
     boardFilters: { status: "available", assignment: "mine" },
@@ -41,7 +40,6 @@ test("choices are stored per user and restored as they were", () => {
   assert.deepEqual(window.read("user-1"), {
     screen: "staff-case",
     selectedCaseId: "case-a",
-    selectedPersonId: "alex",
     openPanels: ["confirmed"],
     pendingCreateActionId: "action-1",
     boardFilters: { status: "available", assignment: "mine" },
@@ -55,8 +53,8 @@ test("choices are stored per user and restored as they were", () => {
     windowStateKey("user-2"),
   ]);
   assert.equal(windowStateKey("user-1"), "vitally:client:v1:user-1");
-  // Staff filters and the persona live in the same record as the client's
-  // selection: one key scheme, so one sign-out clears everything.
+  // Staff filters live in the same record as the client's selection: one key
+  // scheme, so one sign-out clears everything.
   assert.ok(sessionStorage.raw(windowStateKey("user-1")).includes("boardFilters"));
 });
 
@@ -120,7 +118,7 @@ test("an unreadable record restores nothing and never throws", () => {
 test("clearing one user's record leaves the other window state alone", () => {
   const sessionStorage = fakeSession();
   const window = createWindowState({ sessionStorage });
-  window.write("user-1", { screen: "staff", selectedPersonId: "alex" });
+  window.write("user-1", { screen: "staff", selectedCaseId: "case-a" });
   window.write("user-2", { screen: "applications" });
   window.writeAccess({ startedAt: 1_000, email: "mei@example.org" });
 
@@ -254,15 +252,21 @@ test("a staff window neither stores nor restores a persona", () => {
   const leftover = JSON.stringify({ screen: "staff", selectedPersonId: "person-sam" });
   const sessionStorage = fakeSession({ [windowStateKey("user-riley")]: leftover });
   const window = createWindowState({ sessionStorage });
-  assert.deepEqual(window.read("user-riley", { access: "staff" }), { screen: "staff" });
+  assert.deepEqual(window.read("user-riley"), { screen: "staff" });
   // A record holding nothing but the persona is nothing restored.
   sessionStorage.setItem(windowStateKey("user-riley"), JSON.stringify({ selectedPersonId: "person-sam" }));
-  assert.equal(window.read("user-riley", { access: "staff" }), null);
+  assert.equal(window.read("user-riley"), null);
 
-  window.write("user-riley", { screen: "staff-case", selectedPersonId: "person-sam" }, { access: "staff" });
+  window.write("user-riley", { screen: "staff-case", selectedPersonId: "person-sam" });
   assert.deepEqual(JSON.parse(sessionStorage.raw(windowStateKey("user-riley"))), { screen: "staff-case" });
+});
 
-  // A presenter keeps the persona it chose, as before.
-  window.write("p1", { screen: "staff", selectedPersonId: "alex" }, { access: "presenter" });
-  assert.deepEqual(window.read("p1", { access: "presenter" }), { screen: "staff", selectedPersonId: "alex" });
+test("a stored persona is ignored and never written", () => {
+  // A persona left in this tab by an earlier presenter window (or by hand).
+  const leftover = JSON.stringify({ selectedPersonId: "p1", screen: "board" });
+  const sessionStorage = fakeSession({ [windowStateKey("user-1")]: leftover });
+  const window = createWindowState({ sessionStorage });
+  assert.deepEqual(window.read("user-1"), { screen: "board" });
+  window.write("user-1", { screen: "board", selectedPersonId: "p1" });
+  assert.deepEqual(JSON.parse(sessionStorage.raw(windowStateKey("user-1"))), { screen: "board" });
 });

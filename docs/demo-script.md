@@ -1,5 +1,9 @@
 # ViTally demonstration script
 
+> **Note:** this script still describes presenter mode (the presenter panel, the persona
+> picker, "Reset sample cases" and the checkpoints), which has been removed. A presenter who signs
+> in now sees one plain screen. The rewrite for the role accounts is #137.
+
 This is the rehearsal script for presenting ViTally. It describes only what the implemented,
 tested application actually does — see [`docs/setup.md`](setup.md) for how to bring up the
 isolated local stack this is rehearsed against. **Use fictional names only. Never type a real
@@ -69,6 +73,8 @@ actions from anyone else regardless of what the screen shows). It has:
   submits anything by itself.
 
 ## The M4 story: two real staff accounts and the 13614-C
+
+Note: this script was rehearsed on the earlier example roster, with Riley Park (`staff-a@`) and Jordan Lee (`staff-b@`). On the current example roster, use the Preparer (`preparer@example.org`) and the Reviewer (`reviewer@example.org`) instead. The script is rewritten for the role accounts in a later step (#128).
 
 Rehearsed on 2026-10-30 on `main` with the example roster plus one reviewer; button names checked against `main` on 2026-10-31. Three windows: the
 **presenter** (only to reset the samples and to act as Sam for the office steps), **Riley Park**

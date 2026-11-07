@@ -37,7 +37,7 @@ same job.
 
 ### The public configuration contract
 
-The browser fetches `./public-config.json` at start-up. It is one of exactly two shapes:
+The browser fetches `./public-config.json` at start-up. It is one of exactly three shapes:
 
 ```json
 {"configured": false}
@@ -52,8 +52,24 @@ The browser fetches `./public-config.json` at start-up. It is one of exactly two
 }
 ```
 
+```json
+{
+  "configured": true,
+  "supabaseUrl": "http://127.0.0.1:54321",
+  "supabasePublishableKey": "<publishable key>",
+  "authResendCooldownSeconds": 65,
+  "demoTools": true
+}
+```
+
 `server.mjs` builds it from `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` and
 `AUTH_RESEND_COOLDOWN_SECONDS` in `.env.local`. A static host serves it as a plain committed file.
+`server.mjs` adds `"demoTools": true` only when `VITALLY_DEMO_TOOLS` is `1` and `SUPABASE_URL` is a
+loopback address (`127.0.0.1`, `localhost` or `[::1]`). If the flag is set but the URL is not on
+this machine, the key is left out and the server prints a start-up warning that never includes
+the URL. The browser shows the fill tools only when it receives the key and its own
+`supabaseUrl` is also a loopback address. A committed `public-config.json` must never carry
+`demoTools`; `tests/demo-tools-config.test.mjs` fails if any tracked `public-config*.json` does.
 The publishable key is designed to be public; row-level security protects the data. **The
 service-role (secret) key must never appear in this file, in `src/`, or in the repository.**
 
@@ -110,8 +126,12 @@ so each tool must prove it is pointed at the intended target before doing anythi
 | `classroom-target.mjs` | Approves the classroom project: HTTPS, the session pooler (or a verified direct connection) with `sslmode=verify-full`, a project ref the operator typed in by hand, and nothing that matches the test target |
 | `database.mjs` | `openDatabase(target)`: guard first, then connect; maps database errors |
 | `migrate.mjs` | Applies pending migrations with a SHA-256 ledger. `--target test` (default) or `--target classroom` |
-| `workspace-setup.mjs` | `initializeWorkspace`: creates a workspace, its three demo people, memberships, staff members (038) and sample-case bindings |
+| `workspace-setup.mjs` | `initializeWorkspace`: creates a workspace, its three demo people, memberships, and staff members (038) |
 | `roster.mjs` | Reads a roster file, creates confirmed password-free accounts, and calls `initializeWorkspace`. Never prints an address ([roster format](#the-roster)) |
+| `seed.mjs` | `npm run seed:local`: builds rehearsal cases on the **local test stack only**. Needs `VITALLY_ALLOW_LOCAL_SEED=1` (checked before any file is read) and refuses any other target as `TARGET_REJECTED`. Records its case ids in `.vitally-runs/seed-<workspaceId>.json`, which the next run uses to replace the previous set. Never prints an address |
+| `seed-cases.mjs` | The cases it builds, acting as the role accounts through `vitally_create_case` and `vitally_apply_action`. The only direct insert is the help request |
+
+The database has no sample cases, reset or checkpoints (removed in #135, migration 040). Rehearsal cases come from `seed.mjs`.
 
 A guard failure is always `TARGET_REJECTED` and deliberately does not say which check failed;
 [`docs/setup.md`](../setup.md#private-test-configuration) lists what to check. The guards are unit
@@ -128,10 +148,12 @@ The roster is a JSON file (a `.vitally-roster*.json` file, ignored by version co
   "workspaceId": "replace-with-a-uuid",
   "presenters": ["presenter@example.org"],
   "staff": [
-    { "email": "staff-a@example.org", "name": "Riley Park", "personKey": "riley", "capabilities": ["prepare"] },
-    { "email": "staff-b@example.org", "name": "Jordan Lee", "personKey": "jordan", "capabilities": ["admin", "followup"] }
+    { "email": "site-coordinator@example.org", "name": "Sky Chen (site coordinator)", "personKey": "site_coordinator", "capabilities": ["admin", "followup", "assist", "receive_documents"] },
+    { "email": "preparer@example.org", "name": "Rowan Diaz (preparer)", "personKey": "preparer", "capabilities": ["prepare"] },
+    { "email": "reviewer@example.org", "name": "Ari Novak (reviewer)", "personKey": "reviewer", "capabilities": ["review"] },
+    { "email": "intaker@example.org", "name": "Kai Mensah (intaker)", "personKey": "intaker", "capabilities": ["receive_documents", "assist"] }
   ],
-  "defaultFollowup": "jordan",
+  "defaultFollowup": "site_coordinator",
   "applicants": ["client-a@example.org"]
 }
 ```
@@ -140,7 +162,7 @@ The roster is a JSON file (a `.vitally-roster*.json` file, ignored by version co
 | --- | --- |
 | `staff` | Optional list. Each entry has `email`, `name`, `personKey` and `capabilities`. `capabilities` is non-empty, from `prepare`, `review`, `admin`, `followup`, `receive_documents`, `assist`. `personKey` is lower-case letters, digits and underscores, unique on the roster, and not `alex`, `morgan` or `sam` |
 | `defaultFollowup` | Optional: the `personKey` of a `staff` entry that has `followup`. It becomes the workspace's default follow-up person (who new follow-ups and withdrawal notices go to). **Required when the roster has no presenter**, because Sam, the default otherwise, would get work nobody can act on |
-| `presenters` | Now optional, but the roster needs at least one presenter or one staff member |
+| `presenters` | Now optional, but the roster needs at least one presenter or one staff member. A presenter who signs in sees one plain screen, "This account is no longer used"; the role goes in #136 |
 
 For each staff entry the command creates the Auth account as it does for any address, then, inside
 `initializeWorkspace`'s one serializable transaction, calls `add_staff_member` (and

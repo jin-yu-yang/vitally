@@ -236,19 +236,6 @@ A client session SHALL be able to read neither questionnaire table: row-level se
 - **WHEN** staff open a case whose review was approved before the questionnaires existed
 - **THEN** that attempt reads "No questionnaire was recorded for this version."
 
-### Requirement: Sample cases carry fictional answers
-Applying a fixture scenario to a sample case (seeding or a checkpoint reset) SHALL first clear the case's questionnaires and signing plan with the rest of its work. It SHALL then seed:
-- fictional preparer answers for every seeded preparation version of the Pending review (`review_ready`), Corrections in progress (`corrections_required`) and Ready to exit (`review_approved`) scenarios;
-- for the approved attempt of the Ready to exit scenario, fictional reviewer answers that say yes and the Customer Portal, its contact step completed with outcome reached, and the signing plan `portal`.
-
-#### Scenario: The seeded approved sample shows answers
-- **WHEN** the samples are seeded and staff open the Ready to exit sample
-- **THEN** the review panel shows preparer answers for versions 1 and 2 and reviewer answers for the approved attempt, and an admin is offered Mark ready to e-file…
-
-#### Scenario: A checkpoint reset leaves no stale answers
-- **WHEN** a presenter resets an approved sample case to the `ready_for_review` checkpoint
-- **THEN** the case holds exactly one preparer questionnaire (version 1), no reviewer questionnaire, and no signing plan
-
 ### Requirement: An approved review offers the Exit Form
 ViTally SHALL offer "Download Exit Form" for an approved review that has a reviewer questionnaire. On a volunteer's case page, each such review in the Independent review panel SHALL have the button, whether or not that volunteer is on the case. On the office's case page, which has no Independent review panel, the Overview SHALL have an Exit Form panel with the button for the latest such review. Neither SHALL appear for a review with no questionnaire, or before there is an approved review. The office's panel SHALL stay on the case at later stages.
 

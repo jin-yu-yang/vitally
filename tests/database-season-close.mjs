@@ -20,8 +20,8 @@ test("season-end close against real Supabase", async (t) => {
       ).rows[0];
     const entry = async (caseId) => ({ caseId, revision: Number((await row(caseId)).revision) });
     const hold = (caseId) =>
-      f.act(f.presenter, caseId, f.sam, "PUT_ON_HOLD", { confirmed: true });
-    const close = (cases, opts) => f.closeUnsigned(f.presenter, f.sam, cases, opts);
+      f.act(f.siteCoordinator, caseId, "PUT_ON_HOLD", { confirmed: true });
+    const close = (cases, opts) => f.closeUnsigned(f.siteCoordinator, cases, opts);
     const events = async (caseId) =>
       (
         await f.sql(
@@ -37,7 +37,7 @@ test("season-end close against real Supabase", async (t) => {
       await hold(held);
       await f.sql(
         "insert into public.document_requests(workspace_id,case_id,title,message,requested_by_person_id) values($1,$2,'Fictional paper','A fictional note.',$3)",
-        [f.workspaceId, ready, f.alex],
+        [f.workspaceId, ready, f.preparerId],
       );
       assert.equal(
         await count("select count(*) from public.admin_followups where case_id=$1 and status='open'", ready),
@@ -115,8 +115,8 @@ test("season-end close against real Supabase", async (t) => {
       await assert.rejects(() => close([ea], { confirmed: false }), rejected("VALIDATION"));
       await assert.rejects(() => close([{ ...ea, extra: 1 }]), rejected("VALIDATION"));
       await assert.rejects(() => close([{ caseId: "nope", revision: 1 }]), rejected("VALIDATION"));
-      await assert.rejects(() => f.closeUnsigned(f.presenter, f.alex, [ea]), rejected("FORBIDDEN"));
-      await assert.rejects(() => f.closeUnsigned(f.applicantA, null, [ea]), rejected("FORBIDDEN"));
+      await assert.rejects(() => f.closeUnsigned(f.preparer, [ea]), rejected("FORBIDDEN"));
+      await assert.rejects(() => f.closeUnsigned(f.applicantA, [ea]), rejected("FORBIDDEN"));
       assert.equal((await row(a)).stage, "review_approved");
     });
 

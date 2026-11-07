@@ -5,6 +5,7 @@
   "type": "module",
   "description": "ViTally: a Supabase-backed shared demonstration of a VITA tax-prep workflow — real email sign-in, real shared state between a client and a staff window, simulated documents and preparation steps",
   "scripts": {
+    "seed:local": "node --env-file=.env.test tools/admin/seed.mjs",
     "start": "node --env-file-if-exists=.env.local server.mjs",
     "dev": "node --env-file-if-exists=.env.local server.mjs",
     "build:vendor": "node tools/build.mjs",
