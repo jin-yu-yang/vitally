@@ -1844,6 +1844,20 @@ test("the three handlers store the answers", async (t) => {
       const [task] = await goOver(f, caseId);
       await f.act(f.siteCoordinator, caseId, "PUT_ON_HOLD", { confirmed: true });
       assert.equal((await f.readStaffCase(caseId)).stage, "on_hold");
+      // Any other task resolved during the hold leaves the plan alone. The
+      // inserted notice stands in for any purpose but go_over_return.
+      const [other] = (
+        await f.sql(
+          "insert into public.admin_followups(workspace_id,case_id,purpose,assignee_person_id,reason,created_by_person_id) values($1,$2,'withdrawal_notice',$3,'Fictional notice.',$3) returning id",
+          [f.workspaceId, caseId, f.siteCoordinatorId],
+        )
+      ).rows;
+      await f.act(f.siteCoordinator, caseId, "RESOLVE_FOLLOWUP", {
+        followupId: other.id,
+        outcome: "reached",
+        note: "Fictional: another task.",
+      });
+      assert.deepEqual(await plan(f, caseId), { signing_plan: "go_over_first", signing_appointment_at: null });
       await f.act(f.siteCoordinator, caseId, "RESOLVE_FOLLOWUP", {
         followupId: task.id,
         outcome: "reached",
