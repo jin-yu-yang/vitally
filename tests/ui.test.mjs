@@ -82,6 +82,49 @@ test("a text-like control keeps its caret", () => {
   });
 });
 
+test("a selected range is kept whole, so typing over it still replaces it (#120)", () => {
+  // Select all, then a redraw lands before the typing: the range must come
+  // back, or the typed text goes in front of the old value.
+  const selected = (selectionStart, selectionEnd, selectionDirection) => ({
+    tagName: "INPUT",
+    type: "text",
+    name: "addr_city",
+    id: "field-client-addr_city",
+    selectionStart,
+    selectionEnd,
+    selectionDirection,
+  });
+  assert.deepEqual(describeFocus(selected(0, 12, "forward")), {
+    id: "field-client-addr_city",
+    name: "addr_city",
+    action: null,
+    related: [],
+    caret: 0,
+    selectionEnd: 12,
+    direction: "forward",
+  });
+  assert.equal(describeFocus(selected(2, 9, "backward")).direction, "backward");
+  // "none" (no direction) restores as forward, which is what typing over it does.
+  assert.equal(describeFocus(selected(2, 9, "none")).direction, "forward");
+  // A collapsed caret is described exactly as before: no range keys at all.
+  assert.deepEqual(describeFocus(selected(5, 5, "none")), {
+    id: "field-client-addr_city",
+    name: "addr_city",
+    action: null,
+    related: [],
+    caret: 5,
+  });
+  // A textarea keeps its range too.
+  assert.equal(describeFocus({ tagName: "TEXTAREA", name: "note", selectionStart: 0, selectionEnd: 40 }).selectionEnd, 40);
+});
+
+test("the redraw puts a selection back as a range, not a caret (#120)", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const app = await readFile(new URL("../src/app.mjs", import.meta.url), "utf8");
+  assert.match(app, /setSelectionRange\(focus\.caret, focus\.selectionEnd \?\? focus\.caret, focus\.direction \?\? "none"\)/);
+  assert.doesNotMatch(app, /setSelectionRange\(focus\.caret, focus\.caret\)/);
+});
+
 test("nothing focused, or nothing to find again, is nothing to restore", () => {
   assert.equal(describeFocus(null), null);
   assert.equal(describeFocus(undefined), null);

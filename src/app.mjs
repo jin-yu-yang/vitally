@@ -534,7 +534,8 @@ if (!config) {
     const landed = document.activeElement === field;
     if (focus.caret === null || !("setSelectionRange" in field)) return landed;
     try {
-      field.setSelectionRange(focus.caret, focus.caret);
+      // A selection comes back whole, so typing still replaces it (#120).
+      field.setSelectionRange(focus.caret, focus.selectionEnd ?? focus.caret, focus.direction ?? "none");
     } catch {
       // Some input types refuse a selection range; the focus is what matters.
     }

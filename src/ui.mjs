@@ -307,9 +307,19 @@ export function describeFocus(active) {
   if (!selectable) return description;
   try {
     const caret = active.selectionStart;
+    if (typeof caret !== "number") return description;
+    // A selected range is kept as a range (#120). With only its start, a
+    // redraw between selecting a field's text and typing over it collapsed
+    // the selection to that start, so the new text went in front of the old
+    // instead of replacing it ("Otherwindow CityPhiladelphia"). Only a real
+    // range is recorded: a plain caret is described exactly as before.
+    const end = active.selectionEnd;
+    if (typeof end !== "number" || end <= caret) return { ...description, caret };
     return {
       ...description,
-      caret: typeof caret === "number" ? caret : null,
+      caret,
+      selectionEnd: end,
+      direction: active.selectionDirection === "backward" ? "backward" : "forward",
     };
   } catch {
     return description;

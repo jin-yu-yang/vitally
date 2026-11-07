@@ -272,8 +272,11 @@ when that may happen:
    changes, or a text field that drives a show-if (today only `gcf_sp_signature`) changes and the
    `data-q` set on the page differs from `visibleIds(step, draft)` (`needsRedraw`).
 4. **Other redraws keep focus, caret and scroll** when they stay in the same place (the same
-   screen, case and step, compared inside `render()`). A step change scrolls to the top and
-   focuses `#main`. A redraw during IME composition waits for `compositionend`.
+   screen, case and step, compared inside `render()`). A selected range comes back as a range,
+   with its direction (`describeFocus` in `ui.mjs`, `restoreField` in `app.mjs`). If only its
+   start came back, text typed over a selection right after a redraw would go in front of the old
+   value instead of replacing it (#120, "Otherwindow CityPhiladelphia"). A step change scrolls to
+   the top and focuses `#main`. A redraw during IME composition waits for `compositionend`.
 
 Before a save or a step change, `sweepV2Form` reads the whole form into the draft once more (for
 values that arrived without an `input` event, such as autofill); it is skipped while a redraw is
