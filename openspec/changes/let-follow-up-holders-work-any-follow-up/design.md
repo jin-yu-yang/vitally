@@ -145,7 +145,7 @@ The team decided (#172, 11/7) that anyone with `followup` may work any open offi
 4. Before the PR: sync with `main`, and confirm there is only one `042`.
 5. Teammates apply 042 with `npm run db:migrate:test` after it merges.
 
-**Rollback:** migrations are forward-only. To undo, a new migration restores the assignee check in `lock_open_followup` and drops `people_followup_needs_admin`. No data needs restoring, because 042 changes no rows.
+**Rollback:** migrations are forward-only. To undo, a new migration restores the assignee check in `lock_open_followup`, drops `people_followup_needs_admin`, and redefines `add_staff_member` without the follow-up line; the roster's refusal in `tools/admin/roster.mjs` is removed with it. No data needs restoring, because 042 changes no rows.
 
 ## Open Questions
 

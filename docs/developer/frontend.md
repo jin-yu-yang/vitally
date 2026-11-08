@@ -810,7 +810,8 @@ database side is in [Database: the contact log](database.md#the-contact-log).
   - the **Contacts tab** (`contactsPanel`, in both `renderStaffCase` and `renderAdminCase`): Copy
     all, the form, then the entries newest first with Copy, Edit and an "Earlier versions" list;
   - the case page's **Follow-up tab** and the office queue's **Log contact** drawer, inside each
-    open task the persona may record on (`followupForms` in `admin-views.mjs`), linked to that task.
+    open task when the signed-in person holds `followup`, whoever the task is assigned to (042;
+    `followupForms` in `admin-views.mjs`), linked to that task.
     Each task also lists its entries under "Contacts so far" (`taskContacts`).
 - **Flow.** `app.mjs` reads the form into an entry and calls `controller.logContact(caseId, entry,
   followupId)` or `controller.editContact(contactId, entry)`, which call the store's RPCs and

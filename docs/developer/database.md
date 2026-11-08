@@ -489,7 +489,7 @@ shorthands in the table:
 | `RECORD_DOCUMENT_RESPONSE` | Presenter + `receive_documents` person, case has no owner | `preparing`, `corrections_required` | Request is `open` | Staff-recorded document; request → `awaiting_verification` | Yes |
 | `VERIFY_DOCUMENT` | Presenter + person | `preparing`, `corrections_required` | Current preparer; request `awaiting_verification` | Request → `verified` | Yes |
 | `ESCALATE_CONTACT` | Presenter + person | `preparing`, `corrections_required` | Current preparer; request `open`; no open task | Follow-up assigned to the workspace's default follow-up person | No |
-| `RECORD_CONTACT` | Presenter + `followup` person | (any; task must be open) | Task `open` (any `followup` holder, 042) | Refused since 031 (`VALIDATION`); contacts are logged with `vitally_log_contact` | No |
+| `RECORD_CONTACT` | Presenter + `followup` person | (any; task must be open) | — (refused before any task check) | Refused since 031 (`VALIDATION`); contacts are logged with `vitally_log_contact` | No |
 | `RESOLVE_FOLLOWUP` | Presenter + `followup` person | (any; task must be open) | Task `open` (any `followup` holder, 042) | Task → `resolved`; (033) a `go_over_return` task also turns the case's `go_over_first` signing plan into the reviewer's signing method, (041) also while the case is on a Hold from `review_approved` | No |
 | `SUBMIT_REVIEW` | Presenter + person | `preparing` | Current preparer; intake verified; no unsettled request | Version + 1; → `review_ready`; active review superseded | Yes |
 | `CLAIM_REVIEW` | Presenter + person | `review_ready`, no reviewer | Not a participant (`SELF_REVIEW`); `review` | → `reviewing`; sets reviewer; new `active` review | Yes |
@@ -814,7 +814,7 @@ and a case is created with no answers (`vitally_create_case` refuses any other `
 
 ## Testing
 
-The database suite (`tests/database*.mjs`, 446 tests) runs against the local stack only. Each test
+The database suite (`tests/database*.mjs`, 448 tests) runs against the local stack only. Each test
 file builds a throwaway workspace with fresh synthetic accounts through
 [`tests/support/database-fixture.mjs`](../../tests/support/database-fixture.mjs) and deletes it
 afterwards, so tests are independent and leave your rehearsal workspace alone.
