@@ -580,12 +580,12 @@ test("the board refuses a self-review with the same words the case does", () => 
   );
 });
 
-test("a presenter with no persona reads the board and acts on nothing", () => {
+test("a staff account with no linked volunteer reads the board and acts on nothing", () => {
   const html = board({ person: null });
   assert.match(html, /This account isn(?:'|&#39;)t linked to a volunteer yet\. Ask your site coordinator\./);
   assert.match(html, /read-only/i);
   assert.doesNotMatch(html, /data-case-action=/);
-  // Filters and navigation still work without a persona.
+  // Filters and navigation still work without a linked volunteer.
   assert.match(html, /data-action="set-board-filter"/);
   assert.match(html, /data-action="open-case" data-case-id="case-1"/);
 
@@ -1151,7 +1151,7 @@ test("eligibility answers the same way for a board row and a full case", () => {
     false,
   );
 
-  // Nothing is allowed without a persona.
+  // Nothing is allowed without a linked volunteer.
   const nobody = staffEligibility({ stage: "preparation_ready" }, null);
   for (const decision of [
     "claimPreparation",
@@ -1508,8 +1508,8 @@ test("the preparer questionnaire's auto-fill button follows the switch, not the 
   const record = staffCase({ stage: "preparing" });
   const step = (ui, principal) => nextStep(record, staffEligibility(record, ALEX), { principal, ...ui });
   assert.match(step({ demoTools: true }, { access: "staff" }), /data-action="demo-fill"/, "staff account, switch on");
-  assert.doesNotMatch(step({ demoTools: false }, { access: "presenter" }), /demo-fill/, "presenter, switch off");
-  assert.doesNotMatch(step({}, { access: "presenter" }), /demo-fill/, "presenter, no switch given");
+  assert.doesNotMatch(step({ demoTools: false }, { access: "staff" }), /demo-fill/, "staff account, switch off");
+  assert.doesNotMatch(step({}, { access: "staff" }), /demo-fill/, "staff account, no switch given");
 });
 
 test("your next step offers the one action that fits, or says who the case waits on", () => {
@@ -2586,7 +2586,7 @@ test("a note is text, not markup", () => {
   assert.match(taskContacts(linked, { id: "task-1" }), /&lt;b&gt;/);
 });
 
-test("a persona switch closes someone else's edit form", () => {
+test("another staff member does not get someone else's open edit form", () => {
   const record = staffCase({ contacts: [contactEntry({ loggedByPersonId: "alex" })] });
   const ui = { openPanels: ["contact-edit:c1"] };
   const forAlex = contactsPanel(record, ALEX, ui);

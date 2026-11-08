@@ -768,7 +768,7 @@ test("the e-file dialogs name the client and the application", () => {
 // Refusals, escaping, and what nobody may do
 // ---------------------------------------------------------------------------
 
-test("a window with no persona is offered nothing at all", () => {
+test("a staff window with no linked volunteer is offered nothing at all", () => {
   const record = officeCase({
     requests: [openRequest()],
     followups: [openTask()],
@@ -780,7 +780,7 @@ test("a window with no persona is offered nothing at all", () => {
   assert.match(html, /This account isn(?:'|&#39;)t linked to a volunteer yet\. Ask your site coordinator\./);
 });
 
-test("a persona without the office roles gets explanations, not office actions", () => {
+test("a volunteer without the office roles gets explanations, not office actions", () => {
   const record = officeCase({
     stage: "received",
     intakeVerified: false,

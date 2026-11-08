@@ -389,7 +389,7 @@ export const openFollowups = (record) =>
   (record?.followups ?? []).filter((task) => task?.status === "open");
 
 // A board row is a scalar Case and carries no follow-up records at all, so the
-// count comes from the summary the presenter list attaches instead (Ruling
+// count comes from the summary the board list attaches instead (Ruling
 // R56). An opened case carries the records themselves and is counted from
 // them, which is always the more exact of the two.
 export const openFollowupCount = (record) =>

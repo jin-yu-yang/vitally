@@ -124,9 +124,6 @@ export function appShell({ sidebar = "", body = "", open = true } = {}) {
 }
 
 export function page(state, body) {
-  // A presenter's one plain screen stands alone: no header, footer, banners or
-  // dialogs around it.
-  if (state?.principal?.access === "presenter") return body;
   // Staff accounts work in the staff frame, whose sidebar carries the brand,
   // help and sign-out. Everyone else gets the client frame.
   const staff = isStaffWindow(state?.principal);
@@ -165,12 +162,6 @@ export function unreachableScreen(state) {
 export function noAccessScreen(state) {
   const lang = viewLang(state);
   return `<main id="main" class="narrow" tabindex="-1"><div class="center-icon">${icon("lock")}</div><div class="page-intro centered"><span class="overline">${esc(t("no_access.overline", {}, lang))}</span><h1>${esc(t("no_access.title", {}, lang))}</h1><p>${esc(sentence(state.error?.message ?? "You do not have access to this step.", lang))}</p></div><div class="panel"><p>${esc(t("no_access.body", {}, lang))}</p>${button(esc(t("frame.sign_out", {}, lang)), "sign-out", "primary full")}</div></main>`;
-}
-
-// A presenter account is no longer used: the one plain screen it gets. English
-// only, like every staff-side screen.
-export function presenterScreen() {
-  return `<main id="main" class="narrow" tabindex="-1"><div class="center-icon">${icon("lock")}</div><div class="page-intro centered"><h1>This account is no longer used</h1><p>Presenter mode has been removed. Ask your site coordinator for a staff account.</p></div><div class="panel">${button("Sign out", "sign-out", "text")}</div></main>`;
 }
 
 // ---------------------------------------------------------------------------

@@ -900,7 +900,7 @@ test("Add a case keeps its fill pill for a staff admin with the switch", () => {
   assert.doesNotMatch(addV2({ demoTools: false }), /fill-assisted-intake/);
 });
 
-test("the version-2 Add a case refuses a persona without the right", () => {
+test("the version-2 Add a case refuses a volunteer without the right", () => {
   const refused = addV2({ demoTools: true, person: { id: "p-al", name: "Alex", capabilities: ["prepare"] } });
   assert.match(refused, /staff-reason/);
   assert.doesNotMatch(refused, /<form/);
