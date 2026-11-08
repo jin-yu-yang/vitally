@@ -75,15 +75,15 @@
 ## 5. Tools and roster
 
 - [ ] 5.1 `tools/admin/workspace-setup.mjs`: call `initialize_workspace($1,$2::uuid[])` with no `presenterUserIds`.
-- [ ] 5.2 `tools/admin/roster.mjs`:
+- [x] 5.2 `tools/admin/roster.mjs`:
   - require staff and `defaultFollowup`;
   - remove `RESERVED_PERSON_KEYS`;
   - ignore `presenters`, printing "presenters is no longer used and was ignored; those addresses get no access.";
   - drop the presenter count from the summary and the presenter word from the header comment.
 
   `tools/admin/roster.example.json` loses `presenters`.
-- [ ] 5.3 `tools/admin/seed-cases.mjs`: drop `p_person_id`.
-- [ ] 5.4 `tests/roster.test.mjs`:
+- [x] 5.3 `tools/admin/seed-cases.mjs`: drop `p_person_id`.
+- [x] 5.4 `tests/roster.test.mjs`:
   - remove only the "at least one presenter" assertion;
   - convert the presenter-shaped rosters;
   - add "an old roster's `presenters` is ignored with a note" and "a roster with no `defaultFollowup` is refused";
@@ -92,17 +92,17 @@
 
 ## 6. The browser
 
-- [ ] 6.1 `src/supabase-store.mjs`:
+- [x] 6.1 `src/supabase-store.mjs`:
   - remove `SUBSCRIBED_TABLES.presenter`, the presenter half of `isStaffAccess`, and `actingPerson`;
   - remove `p_person_id` from the six RPC calls;
   - remove `mapPerson.linked` (grep for readers first).
-- [ ] 6.2 `src/controller.mjs`:
+- [x] 6.2 `src/controller.mjs`:
   - remove `inert()` and its seven call sites, the presenter screen choice, and the `testing` export;
   - remove `personId` from every request.
 
   `src/contracts.mjs`: the Action shape loses `personId`, and its presenter comments go. `src/window-state.mjs`: fix its comment.
-- [ ] 6.3 Remove `presenterScreen` and the bare-frame `page()` branch from `src/views.mjs`, the presenter branch from `src/language.mjs`, and the presenter route from `src/app.mjs`.
-- [ ] 6.4 Unit tests, following brainstorm Q9:
+- [x] 6.3 Remove `presenterScreen` and the bare-frame `page()` branch from `src/views.mjs`, the presenter branch from `src/language.mjs`, and the presenter route from `src/app.mjs`.
+- [x] 6.4 Unit tests, following brainstorm Q9:
   - remove `store.test` "a presenter's call still names the person";
   - replace the six controller presenter-window tests with no-membership window tests, which allow only `getPrincipal` repeats;
   - replace the two shell presenter tests with `noAccessScreen` tests: Sign out only, the client frame, follows the language;
@@ -118,12 +118,12 @@
 
 ## 7. Docs
 
-- [ ] 7.1 Update:
+- [x] 7.1 Update:
   - `README.md`;
   - `docs/setup.md`: the roster, presenters, personas, and what `VT008` means, with a read-only query for its counts;
   - `docs/developer/`: `README`, `architecture`, `backend`, `database`, `frontend`, `production-roadmap` (mark presenter access done in #136);
   - `docs/design/DESIGN.md`.
-- [ ] 7.2 Grep all of `docs/` and `README.md` for presenter and persona wording beyond 7.1's list. Leave `docs/demo-script.md` (#137), the dated docs, binary files and `docs/superpowers/` alone.
+- [x] 7.2 Grep all of `docs/` and `README.md` for presenter and persona wording beyond 7.1's list. Leave `docs/demo-script.md` (#137), the dated docs, binary files and `docs/superpowers/` alone.
 
 ## 8. Verification
 
