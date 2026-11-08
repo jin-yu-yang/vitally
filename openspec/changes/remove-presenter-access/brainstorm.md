@@ -33,7 +33,7 @@ Presenter mode is being removed in steps (#128):
 | browser story | 83 / 83, 40 phases | #174's retrospective |
 | auth-browser | 20 / 20 | #174's retrospective |
 
-**The local stack** is container `supabase_db_vitally-hailey.*`, migrated to 040. Main has since added `041_resolve_go_over_during_hold.sql` (#176), so this change's migration is **042** (renumbered at propose). I read it read-only during the brainstorm. The user has used the app since then, so every count below is illustrative. **User ruling:** apply re-takes every count fresh and doesn't reset the stack.
+**The local stack** is container `supabase_db_vitally-hailey.*`, migrated to 040. Main has since added `041_resolve_go_over_during_hold.sql` (#176), and #172 (let-follow-up-holders-work-any-follow-up) takes 042 and merges first, so this change's migration is **043** (renumbered at propose, then again during apply). #172 also redefines `add_staff_member` (it refuses `followup` without `admin`), so 043 copies that function from #172's 042 and changes only the reserved keys. I read it read-only during the brainstorm. The user has used the app since then, so every count below is illustrative. **User ruling:** apply re-takes every count fresh and doesn't reset the stack.
 
 | Workspace | What it is | Memberships | Cases | People |
 |---|---|---|---|---|
@@ -70,10 +70,10 @@ The People counts include Alex, Morgan and Sam (unlinked) in each workspace.
 
 ### Q1. Policies, the access check and helpers
 
-**The access check.** `memberships_access_check` is `CHECK (access = ANY (ARRAY['applicant','presenter','staff']))`. 042 drops it and re-adds it by name as `applicant` and `staff` only, after deleting the presenter memberships (Q4).
+**The access check.** `memberships_access_check` is `CHECK (access = ANY (ARRAY['applicant','presenter','staff']))`. 043 drops it and re-adds it by name as `applicant` and `staff` only, after deleting the presenter memberships (Q4).
 
 **The 24 RLS policies.** Each table has one, a SELECT for `authenticated`.
-- 22 of them test `m.access = ANY (ARRAY['presenter','staff'])`. 042 changes each to `m.access = 'staff'` with `ALTER POLICY … USING`, with no DROP.
+- 22 of them test `m.access = ANY (ARRAY['presenter','staff'])`. 043 changes each to `m.access = 'staff'` with `ALTER POLICY … USING`, with no DROP.
 - `own_membership` and `member_workspace` don't mention presenter and stay.
 - The 6 `visible_*` policies keep their applicant-owner branch: `case_contacts`, `case_document_cards`, `cases`, `client_events`, `document_requests` and `documents`.
 
@@ -94,9 +94,9 @@ The People counts include Alex, Morgan and Sam (unlinked) in each workspace.
 | `act_close_case`, `vitally_log_contact` | Only comments change ("presenter-only", "persona"). The bodies are otherwise unchanged. |
 | `check_authority`, `reserve_receipt`, `receive_document` | Unchanged. |
 
-**After 042, nothing in the catalog mentions `presenter`:** no function source, constraint, policy name, policy expression or view.
+**After 043, nothing in the catalog mentions `presenter`:** no function source, constraint, policy name, policy expression or view.
 
-**The request digest keeps its `'personId'` key,** filled with the resolved person, so receipts stored before 042 still match their replays.
+**The request digest keeps its `'personId'` key,** filled with the resolved person, so receipts stored before 043 still match their replays.
 
 ### Q2. The six RPCs lose `p_person_id` (user ruling: also drop `personId` from the browser)
 
@@ -128,16 +128,16 @@ These are the only six functions in `public`. Nothing in the catalog calls them.
 
 The user first chose to keep the persona rows, then changed the ruling once the presenter receipts were going.
 
-**Rule:** 042 deletes each person with `person_key in ('alex','morgan','sam') and user_id is null` that nothing references, and keeps the rest. A reference is any of:
+**Rule:** 043 deletes each person with `person_key in ('alex','morgan','sam') and user_id is null` that nothing references, and keeps the rest. A reference is any of:
 - the 23 foreign-key columns that point at `people` (listed in Q11);
 - `action_receipts.actor_person_id`, which has no foreign key, counted after the presenter receipts are deleted (Q4).
 
-Keeping referenced rows means 042 never fails on a teammate's stack where a persona acted on a hand-made case.
+Keeping referenced rows means 043 never fails on a teammate's stack where a persona acted on a hand-made case.
 
 **On the user's stack at brainstorm time:**
 - The only persona references were 52 presenter receipts with `actor_person_id` = Sam in `160fc95a`, and `d3c53ee2`'s default follow-up (Sam).
 - Receipts from other accounts never reference a persona: staff record their own person and clients record none.
-- So 042 would delete 8 persona rows and keep 1: Sam in `d3c53ee2`.
+- So 043 would delete 8 persona rows and keep 1: Sam in `d3c53ee2`.
 
 **Follow-ons:**
 - A kept persona stays as it is. `d3c53ee2`'s default stays Sam. The seed already refuses a workspace whose default is a persona.
@@ -159,9 +159,9 @@ Keeping referenced rows means 042 never fails on a teammate's stack where a pers
 - `contact_log_versions.edited_by_user_id`;
 - `people.user_id` (deferrable).
 
-**`action_receipts`** has no foreign key on its actor columns; its only foreign key is `workspace_id` → `workspaces` (CASCADE). The presenters had 82 receipts on the user's stack. **User ruling:** those receipts came from test runs, so 042 deletes them.
+**`action_receipts`** has no foreign key on its actor columns; its only foreign key is `workspace_id` → `workspaces` (CASCADE). The presenters had 82 receipts on the user's stack. **User ruling:** those receipts came from test runs, so 043 deletes them.
 
-**042's data steps, in this order:**
+**043's data steps, in this order:**
 1. **Refusal (user ruling).** If any presenter membership is referenced by the seven columns above, or by `cases.created_by_user_id`, raise an exception that gives the count per table, and change nothing. There is no ban path.
 2. Delete every `action_receipts` row whose `actor_user_id` belongs to a presenter membership.
 3. Delete the `access = 'presenter'` memberships.
@@ -172,15 +172,15 @@ Keeping referenced rows means 042 never fails on a teammate's stack where a pers
 **What a former presenter sees afterwards.** The deleted address gets `otp_disabled` at sign-in, which `src/auth.mjs` already maps to an unknown address. A session that is still open finds no membership in `getPrincipal`, so the window shows `noAccessScreen` and reads nothing.
 
 **Verifying the refusal (user ruling).** No database test covers it:
-- The suite runs on a database past 042, where the access check forbids presenter memberships, so a test has nothing to seed.
+- The suite runs on a database past 043, where the access check forbids presenter memberships, so a test has nothing to seed.
 - Moving the refusal into a callable function would leave a presenter mention, which the catalog check forbids.
 
 Instead, it is verified once during apply on a throwaway database, never on the user's stack:
-1. Start from a copy at 040, and apply main's 041 first.
+1. Start from a copy at 040, and apply main's 041 and 042 first.
 2. Seed a presenter membership and a `case_events` row that references it.
-3. Run 042 and confirm it fails with per-table counts.
+3. Run 043 and confirm it fails with per-table counts.
 4. Confirm the row counts are unchanged.
-5. Remove the reference, run 042 again, and confirm it succeeds.
+5. Remove the reference, run 043 again, and confirm it succeeds.
 
 The PR records this evidence.
 
@@ -203,7 +203,7 @@ The PR records this evidence.
 
 ### Q6. The plain screen and `inert()` are replaced by `noAccessScreen`
 
-After 042 no membership can hold `presenter`, so the value never reaches the browser.
+After 043 no membership can hold `presenter`, so the value never reaches the browser.
 
 **Removed:**
 - `presenterScreen` (`src/views.mjs` ~170–173);
@@ -267,7 +267,7 @@ After 042 no membership can hold `presenter`, so the value never reaches the bro
 | The other ~90 | live code | **convert:** the presenter becomes `f.siteCoordinator` or a role account, persona ids become role ids, `p_person_id` is dropped, and names containing "presenter" are reworded. Includes database ~1125 (the policy expressions become `'staff'`) and catalog ~66/~126 (policy names and RPC signatures). |
 
 **New database tests:**
-- catalog checks after 042: no function source, constraint, policy name or expression, or view mentions `presenter`;
+- catalog checks after 043: no function source, constraint, policy name or expression, or view mentions `presenter`;
 - the 24 policy names, one per table;
 - the exact six RPC signatures and their ACLs;
 - the old signatures and `acting_person(memberships, uuid)` are gone;
@@ -341,7 +341,7 @@ The 23 foreign-key columns that point at `people`:
 
 The column without a foreign key: `action_receipts.actor_person_id`.
 
-**Builder's call:** 042 should derive this list from `pg_constraint` at run time rather than hard-coding it, so a missed column can't delete a referenced row; a NO ACTION foreign key would block the delete anyway.
+**Builder's call:** 043 should derive this list from `pg_constraint` at run time rather than hard-coding it, so a missed column can't delete a referenced row; a NO ACTION foreign key would block the delete anyway.
 
 ### Q12. Docs, and the user's local roster
 
@@ -419,7 +419,7 @@ As in #135:
 
 ## Acceptance
 
-- 042 applies on the user's stack, and the before/after differences equal the expected differences and nothing else.
+- 043 applies on the user's stack, and the before/after differences equal the expected differences and nothing else.
 - The refusal is verified on a throwaway database, with the evidence in the PR.
 - The catalog has no `presenter` mention.
 - The six RPCs have the exact new signatures and ACLs, and the old signatures are gone.
@@ -434,12 +434,12 @@ A fresh reviewer read this document as the builder and raised three questions.
 1. **Could the refusal fire on the user's own stack?** This is answered already.
    - During the brainstorm I counted presenter user ids in all eight refusal columns: the seven membership-keyed columns plus `cases.created_by_user_id`. Every count was 0.
    - The count misses no rows: a presenter acting with a null person still writes its `actor_user_id`, and those columns are exactly the ones counted.
-   - Because the user has used the app since then, apply's read-only before-count script **also counts the refusal condition before the backup is taken**. If it is not zero, apply stops before 042 runs and shows the user the counts. 042 is never edited after it is applied.
-2. **A presenter account that also holds another membership.** **Builder's call:** the refusal also fires, with a count, when any presenter account holds a membership other than its presenter one, active or not. This keeps the fail-closed design: 042 never deletes another workspace's membership, and never hits a raw foreign-key error on `auth.users`. On the user's stack each presenter account holds exactly one membership.
-3. **The classroom project, and whether the operator can read why 042 refused.**
+   - Because the user has used the app since then, apply's read-only before-count script **also counts the refusal condition before the backup is taken**. If it is not zero, apply stops before 043 runs and shows the user the counts. 043 is never edited after it is applied.
+2. **A presenter account that also holds another membership.** **Builder's call:** the refusal also fires, with a count, when any presenter account holds a membership other than its presenter one, active or not. This keeps the fail-closed design: 043 never deletes another workspace's membership, and never hits a raw foreign-key error on `auth.users`. On the user's stack each presenter account holds exactly one membership.
+3. **The classroom project, and whether the operator can read why 043 refused.**
    - **Readability (builder's call):** the refusal raises its own SQLSTATE, `VT008`: the next code after the `VT001`–`VT007` already in use, and not tied to a migration number (user ruling at propose). The message gives the counts per table, and so does the DETAIL. `tools/admin/migrate.mjs` prints only the code, so it shows `Migration failed (VT008).`, and `docs/setup.md` gains a read-only query that shows the counts. `migrate.mjs` is unchanged. The throwaway verification reads the full message through `psql`.
-   - **Privilege:** on the local stack, `postgres` (the migration role) holds DELETE on `auth.users`, which `supabase_auth_admin` owns. 042 runs in one transaction, so if a hosted project denies it, 042 fails with 42501 and changes nothing.
-   - **The classroom project doesn't exist yet (user, at propose).** A new project runs every migration from scratch with no presenter accounts, so 042's deletes find nothing there.
+   - **Privilege:** on the local stack, `postgres` (the migration role) holds DELETE on `auth.users`, which `supabase_auth_admin` owns. 043 runs in one transaction, so if a hosted project denies it, 043 fails with 42501 and changes nothing.
+   - **The classroom project doesn't exist yet (user, at propose).** A new project runs every migration from scratch with no presenter accounts, so 043's deletes find nothing there.
    - Account deletion stays in SQL. Moving it to the admin API would split the delete across two systems, so it could no longer happen in one transaction.
 
 The reviewer also confirmed two claims. The digest already uses the resolved person (from 038), so keeping its `'personId'` key is safe. `workspaces.default_followup_person_id` is nullable.

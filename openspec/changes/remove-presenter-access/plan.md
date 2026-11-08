@@ -2,16 +2,16 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Migration 042 removes presenter access from the database, along with presenter accounts, their test-run receipts and every demonstration persona that nothing references. The app, tools, tests and docs stop using `presenter`, `p_person_id` and `personId`. Every check that guarded presenter behaviour is converted, or replaced by a check on an account with no membership.
+**Goal:** Migration 043 removes presenter access from the database, along with presenter accounts, their test-run receipts and every demonstration persona that nothing references. The app, tools, tests and docs stop using `presenter`, `p_person_id` and `personId`. Every check that guarded presenter behaviour is converted, or replaced by a check on an account with no membership.
 
 **Architecture:**
-- **One migration, in one transaction.** 042 is hand-written. It refuses first (`VT008`), then:
+- **One migration, in one transaction.** 043 is hand-written. It refuses first (`VT008`), then:
   1. deletes the data (receipts, memberships, accounts, unreferenced personas);
   2. re-adds the access check;
   3. rewrites the policies in place;
   4. replaces `acting_person`, the six RPCs and `initialize_workspace` with signatures that have no person parameter and no presenter list;
   5. rewrites four helpers and `add_staff_member` with `CREATE OR REPLACE`.
-- **The local stack gets 042 only through a counted, backed-up procedure,** with the refusal verified on a restored throwaway copy.
+- **The local stack gets 043 only through a counted, backed-up procedure,** with the refusal verified on a restored throwaway copy.
 - **The browser** loses the presenter screen, `inert()` and `personId`. An account with no membership keeps the existing `noAccessScreen`.
 
 **Tech Stack:** PostgreSQL / Supabase SQL migrations, ES-module browser app, `node:test` unit and database suites, the Playwright browser story, Node tooling in `tools/admin/`.
@@ -28,7 +28,7 @@
 ## Global Constraints
 
 **The migration**
-- The file is `supabase/migrations/042_remove_presenter_access.sql`. Never edit an applied migration (001–041). 041 is main's `041_resolve_go_over_during_hold.sql` (#176).
+- The file is `supabase/migrations/043_remove_presenter_access.sql`. Never edit an applied migration (001–042). 041 is main's `041_resolve_go_over_during_hold.sql` (#176). 042 is #172's migration (let-follow-up-holders-work-any-follow-up), which merges to main before this change.
 - **No `CASCADE`** in our SQL. Drop each old signature by its full identity:
   - `public.vitally_apply_action(uuid,uuid,bigint,uuid,text,jsonb)`;
   - `public.vitally_assistance_action(uuid,uuid,bigint,uuid,text,text)`;
@@ -40,15 +40,15 @@
   - `vitally_private.initialize_workspace(uuid,uuid[],uuid[])`.
 
   Supabase's own `auth` foreign keys cascade when `auth.users` rows are deleted. That is allowed (user ruling).
-- **The source for every rewritten function** is its live definition on the stack at 040. None of the 14 replaced functions is redefined in 041; #176 redefines only `act_resolve_followup`, which 042 doesn't touch (checked at propose against every migration file): `select pg_get_functiondef('<schema>.<name>(<args>)'::regprocedure)`. Change only what this plan states.
+- **The source for every rewritten function** is its live definition on the stack at 040. None of the 14 replaced functions is redefined in 041; #176 redefines only `act_resolve_followup`, which 043 doesn't touch (checked at propose against every migration file). **Exception: `add_staff_member` is copied from #172's 042**, once it is on main, keeping only this change's edit (the reserved `alex`/`morgan`/`sam` keys removed). After #172 merges, every other replaced function is re-checked against main's newest definitions: `select pg_get_functiondef('<schema>.<name>(<args>)'::regprocedure)`. Change only what this plan states.
 
-**Order in 042**
+**Order in 043**
 1. **Refusal.** Count presenter user ids (`select user_id from public.memberships where access='presenter'`) in each of:
    - `cases.owner_user_id`, `case_events.actor_user_id`, `documents.submitted_by_user_id`, `contact_attempts.actor_user_id`, `contact_log.logged_by_user_id`, `contact_log_versions.edited_by_user_id` and `people.user_id`, each matched on `(workspace_id, user_id)`;
    - `cases.created_by_user_id`;
    - any other `memberships` row of the same `user_id`.
 
-   If any count is above zero: `raise exception using errcode = 'VT008', message = '042 refused: presenter accounts are referenced (' || <kind=count, …> || ')', detail = <same>`.
+   If any count is above zero: `raise exception using errcode = 'VT008', message = '043 refused: presenter accounts are referenced (' || <kind=count, …> || ')', detail = <same>`.
 2. `delete from public.action_receipts where actor_user_id in (<presenter user ids>)`.
 3. Delete the presenter memberships.
 4. `delete from auth.users where id in (<those ids>)`. Capture the ids into a temp table before step 3.
@@ -90,7 +90,7 @@
 **The local stack**
 - Never run `supabase start` from the repo root.
 - The database, browser and auth-browser suites run one at a time, with no other test process on the stack.
-- **Applying 042 to the local stack can't be undone,** and it breaks other branches' database and browser suites, and the local app, until this branch's later tasks land. Task 1 stops for the controller, who confirms with the user, before the stack procedure.
+- **Applying 043 to the local stack can't be undone,** and it breaks other branches' database and browser suites, and the local app, until this branch's later tasks land. Task 1 stops for the controller, who confirms with the user, before the stack procedure.
 
 **Data and output**
 - Fictional data only.
@@ -101,18 +101,18 @@
 
 ## Review Focus
 
-1. **A replay of a receipt stored before 042** (whose digest was computed with the then-resolved person) must return the stored receipt, not a conflict. An old-path receipt can't be created after 042, so two tests stand in. Task 1's catalog test asserts that each RPC's digest still contains `'personId', v_person.id`. Task 2's "an identical replay keeps its actor" asserts that a replay returns the stored receipt.
-2. **A window signed in before 042 as a presenter** must, after refresh, show the no-access screen and read nothing, not an error page. Test in Task 4: the controller's no-membership window tests, including focus, online and Try again.
+1. **A replay of a receipt stored before 043** (whose digest was computed with the then-resolved person) must return the stored receipt, not a conflict. An old-path receipt can't be created after 043, so two tests stand in. Task 1's catalog test asserts that each RPC's digest still contains `'personId', v_person.id`. Task 2's "an identical replay keeps its actor" asserts that a replay returns the stored receipt.
+2. **A window signed in before 043 as a presenter** must, after refresh, show the no-access screen and read nothing, not an error page. Test in Task 4: the controller's no-membership window tests, including focus, online and Try again.
 3. **An old local roster with `presenters` and `sampleCaseOwners`** must apply, print both notes, and create no account for the presenter addresses. Test in Task 3.
 4. **A staff-only workspace whose default follow-up person was never set** (a new workspace before `set_default_followup`) must not break escalation. The roster always sets it. Test in Task 2: `initialize_workspace` on a new workspace leaves the default null, and a roster run sets it in the same transaction.
 5. **The seed on a stack that kept Sam as default** must still refuse, with its existing message. Test in Task 3: the seed's role-resolution test with a kept Sam default still refuses.
 
 ---
 
-### Task 1: Migration 042, its catalog tests, and the stack procedure
+### Task 1: Migration 043, its catalog tests, and the stack procedure
 
 **Files:**
-- Create: `supabase/migrations/042_remove_presenter_access.sql`
+- Create: `supabase/migrations/043_remove_presenter_access.sql`
 - Modify: `tests/database-catalog.mjs`
 - Scratch, not committed, in the session scratchpad: `refusal-precheck.sql`, `counts.sql`, the backup file, and the before/after/throwaway outputs
 
@@ -146,10 +146,10 @@
   - **"private entry points are not callable by clients":** `has_function_privilege(role, 'vitally_private.acting_person(public.memberships)', 'execute')` and the same for `initialize_workspace(uuid,uuid[])` are false for `anon`, `authenticated` and `service_role`.
   - **"the digest still records the resolved person"** (Review Focus 1): each of the six RPC sources matches `'personId', v_person.id`.
   - **"the access check allows two values":** inserting a membership with `access='presenter'` is refused by `memberships_access_check`.
-- [ ] **Step 2: Run them to see them fail** on the stack before 042: `node --env-file=.env.test --test tests/database-catalog.mjs`. Expected: FAIL on presenter mentions, policy names, signatures and access. Record the output.
-- [ ] **Step 3: Write 042** in the Global Constraints order. Copy each function from `pg_get_functiondef` on the stack, and check that no migration after 040 redefines it.
+- [ ] **Step 2: Run them to see them fail** on the stack before 043: `node --env-file=.env.test --test tests/database-catalog.mjs`. Expected: FAIL on presenter mentions, policy names, signatures and access. Record the output.
+- [ ] **Step 3: Write 043** in the Global Constraints order. Copy each function from `pg_get_functiondef` on the stack, and check that no migration after 040 redefines it.
 - [ ] **Step 4: Write the scratch scripts.** Both are read-only, run with `psql` through `docker exec` on the stack's database.
-  - **`refusal-precheck.sql`:** the nine counts of 042's refusal.
+  - **`refusal-precheck.sql`:** the nine counts of 043's refusal.
   - **`counts.sql`:**
     - `count(*)` of every table in `public`;
     - `people` grouped by `person_key in ('alex','morgan','sam')` and `user_id is null`;
@@ -157,7 +157,7 @@
     - `action_receipts` in total, and those whose actor is a presenter;
     - `workspaces.id` with `default_followup_person_id` and that person's key;
     - `count(*)` of `auth.users`, `identities`, `sessions`, `refresh_tokens`, `mfa_factors`, `mfa_challenges`, `mfa_amr_claims`, `one_time_tokens`, `oauth_authorizations`, `oauth_consents`, `webauthn_credentials` and `webauthn_challenges`, plus each one's rows belonging to presenter accounts.
-- [ ] **Step 5: Stop for the controller.** Report NEEDS_CONTEXT with "ready to start the stack procedure for 042" and wait. The controller tells the user that the before-counts are starting, so they stay off the local app, and waits for the user's go-ahead.
+- [ ] **Step 5: Stop for the controller.** Report NEEDS_CONTEXT with "ready to start the stack procedure for 043" and wait. The controller tells the user that the before-counts are starting, so they stay off the local app, and waits for the user's go-ahead.
 - [ ] **Step 6: Pre-check.** Run `refusal-precheck.sql`. If any count is above zero, report BLOCKED with the counts and change nothing.
 - [ ] **Step 7: Before-counts and backup.**
   1. Run `counts.sql` and save the output as `before.txt`.
@@ -165,12 +165,12 @@
 - [ ] **Step 8: Restore check and throwaway refusal test.**
   1. `createdb vitally_throwaway` in the same container, and `pg_restore` the backup into it. Run `counts.sql` there; it must equal `before.txt`.
   2. In `vitally_throwaway`, insert a fictional `auth.users` row (`…@vitally.invalid`), a `presenter` membership in workspace `160fc95a-…`, and a `case_events` row on one of its cases with that `actor_user_id`.
-  3. Apply main's 041 to the copy (`psql -v ON_ERROR_STOP=1 -1 -f 041_resolve_go_over_during_hold.sql`). Then run `psql -v ON_ERROR_STOP=1 -1 -f 042_remove_presenter_access.sql`. Expected: `ERROR: 042 refused: presenter accounts are referenced (case_events.actor_user_id=1, …)` with SQLSTATE `VT008`.
+  3. Apply main's 041 and 042 to the copy, in order (`psql -v ON_ERROR_STOP=1 -1 -f <file>` for each). Then run `psql -v ON_ERROR_STOP=1 -1 -f 043_remove_presenter_access.sql`. Expected: `ERROR: 043 refused: presenter accounts are referenced (case_events.actor_user_id=1, …)` with SQLSTATE `VT008`.
   4. Run `counts.sql` again; it must be unchanged from step 2's state.
-  5. Delete the seeded `case_events` row and run 042 again. Expected: success.
+  5. Delete the seeded `case_events` row and run 043 again. Expected: success.
   6. Save every command and output.
   7. `dropdb vitally_throwaway`.
-- [ ] **Step 9: Apply.** Run `npm run db:migrate:test`. It applies main's 041 and then 042; 041 repairs no rows, so the expected differences are 042's alone. Expected: "Approved test migrations applied." If it fails, report BLOCKED with the code, and never edit a migration that is already applied anywhere.
+- [ ] **Step 9: Apply.** Run `npm run db:migrate:test`. It applies main's 041 and 042, then 043. Before the before-counts, read #172's 042 and note any rows it changes; the expected differences are 043's plus exactly those. Expected: "Approved test migrations applied." If it fails, report BLOCKED with the code, and never edit a migration that is already applied anywhere.
 - [ ] **Step 10: After-counts.** Run `counts.sql` and save it as `after.txt`. Compute the expected differences from `before.txt`, as in brainstorm Q13:
   - receipts: minus the presenter receipts;
   - memberships: minus the presenter memberships;
@@ -180,7 +180,7 @@
 
   **Any difference that doesn't match stops the work:** report BLOCKED with both tables. Otherwise, the controller tells the user that the after-counts are done.
 - [ ] **Step 11: Run the catalog tests to see them pass:** `node --env-file=.env.test --test tests/database-catalog.mjs`. Expected: PASS. List the other database suites' failures for Task 2.
-- [ ] **Step 12: Commit** "Database: migration 042 removes presenter access (#136)". The report carries the before/after table, the expected differences, and the throwaway refusal transcript.
+- [ ] **Step 12: Commit** "Database: migration 043 removes presenter access (#136)". The report carries the before/after table, the expected differences, and the throwaway refusal transcript.
 
 ### Task 2: The database fixture and suites
 
@@ -204,7 +204,7 @@
   - `seedWorkflow` acts through role accounts;
   - `initializeVerified` now asserts: people are exactly the staff, and the default is `site_coordinator`.
 - [ ] **Step 3: `rpc-signatures.mjs`.** The six signatures without the person argument; drop `assistPersonId`.
-- [ ] **Step 4: Remove the 2 tests whose code is gone.** In `database-staff-identity.mjs`: "a presenter chooses a demo persona" and "a presenter tries a staff member's person". Record `grep -n "presenter" supabase/migrations/042_remove_presenter_access.sql` and the new `acting_person` body as the evidence that the presenter branch is gone.
+- [ ] **Step 4: Remove the 2 tests whose code is gone.** In `database-staff-identity.mjs`: "a presenter chooses a demo persona" and "a presenter tries a staff member's person". Record `grep -n "presenter" supabase/migrations/043_remove_presenter_access.sql` and the new `acting_person` body as the evidence that the presenter branch is gone.
 - [ ] **Step 5: The replacements**, each named in the report with the test it replaces:
   - **"a call carrying p_person_id matches no function and writes nothing"** replaces staff-identity "naming its own person is the same as null", "naming someone else is FORBIDDEN", "a client names a person" and "a tampered request", and database-store "a client who forges a staff person". For one staff session and one applicant session, call `vitally_apply_action` through the API with an extra `p_person_id`. Expect PostgREST error `PGRST202` and unchanged receipt and event counts.
   - **"two access types; presenter is refused"** replaces "the three access types".

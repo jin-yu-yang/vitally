@@ -9,7 +9,7 @@ ViTally has three kinds of membership: `applicant`, `presenter` and `staff`.
 
 In the browser, a presenter account gets a plain screen. `inert()` stops its window from loading, subscribing or retrying, and the store keeps a presenter read entry.
 
-**State observed on the user's local stack** (migrated to 040; read-only, 2026-11-07; main's 041, #176, is not yet applied there):
+**State observed on the user's local stack** (migrated to 040; read-only, 2026-11-07; main's 041 (#176) is not yet applied there, and #172's 042 merges to main before this change):
 
 | What | Count |
 |---|---|
@@ -21,7 +21,7 @@ In the browser, a presenter account gets a plain screen. `inert()` stops its win
 These numbers are illustrative. Apply re-takes them all.
 
 **Constraints from the project and the user:**
-- Applied migrations are never edited; this is 042.
+- Applied migrations are never edited; this is 043.
 - No `CASCADE` in our SQL.
 - Every new function gets an explicit revoke.
 - No test is removed while its code survives.
@@ -32,7 +32,7 @@ These numbers are illustrative. Apply re-takes them all.
 ## Goals / Non-Goals
 
 **Goals:**
-- After 042, `presenter` appears nowhere in the database catalog, and nowhere in `src`, `tools` or `tests`.
+- After 043, `presenter` appears nowhere in the database catalog, and nowhere in `src`, `tools` or `tests`.
 - Staff always act as their own person and clients as no person, with no way for a request to name one.
 - Existing stacks lose presenter accounts, their test-run receipts and every persona nothing references. Any history that still references them stays.
 - Every check that guarded presenter behaviour is converted, or replaced by a check on the same property for an account with no membership.
@@ -42,7 +42,7 @@ These numbers are illustrative. Apply re-takes them all.
 - Filtering kept personas out of the pool's "Prepared by" / "Reviewed by" options.
 - Changing "persona" wording in specs where it already means the staff member's own person.
 - Editing dated docs, `docs/superpowers/`, or the user's local roster file.
-- Running 042 on the classroom project.
+- Running 043 on the classroom project.
 
 ## Decisions
 
@@ -63,13 +63,13 @@ These numbers are illustrative. Apply re-takes them all.
   - Old signatures and `acting_person(memberships, uuid)` are dropped by name.
   - Every new function gets `revoke all … from public, anon, authenticated, service_role`. The six RPCs then get `grant execute … to authenticated`.
   - The four helpers that test presenter keep their signatures and are changed with `CREATE OR REPLACE`.
-  - The request digest keeps its `'personId'` key, filled with the resolved person, so receipts stored before 042 replay identically.
+  - The request digest keeps its `'personId'` key, filled with the resolved person, so receipts stored before 043 replay identically.
 - **Why:** only presenters ever chose a person. Removing the parameter means no request can claim another person. A call that still sends `p_person_id` matches no function and writes nothing.
 - **Alternative considered:** keep the parameter and require null. Rejected, because it keeps a contract that has no use.
 - **Browser (user ruling):** `personId` goes from every request and from the Action shape in `src/contracts.mjs`.
 
-### D4: 042's data steps refuse rather than guess
-- **Choice:** in this order, all in 042's single transaction:
+### D4: 043's data steps refuse rather than guess
+- **Choice:** in this order, all in 043's single transaction:
   1. **Refuse** with SQLSTATE `VT008`, giving per-table counts, if a presenter account is referenced by:
      - `cases.owner_user_id`, `case_events.actor_user_id`, `documents.submitted_by_user_id`, `contact_attempts.actor_user_id`, `contact_log.logged_by_user_id`, `contact_log_versions.edited_by_user_id`, `people.user_id` or `cases.created_by_user_id`;
      - any other membership of that account (builder's call; see the builder check in brainstorm.md).
@@ -83,12 +83,12 @@ These numbers are illustrative. Apply re-takes them all.
   - Ban referenced accounts: rejected by the user.
   - Repoint the referencing rows: rejected, because it rewrites history.
   - Delete accounts through the admin API: rejected, because the delete would no longer be atomic with the migration.
-- **Verification:** a database test can't reach the refusal, because past 042 the constraint forbids the state it needs, and a callable presenter-aware function is forbidden. It is verified once on a throwaway database (user ruling).
+- **Verification:** a database test can't reach the refusal, because past 043 the constraint forbids the state it needs, and a callable presenter-aware function is forbidden. It is verified once on a throwaway database (user ruling).
 - **Error code:** `VT008`, the next code after `VT001`–`VT007`, not tied to a migration number.
 - **Readability:** `migrate.mjs` prints only the SQLSTATE, so `docs/setup.md` documents what `VT008` means and gives a read-only query that shows the counts.
 
 ### D5: Personas are deleted only when nothing references them
-- **Choice (user ruling, option (b)):** delete each `people` row with `person_key in ('alex','morgan','sam') and user_id is null` that has no reference. A reference is any foreign-key column that points at `people`, derived from `pg_constraint` when 042 runs, or `action_receipts.actor_person_id`, which has no foreign key. Rows that are referenced are kept.
+- **Choice (user ruling, option (b)):** delete each `people` row with `person_key in ('alex','morgan','sam') and user_id is null` that has no reference. A reference is any foreign-key column that points at `people`, derived from `pg_constraint` when 043 runs, or `action_receipts.actor_person_id`, which has no foreign key. Rows that are referenced are kept.
 - **Why:** this cleans up stacks without ever failing on a teammate's stack where a persona acted on a hand-made case. Deriving the columns means a missed column can't make the delete fail, or lose a row that is still referenced.
 - **Alternatives considered:**
   - Keep all personas: the user's first ruling, changed once the receipts were going.
@@ -98,7 +98,7 @@ These numbers are illustrative. Apply re-takes them all.
 - **Choice:**
   - `initialize_workspace(p_workspace_id uuid, p_applicants uuid[])` replaces the three-argument form, which is dropped by name. The new form is revoked from every client role, with no grant.
   - It creates no personas and drops the "exactly three unlinked people" check. A new workspace's default follow-up stays null until `set_default_followup` runs in the same transaction.
-  - `add_staff_member` (with `CREATE OR REPLACE`) and `roster.mjs` stop reserving `alex`, `morgan` and `sam`.
+  - `add_staff_member` (with `CREATE OR REPLACE`) and `roster.mjs` stop reserving `alex`, `morgan` and `sam`. `add_staff_member` is copied from #172's migration 042, its newest definition, and keeps #172's refusal of `followup` without `admin`.
 - **Why:** `add_staff_member` already refuses a key held by anyone other than exactly that staff member. A kept persona's key stays unusable in its workspace, and a freed key gets a new person id.
 - **Trade-off:** the roster can't warn about a kept persona's key before creating accounts.
 
@@ -132,32 +132,32 @@ A test is removed only when its code is gone, named and shown by grep. Otherwise
 
 ## Risks / Trade-offs
 
-- **[Risk] The refusal fires on the user's stack because the user created presenter-referenced rows after the brainstorm** → Mitigation: the before-count script checks the refusal condition first. If it isn't zero, apply stops before 042 runs and shows the user.
-- **[Risk] 042 on the classroom project** → None to decide now. The classroom project doesn't exist yet. A new project runs every migration from scratch with no presenter accounts, so 042's refusal check and deletes find nothing there.
-- **[Risk] The persona delete misses a reference column** → Mitigation: the columns are derived from `pg_constraint` when 042 runs, and every reference is NO ACTION, so a miss would make 042 fail rather than lose data.
+- **[Risk] The refusal fires on the user's stack because the user created presenter-referenced rows after the brainstorm** → Mitigation: the before-count script checks the refusal condition first. If it isn't zero, apply stops before 043 runs and shows the user.
+- **[Risk] 043 on the classroom project** → None to decide now. The classroom project doesn't exist yet. A new project runs every migration from scratch with no presenter accounts, so 043's refusal check and deletes find nothing there.
+- **[Risk] The persona delete misses a reference column** → Mitigation: the columns are derived from `pg_constraint` when 043 runs, and every reference is NO ACTION, so a miss would make 043 fail rather than lose data.
 - **[Risk] The Action shape change breaks a stored or replayed browser request** → Mitigation: requests are built per action and not persisted across versions. The digest is computed in the database from resolved values.
-- **[Risk] Renaming policies breaks a test that pins names** → Mitigation: the catalog test is converted to the new names in the same task as 042.
+- **[Risk] Renaming policies breaks a test that pins names** → Mitigation: the catalog test is converted to the new names in the same task as 043.
 - **[Trade-off] Kept personas still appear in the pool's person filter on older stacks** → Accepted. This is out of scope, and only stacks with real persona history have them.
 - **[Trade-off] `migrate.mjs` shows only `VT008`** → Accepted. The fix is documented, and `migrate.mjs` stays unchanged.
 
 ## Migration Plan
 
-1. In the change's worktree, write 042 and convert the fixture and tests. Run `npm run db:migrate:test` and the database suite on the test stack.
+1. In the change's worktree, write 043 and convert the fixture and tests. Run `npm run db:migrate:test` and the database suite on the test stack.
 2. Verify the refusal once on a throwaway database:
-   1. restore a copy at 040, and apply main's 041;
+   1. restore a copy at 040, and apply main's 041 and 042;
    2. seed a referenced presenter;
-   3. confirm 042 fails with `VT008` and the counts, and that the row counts are unchanged;
-   4. remove the reference and confirm 042 succeeds.
+   3. confirm 043 fails with `VT008` and the counts, and that the row counts are unchanged;
+   4. remove the reference and confirm 043 succeeds.
 3. On the user's stack:
    1. tell the user before-counts are starting;
    2. run the refusal pre-check; if it isn't zero, stop;
    3. take a verified backup and restore check;
    4. take the read-only before-counts;
-   5. apply 042;
+   5. apply 043;
    6. take the after-counts;
    7. compare against the expected differences (brainstorm Q13). Any other difference stops the work.
 4. Run every check in brainstorm Q14, and record test counts before and after.
-5. **Rollback:** restore the verified backup. 042 is final once applied anywhere; any fix is a new migration.
+5. **Rollback:** restore the verified backup. 043 is final once applied anywhere; any fix is a new migration.
 
 ## Open Questions
 

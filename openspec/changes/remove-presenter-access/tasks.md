@@ -6,9 +6,9 @@
   - browser story: `npm run test:browser` (83 tests, 40 phases);
   - auth-browser: `npm run test:auth-browser` (20).
 
-## 2. Migration 042
+## 2. Migration 043
 
-- [ ] 2.1 Write `supabase/migrations/042_remove_presenter_access.sql` as design D1–D6 describe.
+- [ ] 2.1 Write `supabase/migrations/043_remove_presenter_access.sql` as design D1–D6 describe.
   - **The refusal, which runs first:** SQLSTATE `VT008`, giving per-kind counts. It covers the seven membership-keyed columns, `cases.created_by_user_id`, and any other membership of a presenter account.
   - **The data steps, in this order:**
     1. presenter receipts;
@@ -26,20 +26,20 @@
   - the refusal pre-check: presenter references in the eight columns, and other memberships of presenter accounts;
   - the count script (brainstorm Q13): every `public` table, people by key and link, memberships by access, receipts in total and by presenter actor, the default follow-up person per workspace, and every `auth` table in the cascade.
 
-## 3. Apply 042 to the user's local stack (the test stack)
+## 3. Apply 043 to the user's local stack (the test stack)
 
-`npm run db:migrate:test` targets this stack. Applying 042 can't be undone, and from then on other branches' database and browser suites fail on this stack until #136 merges. 042 is applied to this stack only through these steps, before any database suite runs on this branch.
+`npm run db:migrate:test` targets this stack. Applying 043 can't be undone, and from then on other branches' database and browser suites fail on this stack until #136 merges. 043 is applied to this stack only through these steps, before any database suite runs on this branch.
 
 - [ ] 3.1 Tell the user the before-counts are starting, so they stay off the local app until 3.5. Run the refusal pre-check. If it isn't zero, stop and show the user before going further.
 - [ ] 3.2 Take the before-counts. Take a backup (`pg_dump` of the stack's database, kept in the scratchpad).
 - [ ] 3.3 **Restore check, and the throwaway database:** restore the backup into a new database in the same container (for example `vitally_throwaway`), never the stack's own database. Run the count script there; it must equal the before-counts. Then verify the refusal on that copy:
   1. seed a presenter membership and a `case_events` row that references it;
-  2. apply main's 041 to the copy, then run 042's file and confirm it fails with `VT008` and the per-kind counts;
+  2. apply main's 041 and 042 to the copy, then run 043's file and confirm it fails with `VT008` and the per-kind counts;
   3. confirm the copy's counts are unchanged;
-  4. delete the seeded reference, run 042 again, and confirm it succeeds.
+  4. delete the seeded reference, run 043 again, and confirm it succeeds.
 
   Keep the commands and output for the PR, then drop the throwaway database.
-- [ ] 3.4 Apply 042 to the stack (`npm run db:migrate:test`, which also applies main's 041; that one repairs no rows). Take the after-counts. Compare them with the expected differences computed from the before-counts. Any other difference stops the work, and the numbers go to the user.
+- [ ] 3.4 Apply 043 to the stack (`npm run db:migrate:test`, which also applies main's 041 and 042 first; 041 repairs no rows, and any rows 042 changes are added to the expected differences). Take the after-counts. Compare them with the expected differences computed from the before-counts. Any other difference stops the work, and the numbers go to the user.
 - [ ] 3.5 Tell the user the after-counts are done.
 
 ## 4. Database test support and suites

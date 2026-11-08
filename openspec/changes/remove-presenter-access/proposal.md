@@ -15,7 +15,7 @@ Each of these is code nobody uses that still has to be kept safe. This change (#
 - From: an account is a client, a presenter or a staff member.
 - To: an account is a client or a staff member. The database refuses any other value.
 - Reason: no presenter screens or sample cases remain to use.
-- Impact: breaking for any stack that still has presenter memberships. Migration 042 deletes them, refusing if real work references them.
+- Impact: breaking for any stack that still has presenter memberships. Migration 043 deletes them, refusing if real work references them.
 
 **The six public RPCs**
 - From: each takes `p_person_id`. A presenter names a persona, and staff and clients must pass null or their own person.
@@ -25,18 +25,18 @@ Each of these is code nobody uses that still has to be kept safe. This change (#
 
 **Presenter data on existing stacks**
 - From: presenter memberships, accounts and their receipts stay.
-- To: 042 deletes, in order:
+- To: 043 deletes, in order:
   - the presenter receipts (test-run history only);
   - the presenter memberships;
   - the presenter accounts, using Supabase's own auth cascade for their sessions and tokens.
-- Before deleting anything, 042 refuses to run if any case, event, document, contact or other membership references a presenter account.
+- Before deleting anything, 043 refuses to run if any case, event, document, contact or other membership references a presenter account.
 - Impact: a former presenter address can no longer sign in. A window still open shows "This account has no access".
 
 **The demonstration personas**
 - From: every workspace is created with Alex, Morgan and Sam, the keys `alex`, `morgan` and `sam` are reserved, and Sam is the default follow-up person.
 - To:
   - New workspaces get no personas.
-  - 042 deletes each existing persona that nothing references and keeps the rest.
+  - 043 deletes each existing persona that nothing references and keeps the rest.
   - The keys are no longer reserved. A kept persona's key stays taken.
 - Impact: a roster must list staff and a `defaultFollowup`. A roster that still lists `presenters` gets a note and those addresses get no access.
 
@@ -74,7 +74,7 @@ None.
 ## Impact
 
 **Database**
-- New migration `supabase/migrations/042_remove_presenter_access.sql`:
+- New migration `supabase/migrations/043_remove_presenter_access.sql`:
   - the access check and the 22 policies;
   - `acting_person`, `check_operation_authority`, `contact_person`, `lock_case` and `lock_assistance_item`;
   - the six RPCs;
@@ -102,4 +102,4 @@ None.
 - dated docs;
 - `docs/superpowers/`.
 
-**The classroom project** doesn't exist yet. A new project runs every migration from scratch with no presenter accounts, so 042's deletes find nothing there.
+**The classroom project** doesn't exist yet. A new project runs every migration from scratch with no presenter accounts, so 043's deletes find nothing there.

@@ -38,7 +38,7 @@
 
 ### Requirement: A presenter account gets a plain screen and no staff screens
 
-**Reason**: Migration 042 deletes every presenter membership and account, and the database refuses the `presenter` access value, so no presenter can sign in or reach the browser. The plain screen and its guard are removed with it.
+**Reason**: Migration 043 deletes every presenter membership and account, and the database refuses the `presenter` access value, so no presenter can sign in or reach the browser. The plain screen and its guard are removed with it.
 
 **Migration**: A former presenter address can no longer sign in. A window still signed in as one gets the no-access screen (requirement "Presenter accounts are removed with their test-run history").
 
@@ -178,7 +178,7 @@ A roster SHALL list at least one staff member and SHALL name a `defaultFollowup`
 - **THEN** the command prints that presenters is no longer used and those addresses get no access, and no account or membership is created for them
 
 ### Requirement: Presenter accounts are removed with their test-run history
-Migration 042 SHALL remove presenter access from every stack it runs on, in one transaction. It SHALL first check whether a presenter account is referenced, and SHALL refuse with SQLSTATE `VT008`, changing nothing, if any of these exist:
+Migration 043 SHALL remove presenter access from every stack it runs on, in one transaction. It SHALL first check whether a presenter account is referenced, and SHALL refuse with SQLSTATE `VT008`, changing nothing, if any of these exist:
 - a case, case event, document, contact attempt, contact log entry, contact log version or person that references a presenter's membership;
 - a case created by a presenter account;
 - any other membership of a presenter account.
@@ -198,31 +198,31 @@ After the migration, no function, constraint, policy or view in the database SHA
 A former presenter address SHALL be treated at sign-in like any address not on the roster. A window still signed in as a former presenter SHALL show the no-access screen ("This account has no access", with Sign out) and SHALL load and subscribe to nothing.
 
 #### Scenario: A stack with test-run presenters
-- **WHEN** 042 runs on a stack whose presenter accounts have only receipts
+- **WHEN** 043 runs on a stack whose presenter accounts have only receipts
 - **THEN** their receipts, memberships and accounts are deleted, and every other row is unchanged except unreferenced personas
 
 #### Scenario: A presenter referenced by real work
-- **WHEN** 042 runs on a stack where a case event's actor is a presenter account
-- **THEN** 042 fails with `VT008`, its message counts the referencing rows, and nothing on the stack changes
+- **WHEN** 043 runs on a stack where a case event's actor is a presenter account
+- **THEN** 043 fails with `VT008`, its message counts the referencing rows, and nothing on the stack changes
 
 #### Scenario: Personas nothing references
-- **WHEN** 042 runs on a workspace whose Alex, Morgan and Sam are referenced only by presenter receipts
+- **WHEN** 043 runs on a workspace whose Alex, Morgan and Sam are referenced only by presenter receipts
 - **THEN** all three are deleted
 
 #### Scenario: A persona that is still referenced
-- **WHEN** 042 runs on a workspace whose default follow-up person is Sam
+- **WHEN** 043 runs on a workspace whose default follow-up person is Sam
 - **THEN** Sam is kept, unlinked, and stays the default follow-up person
 
 #### Scenario: A former presenter tries to sign in
-- **WHEN** a former presenter address asks for a sign-in code after 042
+- **WHEN** a former presenter address asks for a sign-in code after 043
 - **THEN** the sign-in form answers as it does for an address not on the roster, and no code is sent
 
 #### Scenario: A window still signed in
-- **WHEN** a window was signed in as a presenter before 042, and refreshes afterwards
+- **WHEN** a window was signed in as a presenter before 043, and refreshes afterwards
 - **THEN** it shows "This account has no access" with Sign out, and loads no cases, people or workspace details
 
 #### Scenario: The catalog has no presenter
-- **WHEN** the database catalog is read after 042
+- **WHEN** the database catalog is read after 043
 - **THEN** no function source, constraint, policy name, policy expression or view contains `presenter`
 
 ## MODIFIED Requirements
