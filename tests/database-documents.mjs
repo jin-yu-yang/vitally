@@ -1128,6 +1128,68 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
       });
       assert.equal((await f.readStaffCase(caseId)).followups[0].status, "resolved");
     });
+    await t.test("a missing or cancelled task takes no contact or resolve (042)", async () => {
+      const caseId = await requestedCase(f);
+      await f.act(f.preparer, caseId, "ESCALATE_CONTACT", { reason: "Office contact needed" });
+      const [task] = (await f.readStaffCase(caseId)).followups;
+      // A task id that exists nowhere: the contact is forbidden.
+      await assert.rejects(
+        () => f.logContact(f.siteCoordinator, caseId, SAMPLE_CONTACT(), crypto.randomUUID()),
+        rejected("FORBIDDEN"),
+      );
+      // A cancelled task is not open, whoever asks.
+      await f.sql("update public.admin_followups set status='cancelled' where id=$1", [task.id]);
+      await assert.rejects(
+        () => f.logContact(f.siteCoordinator, caseId, SAMPLE_CONTACT(), task.id),
+        rejected("INVALID_TRANSITION"),
+      );
+      await assert.rejects(
+        () =>
+          f.act(f.siteCoordinator, caseId, "RESOLVE_FOLLOWUP", {
+            followupId: task.id,
+            outcome: "reached",
+            note: "Spoke with the client",
+          }),
+        rejected("INVALID_TRANSITION"),
+      );
+      assert.equal((await taskContacts(f, task.id)).length, 0);
+    });
+    await t.test("follow-up work needs the capability, not the assignment (042)", async () => {
+      const dee = await f.staff({ key: "dee", name: "Dee Navarro", capabilities: ["admin", "receive_documents"] });
+      const caseId = await requestedCase(f);
+      await f.act(f.preparer, caseId, "ESCALATE_CONTACT", { reason: "Office contact needed" });
+      const [task] = (await f.readStaffCase(caseId)).followups;
+      const payload = { followupId: task.id, outcome: "reached", note: "Spoke with the client" };
+      // Admin without follow-up access is refused.
+      await assert.rejects(
+        () => f.logContact(dee.client, caseId, SAMPLE_CONTACT(), task.id),
+        rejected("FORBIDDEN"),
+      );
+      await assert.rejects(() => f.act(dee.client, caseId, "RESOLVE_FOLLOWUP", payload), rejected("FORBIDDEN"));
+      // So is the assignee once they no longer hold follow-up access.
+      assert.equal(task.assigneeId, f.siteCoordinatorId);
+      await f.sql("update public.people set capabilities=$1 where id=$2", [
+        ["admin", "assist", "receive_documents"],
+        f.siteCoordinatorId,
+      ]);
+      try {
+        await assert.rejects(
+          () => f.logContact(f.siteCoordinator, caseId, SAMPLE_CONTACT(), task.id),
+          rejected("FORBIDDEN"),
+        );
+        await assert.rejects(
+          () => f.act(f.siteCoordinator, caseId, "RESOLVE_FOLLOWUP", payload),
+          rejected("FORBIDDEN"),
+        );
+      } finally {
+        await f.sql("update public.people set capabilities=$1 where id=$2", [
+          ["admin", "followup", "assist", "receive_documents"],
+          f.siteCoordinatorId,
+        ]);
+      }
+      assert.equal((await taskContacts(f, task.id)).length, 0);
+      assert.equal((await f.readStaffCase(caseId)).followups[0].status, "open");
+    });
     await t.test(
       "rejected document and follow-up actions commit no receipt or record",
       async () => {

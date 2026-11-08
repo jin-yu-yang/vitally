@@ -337,6 +337,7 @@ test("each open task has the shared form and Resolve", () => {
     person: { id: "desk", name: "Desk", capabilities: ["admin", "receive_documents"] },
   });
   assert.doesNotMatch(forDesk, linkedForm("task-1"));
+  assert.doesNotMatch(forDesk, /data-case-action="RESOLVE_FOLLOWUP"/);
   assert.match(forDesk, /Needs office follow-up access\./);
 });
 

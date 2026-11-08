@@ -1565,6 +1565,9 @@ const rowsFor = async (f, table, caseId) =>
   (await f.sql(`select * from public.${table} where case_id=$1 order by created_at`, [caseId])).rows;
 const goOver = async (f, caseId) =>
   (await f.sql("select * from public.admin_followups where case_id=$1 and purpose='go_over_return'", [caseId])).rows;
+// A case's review attempts, oldest first, by what identifies each one.
+const reviewAttempts = (staffCase) =>
+  staffCase.reviews.map(({ id, status, preparationVersion }) => ({ id, status, preparationVersion }));
 const NO = { ...without(without(REVIEWER, "wentOverOn"), "wentOverHow"), wentOver: false };
 const plan = async (f, caseId) =>
   (await f.sql("select signing_plan, to_char(signing_appointment_at,'YYYY-MM-DD\"T\"HH24:MI') as signing_appointment_at from public.cases where id=$1", [caseId])).rows[0];
@@ -1731,7 +1734,8 @@ test("the three handlers store the answers", async (t) => {
       const caseId = await reviewingCase(f, f.reviewer);
       await f.act(f.reviewer, caseId, "APPROVE_REVIEW", { questionnaire: NO });
       const [task] = await goOver(f, caseId);
-      const before = (await f.readStaffCase(caseId)).stage;
+      const beforeCase = await f.readStaffCase(caseId);
+      const before = beforeCase.stage;
       const { contactId } = await f.logContact(f.siteCoordinator, caseId, SAMPLE_CONTACT(), task.id);
       const [logged] = (await f.sql("select followup_id, outcome from public.contact_log where id=$1", [contactId])).rows;
       assert.equal(logged.followup_id, task.id);
@@ -1746,7 +1750,9 @@ test("the three handlers store the answers", async (t) => {
         note: "Went over the fictional return.",
       });
       assert.equal((await goOver(f, caseId))[0].status, "resolved");
-      assert.equal((await f.readStaffCase(caseId)).stage, before);
+      const afterCase = await f.readStaffCase(caseId);
+      assert.equal(afterCase.stage, before);
+      assert.deepEqual(reviewAttempts(afterCase), reviewAttempts(beforeCase), "the review attempt is unchanged");
     });
     await t.test("yes completes the review-contact step", async () => {
       const caseId = await f.approvedCase();
@@ -1877,6 +1883,8 @@ test("the three handlers store the answers", async (t) => {
       await f.act(f.reviewer, caseId, "APPROVE_REVIEW", { questionnaire: NO });
       const [task] = await goOver(f, caseId);
       assert.notEqual(task.assignee_person_id, jo.personId);
+      assert.equal((await plan(f, caseId)).signing_plan, "go_over_first");
+      const beforeCase = await f.readStaffCase(caseId);
       await f.logContact(jo.client, caseId, SAMPLE_CONTACT(), task.id);
       await f.act(jo.client, caseId, "RESOLVE_FOLLOWUP", {
         followupId: task.id,
@@ -1884,6 +1892,9 @@ test("the three handlers store the answers", async (t) => {
         note: "Fictional: went over the return by phone.",
       });
       assert.deepEqual(await plan(f, caseId), { signing_plan: "portal", signing_appointment_at: null });
+      const afterCase = await f.readStaffCase(caseId);
+      assert.equal(afterCase.stage, beforeCase.stage);
+      assert.deepEqual(reviewAttempts(afterCase), reviewAttempts(beforeCase), "the review attempt is unchanged");
       await f.act(f.siteCoordinator, caseId, "MARK_READY_TO_EFILE", { confirmed: true });
       assert.equal((await f.readStaffCase(caseId)).stage, "ready_to_efile");
     });

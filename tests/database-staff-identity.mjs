@@ -682,6 +682,8 @@ test("staff identity against real Supabase", async (t) => {
           () => f.sql("update public.people set capabilities=$1 where id=$2", [["followup", "review"], riley.personId]),
           byTheCheck,
         );
+        // The refused write leaves Riley's capabilities as they were.
+        assert.deepEqual((await personRow(f, "riley")).capabilities, ["prepare"]);
         await assert.rejects(
           () =>
             f.sql(
