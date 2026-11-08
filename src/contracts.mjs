@@ -119,15 +119,14 @@ export const SQLSTATE_ERROR_CODES = Object.freeze({
 });
 
 // True for a staff account only: the principal that gets the staff screens.
-// A presenter gets one plain screen (`presenterScreen`) and nothing else.
+// An account with no staff or applicant access gets `noAccessScreen` and nothing else.
 export const isStaffWindow = (principal) => principal?.access === "staff";
 
-// Principal: { userId, workspaceId, access: 'applicant'|'presenter'|'staff',
+// Principal: { userId, workspaceId, access: 'applicant'|'staff',
 //              email, personId, personName }
 //   personId and personName are the staff member's own roster person, linked
-//   through their account; null for an applicant or a presenter.
-//   A staff window is a staff account's alone. A presenter gets one plain
-//   screen and nothing is read for it.
+//   through their account; null for an applicant.
+//   A staff window is a staff account's alone.
 // Person: { id, name, capabilities: string[] }
 // Case: { id, reference, workspaceId, ownerUserId, stage,
 //         revision, preparationVersion, answers, intakeVerified,
@@ -137,7 +136,7 @@ export const isStaffWindow = (principal) => principal?.access === "staff";
 //   { phone, spousePhone, bestContactTime, bestContactNote }, or null when
 //   there is none. A list entry carries only the
 //   scalars, intakeVersion and intakeVisited (sub-step ids, [] when none)
-//   included, and no contact. A presenter's list entry also carries six
+//   included, and no contact. A staff list entry also carries six
 //   summaries: participants, openFollowups, followupAssigneeIds,
 //   openRequests, phone and reviewContactStatus (the latest approved
 //   review's client_contact_status: 'pending', 'completed', or null when no
@@ -149,7 +148,7 @@ export const isStaffWindow = (principal) => principal?.access === "staff";
 // Staff case additionally includes participants, reviews, followups,
 // internalHistory and materials: [{ item, receivedAt, recordedByPersonId }].
 // These are never loaded by the applicant adapter.
-// Action: { actionId, caseId, expectedRevision, personId, type, payload }
+// Action: { actionId, caseId, expectedRevision, type, payload }
 //   SUBMIT_REVIEW and APPROVE_REVIEW payloads are { questionnaire };
 //   RESUBMIT_REVIEW's is { questionnaire, resolution }.
 //   Preparer questionnaire: { confirmedBy: client|spouse|other,

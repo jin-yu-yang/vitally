@@ -129,7 +129,7 @@ export function createWindowState({ sessionStorage, clock = () => Date.now() } =
   return {
     // What this user chose in this window, or null when nothing usable is
     // stored. Only the fields that were actually stored come back.
-    // A field no longer known — the persona an older presenter window
+    // A field no longer known — the persona an older window
     // stored, say — is dropped like any other unknown field.
     read(userId) {
       if (!userId) return null;

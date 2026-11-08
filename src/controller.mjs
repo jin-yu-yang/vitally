@@ -459,7 +459,7 @@ export function createController({
   }
 
   function persistSession() {
-    if (!state.principal || inert()) return;
+    if (!state.principal) return;
     const { userId } = state.principal;
     windowState.write(userId, {
       screen: state.screen,
@@ -716,19 +716,11 @@ export function createController({
   }
 
   async function loadList() {
-    if (inert()) return;
     state.cases = await store.listCases();
     state.lists.cases = "ready";
     noteConnected();
   }
 
-  // The one presenter check (remove-presenter-screens): a presenter's plain
-  // screen reads nothing, saves no place and opens no channel. Every read
-  // (`loadData`, `loadList`, `loadWorkspace`, `loadAssistance`, `loadSelected`),
-  // the save of the window's place (`persistSession`) and the channel
-  // (`subscribe`) return at once, so no caller (focus, online, Try again,
-  // refresh, a late change) can wake it.
-  const inert = () => state.principal?.access === "presenter";
   // Everything a staff screen does: its reads, its rules and its actions.
   const staffWindow = () => state.principal?.access === "staff";
 
@@ -737,7 +729,6 @@ export function createController({
   // already a mistake (`supabase-store.mjs`, "an applicant read never names a
   // staff table").
   async function loadAssistance() {
-    if (inert()) return;
     if (!staffWindow()) {
       state.lists.assistance = "ready";
       return;
@@ -752,7 +743,6 @@ export function createController({
   // starts at.
   // Only a staff window reads it.
   async function loadWorkspace() {
-    if (inert()) return;
     if (!staffWindow() || !store.getWorkspace) return;
     state.workspace = await store.getWorkspace();
     noteConnected();
@@ -760,7 +750,6 @@ export function createController({
   }
 
   async function loadSelected() {
-    if (inert()) return;
     if (!state.selectedCaseId) return;
     const next = await store.getCase(state.selectedCaseId);
     applyCase(next);
@@ -873,7 +862,7 @@ export function createController({
   }
 
   function subscribe() {
-    if (releaseStore || inert()) return;
+    if (releaseStore) return;
     releaseStore = store.subscribe({
       onChange: (change) => handleChange(change),
       onConnection: (status) => {
@@ -934,7 +923,6 @@ export function createController({
   // refresh reads everything, not only the lists.
   let dataLoaded = false;
   async function loadData() {
-    if (inert()) return;
     await loadList();
     if (staffWindow()) {
       state.people = await store.listPeople();
@@ -972,6 +960,16 @@ export function createController({
   // Identity first, and only then the subscription: a refused or unreachable
   // principal must never open a channel, and staff reads happen only when the
   // principal says staff.
+  // The window of an account with no membership (or an access this app no
+  // longer has). `getPrincipal` is the only store call it makes; focus,
+  // online and Try again ask it again, so a granted membership is noticed.
+  function showNoAccess(error) {
+    state.principal = null;
+    noteFailure(error, { message: "You do not have access to this step." });
+    state.screen = "no-access";
+    show();
+  }
+
   async function load() {
     let session;
     try {
@@ -1008,20 +1006,20 @@ export function createController({
       // account is not on the roster (FORBIDDEN) or the server is unreachable.
       state.principal = null;
       noteFailure(error);
+      if (error?.code === "FORBIDDEN") state.screen = "no-access";
       show();
+      return;
+    }
+    // Only staff and applicant accounts get a window. Any other access has
+    // the same answer as no membership: the no-access screen, nothing read,
+    // no channel opened and no place saved for this window.
+    if (principal?.access !== "staff" && principal?.access !== "applicant") {
+      showNoAccess({ code: "FORBIDDEN" });
       return;
     }
     state.principal = principal;
     state.authError = null;
     windowState.clearAccess();
-    // A presenter account is no longer used: one plain screen, nothing read,
-    // no channel opened and no place saved for this window.
-    if (inert()) {
-      state.screen = "presenter";
-      state.error = null;
-      show();
-      return;
-    }
     restoreSession();
     // A staff window lands on the work board and a client on their applications,
     // unless this window was already somewhere this principal may be.
@@ -1413,7 +1411,6 @@ export function createController({
           actionId: newActionId(),
           caseId: record.id,
           expectedRevision: Number(record.revision),
-          personId: null,
           type: "START_SCREENING",
           payload: {},
         },
@@ -1471,12 +1468,12 @@ export function createController({
   // one is in flight does nothing at all. Reopening, refreshing or filling a
   // form never reaches this function.
   //
-  // `mode` and `personId` are what distinguish a client's own application from
+  // `mode` is what distinguishes a client's own application from
   // one the office typed in for a walk-in; the idempotency, the receipt and the
   // "what happens next" hook are the same for both, so they are written once.
   // `select: false` (the office's new draft) only creates: the caller reads
   // and adopts the case itself.
-  async function startCase({ mode, personId, answers }, afterReceipt, { select = true } = {}) {
+  async function startCase({ mode, answers }, afterReceipt, { select = true } = {}) {
     if (creating) return null;
     creating = true;
     if (!state.pendingCreateActionId) {
@@ -1486,7 +1483,6 @@ export function createController({
     const request = {
       actionId: state.pendingCreateActionId,
       mode,
-      personId: personId ?? null,
       answers,
     };
     // Who asked: a sign-out (or another sign-in) while the create is out
@@ -1526,7 +1522,7 @@ export function createController({
   }
 
   async function createCase() {
-    return await startCase({ mode: "client", personId: null, answers: {} }, () => {
+    return await startCase({ mode: "client", answers: {} }, () => {
       state.screen = "reference";
     });
   }
@@ -1648,7 +1644,7 @@ export function createController({
       !state.selectedCaseId;
     if (!state.officeDraftCaseId) {
       const receipt = await startCase(
-        { mode: "assisted", personId: null, answers: {} },
+        { mode: "assisted", answers: {} },
         null,
         { select: false },
       );
@@ -2216,7 +2212,6 @@ export function createController({
       expectedRevision: state.editBaseRevision ?? pinRevision(),
       // No one sends a person: a client answers for themselves, and the
       // database derives a staff account's person from the account.
-      personId: null,
       type: "SAVE_ANSWERS",
       // A save never sends an invalid value (spec §2.5): every field's
       // trimmed value, null clears included, minus the ones that fail their
@@ -2353,7 +2348,6 @@ export function createController({
       // As a save's pin: the revision this window last knew, the receipt's
       // when the re-read after a save failed.
       expectedRevision: pinRevision(),
-      personId: null,
       type,
       payload: payload ?? {},
     };
@@ -2544,7 +2538,6 @@ export function createController({
       actionId: newActionId(),
       itemId: item.id,
       expectedRevision: Number(item.revision),
-      personId: null,
       type,
       // A claim carries no note at all; a resolution says what was done.
       note: type === "RESOLVE" ? note : null,
@@ -2625,8 +2618,7 @@ export function createController({
       {
         actionId: newActionId(),
         caseId,
-        personId: null,
-        followupId,
+          followupId,
         entry,
       },
       (request) => store.logContact(request),
@@ -2644,8 +2636,7 @@ export function createController({
     try {
       await store.closeUnsigned({
         actionId: newActionId(),
-        personId: null,
-        cases: cases.map(({ caseId, revision }) => ({ caseId, revision })),
+          cases: cases.map(({ caseId, revision }) => ({ caseId, revision })),
         confirmed: true,
       });
     } catch (error) {
@@ -2683,8 +2674,7 @@ export function createController({
         actionId: newActionId(),
         contactId: contact.id,
         expectedRevision: Number(contact.revision),
-        personId: null,
-        entry,
+          entry,
       },
       (request) => store.editContact(request),
     );
@@ -2806,8 +2796,5 @@ export function createController({
     dismissError,
     clearError,
     noteLocalFailure,
-    // For the unit tests only: the loads a late change reaches, called
-    // directly to prove each is inert for a presenter on its own.
-    testing: { loadList, loadWorkspace, loadAssistance },
   };
 }
