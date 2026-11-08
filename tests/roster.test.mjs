@@ -13,10 +13,20 @@ import {
 } from "../tools/admin/roster.mjs";
 
 const NOTE = "sampleCaseOwners is no longer used and was ignored.";
+const PRESENTER_NOTE =
+  "presenters is no longer used and was ignored; those addresses get no access.";
 const WORKSPACE = "3f1c2b4a-8d7e-4f60-9a1b-2c3d4e5f6a7b";
+const riley = (extra = {}) => ({
+  email: " Riley@Example.org ",
+  name: "Riley Park",
+  personKey: "riley",
+  capabilities: ["prepare", "followup"],
+  ...extra,
+});
 const valid = () => ({
   workspaceId: WORKSPACE,
-  presenters: ["  Presenter@Example.org "],
+  staff: [riley()],
+  defaultFollowup: "riley",
   applicants: ["client-a@example.org", "client-b@example.org"],
 });
 const invalid = (pattern) => (error) =>
@@ -25,10 +35,16 @@ const invalid = (pattern) => (error) =>
 test("a roster is trimmed, lower-cased and kept in order", () => {
   assert.deepEqual(parseRoster(valid()), {
     workspaceId: WORKSPACE,
-    presenters: ["presenter@example.org"],
     applicants: ["client-a@example.org", "client-b@example.org"],
-    staff: [],
-    defaultFollowup: null,
+    staff: [
+      {
+        email: "riley@example.org",
+        name: "Riley Park",
+        personKey: "riley",
+        capabilities: ["prepare", "followup"],
+      },
+    ],
+    defaultFollowup: "riley",
   });
 });
 
@@ -43,15 +59,49 @@ test("an old roster's sampleCaseOwners is ignored with a note", () => {
   assert.deepEqual(rosterNotes({ ...valid(), sampleCaseOwners: null }), [NOTE]);
 });
 
+test("an old roster's presenters are ignored with a note", async () => {
+  const old = { ...valid(), presenters: ["presenter@example.org"] };
+  const parsed = parseRoster(old);
+  assert.equal("presenters" in parsed, false);
+  assert.deepEqual(rosterNotes(old), [PRESENTER_NOTE]);
+  assert.deepEqual(rosterNotes(valid()), []);
+  assert.doesNotThrow(() => parseRoster({ ...valid(), presenters: "anything" }));
+  // Review Focus 3: both notes print, and no account is made for the presenter.
+  const both = { ...old, sampleCaseOwners: { preparation_ready: "client-a@example.org" } };
+  assert.deepEqual(rosterNotes(both), [NOTE, PRESENTER_NOTE]);
+  const { admin, calls } = fakeAdmin([]);
+  await applyRoster(parseRoster(both), { admin, initialize: async () => ({}) });
+  assert.equal(
+    calls.create.some((call) => call.email === "presenter@example.org"),
+    false,
+  );
+});
+
+test("a roster with no defaultFollowup is refused", () => {
+  const { defaultFollowup, ...none } = valid();
+  assert.throws(() => parseRoster(none), refused(/defaultFollowup/));
+  assert.throws(() => parseRoster({ ...none, defaultFollowup: null }), refused(/defaultFollowup/));
+});
+
+test("a roster with no staff is refused", () => {
+  const { staff, ...none } = valid();
+  assert.throws(() => parseRoster(none), refused(/at least one staff member/));
+  assert.throws(() => parseRoster({ ...none, staff: [] }), refused(/at least one staff member/));
+});
+
+test("any valid key is accepted by the parser", () => {
+  for (const personKey of ["sam", "alex", "morgan"])
+    assert.equal(
+      parseRoster(withStaff([riley({ personKey })], { defaultFollowup: personKey })).staff[0].personKey,
+      personKey,
+    );
+});
+
 test("a malformed roster names the problem, never the address", () => {
   assert.throws(() => parseRoster(null), invalid(/JSON object/));
   assert.throws(
     () => parseRoster({ ...valid(), workspaceId: "not-a-uuid" }),
     invalid(/workspaceId/),
-  );
-  assert.throws(
-    () => parseRoster({ ...valid(), presenters: [] }),
-    invalid(/at least one presenter/),
   );
   assert.throws(
     () => parseRoster({ ...valid(), applicants: "client@example.org" }),
@@ -61,10 +111,10 @@ test("a malformed roster names the problem, never the address", () => {
   assert.throws(() => parseRoster(badAddress), (error) =>
     invalid(/applicants\[1\]/)(error) && !error.message.includes("no at sign"),
   );
-  const twice = { ...valid(), applicants: ["PRESENTER@example.org"] };
+  const twice = { ...valid(), applicants: ["RILEY@example.org"] };
   assert.throws(() => parseRoster(twice), (error) =>
     invalid(/applicants\[0\] is already on the roster/)(error) &&
-    !/presenter@/i.test(error.message),
+    !/riley@/i.test(error.message),
   );
 });
 
@@ -127,7 +177,7 @@ function fakeAdmin(existing, { failCreate = false, perPage } = {}) {
 
 test("missing accounts are created confirmed, and the workspace gets their ids", async () => {
   const { admin, calls } = fakeAdmin([
-    { id: "aaaaaaaa-0000-4000-8000-000000000001", email: "presenter@example.org", email_confirmed_at: "then" },
+    { id: "aaaaaaaa-0000-4000-8000-000000000001", email: "riley@example.org", email_confirmed_at: "then" },
     { id: "bbbbbbbb-0000-4000-8000-000000000002", email: "Client-B@Example.org", email_confirmed_at: null },
     { id: "cccccccc-0000-4000-8000-000000000003", email: "someone-else@example.org", email_confirmed_at: "then" },
   ]);
@@ -149,20 +199,25 @@ test("missing accounts are created confirmed, and the workspace gets their ids",
   assert.deepEqual(setups, [
     {
       workspaceId: WORKSPACE,
-      presenterUserIds: ["aaaaaaaa-0000-4000-8000-000000000001"],
       applicantUserIds: [
         "00000000-0000-4000-8000-000000000001",
         "bbbbbbbb-0000-4000-8000-000000000002",
       ],
-      staff: [],
-      defaultFollowup: null,
+      staff: [
+        {
+          userId: "aaaaaaaa-0000-4000-8000-000000000001",
+          personKey: "riley",
+          name: "Riley Park",
+          capabilities: ["prepare", "followup"],
+        },
+      ],
+      defaultFollowup: "riley",
     },
   ]);
   assert.deepEqual(result, {
     workspaceId: WORKSPACE,
-    presenters: 1,
     applicants: 2,
-    staff: 0,
+    staff: 1,
     created: 1,
     confirmed: 1,
   });
@@ -176,12 +231,12 @@ test("every page of existing accounts is read before anything is created", async
   }));
   existing.push({
     id: "eeeeeeee-0000-4000-8000-000000000009",
-    email: "presenter@example.org",
+    email: "riley@example.org",
     email_confirmed_at: "then",
   });
   const { admin, calls } = fakeAdmin(existing, { perPage: 2 });
   await applyRoster(
-    parseRoster({ workspaceId: WORKSPACE, presenters: ["presenter@example.org"], applicants: [] }),
+    parseRoster({ ...valid(), applicants: [] }),
     { admin, initialize: async () => ({}), perPage: 2 },
   );
   assert.deepEqual(calls.list.map((call) => call.page), [1, 2, 3, 4]);
@@ -200,19 +255,12 @@ test("an account failure stops before the workspace changes and hides the addres
     }),
     (error) =>
       error.code === "ROSTER_ACCOUNT_FAILED" &&
-      /presenters\[0\]/.test(error.message) &&
+      /staff\[0\]/.test(error.message) &&
       !error.message.includes("@"),
   );
   assert.equal(initialized, false);
 });
 
-const riley = (extra = {}) => ({
-  email: " Riley@Example.org ",
-  name: "Riley Park",
-  personKey: "riley",
-  capabilities: ["prepare", "followup"],
-  ...extra,
-});
 const withStaff = (staff = [riley()], extra = {}) => ({ ...valid(), staff, ...extra });
 const hasNoAddress = (error) => !/@/.test(error.message);
 const refused = (pattern) => (error) =>
@@ -228,41 +276,20 @@ test("a staff entry parses, with its address normalised", () => {
       capabilities: ["prepare", "followup"],
     },
   ]);
-  assert.equal(roster.defaultFollowup, null);
-});
-
-test("presenters may be absent when staff exist, if a defaultFollowup is named", () => {
-  const { presenters, ...noPresenters } = withStaff([riley()], { defaultFollowup: "riley" });
-  const roster = parseRoster(noPresenters);
-  assert.deepEqual(roster.presenters, []);
   assert.equal(roster.defaultFollowup, "riley");
-  assert.throws(
-    () => parseRoster({ ...noPresenters, presenters: [], defaultFollowup: undefined }),
-    refused(/A roster with no presenter needs a defaultFollowup\./),
-  );
-  assert.throws(
-    () => parseRoster((({ presenters, ...rest }) => rest)(withStaff())),
-    refused(/A roster with no presenter needs a defaultFollowup\./),
-  );
 });
 
 test("clients alone are not a roster", () => {
-  const { presenters, ...clients } = valid();
-  assert.throws(
-    () => parseRoster(clients),
-    refused(/The roster needs at least one presenter or staff member\./),
-  );
+  const { staff, defaultFollowup, ...clients } = valid();
+  assert.throws(() => parseRoster(clients), refused(/at least one staff member/));
   assert.throws(
     () => parseRoster({ ...clients, staff: [] }),
-    refused(/The roster needs at least one presenter or staff member\./),
+    refused(/at least one staff member/),
   );
 });
 
 test("staff entries are validated before any account is made", () => {
   for (const [entry, pattern] of [
-    [riley({ personKey: "sam" }), /staff\[0\]\.personKey/],
-    [riley({ personKey: "alex" }), /staff\[0\]\.personKey/],
-    [riley({ personKey: "morgan" }), /staff\[0\]\.personKey/],
     [riley({ personKey: "Riley" }), /staff\[0\]\.personKey/],
     [riley({ personKey: "9riley" }), /staff\[0\]\.personKey/],
     [riley({ personKey: "r".repeat(41) }), /staff\[0\]\.personKey/],
@@ -276,7 +303,15 @@ test("staff entries are validated before any account is made", () => {
   ])
     assert.throws(() => parseRoster(withStaff([entry])), refused(pattern));
   for (const capability of ["prepare", "review", "admin", "followup", "receive_documents", "assist"])
-    parseRoster(withStaff([riley({ capabilities: [capability] })]));
+    parseRoster(
+      withStaff(
+        [
+          riley({ capabilities: [capability] }),
+          riley({ email: "lead@example.org", personKey: "lead", capabilities: ["followup"] }),
+        ],
+        { defaultFollowup: "lead" },
+      ),
+    );
   assert.throws(() => parseRoster({ ...valid(), staff: "riley" }), refused(/staff must be a list/));
 });
 
@@ -291,7 +326,7 @@ test("staff people and addresses are never listed twice", () => {
     refused(/staff\[1\] is already on the roster/),
   );
   assert.throws(
-    () => parseRoster(withStaff([riley({ email: "presenter@example.org" })])),
+    () => parseRoster(withStaff([riley({ email: "client-a@example.org" })])),
     refused(/is already on the roster/),
   );
   // Review Focus 4: case and spacing do not hide a duplicate.
@@ -323,7 +358,7 @@ test("defaultFollowup must name a staff entry that can do follow-up", () => {
 
 test("staff accounts are provisioned and their ids reach the workspace", async () => {
   const { admin, calls } = fakeAdmin([
-    { id: "aaaaaaaa-0000-4000-8000-000000000001", email: "presenter@example.org", email_confirmed_at: "then" },
+    { id: "aaaaaaaa-0000-4000-8000-000000000001", email: "someone-else@example.org", email_confirmed_at: "then" },
   ]);
   const setups = [];
   const roster = parseRoster(withStaff([riley()], { defaultFollowup: "riley" }));
@@ -375,7 +410,7 @@ test("the example roster parses and names the role accounts", () => {
   );
   assert.equal(roster.defaultFollowup, "site_coordinator");
   assert.deepEqual(roster.applicants, ["client-a@example.org"]);
-  assert.deepEqual(roster.presenters, ["presenter@example.org"]);
+  assert.equal("presenters" in roster, false);
 });
 
 test("the roster command prints the sampleCaseOwners note once", () => {

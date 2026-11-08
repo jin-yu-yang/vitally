@@ -5,7 +5,7 @@
 //
 // Every address becomes a confirmed Auth account with no password (the app
 // signs in with one-time codes only), then the shared initializer grants each
-// account presenter, staff or applicant access. The target is approved by the same
+// account staff or applicant access. The target is approved by the same
 // fail-closed guards as every other privileged tool before anything is read.
 // Re-running with a longer roster adds the new people; nobody is removed.
 // Addresses are never printed: errors name a roster position instead.
@@ -44,7 +44,6 @@ export const STAFF_CAPABILITIES = Object.freeze([
   "receive_documents",
   "assist",
 ]);
-const RESERVED_PERSON_KEYS = Object.freeze(["alex", "morgan", "sam"]);
 const PERSON_KEY = /^[a-z][a-z0-9_]{0,39}$/;
 
 function parseStaff(raw) {
@@ -59,12 +58,11 @@ function parseStaff(raw) {
     const { personKey, name, capabilities } = entry;
     if (
       typeof personKey !== "string" ||
-      !PERSON_KEY.test(personKey) ||
-      RESERVED_PERSON_KEYS.includes(personKey)
+      !PERSON_KEY.test(personKey)
     )
       throw invalid(
-        `${where}.personKey must be lower-case letters, digits and underscores, start with a letter, ` +
-          `be at most 40 characters, and not be ${RESERVED_PERSON_KEYS.join(", ")}.`,
+        `${where}.personKey must be lower-case letters, digits and underscores, start with a letter ` +
+          `and be at most 40 characters.`,
       );
     if (typeof name !== "string" || name.length < 1 || name.length > 80)
       throw invalid(`${where}.name must be 1 to 80 characters.`);
@@ -83,7 +81,6 @@ function parseStaff(raw) {
 }
 
 function parseDefaultFollowup(raw, staff) {
-  if (raw === undefined || raw === null) return null;
   const member = typeof raw === "string" ? staff.find((entry) => entry.personKey === raw) : undefined;
   if (!member)
     throw invalid("defaultFollowup must name the personKey of a staff entry on this roster.");
@@ -99,17 +96,12 @@ export function parseRoster(raw) {
     throw invalid(
       "workspaceId must be a lower-case UUID. Generate one once and keep it: node -e \"console.log(crypto.randomUUID())\"",
     );
-  const presenters = addresses(raw.presenters, "presenters");
   const applicants = addresses(raw.applicants, "applicants");
   const staff = parseStaff(raw.staff);
-  if (presenters.length === 0 && staff.length === 0)
-    throw invalid("The roster needs at least one presenter or staff member.");
+  if (staff.length === 0) throw invalid("The roster needs at least one staff member.");
   const defaultFollowup = parseDefaultFollowup(raw.defaultFollowup, staff);
-  if (presenters.length === 0 && defaultFollowup === null)
-    throw invalid("A roster with no presenter needs a defaultFollowup.");
   const seen = new Set();
   for (const [field, list] of [
-    ["presenters", presenters],
     ["staff", staff.map((member) => member.email)],
     ["applicants", applicants],
   ])
@@ -120,7 +112,6 @@ export function parseRoster(raw) {
     });
   return {
     workspaceId: raw.workspaceId,
-    presenters,
     applicants,
     staff,
     defaultFollowup,
@@ -128,9 +119,14 @@ export function parseRoster(raw) {
 }
 
 export function rosterNotes(raw) {
-  return raw && typeof raw === "object" && "sampleCaseOwners" in raw
-    ? ["sampleCaseOwners is no longer used and was ignored."]
-    : [];
+  const notes = [];
+  if (raw && typeof raw === "object") {
+    if ("sampleCaseOwners" in raw)
+      notes.push("sampleCaseOwners is no longer used and was ignored.");
+    if ("presenters" in raw)
+      notes.push("presenters is no longer used and was ignored; those addresses get no access.");
+  }
+  return notes;
 }
 
 export function parseRosterArgs(argv) {
@@ -172,7 +168,6 @@ export async function applyRoster(
   let created = 0,
     confirmed = 0;
   for (const [field, list] of [
-    ["presenters", roster.presenters],
     ["staff", roster.staff.map((member) => member.email)],
     ["applicants", roster.applicants],
   ])
@@ -202,7 +197,6 @@ export async function applyRoster(
     }
   await initialize({
     workspaceId: roster.workspaceId,
-    presenterUserIds: roster.presenters.map((address) => ids.get(address)),
     applicantUserIds: roster.applicants.map((address) => ids.get(address)),
     staff: roster.staff.map(({ email, personKey, name, capabilities }) => ({
       userId: ids.get(email),
@@ -214,7 +208,6 @@ export async function applyRoster(
   });
   return {
     workspaceId: roster.workspaceId,
-    presenters: roster.presenters.length,
     applicants: roster.applicants.length,
     staff: roster.staff.length,
     created,
@@ -228,7 +221,7 @@ const HINTS = {
   ROSTER_UNREADABLE: "",
   TARGET_REJECTED: " Check the target's env file and .vitally-targets.json (docs/setup.md).",
   VALIDATION:
-    " The workspace refused the roster: someone may already belong to another workspace, or appear here with the other role.",
+    " The workspace refused the roster: someone may already belong to another workspace, or appear here with the other role, or a staff key may already belong to a kept persona.",
 };
 
 async function main() {
@@ -251,7 +244,7 @@ async function main() {
   });
   console.log(
     `Roster applied to workspace ${result.workspaceId} on the ${target.kind} target: ` +
-      `${result.presenters} presenter(s), ${result.staff} staff, ${result.applicants} applicant(s); ` +
+      `${result.staff} staff, ${result.applicants} applicant(s); ` +
       `${result.created} account(s) created, ${result.confirmed} confirmed.`,
   );
 }
