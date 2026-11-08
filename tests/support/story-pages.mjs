@@ -523,14 +523,24 @@ export const alertText = async (page) =>
   );
 
 /**
- * Record every alert this page ever shows, including the ones that are gone
- * again before anybody looks.
+ * Record every alert this page shows, each time it appears, including the
+ * ones that are gone again before anybody looks.
  *
- * The controller clears `state.error` on its next successful re-read, so a
- * refusal can be erased by an unrelated change arriving a moment later. Reading
- * the screen at the end would therefore under-report what the person saw — and
- * what they did not get time to read. This observes; it changes nothing.
- * Re-install it after a reload, which throws the record away with the document.
+ * A notice can go before a check reads the screen: a toast times out, and a
+ * banner goes when this window presses something else, opens another place or
+ * is dismissed. (A background re-read is not one of those: the controller
+ * leaves `state.error` alone when another window's change arrives.) Reading
+ * the screen at the end would therefore under-report what the person saw —
+ * and what they did not get time to read.
+ *
+ * An entry is words that are on screen now and were not at the last look, so
+ * the same words shown again later (the same toast after a second claim, the
+ * same refusal after a retry) are a new entry. A check that reads past a mark
+ * (`slice(mark)`) sees what appeared after its mark. Words still on screen
+ * from before the mark are not recorded again until they go and come back.
+ *
+ * This observes; it changes nothing. Re-install it after a reload, which
+ * throws the record away with the document.
  */
 export const watchAlerts = (page) =>
   page.evaluate(() => {
@@ -542,18 +552,22 @@ export const watchAlerts = (page) =>
     // somebody typed into the access form. It never leaves the page.
     const safe = (value) =>
       String(value ?? "").replace(/[^\s<>"'\\]+@[^\s<>"'\\]+/g, "<address>");
+    // What the last look found. A redraw replaces #app in one write, so a
+    // notice that stays through it is in both looks and is not recorded twice.
+    let showing = new Set();
     const sweep = () => {
-      const seen = [];
+      const seen = new Set();
       for (const node of document.querySelectorAll('[role="alert"]'))
-        seen.push(safe(node.innerText.replace(/\s+/g, " ").trim()));
+        seen.add(safe(node.innerText.replace(/\s+/g, " ").trim()));
       // The toast carries only successes, information and warnings now
       // (errors go to the banner, in place, or into the open dialog), and it
-      // is a status rather than an alert, so it needs its own look.
+      // is a status rather than an alert, so it needs its own look. Its words
+      // stay in the host until 0.2 s after it hides, then go.
       const toast = document.querySelector("#toast")?.textContent.trim();
-      if (toast) seen.push(`toast: ${safe(toast)}`);
+      if (toast) seen.add(`toast: ${safe(toast)}`);
       for (const text of seen)
-        if (text && !window.__vitallyAlerts.includes(text))
-          window.__vitallyAlerts.push(text);
+        if (text && !showing.has(text)) window.__vitallyAlerts.push(text);
+      showing = seen;
     };
     new MutationObserver(sweep).observe(app, { childList: true, subtree: true });
     // The toast's host sits beside #app, outside it, so it is watched on its own.

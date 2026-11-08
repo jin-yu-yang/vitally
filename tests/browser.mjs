@@ -3899,10 +3899,51 @@ async function runPermutation(t, roles) {
       assert.equal(before.stage, "preparation_ready");
       assert.equal(before.preparer_id, null);
       const windows = [staff, staffB.page];
-      // Read from each window's own recorder rather than from the screen: a
-      // refusal is not necessarily still there to be read, because
-      // `handleChange` clears the error on its next successful re-read and the
-      // winner's change is what arrives next (see the report's findings).
+      const names = ["the Preparer's window", "the Preparer's second window"];
+      // What the winner's own reply draws, as the recorder writes it.
+      const CLAIMED = "toast: This case is yours to prepare.";
+      // One look at a window: whether it shows a refusal and the Preparer row
+      // now, and what it recorded since its mark.
+      const look = (page, from) =>
+        page.evaluate(
+          ({ from, refusal, preparer }) => {
+            const refuses = new RegExp(refusal.source, refusal.flags);
+            return {
+              refusalOnScreen: [...document.querySelectorAll('[role="alert"]')].some((node) =>
+                refuses.test(node.innerText.replace(/\s+/g, " ").trim()),
+              ),
+              preparerShown: [...document.querySelectorAll(".detail-row")].some(
+                (row) =>
+                  row.querySelector("span")?.textContent.trim() === "Preparer" &&
+                  row.querySelector("strong")?.textContent.trim() === preparer,
+              ),
+              since: (window.__vitallyAlerts ?? []).slice(from),
+            };
+          },
+          {
+            from,
+            refusal: { source: REFUSAL_NOTICE.source, flags: REFUSAL_NOTICE.flags },
+            preparer: ROLE_NAMES.preparer,
+          },
+        );
+      // The recorder writes words each time they appear, and words still on
+      // screen at the mark are not written again: so no toast and no refusal
+      // may be showing when the mark is taken.
+      for (const page of windows) await clearToast(page);
+      for (const [index, page] of windows.entries()) {
+        await waitFor(
+          page,
+          `${names[index]}'s toast to be gone before the claims`,
+          () => !document.querySelector("#toast")?.textContent.trim(),
+          undefined,
+          RENDER_MS,
+        );
+        assert.equal(
+          (await look(page, 0)).refusalOnScreen,
+          false,
+          `${names[index]} already shows a refusal before the claims: ${await alertText(page)}`,
+        );
+      }
       const mark = await Promise.all(
         windows.map(async (page) => ((await readAlerts(page)) ?? []).length),
       );
@@ -3928,30 +3969,71 @@ async function runPermutation(t, roles) {
         [true, true],
         "both windows must press their own claim for this to be a race",
       );
-      await waitForDetail(staff, "Preparer", ROLE_NAMES.preparer);
-      await waitForDetail(staffB.page, "Preparer", ROLE_NAMES.preparer);
-      const said = await Promise.all(
-        windows.map(async (page, index) =>
-          ((await readAlerts(page)) ?? []).slice(mark[index]),
-        ),
-      );
-      const refused = said.filter((lines) => lines.some((line) => REFUSAL_NOTICE.test(line)));
+      // Each window's own reply is waited for, not only the Preparer row. The
+      // winner's change reaches both windows as a background re-read, which
+      // can draw the row before either reply is drawn. The loser's refusal
+      // stays on screen through those re-reads (the controller leaves
+      // `state.error` alone for another window's change), so it is read on
+      // screen as well as in the recorder.
+      //
+      // Settled when both windows show the Preparer row, exactly one shows a
+      // refusal, that one recorded it since the mark, and the other recorded
+      // its own claim toast since the mark. A refusal that never comes, or
+      // comes in both, never settles.
+      const settledOn = (looks) => {
+        const refusing = looks.flatMap((view, index) => (view.refusalOnScreen ? [index] : []));
+        if (refusing.length !== 1 || !looks.every((view) => view.preparerShown)) return null;
+        const [loser] = refusing;
+        const winner = 1 - loser;
+        if (!looks[loser].since.some((line) => REFUSAL_NOTICE.test(line))) return null;
+        if (!looks[winner].since.includes(CLAIMED)) return null;
+        return { loser, winner };
+      };
+      let looks = [];
+      let outcome = null;
+      const settleBy = Date.now() + ARRIVAL_MS;
+      while (!outcome && Date.now() < settleBy) {
+        looks = await Promise.all(windows.map((page, index) => look(page, mark[index])));
+        outcome = settledOn(looks);
+        if (!outcome) await new Promise((resolve) => setTimeout(resolve, 150));
+      }
       const counts = {
         events: await eventCount(fixture, target.id, "CLAIM_PREPARATION"),
         receipts: await receiptCount(fixture, target.id, "CLAIM_PREPARATION"),
         participants: await participantCount(fixture, target.id),
       };
+      // Both windows' whole records and what they show, for any failure below.
+      const report = async () =>
+        JSON.stringify(
+          await Promise.all(
+            windows.map(async (page, index) => ({
+              window: names[index],
+              mark: mark[index],
+              notices: await readAlerts(page),
+              alert: await alertText(page),
+              preparerShown: looks[index]?.preparerShown ?? null,
+            })),
+          ),
+        );
+      if (!outcome)
+        assert.fail(
+          `after ${ARRIVAL_MS}ms, the two windows never settled as one refused and one told the case is theirs, ` +
+            `both showing the Preparer row. The database counted ${JSON.stringify(counts)}. The windows: ${await report()}`,
+        );
       assert.deepEqual(counts, { events: 1, receipts: 1, participants: 1 });
-      assert.equal(
-        refused.length,
-        1,
-        `exactly one window should have been refused; the two were told ${JSON.stringify(said)}`,
-      );
+      const { loser, winner } = outcome;
+      // The winner was not refused: nothing recorded since its mark, and
+      // nothing on screen now.
+      const winnerNow = await look(windows[winner], mark[winner]);
+      if (winnerNow.refusalOnScreen || winnerNow.since.some((line) => REFUSAL_NOTICE.test(line)))
+        assert.fail(`${names[winner]} won the claim and was refused as well. The windows: ${await report()}`);
       const stillShowing = await Promise.all(windows.map((page) => alertText(page)));
       evidence.regressions.simultaneousClaims = {
         ...counts,
-        loserSaw: refused[0].find((line) => REFUSAL_NOTICE.test(line)).slice(0, 140),
-        refusalStillOnScreen: stillShowing.filter(Boolean).length === 1,
+        winner: names[winner],
+        loserSaw: looks[loser].since.find((line) => REFUSAL_NOTICE.test(line)).slice(0, 140),
+        refusalStillOnScreen:
+          stillShowing.filter((text) => REFUSAL_NOTICE.test(text ?? "")).length === 1,
       };
       assertConsoleQuiet(staffB, {
         name: "second staff window",
