@@ -236,7 +236,7 @@ export function decorateStaffCase(caseRecord, people = []) {
       (id) => nameOf(id) ?? UNKNOWN_PERSON,
     ),
   };
-  // A board row carries the people who owe a call rather than the tasks
+  // A board row carries the assignees of its open tasks, as a label, rather than the tasks
   // themselves (Ruling R56), and they get names here like everybody else.
   if (Array.isArray(caseRecord.followupAssigneeIds))
     decorated.followupAssigneeNames = caseRecord.followupAssigneeIds.map(
@@ -1918,7 +1918,7 @@ function followupPanel(record) {
       ? `<ul class="followup-list">${followups
           .map(
             (followup) =>
-              `<li><div class="section-head"><h3>${esc(named(FOLLOWUP_STATUS, followup?.status, "Task"))}</h3><span class="muted small">${esc(followup?.assigneeName ?? UNKNOWN_PERSON)}</span></div><p>${esc(followup?.reason)}</p><h4>Contacts so far</h4>${taskContacts(record, followup)}${when(
+              `<li><div class="section-head"><h3>${esc(named(FOLLOWUP_STATUS, followup?.status, "Task"))}</h3><span class="muted small">Assigned to ${esc(followup?.assigneeName ?? UNKNOWN_PERSON)}</span></div><p>${esc(followup?.reason)}</p><h4>Contacts so far</h4>${taskContacts(record, followup)}${when(
                 followup?.resolutionNote,
                 `<p class="field-note">Resolved: ${esc(followup.resolutionNote)}</p>`,
               )}</li>`,

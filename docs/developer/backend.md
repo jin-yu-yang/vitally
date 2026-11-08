@@ -160,8 +160,8 @@ The roster is a JSON file (a `.vitally-roster*.json` file, ignored by version co
 
 | Field | Rule |
 | --- | --- |
-| `staff` | Optional list. Each entry has `email`, `name`, `personKey` and `capabilities`. `capabilities` is non-empty, from `prepare`, `review`, `admin`, `followup`, `receive_documents`, `assist`. `personKey` is lower-case letters, digits and underscores, unique on the roster, and not `alex`, `morgan` or `sam` |
-| `defaultFollowup` | Optional: the `personKey` of a `staff` entry that has `followup`. It becomes the workspace's default follow-up person (who new follow-ups and withdrawal notices go to). **Required when the roster has no presenter**, because Sam, the default otherwise, would get work nobody can act on |
+| `staff` | Optional list. Each entry has `email`, `name`, `personKey` and `capabilities`. `capabilities` is non-empty, from `prepare`, `review`, `admin`, `followup`, `receive_documents`, `assist`; an entry with `followup` must also have `admin` (042). `personKey` is lower-case letters, digits and underscores, unique on the roster, and not `alex`, `morgan` or `sam` |
+| `defaultFollowup` | Optional: the `personKey` of a `staff` entry that has `followup`. It becomes the workspace's default follow-up person (who new follow-ups and withdrawal notices go to). **Required when the roster has no presenter**, so that new follow-ups name a real staff member rather than the persona Sam (since 042 anyone holding `followup` can work them). The person must have `followup`, and so `admin` |
 | `presenters` | Now optional, but the roster needs at least one presenter or one staff member. A presenter who signs in sees one plain screen, "This account is no longer used"; the role goes in #136 |
 
 For each staff entry the command creates the Auth account as it does for any address, then, inside

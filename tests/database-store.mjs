@@ -146,7 +146,7 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
       );
       assert.deepEqual(unclaimed.participants, []);
       assert.equal(unclaimed.openFollowups, 0);
-      // The office's own escalation is counted, and it names who owes the call.
+      // The office's own escalation is counted, and it names whom the office assigned the call to.
       const chased = await f.assistedCase();
       await f.act(f.preparer, chased, "ESCALATE_CONTACT", {
         reason: "No response to the document request.",
