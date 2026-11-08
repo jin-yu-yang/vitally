@@ -6323,6 +6323,45 @@ test("a principal whose access is neither staff nor applicant gets no-access and
   controller.stop();
 });
 
+// A payload already queued on a released channel can still call onChange. The
+// handler's `!state.principal` guard is all that keeps a late change from
+// reading for a window with no principal (no membership, or signed out).
+test("a late change on a released channel reads nothing for a no-access or signed-out window", async () => {
+  const store = staffStore({
+    cases: [{ id: "case-a", reference: "VT-AAAA-BBBB", stage: "preparing", revision: 2, answers: {} }],
+  });
+  const { controller } = build({ store });
+  await controller.start();
+  const late = store.handlers;
+  controller.stop();
+  const staffPrincipal = store.getPrincipal;
+  store.getPrincipal = async () => {
+    store.calls.push("getPrincipal");
+    throw Object.assign(new Error("no access"), { code: "FORBIDDEN" });
+  };
+  await controller.start();
+  assert.equal(controller.getState().screen, "no-access");
+  let calls = store.calls.length;
+  await late.onChange({ table: "workspaces" });
+  await late.onChange({ table: "cases", caseId: "case-a" });
+  await late.onChange({ table: "assistance_items" });
+  assert.deepEqual(store.calls.slice(calls), []);
+  assert.equal(controller.getState().screen, "no-access");
+  controller.stop();
+
+  // And after a sign-out of a window that did have a principal.
+  store.getPrincipal = staffPrincipal;
+  await controller.start();
+  const second = store.handlers;
+  await controller.signOut();
+  calls = store.calls.length;
+  await second.onChange({ table: "workspaces" });
+  await second.onChange({ table: "cases", caseId: "case-a" });
+  await second.onChange({ table: "assistance_items" });
+  assert.deepEqual(store.calls.slice(calls), []);
+  controller.stop();
+});
+
 test("a staff action sends no persona", async () => {
   const store = staffStore({
     cases: [{ id: "case-a", reference: "VT-AAAA-BBBB", stage: "preparation_ready", revision: 2, answers: {} }],
