@@ -273,8 +273,8 @@ function needed(row) {
   if (kind === "unclaimed") return `${esc(stageWork(record.stage).work)}${remindedNote(record)}`;
   if (kind === "call") {
     const n = callTasks(record);
-    const owed = record?.followupAssigneeNames ?? [];
-    return `${esc(n)} open ${n === 1 ? "task" : "tasks"}${when(owed.length, ` · waiting on ${esc(owed.join(", "))}`)}`;
+    const assignees = record?.followupAssigneeNames ?? [];
+    return `${esc(n)} open ${n === 1 ? "task" : "tasks"}${when(assignees.length, ` · assigned to ${esc(assignees.join(", "))}`)}`;
   }
   return `${esc(item?.title)}${when(item?.assigneeName, `<small>Helper: ${esc(item.assigneeName)}</small>`)}`;
 }

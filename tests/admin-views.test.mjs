@@ -39,12 +39,12 @@ test('admin task and preparation have distinct owners', () => {
 
 const ALEX = { id: "alex", name: "Alex", capabilities: ["prepare"] };
 const MORGAN = { id: "morgan", name: "Morgan", capabilities: ["review"] };
-// Task 4's `extendTestWorkspace` can add a capability to an existing person;
-// holding `followup` is still not holding the task.
-const MORGAN_FOLLOWUP = {
-  id: "morgan",
-  name: "Morgan",
-  capabilities: ["review", "followup"],
+// A second office person: holding `admin` and `followup` is enough to work
+// any open task, whoever it is assigned to (042).
+const JO_OFFICE = {
+  id: "jo",
+  name: "Jo",
+  capabilities: ["admin", "followup"],
 };
 const SAM = {
   id: "sam",
@@ -312,20 +312,32 @@ test("each open task has the shared form and Resolve", () => {
   assert.match(html, /does not verify a document, change the preparer, or close the case/);
   // The log form comes before Resolve.
   assert.ok(followup.indexOf("contact-form") < followup.indexOf("Resolve this task"));
-  // There is no way to hand the task to somebody else.
+  // There is no way to hand the task to somebody else, and the note says
+  // anyone with follow-up access may work it.
   assert.doesNotMatch(html, /name="assignee/i);
-  assert.match(html, /no way to hand it to someone else/i);
+  assert.match(
+    html,
+    /The office raises a task when a preparer asks it to contact a client, when a reviewer didn't go over the return with the client, or when a case is withdrawn or closed before its return is filed\. Anyone in the office with follow-up access can log contacts on it and resolve it\./,
+  );
+  assert.doesNotMatch(html, /no way to hand it to someone else/i);
 
   // Both directions of the rule (Ruling R53).
   const forAlex = renderAdminCase(record, { person: ALEX });
   assert.doesNotMatch(forAlex, linkedForm("task-1"));
   assert.doesNotMatch(forAlex, /data-case-action="RESOLVE_FOLLOWUP"/);
   assert.match(forAlex, /Needs office follow-up access\./);
-  // Holding the capability is still not holding the task.
-  const forMorgan = renderAdminCase(record, { person: MORGAN_FOLLOWUP });
-  assert.doesNotMatch(forMorgan, linkedForm("task-1"));
-  assert.match(forMorgan, /The office assigned this task to someone else\./);
-  assert.doesNotMatch(forMorgan, /Needs office follow-up access\./);
+  // Holding the capability is enough: the assignee is a label (042).
+  const forJo = renderAdminCase(record, { person: JO_OFFICE });
+  assert.match(forJo, linkedForm("task-1"));
+  assert.match(forJo, /data-case-action="RESOLVE_FOLLOWUP"/);
+  assert.match(forJo, /<span>Assigned to<\/span><strong>Sam<\/strong>/);
+  assert.doesNotMatch(forJo, /The office assigned this task to someone else\./);
+  // Admin without follow-up access is still refused, by capability.
+  const forDesk = renderAdminCase(record, {
+    person: { id: "desk", name: "Desk", capabilities: ["admin", "receive_documents"] },
+  });
+  assert.doesNotMatch(forDesk, linkedForm("task-1"));
+  assert.match(forDesk, /Needs office follow-up access\./);
 });
 
 test("the task lists its linked contacts", () => {
