@@ -121,7 +121,9 @@ bd092ea Docs: database count 448; who gets the task forms; RECORD_CONTACT row; f
   - It quit at startup with "Could not find profile folder." even with Playwright's temporary profile.
   - Pointing `HOME` elsewhere doesn't help: macOS resolves Application Support from the account, not from `$HOME`.
   - Neither macOS nor the Claude app was updated in between, by the install history and the app's plist date.
-- **The story isn't stable on this machine any more.** It ran 83/83 for #174 on 2026-11-07. A day later its two-window claim race (step 18) failed on `main` too, and two other steps each failed once, with the machine under load.
+- **The story isn't stable on this machine any more.** It ran 83/83 for #174 on 2026-11-07. A day later step 18 (two simultaneous claims) failed on `main` too, and two other steps each failed once, with the machine under load.
+  - Step 18's failure was first read as a race in the app. A trace showed two flaws in the test instead: the recorder ignores repeated notices, and the step reads before the reply is drawn.
+  - The database and the app behave correctly.
 - **`check_related` comes first.** It refuses a `RESOLVE_FOLLOWUP` naming another case's task with `VALIDATION`, before any lock. Only the contact path reaches `FORBIDDEN`. The first plan had both as `FORBIDDEN`.
 - **OpenSpec 1.14 is strict about MODIFIED.** A MODIFIED requirement can't drop a scenario, so the two rewritten requirements are REMOVED and then ADDED under new names, as `remove-presenter-screens` did.
 - **`f.sql` wraps pg errors.** The check constraint's name is on `error.cause.constraint`, not `error.constraint`.
@@ -144,9 +146,12 @@ bd092ea Docs: database count 448; who gets the task forms; RECORD_CONTACT row; f
   > **Why**: the office-follow-up Purpose said "not tied to a document request" after this change gave it the general rule for every purpose.
   > **How to apply**: at archive, read each touched capability's Purpose against its new requirements.
 
-- [ ] 📌 **The story's two-window claim race (step 18) is unreliable.** It fails on `main` too. → **Follow-up** (its own change or issue)
-  > **Why**: the counts always hold (one event, one receipt, one participant), but the losing window sometimes shows no refusal. That depends on whether the winner's live update or the window's own refused reply arrives first.
-  > **How to apply**: investigate whether the app drops a refusal that arrives after the live update, or whether the step needs to read differently.
+- [ ] 🟡 **The story's step 18 (two simultaneous claims) checks badly.** It fails on `main` too. The fault is in the test, not the app. → **Follow-up** (a direct PR: test only)
+  > **Why**: the database always refuses the loser with `CONFLICT`, and the app keeps that refusal on screen. But the story's notice recorder records each distinct text once per window (`tests/support/story-pages.mjs:554-556`), so a refusal the window already showed earlier is invisible after the mark. The step also reads as soon as both windows show the Preparer row, which a realtime re-read can draw before the window's own reply (`tests/browser.mjs:3929-3934`).
+  > **How to apply**:
+  > - wait until exactly one window shows a refusal on screen, rather than reading the record after the mark;
+  > - fix the stale comments that say a re-read clears the refusal;
+  > - check the other `readAlerts(...).slice(mark)` checks for the same blind spot.
 
 ---
 

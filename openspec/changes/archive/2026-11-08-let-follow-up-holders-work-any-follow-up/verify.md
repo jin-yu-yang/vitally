@@ -94,7 +94,14 @@ See below.
 
 **Why the failures aren't this change's:**
 - **The story's viewers see the same page.** The Site Coordinator is the only follow-up holder the story uses, and the assignee of every task it works. For the story's viewers, `git diff origin/main..HEAD -- src/` changes text only: the Follow-up panel's note, the queue row's "assigned to" (was "waiting on"), and the volunteer page's "Assigned to", which the Preparer and the Reviewer see. The only code path the diff removes is `followupWork`'s assignee refusal, which can never trigger for the assignee.
-- **Step 18 fails on `main` too.** It's a race between two windows of the same Preparer account. The same counts held every time (one event, one receipt, one participant), but the losing window sometimes shows no refusal.
+- **Step 18 fails on `main` too, and the fault is in the story's check, not the app.** A read-only trace of the code and of `main`'s surviving run evidence found:
+  - **The two claims never race.** The database locks the case row, so the second claim waits, fails the revision check, and always gets `CONFLICT` (`038_staff_identity.sql:760-768`, `039_preparer_shaded_fields.sql:527-531`). The same counts held every time: one event, one receipt, one participant.
+  - **The app always shows the loser's refusal, and keeps it through realtime re-reads** (`src/controller.mjs:2086-2104`, `:921-923`).
+  - **The story's recorder ignores repeats.** It records each distinct text once for the life of a window (`tests/support/story-pages.mjs:554-556`). The Preparer's role window recorded "This case is yours to prepare." in step 6. In `main`'s failing order it had also recorded the identical conflict banner, from an earlier `ESCALATE_CONTACT` retry under load (`retries` in that run's evidence). So whichever way step 18 went, that window could record nothing new.
+  - **The step reads too early.** It reads as soon as both windows show the Preparer row (`tests/browser.mjs:3929-3934`). Each window's realtime re-read of the winner's change can draw that row before the window's own reply draws its toast or refusal. On `main`, the fresh second window recorded nothing, although anything it showed would have been new, so it was read before its notice was drawn.
+  - **Load sets both up.** It causes the earlier retry that plants the repeated banner, and it widens the gap before each notice.
+
+  The two flaws are proven possible from the code. Which one hit each branch run can't be settled, because those logs are gone. The step's comment that a re-read clears the refusal (`tests/browser.mjs:3901-3904`) is out of date.
 - **Steps 16 and 23 each failed once, and their causes aren't established:**
   - Step 16 failed in run 4, the last run, after passing in runs 1–3 and in both of `main`'s orders. The dialog that didn't open belongs to the signing row, which this change doesn't alter.
   - Step 23, a client draft with Save & exit, failed in run 1, the run that wasn't alone. Its client window was already closed when the step began. On the branch it passed in run 2's Firefox-client order, and on `main` in the Chrome-client order.
@@ -205,7 +212,7 @@ There are 8 files, all historical design documents from parts 1–4d. CLAUDE.md 
 - [ ] ✅ PASS — ready for finishing-a-development-branch and archive
 - [x] ⚠️ PASS WITH WARNINGS — ready for the next steps, with these to note:
   - **The browser story isn't green in any single run.**
-    - Step 18 (simultaneous claims) also fails on `main`.
+    - Step 18 (simultaneous claims) also fails on `main`. Its fault is in the story's check, not the app: the recorder ignores repeated notices, and the step reads too early.
     - Steps 16 and 23 each failed once, for causes that aren't established, in code this change doesn't alter.
   - **Steps 23–40 never ran in the Chrome-client order on the branch.** That includes step 37, the withdrawal-notice resolve. They passed on the branch in the Firefox-client order and on `main` in the Chrome-client order.
   - **Firefox needs a workaround inside the Claude app.** It only launches there with the `--override` preload.
