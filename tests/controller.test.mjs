@@ -6247,7 +6247,7 @@ test("a staff member without admin starts no screening, whatever persona the win
   controller.stop();
 });
 
-// An account with no membership (a former presenter's open session, say): the
+// An account with no membership (an account that lost its membership): the
 // store's getPrincipal answers FORBIDDEN, and the window shows `no-access`.
 // getPrincipal is the only store call it may ever make, however often the
 // window is woken (refresh() re-asks it, so a granted membership is noticed).
@@ -6309,7 +6309,7 @@ test("a window with no membership makes no store call but getPrincipal, however 
 
 test("a principal whose access is neither staff nor applicant gets no-access and nothing is read", async () => {
   const store = fakeStore({
-    principal: { userId: "p1", workspaceId: "w1", access: "presenter" },
+    principal: { userId: "p1", workspaceId: "w1", access: "viewer" },
     cases: [{ id: "case-a", reference: "VT-AAAA-BBBB", stage: "received", revision: 1, answers: {} }],
   });
   const { controller, events } = build({ store });
