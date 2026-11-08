@@ -31,5 +31,5 @@
 
 ## 6. Final checks
 
-- [ ] 6.1 Run `npm run test:browser` and `npx openspec validate --all`
+- [x] 6.1 Run `npm run test:browser` and `npx openspec validate --all`
 - [x] 6.2 Sync with `main`; confirm there is only one `042_*.sql` and that #136 hasn't merged in between (D6)
