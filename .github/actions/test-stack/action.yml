@@ -1,0 +1,67 @@
+# A fresh, isolated local Supabase stack for one CI job, built the way
+# docs/setup.md section 3 builds one, then migrated. Run it after npm ci.
+#
+# The stack's config.toml is supabase/test-stack.config.example.toml itself,
+# with its project id filled in, so CI proves the committed reference. The
+# stack's keys are generated on the runner: CI needs no repository secret.
+# `supabase start` prints those keys, so its output goes to a private file.
+
+name: Local Supabase test stack
+description: Start an isolated local Supabase stack, write .env.test from its status, and apply the migrations.
+
+runs:
+  using: composite
+  steps:
+    - name: Stack folder from the reference config
+      shell: bash
+      run: |
+        stack="$RUNNER_TEMP/vitally-ci"
+        mkdir -p "$stack/supabase/templates" "$stack/supabase/.temp" "$stack/cli-home"
+        sed 's/^project_id = .*/project_id = "vitally-ci"/' \
+          supabase/test-stack.config.example.toml > "$stack/supabase/config.toml"
+        if ! grep -qx 'project_id = "vitally-ci"' "$stack/supabase/config.toml"; then
+          echo "::error::The reference config has no project_id line to fill in."
+          exit 1
+        fi
+        # The sign-in email carries the code, as on every team stack.
+        cp supabase/templates/magic_link.html "$stack/supabase/templates/magic_link.html"
+        # PostgREST 16.3, not the CLI's 16.2 (docs/setup.md, "Pin PostgREST to 16.3").
+        printf %s v16.3 > "$stack/supabase/.temp/rest-version"
+        echo "VITALLY_STACK=$stack" >> "$GITHUB_ENV"
+
+    - name: Start the stack
+      shell: bash
+      run: |
+        if ! SUPABASE_HOME="$VITALLY_STACK/cli-home" ./node_modules/.bin/supabase start \
+          --workdir "$VITALLY_STACK" \
+          --exclude storage-api,imgproxy,postgres-meta,studio,edge-runtime,logflare,vector,supavisor \
+          > "$VITALLY_STACK/start.private.log" 2>&1; then
+          echo "::error::supabase start failed."
+          docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}'
+          # No test user exists yet. The log can still end with keys, so only
+          # lines that name none are shown.
+          grep -viE 'key|secret|token|jwt|postgres(ql)?://' "$VITALLY_STACK/start.private.log" | tail -n 40 || true
+          exit 1
+        fi
+
+    - name: Write .env.test and the target manifest from the stack's status
+      shell: bash
+      run: |
+        umask 077
+        SUPABASE_HOME="$VITALLY_STACK/cli-home" ./node_modules/.bin/supabase status \
+          --workdir "$VITALLY_STACK" --output json > "$VITALLY_STACK/status.private.json"
+        node tools/admin/write-test-env.mjs \
+          --status "$VITALLY_STACK/status.private.json" \
+          --instance vitally-ci \
+          --env .env.test \
+          --manifest "$VITALLY_STACK/vitally-targets.json"
+
+    - name: Stack images and time zone
+      shell: bash
+      run: |
+        docker ps --filter label=com.supabase.cli.project=vitally-ci --format '{{.Image}}' | sort
+        echo "Time zone: $(node -p 'Intl.DateTimeFormat().resolvedOptions().timeZone')"
+
+    - name: Apply the migrations
+      shell: bash
+      run: npm run db:migrate:test

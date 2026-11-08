@@ -4,7 +4,10 @@
 # browser gates rely on is reproducible from the repository, independent of any one
 # machine's `/private/tmp` stack (per Ruling R48).
 #
-# This file is a REFERENCE, not something the CLI reads directly. To build a stack:
+# CI reads this file directly: .github/actions/test-stack copies it as the stack's
+# whole `config.toml`, with only `project_id` filled in, so every change here is
+# tested on the next pull request. Sections it leaves out take the CLI's defaults.
+# To build a local stack by hand instead:
 #
 #   1. Create a fresh temporary working directory and run
 #      `supabase init --workdir <dir>` with the pinned CLI (see docs/setup.md). That

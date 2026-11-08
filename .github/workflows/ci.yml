@@ -1,6 +1,11 @@
-# CI, layer 1: the checks that need no database, no browser and no network
-# beyond installing packages. The database suite (a local Supabase stack) and
-# the browser suites (Playwright) are later layers, each its own job here.
+# CI. `checks` needs no database, no browser and no network beyond installing
+# packages; it is the job main's branch protection requires.
+#
+# `database`, `sign-in` and the two `story` legs each start their own fresh
+# local Supabase stack (.github/actions/test-stack) and run one suite against
+# it. They run in New York time, as every recorded local pass did: some screens
+# use the browser's own date while the database counts days in New York. They
+# need no repository secret.
 
 name: CI
 
@@ -9,13 +14,16 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # Run on any pushed branch: gh workflow run ci.yml --ref <branch>
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A new push to a pull request replaces its run; every commit on main keeps its own.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   checks:
@@ -66,3 +74,105 @@ jobs:
 
       - name: OpenSpec changes and specs are valid
         run: npx openspec validate --all
+
+  database:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      TZ: America/New_York
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.21.0
+          cache: npm
+
+      - run: npm ci
+
+      - uses: ./.github/actions/test-stack
+
+      - name: Database suite
+        run: npm run test:database
+
+  sign-in:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      TZ: America/New_York
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.21.0
+          cache: npm
+
+      - run: npm ci
+
+      # Firefox is the build pinned Playwright brings. Chrome is the runner
+      # image's Google Chrome, which channel 'chrome' launches.
+      - name: Playwright Firefox and its system packages
+        run: ./node_modules/.bin/playwright install --with-deps firefox
+
+      - name: Browser versions
+        run: |
+          google-chrome --version
+          ./node_modules/.bin/playwright --version
+
+      - uses: ./.github/actions/test-stack
+
+      - name: Sign-in suite
+        run: npm run test:auth-browser
+
+  story:
+    name: story (${{ matrix.leg }})
+    runs-on: ubuntu-24.04
+    # Each browser order has a 20-minute limit of its own in tests/browser.mjs.
+    timeout-minutes: 45
+    env:
+      TZ: America/New_York
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Each leg runs one browser order by skipping the other.
+          - leg: chrome-client
+            skip: Firefox client and Chrome staff run the whole demonstration story
+          - leg: firefox-client
+            skip: Chrome client and Firefox staff run the whole demonstration story
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.21.0
+          cache: npm
+
+      - run: npm ci
+
+      - name: Playwright Firefox and its system packages
+        run: ./node_modules/.bin/playwright install --with-deps firefox
+
+      - name: Browser versions
+        run: |
+          google-chrome --version
+          ./node_modules/.bin/playwright --version
+
+      - uses: ./.github/actions/test-stack
+
+      - name: Browser story
+        env:
+          SKIP_ORDER: ${{ matrix.skip }}
+        run: node --env-file=.env.test --test --test-skip-pattern="$SKIP_ORDER" tests/browser.mjs
+
+      # The screenshots show fictional data only. A review inspects them when
+      # this run stands in for a local one, so they are kept for passes too.
+      - name: Story screenshots
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: story-screenshots-${{ matrix.leg }}
+          path: artifacts/browser/
+          retention-days: 7
+          if-no-files-found: warn

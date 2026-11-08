@@ -337,6 +337,19 @@ output — never by hand-typing values into chat or a log:
 | `VITALLY_TEST_LOCAL_INSTANCE_ID` | `VITALLY_INSTANCE` (the exact stack/project id) |
 | `VITALLY_TARGET_MANIFEST` | the absolute path to ignored `.vitally-targets.json` |
 
+[`tools/admin/write-test-env.mjs`](../tools/admin/write-test-env.mjs) writes both `.env.test` and
+`.vitally-targets.json` from the status file saved in [Start and stop](#start-and-stop), with mode
+600, and prints nothing secret. CI uses it the same way:
+
+```sh
+PATH="$VITALLY_NODE_BIN:$PATH" "$VITALLY_NODE" tools/admin/write-test-env.mjs \
+  --status "$VITALLY_STACK/status.private.json" --instance "$VITALLY_INSTANCE" \
+  --env .env.test --manifest "$PWD/.vitally-targets.json"
+```
+
+It refuses a status that is not a plain loopback stack. It overwrites both files, so a stack that
+already has a working `.env.test` doesn't need it.
+
 `.vitally-targets.json` records **endpoint identity only** — never passwords or API keys:
 
 ```json
@@ -543,12 +556,19 @@ token; the browser story's evidence output is explicitly redacted before it is p
 
 The browser story writes screenshots (720px side-by-side and 390px mobile) to the git-ignored
 `artifacts/browser/` directory; they are inspected as part of each task's review, not committed.
+CI keeps each story leg's screenshots as a run artifact for 7 days
+([Continuous integration](#continuous-integration)).
 
 ### Continuous integration
 
-[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every pull request into `main`
-and every push to `main`, on Node 24.21.0 after `npm ci`. It runs four checks, none of which needs
-a database, a browser or a `.env` file:
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every pull request into `main`,
+every push to `main`, and on demand (`gh workflow run ci.yml --ref <branch>` runs it on any pushed
+branch). Every job uses Node 24.21.0 and `npm ci`. A new push to a pull request cancels that pull
+request's older run; runs on `main` are never cancelled.
+
+**`checks`** needs no database, no browser and no `.env` file. It is the only job `main`'s branch
+protection requires. It first fails if any text file is committed with CRLF line endings, then
+runs:
 
 1. `npm test` (the unit suite above);
 2. `npm run build:hant -- --check` (the 繁體 map matches the 简体 source);
@@ -558,11 +578,45 @@ a database, a browser or a `.env` file:
    CLI is a pinned dev dependency (`@fission-ai/openspec`, exactly 1.14.0), so the team and CI run
    the same version; its telemetry is off in CI.
 
-The database suite and the two browser suites are not in CI yet: each needs its own job (a local
-Supabase stack, and Playwright's browsers). Until then, run them locally when a change touches
-what they cover.
+**`database`, `sign-in` and `story`** each start their own fresh stack with
+[`.github/actions/test-stack`](../.github/actions/test-stack/action.yml), which follows
+[section 3](#3-isolated-local-supabase-test-stack) on the runner:
 
-Before those checks, CI fails if any text file is committed with CRLF line endings.
+- The stack's `config.toml` is [`supabase/test-stack.config.example.toml`](../supabase/test-stack.config.example.toml)
+  itself, with the project id `vitally-ci`, plus the code-carrying Magic Link template and the
+  PostgREST 16.3 pin. CI therefore checks the committed reference, ports and all.
+- `supabase start` runs with section 3's `--exclude` list, from the stack's own folder under the
+  runner's temporary directory, never the repository root. Its output, which lists the keys, goes
+  to a private file; if the start fails, the job prints the container states and only the log lines
+  that name no key.
+- [`tools/admin/write-test-env.mjs`](../tools/admin/write-test-env.mjs) writes `.env.test` and the
+  target manifest from `supabase status --output json` and masks every key in the log. The target
+  guard then checks the running containers exactly as it does locally; CI has no exception.
+- `npm run db:migrate:test` applies every migration, in number order, to the empty database.
+
+The stack's keys are generated on the runner, so CI uses no repository secret, and a pull request
+from a fork runs the same way. These jobs run on `ubuntu-24.04` in New York time
+(`TZ=America/New_York`), as every recorded local pass did: some screens use the browser's own date
+while the database counts days in New York, so a runner on UTC could disagree with the database in
+the evening. `checks` stays on UTC.
+
+| Job | Runs | Notes |
+| --- | --- | --- |
+| `database` | `npm run test:database` | |
+| `sign-in` | `npm run test:auth-browser` | Installs Playwright's Firefox with `playwright install --with-deps firefox`; Chrome is the runner image's Google Chrome |
+| `story (chrome-client)`, `story (firefox-client)` | `tests/browser.mjs`, one browser order each (`--test-skip-pattern` skips the other) | Each uploads `artifacts/browser/` as `story-screenshots-<leg>`, pass or fail, kept 7 days |
+
+Versions: Node, the Supabase CLI (and so its default service images), PostgREST and Playwright
+(and so its Firefox) are pinned; Google Chrome is whatever the runner image ships, as on a
+teammate's machine. Each job prints the images and browser versions it used. Only the npm cache
+is cached: Playwright advises against caching its browsers, and saving and loading the stack's
+Docker images takes about as long as pulling them.
+
+The new jobs report on every pull request but do not block merging yet: after they have passed on
+real pull requests for about a week, the repository owner can add `database` and `sign-in` to
+`main`'s required checks. The story stays advisory until it has a record in CI. When a passing CI
+run may stand in for running these suites locally is in [`CLAUDE.md`](../CLAUDE.md) (Project
+rules, Verification).
 
 ### Line endings (Windows)
 
