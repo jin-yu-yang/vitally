@@ -66,6 +66,12 @@ $$;
 delete from public.action_receipts where actor_user_id in (select user_id from vitally_043_presenters);
 delete from public.memberships m using vitally_043_presenters p
  where m.workspace_id=p.workspace_id and m.user_id=p.user_id;
+-- people_membership_fkey is deferrable and initially deferred, so each deleted
+-- membership queues a check on public.memberships, and ALTER TABLE refuses a
+-- table with pending trigger events (55006). Running the check now drains the
+-- queue; the refusal has already made sure no person is linked to a presenter,
+-- so it passes. The constraint is deferred again after step 6.
+set constraints public.people_membership_fkey immediate;
 delete from auth.users where id in (select user_id from vitally_043_presenters);
 
 -- ---------------------------------------------------------------------------
@@ -99,6 +105,7 @@ $$;
 
 alter table public.memberships drop constraint memberships_access_check,
  add constraint memberships_access_check check (access in ('applicant','staff'));
+set constraints public.people_membership_fkey deferred;
 
 -- ---------------------------------------------------------------------------
 -- 7. The 22 policies, from their 038/039 definitions with
