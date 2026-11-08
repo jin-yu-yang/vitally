@@ -654,6 +654,9 @@ test("staff identity against real Supabase", async (t) => {
       // A capability outside the known set, or a repeated one.
       await refused(f.unapprovedUserId, "quinn", "Quinn Ross", ["prepare", "teach"]);
       await refused(f.unapprovedUserId, "quinn", "Quinn Ross", ["prepare", "prepare"]);
+      // Follow-up access without admin (042).
+      await refused(f.unapprovedUserId, "quinn", "Quinn Ross", ["followup"]);
+      await refused(f.unapprovedUserId, "quinn", "Quinn Ross", ["followup", "review"]);
       // Nothing was created for the account.
       assert.deepEqual(await f.readMembership(f.unapprovedUserId), []);
       // An account with an active membership in another workspace.
@@ -668,6 +671,33 @@ test("staff identity against real Supabase", async (t) => {
         );
         assert.equal(extra.rowCount, 0, `${key} was created`);
       }
+    });
+
+    await t.test("no follow-up-only person can be stored (042)", async () => {
+      // f.sql wraps the pg error; the constraint name is on its cause.
+      const byTheCheck = (error) =>
+        error.code === "23514" && error.cause?.constraint === "people_followup_needs_admin";
+      try {
+        await assert.rejects(
+          () => f.sql("update public.people set capabilities=$1 where id=$2", [["followup", "review"], riley.personId]),
+          byTheCheck,
+        );
+        await assert.rejects(
+          () =>
+            f.sql(
+              "insert into public.people(workspace_id,person_key,name,capabilities) values($1,'quinn_direct','Quinn Direct',$2)",
+              [f.workspaceId, ["followup"]],
+            ),
+          byTheCheck,
+        );
+        // Admin without follow-up is still a valid person.
+        await f.sql("update public.people set capabilities=$1 where id=$2", [["admin", "prepare"], riley.personId]);
+      } finally {
+        // On 041 the refused writes succeed; put Riley back so later subtests are unaffected.
+        await f.sql("update public.people set capabilities=$1 where id=$2", [["prepare"], riley.personId]);
+        await f.sql("delete from public.people where workspace_id=$1 and person_key='quinn_direct'", [f.workspaceId]);
+      }
+      assert.deepEqual((await personRow(f, "riley")).capabilities, ["prepare"]);
     });
 
     let frankie;
@@ -753,7 +783,7 @@ test("staff identity against real Supabase", async (t) => {
       frankie = await hire({
         key: "frankie",
         name: "Frankie Doyle",
-        capabilities: ["followup"],
+        capabilities: ["admin", "followup"],
       });
       await f.withSetupLock(() =>
         f.sql("select vitally_private.set_default_followup($1,$2)", [f.workspaceId, "frankie"]),
@@ -765,35 +795,21 @@ test("staff identity against real Supabase", async (t) => {
         await f.sql("select assignee_person_id from public.admin_followups where id=$1", [firstFollowup.id])
       ).rows[0];
       assert.equal(kept.assignee_person_id, f.siteCoordinatorId);
-      // Review Focus 5: the new default cannot take over the Site Coordinator's
-      // open task, and the Site Coordinator still resolves it.
+      // Review Focus 5, changed by 042: the new default may work the Site
+      // Coordinator's open task too, and the task keeps its assignee.
       const resolvePayload = {
         followupId: firstFollowup.id,
         outcome: "reached",
         note: "Spoke with the client.",
       };
-      await refuse(
-        f,
-        frankie.client,
-        "vitally_apply_action",
-        applyArgs({
-          caseId: firstFollowup.case_id,
-          revision: await revisionOf(f, firstFollowup.case_id),
-          type: "RESOLVE_FOLLOWUP",
-          payload: resolvePayload,
-        }),
-      );
       const statusOf = async () =>
         (
           await f.sql("select status,assignee_person_id from public.admin_followups where id=$1", [
             firstFollowup.id,
           ])
         ).rows[0];
-      assert.deepEqual(await statusOf(), { status: "open", assignee_person_id: f.siteCoordinatorId });
-      await f.act(f.siteCoordinator, firstFollowup.case_id, "RESOLVE_FOLLOWUP", resolvePayload);
-      const resolved = await statusOf();
-      assert.notEqual(resolved.status, "open");
-      assert.equal(resolved.assignee_person_id, f.siteCoordinatorId);
+      await f.act(frankie.client, firstFollowup.case_id, "RESOLVE_FOLLOWUP", resolvePayload);
+      assert.deepEqual(await statusOf(), { status: "resolved", assignee_person_id: f.siteCoordinatorId });
       // A further escalation still goes to the new default.
       const [later] = await escalate();
       assert.equal(later.assignee_person_id, frankie.personId);

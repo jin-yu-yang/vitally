@@ -624,7 +624,7 @@ test("document requests, receipts and verification keep the preparer in charge",
   }
 });
 
-test("admin follow-up is assigned, recorded and resolved by its own person", async (t) => {
+test("admin follow-up is assigned, recorded and resolved by the office", async (t) => {
   const f = await createDatabaseFixture();
   try {
     await t.test(
@@ -917,7 +917,7 @@ test("admin follow-up is assigned, recorded and resolved by its own person", asy
       },
     );
     await t.test(
-      "contact and resolution need the assigned person and a listed outcome",
+      "contact and resolution need the follow-up capability and a listed outcome",
       async () => {
         const caseId = await requestedCase(f);
         await f.act(f.preparer, caseId, "ESCALATE_CONTACT", {
@@ -942,31 +942,6 @@ test("admin follow-up is assigned, recorded and resolved by its own person", asy
               rejected("FORBIDDEN"),
               `${type} for ${who}`,
             );
-        // Step 7: the capability alone is not the assignment.
-        await f.sql("update public.people set capabilities=$1 where id=$2", [
-          ["followup", "review"],
-          f.reviewerId,
-        ]);
-        try {
-          await assert.rejects(
-            () =>
-              f.logContact(f.reviewer, caseId, SAMPLE_CONTACT(), followupId),
-            rejected("FORBIDDEN"),
-          );
-          await assert.rejects(
-            () =>
-              f.act(f.reviewer, caseId, "RESOLVE_FOLLOWUP", {
-                outcome: "reached",
-                note: "Spoke with the client",
-              }),
-            rejected("FORBIDDEN"),
-          );
-        } finally {
-          await f.sql("update public.people set capabilities=$1 where id=$2", [
-            ["review"],
-            f.reviewerId,
-          ]);
-        }
         assert.deepEqual(await taskContacts(f, followupId), []);
         for (const payload of [
           { followupId },
@@ -983,7 +958,7 @@ test("admin follow-up is assigned, recorded and resolved by its own person", asy
             rejected("VALIDATION"),
             JSON.stringify(payload),
           );
-        // RECORD_CONTACT refuses every outcome now (design D12); the assignee
+        // RECORD_CONTACT refuses every outcome now (design D12); the office
         // logs linked contacts instead, and none resolves the task.
         for (const outcome of [
           "no_answer",
@@ -1062,10 +1037,10 @@ test("admin follow-up is assigned, recorded and resolved by its own person", asy
           () => f.logContact(f.siteCoordinator, caseId, SAMPLE_CONTACT(), followupId),
           rejected("INVALID_TRANSITION"),
         );
-        // Assignment answers before readiness: a capable non-assignee is
-        // FORBIDDEN on the resolved task, never told that it is closed.
+        // Readiness answers anyone who may act (042): a capable non-assignee
+        // is told the resolved task is not available.
         await f.sql("update public.people set capabilities=$1 where id=$2", [
-          ["followup", "review"],
+          ["admin", "followup", "review"],
           f.reviewerId,
         ]);
         try {
@@ -1076,12 +1051,12 @@ test("admin follow-up is assigned, recorded and resolved by its own person", asy
                 outcome: "reached",
                 note: "Once more",
               }),
-            rejected("FORBIDDEN"),
+            rejected("INVALID_TRANSITION"),
           );
           await assert.rejects(
             () =>
               f.logContact(f.reviewer, caseId, SAMPLE_CONTACT(), followupId),
-            rejected("FORBIDDEN"),
+            rejected("INVALID_TRANSITION"),
           );
         } finally {
           await f.sql("update public.people set capabilities=$1 where id=$2", [
@@ -1092,6 +1067,67 @@ test("admin follow-up is assigned, recorded and resolved by its own person", asy
         assert.equal((await taskContacts(f, followupId)).length, 4);
       },
     );
+    await t.test("anyone with follow-up access works the task (042)", async () => {
+      const jo = await f.staff({ key: "jo", name: "Jo Rivera", capabilities: ["admin", "followup"] });
+      const caseId = await requestedCase(f);
+      await f.act(f.preparer, caseId, "ESCALATE_CONTACT", { reason: "Office contact needed" });
+      const [task] = (await f.readStaffCase(caseId)).followups;
+      assert.equal(task.assigneeId, f.siteCoordinatorId);
+      const payload = { followupId: task.id, outcome: "reached", note: "Spoke with the client" };
+      // Another case's id never reaches the task: a contact is forbidden, and a
+      // resolve is invalid (check_related refuses it first).
+      const otherCaseId = await requestedCase(f);
+      await assert.rejects(
+        () => f.logContact(jo.client, otherCaseId, SAMPLE_CONTACT(), task.id),
+        rejected("FORBIDDEN"),
+      );
+      await assert.rejects(
+        () => f.act(jo.client, otherCaseId, "RESOLVE_FOLLOWUP", payload),
+        rejected("VALIDATION"),
+      );
+      // Two people on one task: both contacts are kept.
+      await f.logContact(f.siteCoordinator, caseId, SAMPLE_CONTACT(), task.id);
+      await f.logContact(jo.client, caseId, SAMPLE_CONTACT(), task.id);
+      assert.equal((await taskContacts(f, task.id)).length, 2);
+      // Logging never moves the case revision, so this is the revision before the resolve.
+      const before = Number(
+        (await f.sql("select revision from public.cases where id=$1", [caseId])).rows[0].revision,
+      );
+      await f.act(jo.client, caseId, "RESOLVE_FOLLOWUP", payload);
+      const [after] = (await f.readStaffCase(caseId)).followups;
+      assert.equal(after.status, "resolved");
+      assert.equal(after.assigneeId, f.siteCoordinatorId, "the assignee stays as a label");
+      const events = await f.sql(
+        "select actor_person_id from public.case_events where case_id=$1 and action='RESOLVE_FOLLOWUP'",
+        [caseId],
+      );
+      assert.deepEqual(events.rows, [{ actor_person_id: jo.personId }]);
+      // The assignee's resolve from before is stale (VT003 CONFLICT), and after
+      // re-reading the task is not available.
+      const stale = await f.siteCoordinator.rpc(
+        "vitally_apply_action",
+        applyArgs({ caseId, revision: before, type: "RESOLVE_FOLLOWUP", payload }),
+      );
+      assert.equal(stale.error?.code, "VT003");
+      await assert.rejects(
+        () => f.act(f.siteCoordinator, caseId, "RESOLVE_FOLLOWUP", payload),
+        rejected("INVALID_TRANSITION"),
+      );
+    });
+    await t.test("a task assigned to someone who can't act is worked by the office (042)", async () => {
+      const caseId = await requestedCase(f);
+      await f.act(f.preparer, caseId, "ESCALATE_CONTACT", { reason: "Office contact needed" });
+      const [task] = (await f.readStaffCase(caseId)).followups;
+      // Sam is a persona no staff account is linked to.
+      await f.sql("update public.admin_followups set assignee_person_id=$2 where id=$1", [task.id, f.sam]);
+      await f.logContact(f.siteCoordinator, caseId, SAMPLE_CONTACT(), task.id);
+      await f.act(f.siteCoordinator, caseId, "RESOLVE_FOLLOWUP", {
+        followupId: task.id,
+        outcome: "reached",
+        note: "Spoke with the client",
+      });
+      assert.equal((await f.readStaffCase(caseId)).followups[0].status, "resolved");
+    });
     await t.test(
       "rejected document and follow-up actions commit no receipt or record",
       async () => {

@@ -1870,6 +1870,23 @@ test("the three handlers store the answers", async (t) => {
       await f.act(f.siteCoordinator, caseId, "MARK_READY_TO_EFILE", { confirmed: true });
       assert.equal((await f.readStaffCase(caseId)).stage, "ready_to_efile");
     });
+    await t.test("another follow-up holder resolves the go-over (042)", async () => {
+      const jo = await f.staff({ key: "jo", name: "Jo Rivera", capabilities: ["admin", "followup"] });
+      const caseId = await reviewingCase(f, f.reviewer);
+      await setService(f, caseId, "online");
+      await f.act(f.reviewer, caseId, "APPROVE_REVIEW", { questionnaire: NO });
+      const [task] = await goOver(f, caseId);
+      assert.notEqual(task.assignee_person_id, jo.personId);
+      await f.logContact(jo.client, caseId, SAMPLE_CONTACT(), task.id);
+      await f.act(jo.client, caseId, "RESOLVE_FOLLOWUP", {
+        followupId: task.id,
+        outcome: "reached",
+        note: "Fictional: went over the return by phone.",
+      });
+      assert.deepEqual(await plan(f, caseId), { signing_plan: "portal", signing_appointment_at: null });
+      await f.act(f.siteCoordinator, caseId, "MARK_READY_TO_EFILE", { confirmed: true });
+      assert.equal((await f.readStaffCase(caseId)).stage, "ready_to_efile");
+    });
     await t.test("client messages carry no answer", async () => {
       const q = {
         ...REVIEWER,
