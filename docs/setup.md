@@ -544,6 +544,27 @@ token; the browser story's evidence output is explicitly redacted before it is p
 The browser story writes screenshots (720px side-by-side and 390px mobile) to the git-ignored
 `artifacts/browser/` directory; they are inspected as part of each task's review, not committed.
 
+### Firefox inside the Claude desktop app
+
+Started from the Claude desktop app (its agent shell or its Terminal panel), Playwright's Firefox
+can quit at launch with `Could not find profile folder.`, so the auth-gate suite and the story stop
+at their first Firefox window. macOS refuses the app's processes the installed Firefox.app's data
+folder, `~/Library/Application Support/Firefox` ("Operation not permitted"), and Firefox reads it
+at startup even with Playwright's own `-profile`. Changing `HOME`, `TMPDIR` or other environment
+variables does not help, and neither does reinstalling Playwright's Firefox.
+
+The workaround is the preload [`tools/firefox-override-preload.mjs`](../tools/firefox-override-preload.mjs).
+It wraps Playwright's `firefox.launch` to add `--override <file>`, where the file holds `[App]` and
+`Profile=Playwright Firefox`. Firefox then keeps its application data in folders of that name
+(in Application Support and Caches). The suites still run on Playwright's own temporary profile,
+and nothing else changes. Pass it in `NODE_OPTIONS`, through `npm run`:
+
+```sh
+PATH="$VITALLY_NODE_BIN:/Users/jinyuyang/.docker/bin:$PATH" NODE_OPTIONS="--import=./tools/firefox-override-preload.mjs" npm run test:browser
+```
+
+The same works for `npm run test:auth-browser`. Outside the Claude desktop app nothing needs it.
+
 ### Continuous integration
 
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every pull request into `main`
