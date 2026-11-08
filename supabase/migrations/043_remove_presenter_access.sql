@@ -17,8 +17,9 @@
 -- No drop here uses CASCADE: every old signature is dropped by its full
 -- identity. Supabase's own auth foreign keys cascade from auth.users to the
 -- account's identities, sessions, tokens and factors. Every function body is
--- copied from its definition at 040 (041 redefines none of them; #172's 042
--- redefines add_staff_member, marked below) and changes only as stated. The migration runs in one transaction.
+-- copied from its definition at 040 (041 redefines none of them), except
+-- add_staff_member, which is copied from 042, and changes only as stated. The
+-- migration runs in one transaction.
 
 -- ---------------------------------------------------------------------------
 -- 1. The refusal. The presenter memberships are captured before anything is
@@ -809,8 +810,7 @@ end;
 $$;
 
 -- Without the reserved demonstration keys: a key held by any other person of
--- the workspace is still refused below.
--- TODO(#172): re-copy from #172's migration 042
+-- the workspace is still refused below. Copied from 042.
 create or replace function vitally_private.add_staff_member(p_workspace_id uuid,p_user_id uuid,p_person_key text,p_name text,p_capabilities text[])
 returns uuid language plpgsql security definer set search_path='' as $$
 declare v_member public.memberships;
@@ -822,6 +822,7 @@ begin
   or length(p_name) not between 1 and 80
   or array_position(p_capabilities,null) is not null
   or not (p_capabilities <@ array['prepare','review','admin','followup','receive_documents','assist']::text[])
+  or ('followup'=any(p_capabilities) and not 'admin'=any(p_capabilities)) -- 042
   or cardinality(p_capabilities)<>(select count(distinct c) from unnest(p_capabilities) c) then
   raise sqlstate 'VT007' using message='VALIDATION';
  end if;
