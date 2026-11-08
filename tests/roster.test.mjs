@@ -20,7 +20,7 @@ const riley = (extra = {}) => ({
   email: " Riley@Example.org ",
   name: "Riley Park",
   personKey: "riley",
-  capabilities: ["prepare", "followup"],
+  capabilities: ["prepare", "admin", "followup"],
   ...extra,
 });
 const valid = () => ({
@@ -41,7 +41,7 @@ test("a roster is trimmed, lower-cased and kept in order", () => {
         email: "riley@example.org",
         name: "Riley Park",
         personKey: "riley",
-        capabilities: ["prepare", "followup"],
+        capabilities: ["prepare", "admin", "followup"],
       },
     ],
     defaultFollowup: "riley",
@@ -208,7 +208,7 @@ test("missing accounts are created confirmed, and the workspace gets their ids",
           userId: "aaaaaaaa-0000-4000-8000-000000000001",
           personKey: "riley",
           name: "Riley Park",
-          capabilities: ["prepare", "followup"],
+          capabilities: ["prepare", "admin", "followup"],
         },
       ],
       defaultFollowup: "riley",
@@ -273,7 +273,7 @@ test("a staff entry parses, with its address normalised", () => {
       email: "riley@example.org",
       name: "Riley Park",
       personKey: "riley",
-      capabilities: ["prepare", "followup"],
+      capabilities: ["prepare", "admin", "followup"],
     },
   ]);
   assert.equal(roster.defaultFollowup, "riley");
@@ -298,21 +298,26 @@ test("staff entries are validated before any account is made", () => {
     [riley({ capabilities: ["teach"] }), /staff\[0\]\.capabilities/],
     [riley({ capabilities: [] }), /staff\[0\]\.capabilities/],
     [riley({ capabilities: "prepare" }), /staff\[0\]\.capabilities/],
+    [riley({ capabilities: ["followup"] }), /staff\[0\]\.capabilities must include admin when they include followup\./],
+    [riley({ capabilities: ["followup", "assist"] }), /staff\[0\]\.capabilities must include admin when they include followup\./],
     [riley({ email: "no at sign" }), /staff\[0\]/],
     ["riley", /staff\[0\]/],
   ])
     assert.throws(() => parseRoster(withStaff([entry])), refused(pattern));
-  for (const capability of ["prepare", "review", "admin", "followup", "receive_documents", "assist"])
-    parseRoster(
-      withStaff(
-        [
-          riley({ capabilities: [capability] }),
-          riley({ email: "lead@example.org", personKey: "lead", capabilities: ["followup"] }),
-        ],
-        { defaultFollowup: "lead" },
-      ),
-    );
+  const lead = riley({ email: "lead@example.org", personKey: "lead", capabilities: ["admin", "followup"] });
+  for (const capability of ["prepare", "review", "admin", "receive_documents", "assist"])
+    parseRoster(withStaff([riley({ capabilities: [capability] }), lead], { defaultFollowup: "lead" }));
+  parseRoster(withStaff([riley({ capabilities: ["admin", "followup"] })]));
+  parseRoster(withStaff([riley({ capabilities: ["admin", "receive_documents"] }), lead], { defaultFollowup: "lead" }));
   assert.throws(() => parseRoster({ ...valid(), staff: "riley" }), refused(/staff must be a list/));
+});
+
+test("follow-up access without admin is refused at any position (042)", () => {
+  const kai = riley({ email: "kai@example.org", name: "Kai Mensah", personKey: "kai", capabilities: ["followup", "assist"] });
+  assert.throws(
+    () => parseRoster(withStaff([riley(), kai])),
+    refused(/^staff\[1\]\.capabilities must include admin when they include followup\.$/),
+  );
 });
 
 test("staff people and addresses are never listed twice", () => {
@@ -377,7 +382,7 @@ test("staff accounts are provisioned and their ids reach the workspace", async (
   assert.deepEqual(Object.keys(riley_).sort(), ["capabilities", "name", "personKey", "userId"]);
   assert.equal(riley_.personKey, "riley");
   assert.equal(riley_.name, "Riley Park");
-  assert.deepEqual(riley_.capabilities, ["prepare", "followup"]);
+  assert.deepEqual(riley_.capabilities, ["prepare", "admin", "followup"]);
   assert.match(riley_.userId, /^00000000-0000-4000-8000-00000000000\d$/);
   assert.equal(setups[0].defaultFollowup, "riley");
   assert.equal(result.staff, 1);

@@ -380,7 +380,7 @@ check failed. Check, in this order:
 
 ## 4. Migrations
 
-Forty-two migrations (001 to 041 and 043; 042 is a teammate's change), applied in order. 020, the version-2 switch-over, was added after 021 and 022: a stack that already has them applies it last, and a new one applies it in number order. Both give the same result. Re-running the migrator on an already-migrated stack is safe,
+Forty-three migrations (001 to 043), applied in order. 020, the version-2 switch-over, was added after 021 and 022: a stack that already has them applies it last, and a new one applies it in number order. Both give the same result. Re-running the migrator on an already-migrated stack is safe,
 but not because the files themselves are re-runnable — `001` and `002` create their tables with a
 plain `create table`, which fails the second time. What makes it safe is the ledger
 `tools/admin/migrate.mjs` keeps: `vitally_private.schema_migrations`, one row per file with a
@@ -430,6 +430,7 @@ already applied, so **the migrations are run only through the migrator, never by
 | `039_preparer_shaded_fields.sql` | Hand-written: the shaded section of Form 13614-C, filled by the case's preparer: the staff-only `preparer_shaded_fields` table (one row per case, in the Realtime publication; its select policy accepts `staff` like 038's), `vitally_private.check_preparer_fields`, and the `SAVE_PREPARER_FIELDS` action with its version guard; `check_operation_authority` and `vitally_apply_action` copied from 038 with the new action; the sample cases that have a preparer questionnaire get a fictional shaded row |
 | `040_remove_sample_case_tools.sql` | Hand-written: the sample cases, the reset and checkpoint functions, the client bindings and the `fixture` columns are removed, and `origin` accepts only `client` and `assisted`. A workspace starts with no cases; use `npm run seed:local` for rehearsal cases |
 | `041_resolve_go_over_during_hold.sql` | Hand-written: resolving a go-over task while the case is on a Hold from Ready to exit also switches the signing plan to the reviewer's method (#171) |
+| `042_let_follow_up_holders_work_any_follow_up.sql` | Hand-written: anyone holding `followup` works any open office follow-up, whoever it is assigned to, and `followup` requires `admin` (#172) |
 | `043_remove_presenter_access.sql` | Hand-written: the `presenter` access type, the person parameter of the six RPCs and the demonstration people (Alex, Morgan, Sam) are removed. It refuses with `VT008` if a presenter account is referenced ([below](#migration-failed-vt008)). |
 
 Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
@@ -518,15 +519,15 @@ person's account) and run the migrator again. Do not edit the migration file.
 
 All commands below run from the repository root with the command-scoped `PATH` shown. Each
 suite's **last-verified count** is below. The database and unit counts were last verified on the
-go-over Hold fix (2026-11-07, issue #171, with migration 041 applied). The story count was last
+change `let-follow-up-holders-work-any-follow-up` (2026-11-08, issue #172, with migration 042 applied). The story count was last
 verified on 2026-11-06, in one run (see the note below the table). The auth-gate count is still from
 the not-married intake wording (2026-10-14, change `add-unmarried-intake-wording`, with migration
 025 applied). Re-run the commands yourself for the current number, since new work changes these counts.
 
 | Suite | Command | Last verified | What it proves |
 | --- | --- | --- | --- |
-| Unit | `"$VITALLY_NODE" --test tests/*.test.mjs` | 1496/1496 | Pure domain/contract logic, the intake catalogue and version-2 renderer, the client text in three languages (every client screen swept in 简体 and 繁體, and the Traditional map checked against `opencc-js`), the auth/store adapters against fakes, the pure view renderers, the controller's async state machine, server allowlist/config logic — no network, no database. |
-| Database | `PATH="$VITALLY_NODE_BIN:/Users/jinyuyang/.docker/bin:$PATH" "$VITALLY_NODE" --env-file=.env.test --test tests/database*.mjs` | 441/441 | Every migration, RLS policy, RPC, and error/ordering rule against the real isolated stack: ownership, authority, idempotent replay, concurrency, Realtime publication/isolation, client numbers, and the version-2 intake checks compared with the browser's. |
+| Unit | `"$VITALLY_NODE" --test tests/*.test.mjs` | 1500/1500 | Pure domain/contract logic, the intake catalogue and version-2 renderer, the client text in three languages (every client screen swept in 简体 and 繁體, and the Traditional map checked against `opencc-js`), the auth/store adapters against fakes, the pure view renderers, the controller's async state machine, server allowlist/config logic — no network, no database. |
+| Database | `PATH="$VITALLY_NODE_BIN:/Users/jinyuyang/.docker/bin:$PATH" "$VITALLY_NODE" --env-file=.env.test --test tests/database*.mjs` | 448/448 | Every migration, RLS policy, RPC, and error/ordering rule against the real isolated stack: ownership, authority, idempotent replay, concurrency, Realtime publication/isolation, client numbers, and the version-2 intake checks compared with the browser's. |
 | Auth gate | `PATH="$VITALLY_NODE_BIN:/Users/jinyuyang/.docker/bin:$PATH" "$VITALLY_NODE" --env-file=.env.test --test tests/auth-browser.mjs` | 20/20, ~20–95 s | Real Chrome and real Firefox, driving the actual access form: a generated one-time code is typed in and verified through the real `verifyOtp` call; only the outbound `/auth/v1/otp` **send** is intercepted (email-free automation), never verification. |
 | Browser story | `PATH="$VITALLY_NODE_BIN:/Users/jinyuyang/.docker/bin:$PATH" "$VITALLY_NODE" --env-file=.env.test --test tests/browser.mjs` | 83/83, ~11–26 min (see the note below the table) | The full demonstration script (see [`docs/demo-script.md`](demo-script.md)) end to end, twice, roles swapped between Chrome and Firefox, plus the regression list below. The main story signs in as the database fixture's role-named staff accounts, each once, in a staff window of its own (the Site Coordinator Avery Lin, the Preparer Taylor Brooks and the Reviewer Jamie Ellis), and switches windows instead of personas; its cases come from the seed module (`tools/admin/seed-cases.mjs`), run on the story's own workspace with a temporary run file. No step signs in as the presenter: each presenter step was replaced one for one by a step that uses the role accounts or the seed, and one phase checks that a presenter who signs in sees only the plain "This account is no longer used" screen. Its throwaway workspace is on version 2, the only intake version: staff read the answers, the contact card before and after a claim, record materials, edit the best time, work the document checklist and open the draft 13614-C; the office takes in a walk-in on the version-2 Add a case; one phase walks every sub-step of the redesigned intake, marks document cards, reviews, opens the draft 13614-C and submits; one phase checks the staff sidebar's peek and pin (peek without pushing the page, stay, a realtime redraw during a peek, close after leaving, pin, no re-peek after a collapse, keyboard, a dialog opened from a peek, and touch); one phase signs two real staff accounts in through the form, in separate windows (Riley Park, who prepares and reviews, and Jordan Lee, who reviews): the board updates live, Riley fills the shaded section in the editor and its field is as tall as its cell, Riley cannot review a case Riley prepared, and a persona left in storage is ignored. An extra admin account, Quinn Harper, made in the contact log step, serves the in-window account switch; and one phase works in Chinese in its own `zh-CN` browser context (the first visit is 简体 from the browser's language, the version-2 intake by Fill and the rail, submit, the progress page and its history in Chinese, one switch to 繁體 that fetches the Traditional map for the first time, a reload that keeps it, and back to English). Every other context is pinned to `en-US`. Optional to re-run before every rehearsal, but recommended before a presentation. |
 The story passed 83/83 in one run on 2026-11-06 (about 26 minutes; the Chrome-client order about 14.1 minutes and the Firefox-client order about 12.2, against what was then a 15-minute limit for each, so the Chrome-client order was close to it; the limit is now 20 minutes, see #126), after the main story moved to the role-named staff accounts and the seed (#132), with migration 039 applied, run from a worktree on D:. The run before it failed once in the Firefox-client order on a hover check that passed in the runs before and after. Before that it passed 77/77 in one run on 2026-10-24 (about 25.6 minutes; an earlier run that day took about 20.7), on change `add-preparer-13614c-fields`, with migration 038 applied, run from a worktree on D: (not under OneDrive). History: it passed 63/63 in one run on 2026-10-20, on change `replace-simulated-screening-checks`, with migration 034 applied, run from a worktree on D: (not under OneDrive). Before that it passed 63/63 in one run on 2026-10-19, on change `add-preparer-and-reviewer-questionnaires`, with migration 033 applied, run from a worktree on D: (not under OneDrive); a worktree outside OneDrive works, while one under OneDrive fails it. Before that it passed 63/63 in one run on 2026-10-19, on change `add-screening-and-efiling-stages`, with migration 032 applied, run from the main checkout. Before that it passed 61/61 in one run on 2026-10-18, on change `add-contact-log`. Before that it passed 57/57 in one run on 2026-10-16 (about 16.6 minutes), on change `add-form-14446-consent`. Before that
@@ -569,6 +570,27 @@ token; the browser story's evidence output is explicitly redacted before it is p
 
 The browser story writes screenshots (720px side-by-side and 390px mobile) to the git-ignored
 `artifacts/browser/` directory; they are inspected as part of each task's review, not committed.
+
+### Firefox inside the Claude desktop app
+
+Started from the Claude desktop app (its agent shell or its Terminal panel), Playwright's Firefox
+can quit at launch with `Could not find profile folder.`, so the auth-gate suite and the story stop
+at their first Firefox window. macOS refuses the app's processes the installed Firefox.app's data
+folder, `~/Library/Application Support/Firefox` ("Operation not permitted"), and Firefox reads it
+at startup even with Playwright's own `-profile`. Changing `HOME`, `TMPDIR` or other environment
+variables does not help, and neither does reinstalling Playwright's Firefox.
+
+The workaround is the preload [`tools/firefox-override-preload.mjs`](../tools/firefox-override-preload.mjs).
+It wraps Playwright's `firefox.launch` to add `--override <file>`, where the file holds `[App]` and
+`Profile=Playwright Firefox`. Firefox then keeps its application data in folders of that name
+(in Application Support and Caches). The suites still run on Playwright's own temporary profile,
+and nothing else changes. Pass it in `NODE_OPTIONS`, through `npm run`:
+
+```sh
+PATH="$VITALLY_NODE_BIN:/Users/jinyuyang/.docker/bin:$PATH" NODE_OPTIONS="--import=./tools/firefox-override-preload.mjs" npm run test:browser
+```
+
+The same works for `npm run test:auth-browser`. Outside the Claude desktop app nothing needs it.
 
 ### Continuous integration
 
@@ -724,7 +746,7 @@ matching `.vitally-roster*.json` and are never committed.
 | Field | Meaning |
 | --- | --- |
 | `workspaceId` | A lower-case UUID. Generate it once and keep it: re-running the same roster with more addresses adds them to the same workspace. |
-| `staff` | Required, at least one entry. Real staff members, each `{ "email", "name", "personKey", "capabilities" }`. Each gets a `staff` account linked to its own new person, which it always acts as, with the staff screens and no demo tools. `capabilities` is non-empty, from `prepare`, `review`, `admin`, `followup`, `receive_documents`, `assist`; `personKey` is unique. Re-running is harmless, but an existing member's values cannot be changed. For a rehearsal, use fictional names and addresses. |
+| `staff` | Required, at least one entry. Real staff members, each `{ "email", "name", "personKey", "capabilities" }`. Each gets a `staff` account linked to its own new person, which it always acts as, with the staff screens and no demo tools. `capabilities` is non-empty, from `prepare`, `review`, `admin`, `followup`, `receive_documents`, `assist`; an entry with `followup` must also have `admin`; `personKey` is unique. Re-running is harmless, but an existing member's values cannot be changed. For a rehearsal, use fictional names and addresses. |
 | `defaultFollowup` | Required: the `personKey` of a `staff` entry with `followup`, who then gets new follow-ups. See [Back end: the roster](developer/backend.md#the-roster). |
 | `applicants` | Classmates who play clients. Each sees only their own applications. |
 | `sampleCaseOwners` | Removed in #135. A roster that still has it runs, and the command prints a note that it was ignored. |

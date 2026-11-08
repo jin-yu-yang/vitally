@@ -159,7 +159,7 @@ The roster is a JSON file (a `.vitally-roster*.json` file, ignored by version co
 
 | Field | Rule |
 | --- | --- |
-| `staff` | Required, at least one entry. Each entry has `email`, `name`, `personKey` and `capabilities`. `capabilities` is non-empty, from `prepare`, `review`, `admin`, `followup`, `receive_documents`, `assist`. `personKey` is lower-case letters, digits and underscores, and unique on the roster (the keys `alex`, `morgan` and `sam` are no longer reserved) |
+| `staff` | Required, at least one entry. Each entry has `email`, `name`, `personKey` and `capabilities`. `capabilities` is non-empty, from `prepare`, `review`, `admin`, `followup`, `receive_documents`, `assist`; an entry with `followup` must also have `admin` (042). `personKey` is lower-case letters, digits and underscores, and unique on the roster (the keys `alex`, `morgan` and `sam` are no longer reserved) |
 | `defaultFollowup` | Required: the `personKey` of a `staff` entry that has `followup`. It becomes the workspace's default follow-up person (who new follow-ups and withdrawal notices go to) |
 | `presenters` | Removed in #136. An old roster that still has it runs, and the command prints "presenters is no longer used and was ignored; those addresses get no access." A former presenter address cannot sign in; an open window shows "This account has no access" |
 

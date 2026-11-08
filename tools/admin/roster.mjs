@@ -34,7 +34,7 @@ function addresses(raw, field, { required = false } = {}) {
   });
 }
 
-// Mirrors vitally_private.add_staff_member (migration 038) so the operator gets
+// Mirrors vitally_private.add_staff_member (latest in migration 042) so the operator gets
 // a clear message before any account is created; the database refuses them again.
 export const STAFF_CAPABILITIES = Object.freeze([
   "prepare",
@@ -74,6 +74,8 @@ function parseStaff(raw) {
       throw invalid(
         `${where}.capabilities must be a non-empty list of: ${STAFF_CAPABILITIES.join(", ")}.`,
       );
+    if (capabilities.includes("followup") && !capabilities.includes("admin"))
+      throw invalid(`${where}.capabilities must include admin when they include followup.`);
     if (keys.has(personKey)) throw invalid(`${where}.personKey is already on the roster.`);
     keys.add(personKey);
     return { email, name, personKey, capabilities: [...new Set(capabilities)] };

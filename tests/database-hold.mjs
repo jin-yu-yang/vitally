@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyArgs, createDatabaseFixture, rejected } from "./support/database-fixture.mjs";
+import { applyArgs, createDatabaseFixture, rejected, SAMPLE_CONTACT } from "./support/database-fixture.mjs";
 
 // Migration 036: Waiting for documents and Hold (the stage check, the origin
 // columns) and the office's documents at intake.
@@ -431,6 +431,25 @@ test("documents at intake against real Supabase", async (t) => {
       assert.deepEqual(await notices(caseId), []);
       const events = await f.sql("select detail from public.case_events where case_id=$1 and action='WITHDRAW'", [caseId]);
       assert.equal(events.rows.length, 1);
+    });
+
+    await t.test("another follow-up holder logs on and resolves a withdrawal notice on the Closed case (042)", async () => {
+      const jo = await f.staff({ key: "jo", name: "Jo Rivera", capabilities: ["admin", "followup"] });
+      const caseId = await preparingCase();
+      await withdraw(caseId);
+      const [notice] = await notices(caseId);
+      assert.equal(notice.status, "open");
+      assert.notEqual(notice.assignee_person_id, jo.personId);
+      const { contactId } = await f.logContact(jo.client, caseId, SAMPLE_CONTACT(), notice.id);
+      const linked = await f.sql("select followup_id from public.contact_log where id=$1", [contactId]);
+      assert.equal(linked.rows[0].followup_id, notice.id);
+      await f.act(jo.client, caseId, "RESOLVE_FOLLOWUP", {
+        followupId: notice.id,
+        outcome: "reached",
+        note: "Fictional: told the preparer to stop work.",
+      });
+      assert.equal((await notices(caseId))[0].status, "resolved");
+      assert.equal((await columns(caseId)).stage, "closed");
     });
 
     await t.test("withdraw while waiting for documents or on a documents hold", async () => {

@@ -3221,3 +3221,18 @@ test("busy disables the review buttons; a refused viewer sees no review", () => 
   const record = staffCase({ stage: "review_ready" });
   assert.doesNotMatch(shadedFor(review({ infoNotes: "n" }), record), /shaded-review"/);
 });
+
+test("the volunteer page shows a task's assignee as a label (042)", () => {
+  const html = renderStaffCase(
+    staffCase({
+      followups: [
+        { id: "f1", status: "open", reason: "Office contact needed", assigneeId: "sam", assigneeName: "Sam" },
+      ],
+    }),
+    ALEX,
+  );
+  const panel = html.slice(html.indexOf('id="followup-title"'));
+  assert.match(panel, /<span class="muted small">Assigned to Sam<\/span>/);
+  assert.doesNotMatch(panel, /data-case-action="RESOLVE_FOLLOWUP"/);
+  assert.match(panel, /Contacts for an office task are logged on the office screens\./);
+});

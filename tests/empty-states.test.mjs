@@ -19,6 +19,7 @@ import { STATES, SENTENCES } from "./empty-states.states.mjs";
 // Both case pages' Intake answers tab gained the 13614-C shaded-section panel
 // on purpose (change add-preparer-13614c-fields). Both case headers read
 // "Signed in as" instead of "Acting as" on purpose.
+// The office case page's Follow-up note changed on purpose (change let-follow-up-holders-work-any-follow-up).
 //
 // The case pages print "Updated" with formatTime, in the machine's own time
 // zone, and the fixture was captured in New York. Node re-reads TZ when it is
