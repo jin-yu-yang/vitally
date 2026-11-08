@@ -1,7 +1,7 @@
 # office-follow-up Specification
 
 ## Purpose
-Office follow-up tasks that are not tied to a document request. A reviewer who approves without going over the return with the client opens a go-over task for the office. It covers how a follow-up's purpose and document request relate, and how the office works a go-over task in Follow-ups and the contact log like any other task.
+Office follow-up tasks of every purpose, and who may work them. Anyone in the office with follow-up access works any open follow-up, whoever it is assigned to. A reviewer who approves without going over the return with the client opens a go-over task for the office. It covers how a follow-up's purpose and document request relate, and how the office works a go-over task in Follow-ups and the contact log like any other task.
 
 ## Requirements
 
