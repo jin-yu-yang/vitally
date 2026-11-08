@@ -32,7 +32,7 @@ Rows are things a person using ViTally can see or do.
 | A volunteer claims a case and works it, answering a short questionnaire at each hand-off | Delivered | Work board and case pool; preparer and reviewer questionnaires |
 | The client gets PCDC's Exit Form at signing, filled from the reviewer's answers | Delivered | "Download Exit Form" under an approved review, and an Exit Form panel on the office's case page; made in the browser on PCDC's own template, nothing kept (#115) |
 | A reviewer can never review their own preparation | Delivered | Enforced by the database, so no screen can skip it |
-| Every staff member signs in as themselves | Delivered | Staff accounts from the roster sign in by email code and act as themselves ("Signed in as …"), enforced by the database (#90, 10/29); the presenter persona picker stays for the demo account only |
+| Every staff member signs in as themselves | Delivered | Staff accounts from the roster sign in by email code and act as themselves ("Signed in as …"), enforced by the database (#90, 10/29) |
 | A case reaches E-filed, then Accepted or Rejected, and can be closed | Delivered | Mark e-filed, filing result (IRS and Pennsylvania), close with a reason |
 | Hold, waiting for documents, same-day signing and client withdrawal | Delivered | Waiting for documents and Hold stages, same-day signing plan, Withdraw on the client's progress page |
 | FSA (facilitated self-assistance) path | Cut | Not built; after the Feb pilot |
@@ -101,7 +101,7 @@ npm start
 ```
 
 Open [http://127.0.0.1:4173](http://127.0.0.1:4173). With no local configuration, this shows the
-setup-needed screen. To sign in and try the client/staff/admin/presenter screens against a real
+setup-needed screen. To sign in and try the client/staff/admin screens against a real
 (isolated, local-only) Supabase project, follow [`docs/setup.md`](docs/setup.md) end to end — it
 covers the runtime, the isolated local Supabase test stack, `.env.local`, the one-time creation of
 fictional rehearsal accounts ([Signing in locally](docs/setup.md#signing-in-locally)), and every
@@ -110,10 +110,10 @@ test command.
 Once that is done, signing in takes five steps:
 
 1. Run `npm start` and open [http://127.0.0.1:4173](http://127.0.0.1:4173).
-2. Type `presenter@example.org` and press **Send verification code**.
+2. Type `site-coordinator@example.org` (a staff account from the example roster) and press **Send verification code**.
 3. Open the local mailbox at [http://127.0.0.1:54324](http://127.0.0.1:54324), open the newest
    message, and copy the code. Nothing is sent outside your machine.
-4. Paste the code and press **Verify and continue**. You are the presenter.
+4. Paste the code and press **Verify and continue**. You are signed in as staff.
 5. To play the client too, open the app in a private window and repeat steps 2–4 with
    `client-a@example.org`.
 
@@ -139,8 +139,8 @@ npm run test:browser        # the full demonstration story, both engines, both d
 ## Rehearsing the demonstration
 
 [`docs/demo-script.md`](docs/demo-script.md) is the rehearsal script: the two-minute main story,
-the full story the browser test suite runs, the assisted-intake (walk-in) path, presenter
-panel usage, what is simulated versus real, and what to expect and say about the known behaviors
+the full story the browser test suite runs, the assisted-intake (walk-in) path, the demo
+wording, what is simulated versus real, and what to expect and say about the known behaviors
 the test suite has pinned (a stale-revision refusal, the `review_ready` fixture's staff-recorded
 document, and so on).
 

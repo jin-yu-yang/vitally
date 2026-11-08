@@ -148,9 +148,9 @@ These are load-bearing. Changing any of them is an architecture decision, not a 
 | Term | Meaning |
 | --- | --- |
 | Workspace | One site's shared data set. Every row belongs to exactly one workspace. The demo has one per class. |
-| Membership | An Auth account's access to a workspace: `applicant` (a client), `presenter` (the demonstration's staff account, which can act as any demo persona) or `staff` (a real staff member, linked to exactly one person). One active membership per account. |
-| Person / persona | A staff member record in `people` with capabilities. Alex, Morgan and Sam are the demo personas, which a presenter account can act as; a staff member's own person is linked to their account (`people.user_id`), and the database makes that account act as it. |
-| Capability | What a person may do: `prepare`, `review`, `admin`, `followup`, `receive_documents`, `assist`. Set on the person (by the workspace initializer for the demo personas, by the roster for staff), and checked on every action. |
+| Membership | An Auth account's access to a workspace: `applicant` (a client) or `staff` (a staff member, linked to exactly one person). One active membership per account. |
+| Person | A staff member record in `people` with capabilities. A staff member's person is linked to their account (`people.user_id`), and the database makes that account act as it. |
+| Capability | What a person may do: `prepare`, `review`, `admin`, `followup`, `receive_documents`, `assist`. Set on the person (by the roster), and checked on every action. |
 | Case | One client's tax-return application, with a readable reference such as `VT-ABCD-2345`. |
 | Stage | Where a case is in the workflow: `draft` through `efiled` (with `screening` after `received` and `ready_to_efile` before `efiled`), or `closed`. |
 | Revision | A counter on each case (and assistance item) that moves on every accepted action. |

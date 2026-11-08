@@ -146,7 +146,6 @@ The roster is a JSON file (a `.vitally-roster*.json` file, ignored by version co
 ```json
 {
   "workspaceId": "replace-with-a-uuid",
-  "presenters": ["presenter@example.org"],
   "staff": [
     { "email": "site-coordinator@example.org", "name": "Sky Chen (site coordinator)", "personKey": "site_coordinator", "capabilities": ["admin", "followup", "assist", "receive_documents"] },
     { "email": "preparer@example.org", "name": "Rowan Diaz (preparer)", "personKey": "preparer", "capabilities": ["prepare"] },
@@ -160,14 +159,13 @@ The roster is a JSON file (a `.vitally-roster*.json` file, ignored by version co
 
 | Field | Rule |
 | --- | --- |
-| `staff` | Optional list. Each entry has `email`, `name`, `personKey` and `capabilities`. `capabilities` is non-empty, from `prepare`, `review`, `admin`, `followup`, `receive_documents`, `assist`. `personKey` is lower-case letters, digits and underscores, unique on the roster, and not `alex`, `morgan` or `sam` |
-| `defaultFollowup` | Optional: the `personKey` of a `staff` entry that has `followup`. It becomes the workspace's default follow-up person (who new follow-ups and withdrawal notices go to). **Required when the roster has no presenter**, because Sam, the default otherwise, would get work nobody can act on |
-| `presenters` | Now optional, but the roster needs at least one presenter or one staff member. A presenter who signs in sees one plain screen, "This account is no longer used"; the role goes in #136 |
+| `staff` | Required, at least one entry. Each entry has `email`, `name`, `personKey` and `capabilities`. `capabilities` is non-empty, from `prepare`, `review`, `admin`, `followup`, `receive_documents`, `assist`. `personKey` is lower-case letters, digits and underscores, and unique on the roster (the keys `alex`, `morgan` and `sam` are no longer reserved) |
+| `defaultFollowup` | Required: the `personKey` of a `staff` entry that has `followup`. It becomes the workspace's default follow-up person (who new follow-ups and withdrawal notices go to) |
+| `presenters` | Removed in #136. An old roster that still has it runs, and the command prints "presenters is no longer used and was ignored; those addresses get no access." A former presenter address cannot sign in; an open window shows "This account has no access" |
 
 For each staff entry the command creates the Auth account as it does for any address, then, inside
 `initializeWorkspace`'s one serializable transaction, calls `add_staff_member` (and
-`set_default_followup` once, when given). Staff are always **new** people: the demo personas are never
-linked. Re-running the same roster is safe; different values for an existing key or account are
+`set_default_followup` once, when given). Staff are always **new** people. Re-running the same roster is safe; different values for an existing key or account are
 refused, and changing a staff member's capabilities is not supported. Memberships, people and the
 default are atomic, but the Auth account is created first, outside the transaction: a failed run can
 leave a confirmed account with no membership, and a re-run completes it. The command never prints an

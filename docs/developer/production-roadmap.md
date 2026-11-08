@@ -11,7 +11,7 @@ exists, what is missing, and where the change lands.
 
 | Product spec area | Demo today | Gap |
 | --- | --- | --- |
-| Roles (spec §6) | Client; real per-person `staff` accounts (038); and a "presenter" account acting as staff personas for the demo | Role-based visibility, role-to-capability mapping, presenter removal ([§1](#1-staff-identity)) |
+| Roles (spec §6) | Client, and real per-person `staff` accounts (038); presenter access was removed in #136 | Role-based visibility, role-to-capability mapping ([§1](#1-staff-identity)) |
 | Client accounts (spec §8.1) | Rostered email addresses only, one-time codes; the drafted intake (steps 0–9 with sub-steps) is built but not switched on yet | Open client sign-up; the intake-first flow the spec describes ([§2](#2-client-accounts-and-intake)) |
 | Documents (spec §5, §7.1) | Metadata for one fixed fictional file | Real upload, storage, scanning, retention ([§3](#3-documents)) |
 | State machine (spec §8.2) | Intake, screening, preparation, review, corrections, signature, e-filing, closure | Unreachable client, the IRS's answer after e-filing, amendments, waiting for documents and hold, withdrawal, reassignment ([§4](#4-workflow-coverage)) |
@@ -26,17 +26,18 @@ exists, what is missing, and where the change lands.
 
 **Built (add-staff-identity, migration 038).** A third membership access, `staff`, is linked to
 exactly one `people` row (`people.user_id`). The database decides the acting person from
-`auth.uid()` at every entry point that takes `p_person_id`: a staff account always acts as its own
+`auth.uid()` at every entry point that acts as a person: a staff account always acts as its own
 person, and receipts, case history, participation, reviews and the contact log name it. The
-independence rule holds across real accounts, and a presenter can no longer act as a staff member's
-person. The roster command creates staff accounts (`staff` list, optional `defaultFollowup`), staff
-get the staff screens without the persona picker or demo tools, and staff-only workspaces work. See
+independence rule holds across real accounts. The roster command creates staff accounts (`staff`
+list and a required `defaultFollowup`), and staff-only workspaces work. **Presenter access was
+removed in #136 (migration 043):** the `presenter` access type, the person parameter `p_person_id`
+of the six RPCs and the demonstration people (Alex, Morgan, Sam) are gone. See
 [Database: who is acting](database.md#who-is-acting) and
 [Back end: privileged tooling](backend.md#privileged-tooling).
 
 **Still to do.**
 
-- **Visibility.** Staff see exactly what presenters see: every case except other people's unsubmitted
+- **Visibility.** Staff see every case except other people's unsubmitted
   drafts. The spec says volunteers see the cases they prepare or review and admins see everything.
   Volunteers also need to see unclaimed work to claim it. Decide the rule, then change every policy
   and `lock_case` together (see
@@ -48,18 +49,16 @@ get the staff screens without the persona picker or demo tools, and staff-only w
   there is no admin screen.
 - **One person, two workspaces** ([#104](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/104)).
   The screens are chosen by the acting person's capabilities (ruling R55): `admin` gets the office
-  workspace, everyone else the preparation/review one. A presenter switches persona to move between
-  them; a staff account is one person and cannot. So a staff member with `admin` and `prepare` or
+  workspace, everyone else the preparation/review one. A staff account is one person and cannot
+  switch. So a staff member with `admin` and `prepare` or
   `review` — PCDC's site coordinator, who runs the office and also reviews — reaches only the office
   workspace and never sees *Claim review*. Found on 2026-10-30 rehearsing with real accounts; the
   rehearsal gives the reviewer `review` alone. Needed on day 1 of the pilot: a switch between the two
   workspaces for such a person (a view change; the database already checks every action), decided
   together with the role mapping above.
-- **Presenter removal.** Presenter access, the persona picker and `p_person_id` stay for the
-  classroom demonstration. Once the demo no longer needs them (§5), remove them and rename or split
-  the remaining access into real roles.
-- **Tooling.** Staff can be added only as new people; linking an existing person (including the
-  demo personas) is not supported.
+- **Roles.** Presenter access is removed (#136); renaming or splitting `staff` into real roles
+  is the role mapping above.
+- **Tooling.** Staff can be added only as new people; linking an existing person is not supported.
 
 Do the visibility change next and keep the database tests green throughout.
 
@@ -154,7 +153,7 @@ Remove these, or restrict them to non-production environments, before real use:
 
 | Part | Where |
 | --- | --- |
-| Presenter access and the persona picker | `memberships.access = 'presenter'` (#136). The screen parts, `presenter-views.mjs` and `selectedPersonId`, are done in #134 |
+| Presenter access and the persona picker | Done in #136 (migration 043): `memberships.access = 'presenter'`, the person parameter `p_person_id` of the six RPCs and the demonstration people (Alex, Morgan, Sam) are gone. The screen parts, `presenter-views.mjs` and `selectedPersonId`, were done in #134 |
 | Sample cases, reset and checkpoints | Done in #135 (migration 040): `vitally_reset_fixtures`, `vitally_load_checkpoint`, `cases.fixture`, `cases.fixture_key`, `origin = 'fixture'`, `workspaces.fixture_generation`, `vitally_private.fixture_client_bindings`, `assistance_items.fixture` are gone |
 | Fictional form filling | `sample-data.mjs`, the "Fill fictional details" buttons and pill |
 | Simulated document and upload failure | The fixed file name; the "simulate upload failure" checkbox |
@@ -212,7 +211,7 @@ Before real data:
   phones for whole households, and a real intake may add identifiers such as Social Security
   numbers. Decide which fields need column-level encryption or a separate protected table, and who
   may read them. Phones already live apart from the answers (`case_contacts`) so part 5 can mask
-  them in one place; today every presenter can read that table and only the screens hide it
+  them in one place; today every staff account can read that table and only the screens hide it
   ([Architecture: who can see what](architecture.md#who-can-see-what)).
 - **Program rules.** Follow the IRS's VITA privacy and confidentiality requirements for handling
   taxpayer information; confirm them with PCDC's site coordinator.
