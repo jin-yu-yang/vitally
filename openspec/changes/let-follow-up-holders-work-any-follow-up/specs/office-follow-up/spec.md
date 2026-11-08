@@ -7,8 +7,10 @@ A follow-up's assignee SHALL be a label only: it says whom the office asked, and
 
 The database SHALL remain the authority, and SHALL refuse:
 - a caller whose person lacks `followup`, with `FORBIDDEN`;
-- a task that doesn't exist, or that belongs to another case, with `FORBIDDEN`;
+- a contact linked to a task that doesn't exist, or that belongs to another case, with `FORBIDDEN`; a `RESOLVE_FOLLOWUP` naming such a task SHALL stay a `VALIDATION` refusal, as today;
 - a task that is not open (resolved or cancelled), as not available (`INVALID_TRANSITION`), whoever sends it.
+
+Two people may work the same task. Every contact either of them logs on it SHALL be kept. A resolve sent at a case revision older than another person's resolve SHALL be refused as a conflict, like any stale action, and after re-reading the task is not available.
 
 The office screens are admin-only, and `followup` requires `admin` (capability `sign-in`), so every `followup` holder can reach them. In Follow-ups, a "Call the client" row SHALL read "<n> open task" or "<n> open tasks", followed by " · assigned to " and the names of its open tasks' assignees. On the case page's Follow-up tab and in the Log contact drawer, each task SHALL show "Assigned to" and its assignee's name.
 
@@ -21,16 +23,20 @@ The office screens are admin-only, and `followup` requires `admin` (capability `
 - **THEN** both succeed, and the task is resolved
 
 #### Scenario: A withdrawal notice on a Closed case
-- **WHEN** a client withdraws a case at Filing in progress, and a staff member holding `followup` who is not the notice's assignee resolves the notice
-- **THEN** the notice is resolved, and the case stays Closed
+- **WHEN** a client withdraws a case at Filing in progress, and a staff member holding `followup` who is not the notice's assignee logs a contact linked to the notice and then resolves it
+- **THEN** both succeed, the notice is resolved, and the case stays Closed
 
 #### Scenario: Without follow-up access
 - **WHEN** a preparer without `followup` sends a contact linked to an open task, or resolves it, directly to the database
 - **THEN** the database refuses both as forbidden, and the task stays open
 
 #### Scenario: A task from another case
-- **WHEN** a staff member holding `followup` sends a contact on one case linked to a task of another case
-- **THEN** the database refuses it as forbidden
+- **WHEN** a staff member holding `followup` sends a contact on one case linked to a task of another case, and then sends `RESOLVE_FOLLOWUP` on that case naming the same task
+- **THEN** the database refuses the contact as forbidden and the resolve as invalid (`VALIDATION`), and the task stays open
+
+#### Scenario: Two follow-up holders on one task
+- **WHEN** the assignee and another follow-up holder each log a contact linked to the task, and the other holder then resolves it
+- **THEN** both entries are listed under "Contacts so far", a resolve the assignee sends at the case revision from before that resolve is refused as a conflict, and a resolve sent after re-reading is refused as not available
 
 #### Scenario: A resolved task
 - **WHEN** a staff member holding `followup`, whether or not they are the assignee, sends a contact linked to a resolved task, or resolves it again

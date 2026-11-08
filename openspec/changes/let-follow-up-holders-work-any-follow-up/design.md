@@ -39,14 +39,14 @@ The team decided (#172, 11/7) that anyone with `followup` may work any open offi
 ### D1: `lock_open_followup` checks only that the task exists here and is open
 - **Choice:** migration `042_let_follow_up_holders_work_any_follow_up.sql` redefines `vitally_private.lock_open_followup(p_case, p_person, p_payload)` with the same signature:
   1. select the task by `workspace_id`, `case_id` and the payload's `followupId`, `for update`;
-  2. `if not found` → `VT001 FORBIDDEN`;
+  2. `if not found` → `VT001 FORBIDDEN`. Only `vitally_log_contact` reaches this branch: for `RESOLVE_FOLLOWUP`, `check_related` (023) already refuses a task that is missing or on another case with `VT007 VALIDATION` before the action runs, and that stays;
   3. status not `open` → `VT004 INVALID_TRANSITION`;
   4. return the task.
 
   `p_person` stays in the signature, unused, so both callers stay as they are. It is `security definer` with `search_path=''`, and the file ends with the schema-wide revoke, as 041 does. The function's header comment drops the old reason for the order (a non-assignee couldn't tell open from resolved) and says the capability is checked by the caller.
 - **Why:**
   - It is the only place the assignee is checked. Both entry points keep their `followup` check, which runs first.
-  - The explicit "not found" keeps today's answer for a task on another case or a missing one (`VT001`), so callers and `tests/database-contacts.mjs:319-327` are unchanged. Without it, dropping the assignee check would have turned that into `VT004`, which leaks that something exists and reads as "not available".
+  - The explicit "not found" keeps today's answer for a contact linked to a task on another case or a missing one (`VT001`), so callers and `tests/database-contacts.mjs:319-327` are unchanged. `RESOLVE_FOLLOWUP` keeps its `VALIDATION` from `check_related`. Without it, dropping the assignee check would have turned that into `VT004`, which leaks that something exists and reads as "not available".
   - No information is lost by answering `VT004` to anyone who may act: every staff member can already read a task's status through row-level security.
 - **Alternatives considered:**
   - Refuse a missing task with `VT007 VALIDATION`, as `check_related` does for `RESOLVE_FOLLOWUP`. Rejected: it changes an answer callers and tests already rely on, for no gain.
@@ -71,7 +71,7 @@ The team decided (#172, 11/7) that anyone with `followup` may work any open offi
   - Resolve: `lock_case` is `for update` and the action checks the case's revision. A stale second resolve gets `CONFLICT`, and after the re-read the task is no longer open, so the form is gone (or a send gets `INVALID_TRANSITION`).
   - Log contact: no revision check, as today. Two entries for the same call are both kept. A contact sent after the other person resolved the task gets `INVALID_TRANSITION`.
   - The lock order is case, then task, everywhere.
-- **Why:** the existing locks already serialise the writes. The contact log keeps every entry by design.
+- **Why:** the existing locks already serialise the writes. The contact log keeps every entry by design. The `office-follow-up` scenario "Two follow-up holders on one task" states it, and a database test checks it (D7).
 - **Alternatives considered:** a "someone is working on this" marker. Rejected as reassign/claim UI, which is out of scope.
 
 ### D4: The browser follows the database
@@ -89,7 +89,7 @@ The team decided (#172, 11/7) that anyone with `followup` may work any open offi
 
 ### D5: Where the rules go in the specs
 - **Choice:**
-  - **`office-follow-up`:** ADD "Anyone with follow-up access works any open office follow-up". It covers every purpose, the assignee as a label, a missing or other-case task (forbidden), a closed task (not available), and the "assigned to" texts. Replace "The office works a go-over follow-up like any other" with "The office works a go-over follow-up like any other task", which points at the new requirement. Its scenario "Only the assignee works it" becomes "Another follow-up holder works it".
+  - **`office-follow-up`:** ADD "Anyone with follow-up access works any open office follow-up". It covers every purpose, the assignee as a label, a missing or other-case task (a contact is forbidden, a resolve invalid), a closed task (not available), two people on one task, and the "assigned to" texts. Replace "The office works a go-over follow-up like any other" with "The office works a go-over follow-up like any other task", which points at the new requirement. Its scenario "Only the assignee works it" becomes "Another follow-up holder works it".
   - **`staff-case-work`:** replace "Office follow-up contacts are logged in the contact log" with "Office follow-up contacts are logged in the contact log by anyone with follow-up access". Any `followup` holder logs a contact on an open task. A person without `followup`, or a closed task, is refused. It also states the Follow-up note and the volunteer page's "Assigned to". The Sam scenarios become the Site Coordinator's.
   - **Why replaced, not modified:** OpenSpec refuses a MODIFIED requirement that drops a scenario, and both old requirements have a scenario that states the rule being removed. Each is REMOVED (with its reason and migration) and ADDED under a new name, as `remove-presenter-screens` did. Nothing else refers to the old names.
   - **`sign-in`:** ADD "A staff member with follow-up access also has admin". It covers the roster's refusal, `add_staff_member`'s refusal and the stored check.
@@ -111,9 +111,10 @@ The team decided (#172, 11/7) that anyone with `followup` may work any open offi
 - **Choice:**
   - **Database:**
     - A non-assignee with `admin` and `followup` logs a contact on, and resolves, an open task of each purpose, including a withdrawal notice on a closed case. Resolving a go-over unblocks Mark ready to e-file.
-    - A missing or other-case task is still `VT001`, a resolved task is `VT004` for anyone, and a person without `followup` is still refused.
+    - Two holders on one task: both contacts are kept, a stale resolve is a conflict, and a re-read resolve is not available.
+    - A contact linked to a missing or other-case task is still `VT001`, and a resolve naming another case's task is still `VT007`. A resolved task is `VT004` for anyone, and a person without `followup` is still refused.
     - `add_staff_member` refuses `followup` without `admin`, and the check refuses an insert or update of such a person.
-    - Existing tests that assert the old rule, or that hire or update a follow-up-only person, are converted: `tests/database-documents.mjs:945-969` and `1065-1090`, `tests/database-staff-identity.mjs:752-792`, `tests/database-actions.mjs:944`.
+    - Existing tests that assert the old rule, or that hire or update a follow-up-only person, are converted: `tests/database-documents.mjs:945-969` and `1065-1090`, `tests/database-staff-identity.mjs:752-792`, `tests/database-actions.mjs:315-318` and `944`.
   - **Unit:**
     - `followupWork` and the forms for a non-assignee holder (`tests/admin-views.test.mjs`); the Call the client row's "assigned to" (`tests/office-views.test.mjs`); the volunteer page's "Assigned to" (`tests/staff-views.test.mjs`).
     - The new note, including the snapshot fixture `tests/fixtures/empty-states.json`.
@@ -127,6 +128,7 @@ The team decided (#172, 11/7) that anyone with `followup` may work any open offi
 - [Risk] #136 merges first, and this branch's 042 clashes with it or loses its `add_staff_member` → Mitigation: D6's checks before apply and before the PR; copy `add_staff_member` from the latest migration when renumbering.
 - [Risk] Two office people resolve or log on the same task at once → Mitigation: D3. The second resolve gets the usual conflict. Duplicate contact entries are kept, as the contact log intends.
 - [Trade-off] Any `followup` holder can now resolve a go-over task, which switches the client's Ready to exit message → Accepted: that is the decision. Who resolved shows in History.
+- [Trade-off] Until #136 removes presenter access, a presenter can still act as the unlinked persona Sam, who holds `followup`, so after 042 it can also log contacts on and resolve any open task, not only Sam's → Accepted: a presenter acting as Sam already holds `admin` and can close any case, and since #169 no screen lets a presenter act. #136 removes the path. This is not written into the `office-follow-up` spec, which #136 doesn't touch, so it would go stale there.
 - [Trade-off] `vitally_log_contact` keeps an internal comment saying a linked contact needs "the task's assignee" (038:567-568) → Accepted: redefining the function just for a comment would clash with #136, which rewrites it. The developer docs say the current rule.
 - [Trade-off] "Assigned to" may still read as if the assignee did the work → Accepted for now: the note says anyone with follow-up access can work a task, and the group's wording review may adjust it.
 

@@ -7,8 +7,8 @@
 ## 2. Database tests
 
 - [ ] 2.1 Convert the tests that assert the old rule or store a follow-up-only person: `tests/database-documents.mjs` (step 7 removed; the resolved-task check becomes `INVALID_TRANSITION` for a capable non-assignee with `admin`), `tests/database-staff-identity.mjs` (Frankie gets `admin`, and "Review Focus 5" becomes a success), `tests/database-actions.mjs` (Dana gets `admin`; the replay test strips `admin` and `followup` from Sam together)
-- [ ] 2.2 Add database tests for the new rule: a non-assignee with `admin` and `followup` logs on and resolves a document task, and history names them; a task assigned to Sam is worked by the Site Coordinator; another holder resolves a go-over and Mark ready to e-file is allowed; another holder resolves a withdrawal notice on a Closed case
-- [ ] 2.3 Add database tests for the capability rule: `add_staff_member` refuses `followup` without `admin` and creates nothing; a direct write of a follow-up-only person is refused by `people_followup_needs_admin`; `admin` without `followup` is still accepted
+- [ ] 2.2 Add database tests for the new rule: a non-assignee with `admin` and `followup` logs on and resolves a document task, and history names them; another case's task gets `FORBIDDEN` for a contact and `VALIDATION` for a resolve; two holders' contacts are both kept, a stale resolve is a conflict and a re-read one is not available; a task assigned to Sam is worked by the Site Coordinator; another holder resolves a go-over and Mark ready to e-file is allowed; another holder logs on and resolves a withdrawal notice on a Closed case
+- [ ] 2.3 Add database tests for the capability rule: `add_staff_member` refuses `followup` without `admin` and creates nothing; a direct update or insert of a follow-up-only person is refused by `people_followup_needs_admin`; `admin` without `followup` is still accepted
 - [ ] 2.4 Run `npm run test:database`
 
 ## 3. Roster
@@ -18,7 +18,7 @@
 
 ## 4. Browser
 
-- [ ] 4.1 `src/admin-views.mjs`: `followupWork()` drops the assignee refusal; the comments that say only the assignee acts are reworded; the Follow-up panel note uses the agreed wording
+- [ ] 4.1 `src/admin-views.mjs`: `followupWork()` drops the assignee refusal; the comments that say only the assignee acts are reworded (also in `src/staff-views.mjs`, `src/supabase-store.mjs` and `tests/database-store.mjs`); the Follow-up panel note uses the agreed wording
 - [ ] 4.2 `src/office-views.mjs`: the Call the client row reads "· assigned to <names>"
 - [ ] 4.3 `src/staff-views.mjs`: the volunteer page's task heading shows "Assigned to <name>"
 - [ ] 4.4 Unit tests: `tests/admin-views.test.mjs` (a non-assignee holder gets the forms; the new note), `tests/office-views.test.mjs` ("assigned to"; the drawer offers the forms on someone else's task), `tests/staff-views.test.mjs` (the volunteer page's "Assigned to"), and `tests/fixtures/empty-states.json` with its header comment in `tests/empty-states.test.mjs`

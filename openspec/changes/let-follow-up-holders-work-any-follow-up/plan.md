@@ -67,7 +67,9 @@
 - [ ] **Step 1: Convert the tests that assert the old rule or store a follow-up-only person.**
 
   `tests/database-documents.mjs`:
+  - Rename the top-level test `"admin follow-up is assigned, recorded and resolved by its own person"` (about line 627) to `"admin follow-up is assigned, recorded and resolved by the office"`.
   - Rename the subtest `"contact and resolution need the assigned person and a listed outcome"` to `"contact and resolution need the follow-up capability and a listed outcome"`.
+  - In the comment `// RECORD_CONTACT refuses every outcome now (design D12); the assignee` / `// logs linked contacts instead, and none resolves the task.` (about lines 986-987), "the assignee logs" becomes "the office logs".
   - Delete the block that starts `// Step 7: the capability alone is not the assignment.` and ends with the `finally` that restores `["review"]` (about lines 945-969). Keep the line after it, `assert.deepEqual(await taskContacts(f, followupId), []);`.
   - Replace the block that starts `// Assignment answers before readiness: a capable non-assignee is` (about lines 1065-1090) with:
 
@@ -138,13 +140,27 @@
       await f.act(f.preparer, caseId, "ESCALATE_CONTACT", { reason: "Office contact needed" });
       const [task] = (await f.readStaffCase(caseId)).followups;
       assert.equal(task.assigneeId, f.siteCoordinatorId);
+      const payload = { followupId: task.id, outcome: "reached", note: "Spoke with the client" };
+      // Another case's id never reaches the task: a contact is forbidden, and a
+      // resolve is invalid (check_related refuses it first).
+      const otherCaseId = await requestedCase(f);
+      await assert.rejects(
+        () => f.logContact(jo.client, otherCaseId, SAMPLE_CONTACT(), task.id),
+        rejected("FORBIDDEN"),
+      );
+      await assert.rejects(
+        () => f.act(jo.client, otherCaseId, "RESOLVE_FOLLOWUP", payload),
+        rejected("VALIDATION"),
+      );
+      // Two people on one task: both contacts are kept.
+      await f.logContact(f.siteCoordinator, caseId, SAMPLE_CONTACT(), task.id);
       await f.logContact(jo.client, caseId, SAMPLE_CONTACT(), task.id);
-      assert.equal((await taskContacts(f, task.id)).length, 1);
-      await f.act(jo.client, caseId, "RESOLVE_FOLLOWUP", {
-        followupId: task.id,
-        outcome: "reached",
-        note: "Spoke with the client",
-      });
+      assert.equal((await taskContacts(f, task.id)).length, 2);
+      // Logging never moves the case revision, so this is the revision before the resolve.
+      const before = Number(
+        (await f.sql("select revision from public.cases where id=$1", [caseId])).rows[0].revision,
+      );
+      await f.act(jo.client, caseId, "RESOLVE_FOLLOWUP", payload);
       const [after] = (await f.readStaffCase(caseId)).followups;
       assert.equal(after.status, "resolved");
       assert.equal(after.assigneeId, f.siteCoordinatorId, "the assignee stays as a label");
@@ -153,6 +169,17 @@
         [caseId],
       );
       assert.deepEqual(events.rows, [{ actor_person_id: jo.personId }]);
+      // The assignee's resolve from before is stale (VT003 CONFLICT), and after
+      // re-reading the task is not available.
+      const stale = await f.siteCoordinator.rpc(
+        "vitally_apply_action",
+        applyArgs({ caseId, revision: before, type: "RESOLVE_FOLLOWUP", payload }),
+      );
+      assert.equal(stale.error?.code, "VT003");
+      await assert.rejects(
+        () => f.act(f.siteCoordinator, caseId, "RESOLVE_FOLLOWUP", payload),
+        rejected("INVALID_TRANSITION"),
+      );
     });
     await t.test("a task assigned to someone who can't act is worked by the office (042)", async () => {
       const caseId = await requestedCase(f);
@@ -192,16 +219,19 @@
     });
   ```
 
-  `tests/database-hold.mjs`, a new subtest in the withdraw group (after `"withdraw before preparation"`):
+  `tests/database-hold.mjs`: add `SAMPLE_CONTACT` to the import from `./support/database-fixture.mjs` (line 3), and a new subtest in the withdraw group (after `"withdraw before preparation"`):
 
   ```js
-    await t.test("another follow-up holder resolves a withdrawal notice on the Closed case (042)", async () => {
+    await t.test("another follow-up holder logs on and resolves a withdrawal notice on the Closed case (042)", async () => {
       const jo = await f.staff({ key: "jo", name: "Jo Rivera", capabilities: ["admin", "followup"] });
       const caseId = await preparingCase();
       await withdraw(caseId);
       const [notice] = await notices(caseId);
       assert.equal(notice.status, "open");
       assert.notEqual(notice.assignee_person_id, jo.personId);
+      const { contactId } = await f.logContact(jo.client, caseId, SAMPLE_CONTACT(), notice.id);
+      const linked = await f.sql("select followup_id from public.contact_log where id=$1", [contactId]);
+      assert.equal(linked.rows[0].followup_id, notice.id);
       await f.act(jo.client, caseId, "RESOLVE_FOLLOWUP", {
         followupId: notice.id,
         outcome: "reached",
@@ -225,14 +255,29 @@
 
     ```js
     await t.test("no follow-up-only person can be stored (042)", async () => {
-      await assert.rejects(
-        () => f.sql("update public.people set capabilities=$1 where id=$2", [["followup", "review"], riley.personId]),
-        (error) => error.code === "23514" && error.constraint === "people_followup_needs_admin",
-      );
-      assert.deepEqual((await personRow(f, "riley")).capabilities, ["prepare"]);
-      // Admin without follow-up is still a valid person.
-      await f.sql("update public.people set capabilities=$1 where id=$2", [["admin", "prepare"], riley.personId]);
-      await f.sql("update public.people set capabilities=$1 where id=$2", [["prepare"], riley.personId]);
+      // f.sql wraps the pg error; the constraint name is on its cause.
+      const byTheCheck = (error) =>
+        error.code === "23514" && error.cause?.constraint === "people_followup_needs_admin";
+      try {
+        await assert.rejects(
+          () => f.sql("update public.people set capabilities=$1 where id=$2", [["followup", "review"], riley.personId]),
+          byTheCheck,
+        );
+        await assert.rejects(
+          () =>
+            f.sql(
+              "insert into public.people(workspace_id,person_key,name,capabilities) values($1,'quinn_direct','Quinn Direct',$2)",
+              [f.workspaceId, ["followup"]],
+            ),
+          byTheCheck,
+        );
+        // Admin without follow-up is still a valid person.
+        await f.sql("update public.people set capabilities=$1 where id=$2", [["admin", "prepare"], riley.personId]);
+      } finally {
+        // On 041 the refused writes succeed; put Riley back so later subtests are unaffected.
+        await f.sql("update public.people set capabilities=$1 where id=$2", [["prepare"], riley.personId]);
+        await f.sql("delete from public.people where workspace_id=$1 and person_key='quinn_direct'", [f.workspaceId]);
+      }
       assert.deepEqual((await personRow(f, "riley")).capabilities, ["prepare"]);
     });
     ```
@@ -247,10 +292,11 @@
   - the four new "(042)" rule subtests: `FORBIDDEN` where success is expected;
   - the converted resolved-task check: `FORBIDDEN` where `INVALID_TRANSITION` is expected;
   - the converted Frankie step: `FORBIDDEN`;
-  - the two new `add_staff_member` refusals: the call succeeds;
-  - "no follow-up-only person can be stored": the update succeeds.
+  - "add_staff_member refuses what the roster must refuse": the first new refusal's call succeeds (and creates the staff member `quinn`);
+  - "no follow-up-only person can be stored": the update succeeds;
+  - on 041 only, because `quinn` now exists: "initialize_workspace runs again once staff exist" fails its staff count by one.
 
-  Any other failure is reported as is.
+  Any other failure is reported as is. The fixture tears its workspace down at the end, so `quinn` doesn't outlive the run; Step 5's count confirms it.
 
 - [ ] **Step 4: Write 042.**
 
@@ -309,13 +355,13 @@
   -- 2. add_staff_member, from 038.
   ```
 
-  Then copy `create or replace function vitally_private.add_staff_member(...)` from `038_staff_identity.sql` (about lines 901-954, through its closing `$$;`) **verbatim**, and add one line inside its first `if`, right after `or cardinality(p_capabilities)<>(select count(distinct c) from unnest(p_capabilities) c)`:
+  Then copy `create or replace function vitally_private.add_staff_member(...)` from `038_staff_identity.sql` (about lines 901-954, through its closing `$$;`) **verbatim**, and add one line inside its first `if`, immediately **before** the line `  or cardinality(p_capabilities)<>(select count(distinct c) from unnest(p_capabilities) c) then`, which stays as it is:
 
   ```sql
     or ('followup'=any(p_capabilities) and not 'admin'=any(p_capabilities)) -- 042
   ```
 
-  so the `then` follows the new line. Then:
+  Then:
 
   ```sql
   -- ---------------------------------------------------------------------------
@@ -328,7 +374,7 @@
   revoke all on all functions in schema vitally_private from public,anon,authenticated,service_role;
   ```
 
-  Check the copy: `diff` the function body from 038 against 042's. The only difference must be the `-- 042` line.
+  Check the copy: `diff` the function body from 038 against 042's. The only difference must be the one added `-- 042` line.
 
 - [ ] **Step 5: Controller: check the stack, dry-run, apply.** The implementer reports NEEDS_CONTEXT, "ready to apply 042". The controller:
   1. re-runs the #136 check;
@@ -382,7 +428,7 @@
 
 - [ ] **Step 2: Run it to see it fail:** `node --test tests/roster.test.mjs`. Expected: the new rows and test FAIL (the entries are accepted).
 
-- [ ] **Step 3: The refusal.** In `parseStaff`, right after the capabilities check that throws `${where}.capabilities must be a non-empty list of: …`, add:
+- [ ] **Step 3: The refusal.** The comment `// Mirrors vitally_private.add_staff_member (migration 038) so the operator gets` (about line 37) becomes `// Mirrors vitally_private.add_staff_member (latest in migration 042) so the operator gets`. In `parseStaff`, right after the capabilities check that throws `${where}.capabilities must be a non-empty list of: …`, add:
 
   ```js
       if (capabilities.includes("followup") && !capabilities.includes("admin"))
@@ -398,7 +444,9 @@
 **Files:**
 - Modify: `src/admin-views.mjs` (`followupWork` about lines 293-308; the comment about lines 371-372; the comment above `followupForms` about lines 549-552; the panel note about line 617)
 - Modify: `src/office-views.mjs` (the Call the client row, about lines 274-278)
-- Modify: `src/staff-views.mjs` (`followupPanel`, about line 1918)
+- Modify: `src/staff-views.mjs` (`followupPanel`, about line 1918; the comment about lines 239-240)
+- Modify: `src/supabase-store.mjs` (comments only, about lines 459-461 and 535-536)
+- Modify: `tests/database-store.mjs` (a comment only, about line 149)
 - Test: `tests/admin-views.test.mjs`, `tests/office-views.test.mjs`, `tests/staff-views.test.mjs`, `tests/fixtures/empty-states.json`, `tests/empty-states.test.mjs`
 
 **Interfaces:**
@@ -420,7 +468,7 @@
     };
     ```
 
-  - Replace the two lines after `// There is no way to hand the task to somebody else.` (about lines 315-317) with:
+  - Replace the comment `// There is no way to hand the task to somebody else.` and the two lines after it (about lines 315-317) with:
 
     ```js
       // There is no way to hand the task to somebody else, and the note says
@@ -541,6 +589,11 @@
     }
   ```
 
+  The comments that call the assignee the person who owes a call:
+  - `src/staff-views.mjs` (about lines 239-240): `// A board row carries the assignees of its open tasks, as a label, rather than the tasks` / `// themselves (Ruling R56), and they get names here like everybody else.`
+  - `src/supabase-store.mjs` (about line 461): "or who owes somebody a call" becomes "or whom the office asked to call somebody"; (about lines 535-536): `// The assignees of this client's open tasks, as a label (042), without the tasks` / `// themselves: the board names people, and the case screen holds the work.`
+  - `tests/database-store.mjs` (about line 149): "and it names who owes the call" becomes "and it names whom the office assigned the call to".
+
   `src/staff-views.mjs`, in `followupPanel`, the task heading's span:
 
   ```js
@@ -549,7 +602,7 @@
 
 - [ ] **Step 4: The snapshot fixture.** In `tests/fixtures/empty-states.json`, in the `adminCase` string only, replace `The office raises a task when a preparer asks it to contact a client. ViTally assigns it; there is no way to hand it to someone else here.` with the new note (Global Constraints). Do it with a script that asserts the old sentence occurs exactly once. In the header comment of `tests/empty-states.test.mjs`, append: `The office case page's Follow-up note changed on purpose (change let-follow-up-holders-work-any-follow-up).`
 
-- [ ] **Step 5: Run them to see them pass:** `node --test tests/admin-views.test.mjs tests/office-views.test.mjs tests/staff-views.test.mjs tests/empty-states.test.mjs`, then `npm test`. Expected: PASS. Then `grep -rn "assigned this task to someone else\|no way to hand it to someone else\|waiting on \${" src/ tests/`. Expected: no match.
+- [ ] **Step 5: Run them to see them pass:** `node --test tests/admin-views.test.mjs tests/office-views.test.mjs tests/staff-views.test.mjs tests/empty-states.test.mjs`, then `npm test`. Expected: PASS. Then `grep -rn 'assigned this task to someone else\|no way to hand it to someone else\|waiting on \${\|owes\? \(a\|the\|this\|somebody\) call\|[Ww]ho owe' src/ tests/fixtures/` (single quotes). Expected: no match. The tests keep `doesNotMatch` assertions on the old texts, which is why `tests/` itself is not searched.
 
 - [ ] **Step 6: Commit** "Follow-up tasks: anyone with follow-up access works them; the assignee is a label (#172)".
 
@@ -573,10 +626,14 @@
     - "Forty-one migrations, applied in order." becomes "Forty-two migrations, applied in order."
     - A row after 041's: `| \`042_let_follow_up_holders_work_any_follow_up.sql\` | Hand-written: anyone holding \`followup\` works any open office follow-up, whoever it is assigned to, and \`followup\` requires \`admin\` (#172) |`
     - In the roster's `staff` row (about line 702), after the capabilities list: "an entry with `followup` must also have `admin`;".
+  - `docs/developer/database.md`, two more passages:
+    - the `people` row (about line 190): after the capability list, "; `followup` requires `admin` (042, check `people_followup_needs_admin`)";
+    - the `add_staff_member` bullet (about lines 325-329): add "capabilities with `followup` but not `admin` (042)" to its `VT007` refusal list, right after "a capability outside the known set".
+  - `docs/developer/backend.md`, the roster's `staff` row (about line 163): after the capability list, "; an entry with `followup` must also have `admin` (042)", worded as in setup.md.
   - `docs/developer/backend.md` (about line 164): the `defaultFollowup` row's reason becomes "**Required when the roster has no presenter**, so that new follow-ups name a real staff member rather than the persona Sam (since 042 anyone holding `followup` can work them). The person must have `followup`, and so `admin`".
   - `README.md` and `docs/developer/README.md`: the migration range `001–041` / `001-041` becomes `001–042` / `001-042`.
 
-- [ ] **Step 2: Grep for what's now false.** `grep -rn -i "assignee\|someone else\|waiting on\|any combination\|capabilities is non-empty" docs README.md --include=*.md | grep -v docs/superpowers`. Fix each claim that says only the assignee works a task, or that `followup` needs nothing else. Do not touch `docs/superpowers/` or `openspec/changes/archive/`.
+- [ ] **Step 2: Grep for what's now false.** `grep -rn -i --include='*.md' 'assignee\|someone else\|waiting on\|any combination\|is non-empty\|owes\? \(a\|the\) call' docs README.md | grep -v docs/superpowers`. Fix each claim that says only the assignee works a task, or that `followup` needs nothing else. Do not touch `docs/superpowers/` or `openspec/changes/archive/`.
 
 - [ ] **Step 3: The test counts.** Using the real numbers from the runs:
   - `docs/setup.md`: the Unit and Database rows, and the last-verified sentence (verified on this change, on the date of the runs, with migration 042 applied);

@@ -83,6 +83,7 @@ The season-end close opens none (037). The note wording in Q5 covers both, and a
   - MODIFIED: "The office works a go-over follow-up like any other". "The assignee SHALL log contacts on it" and the scenario "Only the assignee works it" change to the general rule, and the Call the client row's text becomes "assigned to".
 - **`staff-case-work`:** MODIFIED "Office follow-up contacts are logged in the contact log", which today says "Only the task's assignee, holding `followup`, SHALL be able to log a contact linked to an open task", with its scenario "Someone else cannot log on the task". It also covers the panel note and the volunteer page's "Assigned to".
 - **`sign-in`:** the user's idea: ADD a new requirement, "A staff member with follow-up access also has admin", instead of editing the roster requirements #136 rewrites. A separate requirement survives either archive order. The roster requirement "The roster can choose the default follow-up person" stays as it is: "Follow-ups already open SHALL keep their assignee" is still true as a label.
+- **Changed during propose:** OpenSpec refuses a MODIFIED requirement that drops a scenario, so both MODIFIED entries above became REMOVED plus ADDED under new names ("…like any other task", "…by anyone with follow-up access"), and the "assigned to" row text moved into the new general requirement (design D5).
 
 **Q8. Order and coordination with #136.** The user checked with Hailey:
 

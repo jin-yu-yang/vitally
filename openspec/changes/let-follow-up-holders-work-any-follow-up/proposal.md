@@ -6,7 +6,7 @@ Only a follow-up's assignee may log contacts on it and resolve it. Tasks go to t
 
 **Who may work an office follow-up (new migration 042)**
 - From: `lock_open_followup` refuses anyone but the task's assignee, for `RESOLVE_FOLLOWUP` and for a contact logged on the task.
-- To: anyone holding `followup` may log a contact on, and resolve, any open office follow-up of every purpose: document requests, go-overs and withdrawal notices. A task that is missing or on another case is still refused as forbidden, and a task that isn't open is "not available" to anyone. The `followup` check that runs before the lock stays.
+- To: anyone holding `followup` may log a contact on, and resolve, any open office follow-up of every purpose: document requests, go-overs and withdrawal notices. A contact linked to a task that is missing or on another case is still refused as forbidden (a resolve naming one stays invalid, as today), and a task that isn't open is "not available" to anyone. The `followup` check that runs before the lock stays.
 - Reason: a task must never wait on someone who can't act.
 - Impact: non-breaking for callers; the refusal for a non-assignee becomes a success. Open tasks already assigned to Sam or anyone else become workable at once. No rows change.
 
@@ -45,8 +45,8 @@ Only a follow-up's assignee may log contacts on it and resolve it. Tasks go to t
 ## Impact
 
 - **Database:** a new `supabase/migrations/042_let_follow_up_holders_work_any_follow_up.sql` redefining `vitally_private.lock_open_followup` and `vitally_private.add_staff_member`, and adding a check on `public.people`. No applied migration is edited. Teammates apply it with `npm run db:migrate:test`.
-- **Code:** `src/admin-views.mjs` (`followupWork`, the panel note, comments), `src/office-views.mjs` (the Call the client row), `src/staff-views.mjs` (the volunteer page's task heading), `tools/admin/roster.mjs`.
-- **Tests:** `tests/database-documents.mjs`, `tests/database-staff-identity.mjs`, `tests/database-actions.mjs`, `tests/database-contacts.mjs`, `tests/database-review.mjs`, `tests/admin-views.test.mjs`, `tests/office-views.test.mjs`, `tests/staff-views.test.mjs`, `tests/roster.test.mjs`, `tests/fixtures/empty-states.json`.
+- **Code:** `src/admin-views.mjs` (`followupWork`, the panel note, comments), `src/office-views.mjs` (the Call the client row), `src/staff-views.mjs` (the volunteer page's task heading, a comment), `src/supabase-store.mjs` (comments), `tools/admin/roster.mjs`.
+- **Tests:** `tests/database-documents.mjs`, `tests/database-staff-identity.mjs`, `tests/database-actions.mjs`, `tests/database-review.mjs`, `tests/database-hold.mjs`, `tests/admin-views.test.mjs`, `tests/office-views.test.mjs`, `tests/staff-views.test.mjs`, `tests/roster.test.mjs`, `tests/fixtures/empty-states.json` with `tests/empty-states.test.mjs`; comments in `tests/database-store.mjs`. `tests/database-contacts.mjs` must pass unchanged.
 - **Docs:** `docs/developer/database.md`, `docs/developer/backend.md`, `docs/setup.md`, `README.md`, `docs/developer/README.md`.
 - **Dependency: #136 (`remove-presenter-access`).** This change merges first. Both use migration 042 and both redefine `add_staff_member`: whichever merges second renumbers its migration and copies `add_staff_member` from the latest migration that defines it. Before applying 042 to the local stack, check whether #136 has merged; before opening the PR, confirm there is only one `042`. Both also edit `tools/admin/roster.mjs`, `tests/roster.test.mjs` and `tests/database-staff-identity.mjs`.
 - **Then #177,** which rewrites the same `office-follow-up` requirement, starts after this change merges.
