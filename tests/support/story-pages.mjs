@@ -641,6 +641,9 @@ export const readSignedInAs = (page) =>
 export async function openCaseByReference(page, reference) {
   // The volunteer board shows one tab at a time; its search reaches every case.
   if (await page.locator("#field-board-search").count()) await findOnBoard(page, reference);
+  // A board redraws itself after an action (two `cases` rows, each re-read),
+  // and a row replaced under the press loses the click, so the case never opens.
+  await waitForQuiet(page);
   await page
     .locator("button.board-reference")
     .filter({ hasText: reference })
