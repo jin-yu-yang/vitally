@@ -137,5 +137,5 @@
 
 ## 9. After archive
 
-- [ ] 9.1 Fix the stale `## Purpose` line of `openspec/specs/sign-in/spec.md`, which deltas can't change. Then full-text grep `openspec/specs/` for `presenter`: the only hits left are this change's deliberate requirement text in sign-in (that `presenter` is refused, and how former presenter accounts are removed). `verify.md` or the retrospective lists them. Don't trim spec text to shorten the list.
+- [x] 9.1 Fix the stale `## Purpose` line of `openspec/specs/sign-in/spec.md`, which deltas can't change. Then full-text grep `openspec/specs/` for `presenter`: the only hits left are this change's deliberate requirement text in sign-in (that `presenter` is refused, and how former presenter accounts are removed). `verify.md` or the retrospective lists them. Don't trim spec text to shorten the list.
 - [x] 9.2 In `retrospective.md` and the PR description, note that the user's `.vitally-roster.local.json` is out of date (riley/jordan only, with `presenters` and `sampleCaseOwners`). Suggest the replacement based on `roster.example.json`. Don't edit the file or print its addresses.
