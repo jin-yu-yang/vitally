@@ -179,11 +179,18 @@ Working notes from apply are scratch:
   - **Always:** `npm test` (unit).
   - **Migrations, SQL functions or other database behaviour:** `npm run db:migrate:test`, then `npm run test:database`.
   - **Sign-in:** `npm run test:auth-browser`.
-  - **Anything a browser shows or does** (views, `app.mjs`, the controller, CSS, the story): `npm run test:browser` (Playwright, about 11–16 minutes).
+  - **Anything a browser shows or does** (views, `app.mjs`, the controller, CSS, the story): `npm run test:browser` (Playwright, about 20–25 minutes locally).
   - **Client text in Chinese:** `npm run build:hant -- --check`.
   - **Server-only changes** (for example `server.mjs` or `tools/`): their unit tests, plus any suite whose behaviour they reach.
   - Say which checks you ran and why the others weren't needed.
-  - **CI** (`.github/workflows/ci.yml`) runs on every pull request and every push to `main`: `npm test`, `npm run build:hant -- --check`, a check that `npm run build:intake` leaves nothing to commit, and `npx openspec validate --all`. It does not yet run the database or browser suites, so run those yourself when the change touches them.
+  - **CI** (`.github/workflows/ci.yml`) runs on every pull request, every push to `main`, and on demand:
+    - `checks`: `npm test`, `npm run build:hant -- --check`, a check that `npm run build:intake` leaves nothing to commit, and `npx openspec validate --all`. It is the only job `main` requires.
+    - `database`, `sign-in` and `story` (two legs, one per browser order): each starts a fresh local Supabase stack, applies the migrations, and runs `npm run test:database`, `npm run test:auth-browser` or the story, in New York time.
+  - **A passing CI run can stand in for the local database, sign-in and story runs** when all of these hold:
+    - it ran on the commit you are verifying: the pull request's run, or `gh workflow run ci.yml --ref <branch>` on a pushed branch;
+    - every job that covers the change passed. A skipped or cancelled job doesn't count. A job that passes on a re-run counts, but say that it failed first;
+    - you link the run wherever you say which checks you ran (the PR body, `verify.md`), and review the story's screenshots from the run's artifacts (kept 7 days).
+  - **CI starts from an empty database.** A migration that changes existing rows still needs a local `npm run db:migrate:test` and `npm run test:database` on a stack that already has `main`'s migrations.
 - **Git:**
   - Teammates merge into `main`, so sync with `main` before pushing.
   - Leave the untracked `VITA-Management-System-Demo/` directory, `.claude/worktrees/` and `.stitch/captures` alone.

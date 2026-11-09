@@ -209,9 +209,10 @@ None of this exists yet; it is the list to work through.
 - **Continuous integration.** [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) runs on every
   pull request into `main` and every push to `main`: it fails on any text file committed with CRLF
   line endings, then runs `npm test`, `npm run build:hant -- --check`, `npm run build:intake` (failing if
-  it leaves anything to commit), and `npx openspec validate --all`. None needs a database or a
-  browser. The database and browser suites are not in CI yet: add each as its own job, with a Supabase
-  CLI stack for the database and Playwright for the browser.
+  it leaves anything to commit), and `npx openspec validate --all`, none of which needs a database or
+  a browser. Its `database`, `sign-in` and `story` jobs each start a fresh local Supabase CLI stack
+  on the runner and run the database suite, the sign-in suite and the browser story against it
+  ([setup guide](../setup.md#continuous-integration)).
 - **Backups and restore.** Decide what the plan's backups provide, and practise a restore.
 - **Secrets.** Secret keys only in the hosting provider's secret store and operators' private
   files. Rotate them when someone leaves the team.
