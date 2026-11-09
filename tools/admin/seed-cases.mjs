@@ -231,7 +231,7 @@ export async function seedCases(
     const created = await callRpc(client, actor.userId, "vitally_create_case", {
       p_action_id: randomUUID(),
       p_mode: mode,
-        p_answers: "{}",
+      p_answers: "{}",
     }).catch(refused(scenario, "CREATE_CASE"));
     run.caseIds.push(created.caseId);
     await recordRun(run, runDir);

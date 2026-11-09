@@ -354,7 +354,7 @@ test("document requests, receipts and verification keep the preparer in charge",
       },
     );
     await t.test(
-      "receipts reject the wrong actor, the wrong case and a forged client",
+      "receipts reject the wrong actor and the wrong case",
       async () => {
         const owned = await requestedCase(f);
         const ownedStaff = await f.readStaffCase(owned);

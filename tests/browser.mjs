@@ -341,7 +341,7 @@ async function assertNoAccessScreen(page) {
       checkpoint: 0,
       indicator: 0,
     },
-    "the no-access window shows more than the plain screen",
+    "the no-access window shows more than the no-access screen",
   );
 }
 
@@ -969,8 +969,8 @@ async function runPermutation(t, roles) {
     });
 
     const clientWin = await openWindow(clientEngine);
-    // The no-access window: it shows the plain screen, and nothing else.
-    const staffWin = await openWindow(staffEngine);
+    // The no-access window: it shows the no-access screen, and nothing else.
+    const noAccessWin = await openWindow(staffEngine);
     // One window per role account, each in its own context, signed in once.
     roleWins = {
       siteCoordinator: await openWindow(staffEngine, {
@@ -981,7 +981,7 @@ async function runPermutation(t, roles) {
       reviewer: await openWindow(staffEngine),
     };
     client = clientWin.page;
-    const noAccessPage = staffWin.page;
+    const noAccessPage = noAccessWin.page;
     staff = roleWins.preparer.page;
 
     // Which window the story drives now. A window just chosen may be on
@@ -1054,7 +1054,7 @@ async function runPermutation(t, roles) {
     await phase("both windows sign in with a generated code and real verification", async () => {
       await loginTestUser({ page: client, actor: applicantA, fixture });
       // The account with no membership signs in through the same real form and
-      // gets the plain screen: no board, no picker, no reset, no checkpoint
+      // gets the no-access screen: no board, no picker, no reset, no checkpoint
       // and no indicator.
       await signInNoAccess({ page: noAccessPage, actor: unapproved, fixture });
       await assertNoAccessScreen(noAccessPage);
@@ -1062,7 +1062,7 @@ async function runPermutation(t, roles) {
       await assertNoAccessSticks(noAccessPage);
       // Its Sign out works. The account signs in again in a fresh document (the
       // auth module's resend cooldown lives in the one it signed out of), to
-      // the same plain screen, which the last staff phase reads once more.
+      // the same no-access screen, which the last staff phase reads once more.
       await clickAction(noAccessPage, "sign-out");
       await waitForText(noAccessPage, "Sign in with your email", RENDER_MS);
       await noAccessPage.goto(fixture.appOrigin);
@@ -1079,7 +1079,7 @@ async function runPermutation(t, roles) {
       await watchAlerts(noAccessPage);
       for (const role of ROLES) await watchAlerts(roleWins[role].page);
       evidence.story.signIn =
-        "applicant A in the client window, the Site Coordinator, Preparer and Reviewer each in a staff window of their own, and the account with no membership on the plain screen, signed out and in again";
+        "applicant A in the client window, the Site Coordinator, Preparer and Reviewer each in a staff window of their own, and the account with no membership on the no-access screen, signed out and in again";
     });
 
     // The story's workspace starts with no cases: nothing in the app makes
@@ -7927,7 +7927,7 @@ async function runPermutation(t, roles) {
       const caseId = await within("building a case ready for preparation", fixture.database.readyCase());
       const { reference } = await caseById(fixture, caseId);
 
-      // The no-access window still shows the plain screen, and reads as no
+      // The no-access window still shows the no-access screen, and reads as no
       // staff account.
       await assertNoAccessScreen(noAccessPage);
       assert.equal(await readSignedInAs(noAccessPage), null, "the no-access window reads as a staff account");
@@ -8216,7 +8216,7 @@ async function runPermutation(t, roles) {
         assertConsoleQuiet(rileyWin, { name: "Riley's staff window", allow: REFUSAL_LINES });
         assertConsoleQuiet(jordanWin, { name: "Jordan's staff window", allow: REFUSAL_LINES });
         evidence.story.staffAccounts =
-          "Riley Park (prepare, review) and Jordan Lee (review) signed in through the real form in two engines; Signed in as, no demonstration controls; a leftover stored persona ignored; the no-access window on the plain screen before and after a reload; Riley prepared and filled the shaded section in the editor, a field as tall as its cell; Jordan's board followed live, Riley's own review refused (SELF_REVIEW), Jordan claimed and approved; history, receipts and events name each";
+          "Riley Park (prepare, review) and Jordan Lee (review) signed in through the real form in two engines; Signed in as, no demonstration controls; a leftover stored persona ignored; the no-access window on the no-access screen before and after a reload; Riley prepared and filled the shaded section in the editor, a field as tall as its cell; Jordan's board followed live, Riley's own review refused (SELF_REVIEW), Jordan claimed and approved; history, receipts and events name each";
       } finally {
         await rileyWin.context.close();
         await jordanWin.context.close();
@@ -8242,8 +8242,8 @@ async function runPermutation(t, roles) {
           name: "client window",
           allow: REFUSAL_LINES,
         }),
-        staff: assertConsoleQuiet(staffWin, {
-          name: "staff window",
+        staff: assertConsoleQuiet(noAccessWin, {
+          name: "no-access window",
           allow: REFUSAL_LINES,
         }),
         ...Object.fromEntries(

@@ -957,9 +957,6 @@ export function createController({
       });
   }
 
-  // Identity first, and only then the subscription: a refused or unreachable
-  // principal must never open a channel, and staff reads happen only when the
-  // principal says staff.
   // The window of an account with no membership (or an access this app no
   // longer has). `getPrincipal` is the only store call it makes; focus,
   // online and Try again ask it again, so a granted membership is noticed.
@@ -970,6 +967,9 @@ export function createController({
     show();
   }
 
+  // Identity first, and only then the subscription: a refused or unreachable
+  // principal must never open a channel, and staff reads happen only when the
+  // principal says staff.
   async function load() {
     let session;
     try {
@@ -2621,7 +2621,7 @@ export function createController({
       {
         actionId: newActionId(),
         caseId,
-          followupId,
+        followupId,
         entry,
       },
       (request) => store.logContact(request),
@@ -2639,7 +2639,7 @@ export function createController({
     try {
       await store.closeUnsigned({
         actionId: newActionId(),
-          cases: cases.map(({ caseId, revision }) => ({ caseId, revision })),
+        cases: cases.map(({ caseId, revision }) => ({ caseId, revision })),
         confirmed: true,
       });
     } catch (error) {
@@ -2677,7 +2677,7 @@ export function createController({
         actionId: newActionId(),
         contactId: contact.id,
         expectedRevision: Number(contact.revision),
-          entry,
+        entry,
       },
       (request) => store.editContact(request),
     );
