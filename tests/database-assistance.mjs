@@ -130,7 +130,6 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
             p_action_id: actionId,
             p_item_id: itemId,
             p_expected_revision: revision,
-            p_person_id: null,
             p_type: type,
             p_note: type === "RESOLVE" ? RESOLUTION_NOTE : "",
           });
@@ -209,13 +208,10 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
         const { itemId } = await f.seedAssistance();
         const claim = { itemId, revision: 1, type: "CLAIM", note: "" };
         // Step 4: the capability, never the title, admits a helper.
-        for (const personId of [f.alex, f.morgan, null, f.foreignPeople.sam])
-          await refuseAssistance(
-            f,
-            f.presenter,
-            { ...claim, personId },
-            "VT001",
-          );
+        for (const client of [f.preparer, f.reviewer])
+          await refuseAssistance(f, client, claim, "VT001");
+        // Another workspace's staff member cannot tell the item exists.
+        await refuseAssistance(f, f.foreignStaff, claim, "VT002");
         const claimed = await f.actAssistance(
           f.siteCoordinator,
           itemId,
@@ -231,29 +227,13 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
         // Step 7: holding `assist` is not holding this item.
         await withCapabilities(
           f,
-          f.morgan,
+          f.reviewerId,
           "update public.people set capabilities=array_append(capabilities,'assist') where id=$1",
           async () => {
-            await refuseAssistance(
-              f,
-              f.presenter,
-              { ...resolve, personId: f.morgan },
-              "VT001",
-            );
+            await refuseAssistance(f, f.reviewer, resolve, "VT001");
           },
         );
-        await refuseAssistance(
-          f,
-          f.presenter,
-          { ...resolve, personId: f.alex },
-          "VT001",
-        );
-        await refuseAssistance(
-          f,
-          f.presenter,
-          { ...resolve, personId: null },
-          "VT001",
-        );
+        await refuseAssistance(f, f.preparer, resolve, "VT001");
         const item = await f.readStaffAssistance(itemId);
         assert.equal(item.status, "assigned");
         assert.equal(item.assigneeId, f.siteCoordinatorId);
@@ -266,7 +246,7 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
         const { itemId } = await f.seedAssistance();
         const spec = { itemId, revision: 1, type: "CLAIM", note: "" };
         const attempts = [crypto.randomUUID(), crypto.randomUUID()];
-        // The owner of the linked case is still not a presenter.
+        // The owner of the linked case is still not staff.
         const owner = await f.applicantA.rpc(
           "vitally_assistance_action",
           assistanceArgs({ ...spec, actionId: attempts[0] }),
@@ -284,13 +264,6 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
         assert.ok(!JSON.stringify(owner.error).includes(itemId));
         for (const client of [f.applicantB, f.outsider])
           await refuseAssistance(f, client, spec, "VT002");
-        // A forged persona reveals nothing a client could not already see.
-        await refuseAssistance(
-          f,
-          f.applicantA,
-          { ...spec, personId: f.sam },
-          "VT002",
-        );
         // Membership is checked before any target is inspected.
         await refuseAssistance(f, f.unapproved, spec, "VT001");
         for (const actionId of attempts)
@@ -339,8 +312,8 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
       );
       await refuseAssistance(
         f,
-        f.presenter,
-        { itemId, revision: 1, personId: f.alex, type: "CLAIM", note: "" },
+        f.preparer,
+        { itemId, revision: 1, type: "CLAIM", note: "" },
         "VT001",
       );
       await f.actAssistance(
@@ -418,13 +391,12 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
         const claim = assistanceArgs({
           itemId,
           revision: 1,
-          personId: f.sam,
           type: "CLAIM",
           note: "",
         });
-        const first = await f.presenter.rpc("vitally_assistance_action", claim);
+        const first = await f.siteCoordinator.rpc("vitally_assistance_action", claim);
         assert.equal(first.error, null);
-        const replay = await f.presenter.rpc(
+        const replay = await f.siteCoordinator.rpc(
           "vitally_assistance_action",
           claim,
         );
@@ -436,10 +408,9 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
           { ...claim, p_note: "Taking this one" },
           { ...claim, p_note: null },
           { ...claim, p_expected_revision: 2 },
-          { ...claim, p_person_id: f.alex },
           { ...claim, p_type: "RESOLVE", p_note: RESOLUTION_NOTE },
         ]) {
-          const response = await f.presenter.rpc(
+          const response = await f.siteCoordinator.rpc(
             "vitally_assistance_action",
             changed,
           );
@@ -448,17 +419,17 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
         // The capability the operation needs is re-checked on every replay.
         await withCapabilities(
           f,
-          f.sam,
+          f.siteCoordinatorId,
           "update public.people set capabilities=array_remove(capabilities,'assist') where id=$1",
           async () => {
-            const stripped = await f.presenter.rpc(
+            const stripped = await f.siteCoordinator.rpc(
               "vitally_assistance_action",
               claim,
             );
             assert.equal(stripped.error.code, "VT001");
           },
         );
-        const restored = await f.presenter.rpc(
+        const restored = await f.siteCoordinator.rpc(
           "vitally_assistance_action",
           claim,
         );
@@ -475,10 +446,9 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
         // Assistance has no technical qualification, so VT006 is unreachable.
         const attempts = [
           [
-            f.presenter,
+            f.preparer,
             {
               revision: 2,
-              personId: f.alex,
               type: "RESOLVE",
               note: RESOLUTION_NOTE,
             },
@@ -627,19 +597,15 @@ test("reminders record a simulated nudge on available work", async (t) => {
       );
       assert.equal((await f.readStaffCase(claimed)).lastRemindedAt, null);
     });
-    await t.test("only an admin presenter may remind", async () => {
+    await t.test("only an admin staff member may remind", async () => {
       const caseId = await f.readyCase();
       const remind = { caseId, revision: 5, type: "REMIND", payload: {} };
-      for (const personId of [f.alex, f.morgan, null, f.foreignPeople.sam])
-        await refuseAction(f, f.presenter, { ...remind, personId }, "VT001");
-      // A presenter-only action stays out of the client's reach either way.
+      for (const client of [f.preparer, f.reviewer])
+        await refuseAction(f, client, remind, "VT001");
+      // Another workspace's staff member cannot tell the case exists.
+      await refuseAction(f, f.foreignStaff, remind, "VT002");
+      // A staff-only action stays out of the client's reach.
       await refuseAction(f, f.applicantA, { ...remind }, "VT001");
-      await refuseAction(
-        f,
-        f.applicantA,
-        { ...remind, personId: f.sam },
-        "VT001",
-      );
       await refuseAction(f, f.applicantB, { ...remind }, "VT002");
       // A reminder confirms nothing, so it carries no payload.
       for (const payload of [
@@ -885,20 +851,16 @@ test("closure cancels pending work without erasing its history", async (t) => {
       },
     );
     await t.test(
-      "only an admin presenter closes, and only before approval",
+      "only an admin staff member closes, and only before approval",
       async () => {
         const caseId = await f.readyCase();
         const payload = { reason: "other", note: CLOSURE_REASON, confirmed: true };
         const close = { caseId, revision: 5, type: "CLOSE_CASE", payload };
-        for (const personId of [f.alex, f.morgan, null, f.foreignPeople.sam])
-          await refuseAction(f, f.presenter, { ...close, personId }, "VT001");
+        for (const client of [f.preparer, f.reviewer])
+          await refuseAction(f, client, close, "VT001");
+        // Another workspace's staff member cannot tell the case exists.
+        await refuseAction(f, f.foreignStaff, close, "VT002");
         await refuseAction(f, f.applicantA, { ...close }, "VT001");
-        await refuseAction(
-          f,
-          f.applicantA,
-          { ...close, personId: f.sam },
-          "VT001",
-        );
         await refuseAction(f, f.applicantB, { ...close }, "VT002");
         // A client's own draft is the client's alone, so it is not closable.
         const draft = await f.draftCase(f.applicantA);

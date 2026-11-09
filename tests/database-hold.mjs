@@ -96,7 +96,6 @@ test("documents at intake against real Supabase", async (t) => {
       for (const [client, code] of [
         [f.preparer, "FORBIDDEN"],
         [f.reviewer, "FORBIDDEN"],
-        [f.presenter, "FORBIDDEN"],
         [f.applicantA, "FORBIDDEN"],
       ])
         await assert.rejects(() => ask(caseId, ["Photo ID"], client), rejected(code));
@@ -635,7 +634,7 @@ test("documents at intake against real Supabase", async (t) => {
       await assert.rejects(() => withdraw(closed), rejected("INVALID_TRANSITION"));
 
       const target = await f.readyCase();
-      for (const client of [f.presenter, f.siteCoordinator, f.preparer])
+      for (const client of [f.siteCoordinator, f.preparer])
         await assert.rejects(() => withdraw(target, { confirmed: true }, client), rejected("FORBIDDEN"));
       // Another client cannot see the case at all.
       await assert.rejects(() => withdraw(target, { confirmed: true }, f.applicantB), rejected("NOT_FOUND"));

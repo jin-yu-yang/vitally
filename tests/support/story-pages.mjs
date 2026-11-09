@@ -59,7 +59,7 @@ export const redactAddresses = (value) =>
 
 // What a failing wait reports: the case on screen, every badge it carries, any
 // refusal it is announcing, the sections it rendered, and the end of the text
-// (the presenter panel is at the top of every staff screen and says nothing
+// (the staff panel is at the top of every staff screen and says nothing
 // about the case).
 const screenText = async (page) => {
   try {
@@ -641,8 +641,8 @@ export const OFFICE_BOARD_HEADING = "Office queue";
  * The name a staff account's sidebar says it is signed in as (OpenSpec change
  * add-staff-identity): its account row reads "Signed in as" in a `<small>`
  * and the person's name in a `<strong>`. Null when there is no such row (a
- * presenter's plain screen has none), so a presenter window can never pass
- * for a staff one.
+ * no-access screen has none), so such a window can never pass for a staff
+ * one.
  */
 export const readSignedInAs = (page) =>
   page.evaluate(() => {

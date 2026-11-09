@@ -131,7 +131,7 @@ export function createSendRoute({ frontendOrigin }) {
   };
 }
 
-// The heading an applicant lands on. A presenter lands somewhere else — the
+// The heading an applicant lands on. A staff member lands somewhere else — the
 // work board, or the office board — so the screen a caller waits for is an
 // argument with this as its default. Nothing else about the assertion changes.
 export const SIGNED_IN_HEADING = "My applications";
@@ -164,8 +164,8 @@ export async function assertAuthenticatedUser(
  * The session half of `assertAuthenticatedUser`, with no screen in it: the
  * SDK's stored session belongs to this user and carries an access token, and
  * the app wrote its window state. Only ids and booleans leave the page.
- * `windowState: false` expects the opposite of the last: a presenter's window
- * loads nothing, so it stores no window state either.
+ * `windowState: false` expects the opposite of the last: a window with no
+ * membership loads nothing, so it stores no window state either.
  */
 export async function assertStoredSession(page, userId, { windowState = true } = {}) {
   const stored = await page.evaluate(
@@ -278,9 +278,9 @@ export async function submitVerificationCode({ page, code }) {
  * `otp` is optional: pass one that was generated earlier (a return visit, or a
  * repeat-generation measurement), otherwise one is generated here. The returned
  * code is for a caller that needs to prove it cannot be reused — it must never
- * be logged. `heading` is the signed-in screen this actor lands on; a presenter
- * passes their own, and an applicant needs nothing. `windowState` is
- * `assertStoredSession`'s: a presenter passes false.
+ * be logged. `heading` is the signed-in screen this actor lands on; a staff
+ * member passes their own, and an applicant needs nothing. `windowState` is
+ * `assertStoredSession`'s: an account with no membership passes false.
  */
 export async function loginTestUser({ page, actor, fixture, otp, heading, windowState }) {
   const code = otp ?? (await fixture.generateOtp(actor.email));
@@ -402,7 +402,7 @@ export async function createBrowserFixture() {
   };
 
   // One provisioned actor, by the name the database fixture uses: one of its
-  // own actors (applicantA, presenter, …) or one of its role-named staff
+  // own actors (applicantA, unapproved, …) or one of its role-named staff
   // accounts (siteCoordinator, preparer, reviewer, intaker), whose address the
   // fixture keeps under `roleAccounts`. Never logged.
   fixture.actor = (key) => {

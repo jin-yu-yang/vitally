@@ -80,7 +80,6 @@ test("seed command against real Supabase", async (t) => {
       const workspaceId = randomUUID();
       await f.initializeOwned({
         workspaceId,
-        presenterUserIds: [],
         applicantUserIds: [],
       });
       await f.staff({
@@ -115,7 +114,7 @@ test("seed command against real Supabase", async (t) => {
       async () => {
         await f.sql(
           "update public.workspaces set default_followup_person_id=$2 where id=$1",
-          [f.workspaceId, f.sam],
+          [f.workspaceId, f.preparerId],
         );
         try {
           await assert.rejects(

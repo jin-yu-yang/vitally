@@ -64,7 +64,7 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
   const f = await createDatabaseFixture();
   try {
     const applicant = createStore(f.applicantA);
-    const presenter = createStore(f.presenter);
+    const office = createStore(f.siteCoordinator);
 
     // A private draft of applicant A, and one case carried far enough to have
     // a request, a document and client-visible progress.
@@ -92,10 +92,10 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
         personId: null,
         personName: null,
       });
-      const staff = await presenter.getPrincipal();
-      assert.equal(staff.access, "presenter");
+      const staff = await office.getPrincipal();
+      assert.equal(staff.access, "staff");
       assert.equal(staff.workspaceId, f.workspaceId);
-      assert.equal(staff.userId, f.presenterUserId);
+      assert.equal(staff.userId, f.siteCoordinatorUserId);
     });
 
     await t.test("an account with no membership is refused", async () => {
@@ -119,7 +119,7 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
       for (const section of [...STAFF_SECTIONS, "requests", "documents", "history"])
         assert.ok(!(section in mine[0]), section);
 
-      const staffIds = (await presenter.listCases()).map((row) => row.id);
+      const staffIds = (await office.listCases()).map((row) => row.id);
       assert.ok(staffIds.includes(caseId));
       assert.ok(staffIds.includes(other.caseId));
       assert.ok(
@@ -128,10 +128,10 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
       );
     });
 
-    await t.test("a presenter list summarises the work on each case", async () => {
+    await t.test("a staff list summarises the work on each case", async () => {
       // A board that cannot say who is already on a case, or what is waiting
       // on a client, is only a list of references (Ruling R56).
-      const claimed = (await presenter.listCases()).find(
+      const claimed = (await office.listCases()).find(
         (row) => row.id === caseId,
       );
       assert.deepEqual(claimed.participants, [f.preparerId]);
@@ -141,7 +141,7 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
       assert.equal(claimed.openFollowups, 0);
       assert.deepEqual(claimed.followupAssigneeIds, []);
       // An unclaimed case carries the same fields, empty.
-      const unclaimed = (await presenter.listCases()).find(
+      const unclaimed = (await office.listCases()).find(
         (row) => row.id === other.caseId,
       );
       assert.deepEqual(unclaimed.participants, []);
@@ -151,7 +151,7 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
       await f.act(f.preparer, chased, "ESCALATE_CONTACT", {
         reason: "No response to the document request.",
       });
-      const waiting = (await presenter.listCases()).find(
+      const waiting = (await office.listCases()).find(
         (row) => row.id === chased,
       );
       assert.equal(waiting.openRequests, 1);
@@ -163,7 +163,7 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
       assert.equal(unclaimed.reviewContactStatus, null);
       const waitingForCall = await f.legacyApprovedCase();
       const called = await f.approvedCase();
-      const listed = await presenter.listCases();
+      const listed = await office.listCases();
       assert.equal(
         listed.find((row) => row.id === waitingForCall).reviewContactStatus,
         "pending",
@@ -186,7 +186,7 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
     });
 
     await t.test("the workspace read carries the office's settings", async () => {
-      const workspace = await presenter.getWorkspace();
+      const workspace = await office.getWorkspace();
       assert.equal(workspace.id, f.workspaceId);
       assert.equal(workspace.defaultFollowupPersonId, f.siteCoordinatorId);
       // The client reads their own workspace row too, and it carries nothing
@@ -207,8 +207,8 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
         assert.ok(!(section in found), `${section} is absent, not empty`);
     });
 
-    await t.test("a presenter case read adds the staff sections", async () => {
-      const staff = await presenter.getCase(caseId);
+    await t.test("a staff case read adds the staff sections", async () => {
+      const staff = await office.getCase(caseId);
       for (const section of STAFF_SECTIONS)
         assert.ok(section in staff, section);
       assert.deepEqual(staff.participants, [f.preparerId]);
@@ -226,7 +226,7 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
       // last moved is not a work board.
       const isoish = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
       const before = await applicant.getCase(draft.caseId);
-      const staff = await presenter.getCase(caseId);
+      const staff = await office.getCase(caseId);
       for (const record of [before, staff])
         for (const field of ["createdAt", "updatedAt"]) {
           assert.equal(typeof record[field], "string", field);
@@ -245,7 +245,6 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
         actionId: crypto.randomUUID(),
         caseId: draft.caseId,
         expectedRevision: before.revision,
-        personId: null,
         type: "SAVE_ANSWERS",
         payload: { answers: { addr_city: "Philadelphia" } },
       });
@@ -263,7 +262,6 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
             actionId: crypto.randomUUID(),
             caseId: draft.caseId,
             expectedRevision: before.revision,
-            personId: null,
             type: "SAVE_ANSWERS",
             payload: { answers: { addr_city: "Camden" } },
           }),
@@ -282,7 +280,6 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
       const receipt = await applicant.createCase({
         actionId: crypto.randomUUID(),
         mode: "client",
-        personId: null,
         answers: {},
       });
       assert.deepEqual(Object.keys(receipt).toSorted(), [
@@ -301,7 +298,6 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
         actionId: crypto.randomUUID(),
         caseId: draft.caseId,
         expectedRevision: before.revision,
-        personId: null,
         type: "SAVE_ANSWERS",
         payload: { answers: { addr_city: "Philadelphia" } },
       });
@@ -313,7 +309,6 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
             actionId: crypto.randomUUID(),
             caseId: draft.caseId,
             expectedRevision: before.revision,
-            personId: null,
             type: "SAVE_ANSWERS",
             payload: { answers: { addr_city: "Camden" } },
           }),
@@ -321,25 +316,9 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
       );
     });
 
-    await t.test("a client who forges a staff person is refused", async () => {
-      const current = await applicant.getCase(draft.caseId);
-      await assert.rejects(
-        () =>
-          applicant.act({
-            actionId: crypto.randomUUID(),
-            caseId: draft.caseId,
-            expectedRevision: current.revision,
-            personId: f.sam,
-            type: "SAVE_ANSWERS",
-            payload: { answers: { addr_city: "Philadelphia" } },
-          }),
-        rejected("FORBIDDEN"),
-      );
-    });
-
-    await t.test("assistance is a presenter list and a presenter action", async () => {
+    await t.test("assistance is a staff list and a staff action", async () => {
       const { itemId } = await f.seedAssistance();
-      const items = await presenter.listAssistance();
+      const items = await office.listAssistance();
       const item = items.find((row) => row.id === itemId);
       assert.ok(item, "the seeded request is listed");
       assert.equal(item.status, "open");
@@ -353,21 +332,20 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
       );
       await assert.rejects(() => applicant.listPeople(), rejected("FORBIDDEN"));
       assert.ok(
-        (await presenter.listPeople()).some((person) => person.id === f.alex),
+        (await office.listPeople()).some((person) => person.id === f.preparerId),
       );
 
-      await presenter.actAssistance({
+      await office.actAssistance({
         actionId: crypto.randomUUID(),
         itemId,
         expectedRevision: 1,
-        personId: f.sam,
         type: "CLAIM",
         note: null,
       });
       const claimed = await f.readStaffAssistance(itemId);
       assert.equal(claimed.revision, 2);
       assert.equal(claimed.status, "assigned");
-      assert.equal(claimed.assigneeId, f.sam);
+      assert.equal(claimed.assigneeId, f.siteCoordinatorId);
     });
 
     await t.test("the Realtime publication is exactly what the adapter watches", async () => {
@@ -394,7 +372,7 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
           "select tablename from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' order by tablename",
         )
       ).rows.map((row) => row.tablename);
-      assert.deepEqual(published, [...SUBSCRIBED_TABLES.presenter].toSorted());
+      assert.deepEqual(published, [...SUBSCRIBED_TABLES.staff].toSorted());
       // Receipts and the private schema are never published.
       assert.ok(!published.includes("action_receipts"));
     });

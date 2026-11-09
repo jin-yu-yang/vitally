@@ -7,19 +7,18 @@
 export const RPC_SIGNATURES = Object.freeze([
   Object.freeze({
     name: "vitally_create_case",
-    signature: "vitally_create_case(uuid,text,uuid,jsonb)",
+    signature: "vitally_create_case(uuid,text,jsonb)",
     authorized: (f) => f.applicantA,
     receiptKeys: Object.freeze(["actionId", "caseId", "reference", "revision"]),
     args: () => ({
       p_action_id: crypto.randomUUID(),
       p_mode: "client",
-      p_person_id: null,
       p_answers: {},
     }),
   }),
   Object.freeze({
     name: "vitally_apply_action",
-    signature: "vitally_apply_action(uuid,uuid,bigint,uuid,text,jsonb)",
+    signature: "vitally_apply_action(uuid,uuid,bigint,text,jsonb)",
     authorized: (f) => f.applicantA,
     receiptKeys: Object.freeze(["actionId", "caseId", "reference", "revision"]),
     // The draft in `context` is the caller's own, so this shape is a legitimate
@@ -28,38 +27,35 @@ export const RPC_SIGNATURES = Object.freeze([
       p_action_id: crypto.randomUUID(),
       p_case_id: context.draftCaseId,
       p_expected_revision: context.draftRevision,
-      p_person_id: null,
       p_type: "SAVE_ANSWERS",
       p_payload: { answers: { addr_city: "Pittsburgh" } },
     }),
   }),
   Object.freeze({
     name: "vitally_assistance_action",
-    signature: "vitally_assistance_action(uuid,uuid,bigint,uuid,text,text)",
-    // Assistance is presenter work, so its positive control is the presenter
-    // with the workspace's `assist` person claiming the open item.
-    authorized: (f) => f.presenter,
+    signature: "vitally_assistance_action(uuid,uuid,bigint,text,text)",
+    // Assistance is staff work, so its positive control is the Site
+    // Coordinator, who holds `assist`, claiming the open item.
+    authorized: (f) => f.siteCoordinator,
     receiptKeys: Object.freeze(["actionId", "itemId", "revision"]),
     args: (context) => ({
       p_action_id: crypto.randomUUID(),
       p_item_id: context.assistanceItemId,
       p_expected_revision: context.assistanceRevision,
-      p_person_id: context.assistPersonId,
       p_type: "CLAIM",
       p_note: "",
     }),
   }),
-  // The contact log (OpenSpec change add-contact-log): presenter work on any
-  // case a presenter can open, under any persona.
+  // The contact log (OpenSpec change add-contact-log): staff work on any case
+  // a staff member can open.
   Object.freeze({
     name: "vitally_log_contact",
-    signature: "vitally_log_contact(uuid,uuid,uuid,uuid,jsonb)",
-    authorized: (f) => f.presenter,
+    signature: "vitally_log_contact(uuid,uuid,uuid,jsonb)",
+    authorized: (f) => f.siteCoordinator,
     receiptKeys: Object.freeze(["actionId", "contactId", "caseId", "revision"]),
     args: (context) => ({
       p_action_id: crypto.randomUUID(),
       p_case_id: context.contactCaseId,
-      p_person_id: context.assistPersonId,
       p_followup_id: null,
       p_entry: context.contactEntry,
     }),
@@ -68,27 +64,25 @@ export const RPC_SIGNATURES = Object.freeze([
   // closes the listed signing cases. An approved case is the target.
   Object.freeze({
     name: "vitally_close_unsigned",
-    signature: "vitally_close_unsigned(uuid,uuid,jsonb,boolean)",
-    authorized: (f) => f.presenter,
+    signature: "vitally_close_unsigned(uuid,jsonb,boolean)",
+    authorized: (f) => f.siteCoordinator,
     receiptKeys: Object.freeze(["actionId", "cases"]),
     args: (context) => ({
       p_action_id: crypto.randomUUID(),
-      p_person_id: context.assistPersonId,
       p_cases: [{ caseId: context.exitCaseId, revision: context.exitCaseRevision }],
       p_confirmed: true,
     }),
   }),
   Object.freeze({
     name: "vitally_edit_contact",
-    signature: "vitally_edit_contact(uuid,uuid,bigint,uuid,jsonb)",
-    authorized: (f) => f.presenter,
+    signature: "vitally_edit_contact(uuid,uuid,bigint,jsonb)",
+    authorized: (f) => f.siteCoordinator,
     receiptKeys: Object.freeze(["actionId", "contactId", "caseId", "revision"]),
-    // The entry in `context` was logged by the same persona at revision 1.
+    // The entry in `context` was logged by the same staff member at revision 1.
     args: (context) => ({
       p_action_id: crypto.randomUUID(),
       p_contact_id: context.contactId,
       p_expected_revision: 1,
-      p_person_id: context.assistPersonId,
       p_entry: { ...context.contactEntry, note: "Corrected." },
     }),
   }),
@@ -98,7 +92,7 @@ export const RPC_SIGNATURES = Object.freeze([
 // They are not entry points: only the roster command calls them, over the
 // database connection, so no public signature changes. The database suite calls
 // each one through PostgREST, under its name in the public schema and in the
-// private schema, as the anonymous client and as the presenter, and expects a
+// private schema, as the anonymous client and as a staff member, and expects a
 // refusal that leaves nothing behind: no permission (42501), or no such
 // function or exposed schema (PGRST202, PGRST106).
 export const PRIVATE_SETUP_DENIALS = Object.freeze(["42501", "PGRST202", "PGRST106"]);

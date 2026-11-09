@@ -341,7 +341,7 @@ const MATRIX = Object.freeze([
 ]);
 
 // The staff-only tables. An applicant may not read a single row of any of
-// them, so a subscription of theirs must stay empty while a presenter's
+// them, so a subscription of theirs must stay empty while a staff member's
 // receives the same change — and while the applicant's *other* channel, on a
 // table they may read, keeps delivering.
 const INTERNAL = Object.freeze([
@@ -511,7 +511,7 @@ const INTERNAL = Object.freeze([
     },
   },
   {
-    // The permanent roster is presenter-only too (`presenter_people`, 001),
+    // The permanent roster is staff-only too (`staff_people`, 001 and 043),
     // and 007 publishes it. Nothing in the product inserts a person either, so
     // each control adds one test-only person through the Task 4 override
     // helper under a fresh key — an identical key would be idempotent and
@@ -533,7 +533,7 @@ const INTERNAL = Object.freeze([
 test("Realtime carries one applicant's rows to that applicant only", async (t) => {
   const f = await createDatabaseFixture();
   // One channel held open for the whole file so the tenant keeps streaming
-  // between checks; it is a presenter's, so it proves nothing about isolation
+  // between checks; it is a staff member's, so it proves nothing about isolation
   // and is never read for evidence.
   let keepalive = null;
   try {
@@ -551,7 +551,7 @@ test("Realtime carries one applicant's rows to that applicant only", async (t) =
         caseId: await preparedCase(f, client),
       };
     }
-    keepalive = watchTable(f.presenter, [{ event: "UPDATE", table: "cases" }], "keepalive");
+    keepalive = watchTable(f.siteCoordinator, [{ event: "UPDATE", table: "cases" }], "keepalive");
     await withDeadline(keepalive.subscribed, "the keepalive channel never subscribed");
     // One repeatable change with a revision on it, so each attempt is its own.
     const saveFor = async (owner) => {
@@ -563,7 +563,7 @@ test("Realtime carries one applicant's rows to that applicant only", async (t) =
     const savedCase = (change) => (row) =>
       row.id === change.id && Number(row.revision) === change.revision;
     // A private client draft is invisible to staff by design, so the keepalive
-    // control moves a case the presenter may actually read.
+    // control moves a case staff may actually read.
     const bumpStaffCase = async (owner) => {
       const receipt = await f.act(f.preparer, owner.caseId, "REQUEST_DOCUMENT", {
         title: "Mileage record",
@@ -871,7 +871,7 @@ test("Realtime carries one applicant's rows to that applicant only", async (t) =
     for (const spec of INTERNAL) {
       await t.test(`${spec.table} reaches staff and no client at all`, async () => {
         const bindings = [{ event: "INSERT", table: spec.table }];
-        const staff = watchTable(f.presenter, bindings, `presenter/${spec.table}`);
+        const staff = watchTable(f.siteCoordinator, bindings, `staff/${spec.table}`);
         const denied = watchTable(f.applicantA, bindings, `A/${spec.table}`);
         // A's fence runs on a table A really can see, so "nothing arrived" is
         // never confused with "this channel was not delivering".
@@ -884,14 +884,14 @@ test("Realtime carries one applicant's rows to that applicant only", async (t) =
           await withDeadline(staff.subscribed, `staff never subscribed to ${spec.table}`);
           await withDeadline(denied.subscribed, `A never subscribed to ${spec.table}`);
           await withDeadline(fence.subscribed, "A never subscribed to the fence");
-          // The positive control: the presenter receives the internal row, and
+          // The positive control: staff receive the internal row, and
           // it is written on a case the applicant owns, so what keeps it from
           // them is the table and not the case.
           await controlUntilSeen(
             staff,
             () => spec.commit(f, owners.A),
             (change) => (row) => spec.identity(row) === change.id,
-            `the presenter's ${spec.table} control`,
+            `the staff ${spec.table} control`,
           );
           // An ordered fence afterwards, on A's own readable table.
           const moved = await saveFor(owners.A);
