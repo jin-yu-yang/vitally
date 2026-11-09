@@ -127,15 +127,15 @@
 
 ## 8. Verification
 
-- [ ] 8.1 `npm test` passes. Record the count after.
-- [ ] 8.2 `npm run test:database` passes. Record the count after.
-- [ ] 8.3 `npm run test:auth-browser`, alone on the stack: all pass.
-- [ ] 8.4 `npm run test:browser`, plain, alone on the local stack: 83/83.
-- [ ] 8.5 `npm run build:hant -- --check` passes.
-- [ ] 8.6 `npm run build:intake` leaves nothing to commit.
-- [ ] 8.7 `npx openspec validate --all` passes.
+- [x] 8.1 `npm test` passes. Count after: 1507 locally on e812970; 1515 in CI on f04495e (main 1509).
+- [x] 8.2 `npm run test:database` passes. Count after: 450 locally on e812970 and in CI on f04495e (main 448).
+- [x] 8.3 `npm run test:auth-browser`, alone on the stack: 20/20 locally on e812970 and in CI.
+- [x] 8.4 `npm run test:browser`, plain, alone on the local stack: 83/83 on 8aa7e32 and 064035c. On e812970 order 1 failed at the Reviewer step and order 2 passed. By the user's ruling on 2026-11-09 the check moved to CI (#180): `story (chrome-client)` passed 4 of 4 beside main's 4 of 4, and every other job passed; one earlier CI attempt failed at "two staff accounts…". Cause unproven; see `verify.md`.
+- [x] 8.5 `npm run build:hant -- --check` passes.
+- [x] 8.6 `npm run build:intake` leaves nothing to commit.
+- [x] 8.7 `npx openspec validate --all` passes (13 of 13).
 
 ## 9. After archive
 
 - [ ] 9.1 Fix the stale `## Purpose` line of `openspec/specs/sign-in/spec.md`, which deltas can't change. Then full-text grep `openspec/specs/` for `presenter`: the only hits left are this change's deliberate requirement text in sign-in (that `presenter` is refused, and how former presenter accounts are removed). `verify.md` or the retrospective lists them. Don't trim spec text to shorten the list.
-- [ ] 9.2 In `retrospective.md` and the PR description, note that the user's `.vitally-roster.local.json` is out of date (riley/jordan only, with `presenters` and `sampleCaseOwners`). Suggest the replacement based on `roster.example.json`. Don't edit the file or print its addresses.
+- [x] 9.2 In `retrospective.md` and the PR description, note that the user's `.vitally-roster.local.json` is out of date (riley/jordan only, with `presenters` and `sampleCaseOwners`). Suggest the replacement based on `roster.example.json`. Don't edit the file or print its addresses.
