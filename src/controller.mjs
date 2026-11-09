@@ -1227,6 +1227,9 @@ export function createController({
   // ---- navigation (window-local) -----------------------------------------
 
   function navigate(screen) {
+    // The no-access window has nowhere to go: the logo and every other
+    // navigation do nothing, so the screen and its Sign out stay.
+    if (state.screen === "no-access" && !state.principal) return;
     // A new office draft belongs to the Add a case page: leaving drops it.
     if (screen !== "office-add-case") {
       state.officeDraft = false;

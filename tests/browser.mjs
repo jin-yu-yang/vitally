@@ -318,6 +318,8 @@ async function assertNoAccessScreen(page) {
     // The screen itself offers Sign out and nothing else. The page around it
     // is the client frame (#169): its header and banner are not the screen.
     actions: [...document.querySelectorAll("#main [data-action]")].map((node) => node.dataset.action),
+    // The whole page, in DOM order, so a new header button cannot slip in.
+    pageActions: [...document.querySelectorAll("#app [data-action]")].map((node) => node.dataset.action),
     board: document.querySelectorAll(".staff-board, .board-row, #office-queue-title, #case-title").length,
     sidebar: document.querySelectorAll(".sidebar-account").length,
     personas: document.querySelectorAll('[data-action="select-person"], #persona-title').length,
@@ -331,6 +333,7 @@ async function assertNoAccessScreen(page) {
       heading: NO_ACCESS_HEADING,
       text: NO_ACCESS_TEXT,
       actions: ["sign-out"],
+      pageActions: ["open-applications", "set-language", "set-language", "set-language", "open-help", "dismiss-error", "sign-out"],
       board: 0,
       sidebar: 0,
       personas: 0,
@@ -340,6 +343,19 @@ async function assertNoAccessScreen(page) {
     },
     "the no-access window shows more than the plain screen",
   );
+}
+
+/**
+ * Dismiss on the banner and the logo in the header take nothing from the
+ * screen: the heading and Sign out are still there, as before.
+ */
+async function assertNoAccessSticks(page) {
+  await clickAction(page, "dismiss-error");
+  await waitForText(page, NO_ACCESS_HEADING, RENDER_MS);
+  await clickAction(page, "open-applications");
+  await waitForText(page, NO_ACCESS_HEADING, RENDER_MS);
+  assert.equal(await page.locator('#main [data-action="sign-out"]').count(), 1, "Sign out is gone after Dismiss and the logo");
+  assert.equal(await page.locator("#main h1").innerText(), NO_ACCESS_HEADING);
 }
 
 /**
@@ -938,13 +954,13 @@ async function runPermutation(t, roles) {
     const applicantB = fixture.actor("applicantB");
     // The account that signed up but was never given a membership.
     const unapproved = fixture.actor("unapproved");
-    // A stale persona's person (fictional, belongs to no row), for the
-    // leftover-persona check: a stored persona is ignored by every account.
-    const stalePersonId = randomUUID();
     // The role-named staff accounts the main story signs in as (#132): the
     // Preparer takes Alex's steps, the Reviewer Morgan's, and the Site
     // Coordinator Sam's office work and follow-ups.
     const { siteCoordinatorId, preparerId, reviewerId } = fixture.database;
+    // A real person of the workspace, for the leftover-persona check: a
+    // stored persona is ignored by every account, even a real person's.
+    const stalePersonId = siteCoordinatorId;
     const ROLES = Object.freeze(["siteCoordinator", "preparer", "reviewer"]);
     const roleHeading = Object.freeze({
       siteCoordinator: OFFICE_BOARD_HEADING,
@@ -1042,6 +1058,8 @@ async function runPermutation(t, roles) {
       // and no indicator.
       await signInNoAccess({ page: noAccessPage, actor: unapproved, fixture });
       await assertNoAccessScreen(noAccessPage);
+      // Dismiss and the logo leave it where it is, with Sign out.
+      await assertNoAccessSticks(noAccessPage);
       // Its Sign out works. The account signs in again in a fresh document (the
       // auth module's resend cooldown lives in the one it signed out of), to
       // the same plain screen, which the last staff phase reads once more.

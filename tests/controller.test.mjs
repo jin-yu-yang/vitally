@@ -6307,6 +6307,37 @@ test("a window with no membership makes no store call but getPrincipal, however 
   assert.ok(store.calls.every((call) => call === "getPrincipal"), store.calls.join());
 });
 
+test("a window with no membership stays on no-access after Dismiss and after the logo, and reads nothing", async () => {
+  const { store, quiet } = noMembership();
+  await quiet(async ({ controller }) => {
+    controller.dismissError();
+    assert.equal(controller.getState().screen, "no-access");
+    assert.equal(controller.getState().error, null);
+    // The logo asks to open the applications.
+    controller.navigate("applications");
+    assert.equal(controller.getState().screen, "no-access");
+    controller.navigate("progress");
+    assert.equal(controller.getState().screen, "no-access");
+  });
+  assert.deepEqual(store.calls, ["getPrincipal"]);
+});
+
+test("a no-access window whose account is later given a membership leaves no-access on refresh", async () => {
+  const store = fakeStore({
+    principal: Object.assign(new Error("no access"), { code: "FORBIDDEN" }),
+    cases: [],
+  });
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(controller.getState().screen, "no-access");
+  controller.dismissError();
+  store.getPrincipal = async () => ({ userId: "user-1", workspaceId: "w1", access: "applicant" });
+  await controller.refresh();
+  assert.notEqual(controller.getState().screen, "no-access");
+  assert.ok(controller.getState().principal);
+  controller.stop();
+});
+
 test("a principal whose access is neither staff nor applicant gets no-access and nothing is read", async () => {
   const store = fakeStore({
     principal: { userId: "p1", workspaceId: "w1", access: "viewer" },

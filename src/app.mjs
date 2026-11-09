@@ -213,7 +213,7 @@ if (!config) {
   function screenFor(state) {
     if (!state.principal) {
       // The sign-in form is only for a visitor who is known to be signed out.
-      if (state.error?.code === "FORBIDDEN") return views.noAccessScreen(state);
+      if (views.showsNoAccess(state)) return views.noAccessScreen(state);
       if (state.session !== "none") return views.unreachableScreen(state);
       return client.accessScreen(state);
     }

@@ -158,6 +158,16 @@ export function unreachableScreen(state) {
   return `<main id="main" class="narrow" tabindex="-1"><div class="center-icon">${icon("clock")}</div><div class="page-intro centered"><span class="overline">${esc(t("unreachable.overline", {}, lang))}</span><h1>${esc(t("unreachable.title", {}, lang))}</h1><p>${esc(sentence(state.error?.message ?? "Network error. Please try again later.", lang))}</p></div><div class="panel"><p>${esc(t("unreachable.body", {}, lang))}</p>${button(`${icon("refresh")} ${esc(t("frame.try_again", {}, lang))}`, "retry-connection", "primary full")}<p class="field-note">${esc(t("unreachable.note", {}, lang))}</p></div></main>`;
 }
 
+// Whether the window is on the no-access screen. It is sticky: the error that
+// put it there may be dismissed, and the screen stays until a refresh finds a
+// membership or the account signs out. Another error (the server cannot be
+// reached) is shown instead.
+export function showsNoAccess(state) {
+  if (state?.principal) return false;
+  if (state?.error?.code === "FORBIDDEN") return true;
+  return state?.screen === "no-access" && !state?.error;
+}
+
 // Signed in, but this account has no active membership in a workspace.
 export function noAccessScreen(state) {
   const lang = viewLang(state);

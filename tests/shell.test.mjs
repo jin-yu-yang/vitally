@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { appShell, staffSidebar, staffScreen, noAccessScreen, page, clientHeader, languageSwitch, dialog, DRAWERS } from "../src/views.mjs";
+import { appShell, staffSidebar, staffScreen, noAccessScreen, showsNoAccess, page, clientHeader, languageSwitch, dialog, DRAWERS } from "../src/views.mjs";
 import { icon, ICON_NAMES, describeFocus, focusSelectors } from "../src/ui.mjs";
 import { TEXT, SENTENCES } from "../src/client-text.mjs";
 import { toggleLabel } from "../src/sidebar-peek.mjs";
@@ -1308,6 +1308,21 @@ test("the no-access screen offers only Sign out", () => {
   assert.deepEqual([...html.matchAll(/data-action="([^"]+)"/g)].map((m) => m[1]), ["sign-out"]);
   for (const gone of ["select-person", "open-reset-fixtures", "open-checkpoint", "Class workspace", "board-row"])
     assert.ok(!html.includes(gone), gone);
+});
+
+test("the no-access screen stays up when the error is dismissed, and says so in the language", () => {
+  const dismissed = noAccessState({ error: null, session: "present" });
+  assert.equal(showsNoAccess(dismissed), true);
+  assert.equal(showsNoAccess(noAccessState()), true);
+  // A different error (the server cannot be reached) is not hidden by it.
+  assert.equal(showsNoAccess(noAccessState({ error: { code: "NETWORK", message: "x" } })), false);
+  assert.equal(showsNoAccess({ principal: null, session: "present", screen: "access", error: null }), false);
+  const html = noAccessScreen(dismissed);
+  assert.ok(html.includes("This account has no access"));
+  assert.deepEqual([...html.matchAll(/data-action="([^"]+)"/g)].map((m) => m[1]), ["sign-out"]);
+  const zh = noAccessScreen({ ...dismissed, lang: "zh-Hans" });
+  assert.ok(zh.includes("此账户无权使用"));
+  assert.ok(!zh.includes("You do not have access"));
 });
 
 test("the no-access screen uses the client frame and follows the language", () => {
