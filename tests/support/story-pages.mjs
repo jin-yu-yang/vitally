@@ -59,8 +59,8 @@ export const redactAddresses = (value) =>
 
 // What a failing wait reports: the case on screen, every badge it carries, any
 // refusal it is announcing, the sections it rendered, and the end of the text
-// (the staff panel is at the top of every staff screen and says nothing
-// about the case).
+// (the case header's "Signed in as" line is at the top of every staff case
+// and says nothing about the case).
 const screenText = async (page) => {
   try {
     const read = await page.evaluate(() => {
