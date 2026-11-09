@@ -458,7 +458,7 @@ export function createStore(client) {
 
     // A client's list is their own cases and nothing more. A presenter's or staff
     // member's list is a work board, and a board that cannot say who is already on a case,
-    // what is waiting on a client, or who owes somebody a call is only a list
+    // what is waiting on a client, or whom the office asked to call somebody is only a list
     // of references. Those three answers, the client's phone for the masked
     // column and the reviewer's call status come from five grouped reads over
     // the same RLS-scoped tables the case screen uses — not from the rows
@@ -532,8 +532,8 @@ export function createStore(client) {
           openWithdrawalNotices: open.filter((row) => row.purpose === "withdrawal_notice").length,
           // The first notice's own text, which says whom the office tells what.
           withdrawalNoticeReason: open.find((row) => row.purpose === "withdrawal_notice")?.reason ?? null,
-          // Who owes this client a call, without the tasks themselves: the
-          // board names people, and the case screen holds the work.
+          // The assignees of this client's open tasks, as a label (042), without the tasks
+          // themselves: the board names people, and the case screen holds the work.
           followupAssigneeIds: [
             ...new Set(open.map((row) => row.assignee_person_id)),
           ],

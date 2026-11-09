@@ -314,7 +314,7 @@ test("case actions apply the shared check order against real Supabase", async (t
         // The capability the action needed is re-checked on every replay.
         await f.sql(
           "update public.people set capabilities=$1 where id=$2",
-          [["assist", "followup", "receive_documents"], f.sam],
+          [["assist", "receive_documents"], f.sam],
         );
         try {
           const stripped = await f.presenter.rpc(
@@ -939,9 +939,9 @@ test("installed entry points deny anonymous callers and serve members", async (t
     await t.test(
       "the private roster functions cannot be called by the anonymous client or a presenter",
       async () => {
-        // A staff member with `followup`, so moving the default to them is a
+        // A staff member with `followup` (and so `admin`, 042), so moving the default to them is a
         // request the function itself would accept from the roster command.
-        const dana = await f.staff({ key: "dana", name: "Dana Fox", capabilities: ["followup"] });
+        const dana = await f.staff({ key: "dana", name: "Dana Fox", capabilities: ["admin", "followup"] });
         const context = {
           workspaceId: f.workspaceId,
           userId: f.unapprovedUserId,

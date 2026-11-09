@@ -222,13 +222,13 @@ test("an unclaimed row offers a reminder to the office and a reason to everyone 
   assert.match(forAlex, /Needs office administrator access\./);
 });
 
-test("a call row opens the log-a-call drawer and says who owes the call", () => {
+test("a call row opens the log-a-call drawer and names the assignees as a label", () => {
   const html = page([
     kase({ id: "e", stage: "preparing", openFollowups: 2, followupAssigneeNames: ["Sam", "Jo"] }),
   ]);
   const row = rowOf(html, "e");
   assert.match(row, /data-action="open-log-call"[^>]*data-case-id="e"/);
-  assert.match(row, /2 open tasks · waiting on Sam, Jo/);
+  assert.match(row, /2 open tasks · assigned to Sam, Jo/);
 });
 
 test("a help row offers the one action its status allows", () => {
@@ -441,15 +441,17 @@ test("the Log contact drawer holds Sam's own task, the shared form and Resolve",
   assert.match(html, /data-action="open-case"[^>]*data-case-id="c1"[^>]*>Open the case</);
 });
 
-test("a task assigned to someone else shows the reason and no form", () => {
+test("a task assigned to someone else offers the forms (042)", () => {
   const html = logCallDrawerBody({
     record: called([task({ assigneeId: "p-jo", assigneeName: "Jo" })]),
     person: sam,
     ui: {},
     caseId: "c1",
   });
-  assert.match(html, /The office assigned this task to someone else\./);
-  assert.doesNotMatch(html, /contact-form/);
+  assert.doesNotMatch(html, /The office assigned this task to someone else\./);
+  assert.match(html, /<span>Assigned to<\/span><strong>Jo<\/strong>/);
+  assert.match(html, /<form class="staff-form contact-form" data-case-id="c1" data-followup-id="f1">/);
+  assert.match(html, /data-case-action="RESOLVE_FOLLOWUP"[^>]*data-followup-id="f1"/);
 });
 
 test("two open tasks are two sections with their own field ids", () => {

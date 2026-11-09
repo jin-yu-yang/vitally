@@ -291,14 +291,13 @@ export function adminEligibility({ caseRecord, followup, request, item } = {}, p
   const assistedIntake = () => gate("admin") ?? allowed;
 
   // The office contacts a client about one task. The assignment is the
-  // server's (`ESCALATE_CONTACT` reads the workspace default), so there is no
-  // assignee selector anywhere and no way to take a task from someone else.
+  // server's (`ESCALATE_CONTACT` reads the workspace default) and is only a
+  // label: anyone holding `followup` may work any open task (042). There is
+  // no assignee selector anywhere.
   const followupWork = () => {
     const stopped = gate("followup");
     if (stopped) return stopped;
     if (!followup) return refused("This task is no longer on screen.");
-    if (followup.assigneeId !== id)
-      return refused("The office assigned this task to someone else.");
     if (followup.status !== "open")
       return refused(
         followup.status === "cancelled"
@@ -368,8 +367,8 @@ export function adminEligibility({ caseRecord, followup, request, item } = {}, p
     recordFilingResult: recordFilingResult(),
     returnToSigning: returnToSigning(),
     assistedIntake: assistedIntake(),
-    // One rule, two actions: the database checks the same capability, the same
-    // assignment and the same open status for both.
+    // One rule, two actions: the database checks the same capability and the
+    // same open status for both.
     recordContact: contact,
     resolveFollowup: contact,
     recordDocumentResponse: recordDocumentResponse(),
@@ -546,7 +545,7 @@ function receiptPanel(record, person, ui) {
   )}${body}</section>`;
 }
 
-// The two forms an assignee uses on an open task: the shared Log contact form,
+// The two forms anyone with follow-up access uses on an open task: the shared Log contact form,
 // linked to the task, then Resolve. Shared by the case page's Follow-up tab
 // and the office queue's Log contact drawer, so the two can never ask for
 // different things; the Contacts tab draws the same form, unlinked.
@@ -614,7 +613,7 @@ function adminFollowupPanel(record, person, ui) {
   const tasks = record.followups ?? [];
   return `<section class="panel" aria-labelledby="office-followup-title"><div class="section-head"><h2 id="office-followup-title">Follow-up with the client</h2><span class="muted small">${esc(
     tasks.length,
-  )} ${tasks.length === 1 ? "task" : "tasks"}</span></div><p class="field-note">The office raises a task when a preparer asks it to contact a client. ViTally assigns it; there is no way to hand it to someone else here.</p>${
+  )} ${tasks.length === 1 ? "task" : "tasks"}</span></div><p class="field-note">The office raises a task when a preparer asks it to contact a client, when a reviewer didn't go over the return with the client, or when a case is withdrawn or closed before its return is filed. Anyone in the office with follow-up access can log contacts on it and resolve it.</p>${
     tasks.length
       ? `<ul class="followup-list">${tasks
           .map((task) => followupTask(record, task, person, ui))
