@@ -1,6 +1,6 @@
 ## 1. Baselines
 
-- [ ] 1.1 Record these counts at the branch base, for the PR:
+- [x] 1.1 Record these counts at the branch base, for the PR:
   - unit: `npm test`, `ℹ tests` (expected 1496);
   - database: `npm run test:database` alone on the stack, `ℹ tests` (re-counted; #174 reported 440);
   - browser story: `npm run test:browser` (83 tests, 40 phases);
@@ -8,7 +8,7 @@
 
 ## 2. Migration 043
 
-- [ ] 2.1 Write `supabase/migrations/043_remove_presenter_access.sql` as design D1–D6 describe.
+- [x] 2.1 Write `supabase/migrations/043_remove_presenter_access.sql` as design D1–D6 describe.
   - **The refusal, which runs first:** SQLSTATE `VT008`, giving per-kind counts. It covers the seven membership-keyed columns, `cases.created_by_user_id`, and any other membership of a presenter account.
   - **The data steps, in this order:**
     1. presenter receipts;
@@ -22,7 +22,7 @@
     - the six RPCs: `grant execute … to authenticated`.
   - **`CREATE OR REPLACE`, same signatures:** `check_operation_authority`, `contact_person`, `lock_case`, `lock_assistance_item`, `act_close_case` (its comment), and `add_staff_member` (no reserved keys).
   - **Constraints:** no `CASCADE` in our SQL, and no trigger disabled.
-- [ ] 2.2 Write the read-only scratch scripts, which are not committed:
+- [x] 2.2 Write the read-only scratch scripts, which are not committed:
   - the refusal pre-check: presenter references in the eight columns, and other memberships of presenter accounts;
   - the count script (brainstorm Q13): every `public` table, people by key and link, memberships by access, receipts in total and by presenter actor, the default follow-up person per workspace, and every `auth` table in the cascade.
 
@@ -30,21 +30,21 @@
 
 `npm run db:migrate:test` targets this stack. Applying 043 can't be undone, and from then on other branches' database and browser suites fail on this stack until #136 merges. 043 is applied to this stack only through these steps, before any database suite runs on this branch.
 
-- [ ] 3.1 Tell the user the before-counts are starting, so they stay off the local app until 3.5. Run the refusal pre-check. If it isn't zero, stop and show the user before going further.
-- [ ] 3.2 Take the before-counts. Take a backup (`pg_dump` of the stack's database, kept in the scratchpad).
-- [ ] 3.3 **Restore check, and the throwaway database:** restore the backup into a new database in the same container (for example `vitally_throwaway`), never the stack's own database. Run the count script there; it must equal the before-counts. Then verify the refusal on that copy:
+- [x] 3.1 Tell the user the before-counts are starting, so they stay off the local app until 3.5. Run the refusal pre-check. If it isn't zero, stop and show the user before going further.
+- [x] 3.2 Take the before-counts. Take a backup (`pg_dump` of the stack's database, kept in the scratchpad).
+- [x] 3.3 **Restore check, and the throwaway database:** restore the backup into a new database in the same container (for example `vitally_throwaway`), never the stack's own database. Run the count script there; it must equal the before-counts. Then verify the refusal on that copy:
   1. seed a presenter membership and a `case_events` row that references it;
   2. apply main's 041 and 042 to the copy, then run 043's file and confirm it fails with `VT008` and the per-kind counts;
   3. confirm the copy's counts are unchanged;
   4. delete the seeded reference, run 043 again, and confirm it succeeds.
 
   Keep the commands and output for the PR, then drop the throwaway database.
-- [ ] 3.4 Apply 043 to the stack (`npm run db:migrate:test`, which also applies main's 041 and 042 first; 041 repairs no rows, and any rows 042 changes are added to the expected differences). Take the after-counts. Compare them with the expected differences computed from the before-counts. Any other difference stops the work, and the numbers go to the user.
-- [ ] 3.5 Tell the user the after-counts are done.
+- [x] 3.4 Apply 043 to the stack (`npm run db:migrate:test`, which also applies main's 041 and 042 first; 041 repairs no rows, and any rows 042 changes are added to the expected differences). Take the after-counts. Compare them with the expected differences computed from the before-counts. Any other difference stops the work, and the numbers go to the user.
+- [x] 3.5 Tell the user the after-counts are done.
 
 ## 4. Database test support and suites
 
-- [ ] 4.1 `tests/support/database-fixture.mjs`: make every change in brainstorm Q8's fixture list:
+- [x] 4.1 `tests/support/database-fixture.mjs`: make every change in brainstorm Q8's fixture list:
   - no presenter account and no `presenterUserIds`;
   - workspaces set up with role staff and `defaultFollowup` `site_coordinator`;
   - `initializeVerified` without personas;
@@ -54,27 +54,27 @@
   - a foreign staff person;
   - arg builders without `personId`;
   - `insertShaded` and `seedWorkflow` without personas.
-- [ ] 4.2 `tests/support/rpc-signatures.mjs`: the six new signatures, without the person argument.
-- [ ] 4.3 Database suites:
+- [x] 4.2 `tests/support/rpc-signatures.mjs`: the six new signatures, without the person argument.
+- [x] 4.3 Database suites:
   - remove the 2 tests whose code goes (staff-identity "a presenter chooses a demo persona", "a presenter tries a staff member's person");
   - make the replacements in brainstorm Q8, including "a call carrying `p_person_id` matches no function and writes nothing";
   - convert the rest (~90).
 
   Each test removed or replaced is named with the code it tested, and a grep shows that code gone.
-- [ ] 4.4 Catalog tests (`tests/database-catalog.mjs`):
+- [x] 4.4 Catalog tests (`tests/database-catalog.mjs`):
   - no `presenter` in function sources, constraints, policy names or expressions, or views;
   - the 24 policy names by table, with `staff_*` in place of `presenter_*`;
   - exactly six `public` functions, with their signatures and ACLs;
   - `acting_person(memberships, uuid)` and the old `initialize_workspace` signature are gone;
   - the new `acting_person` and `initialize_workspace` can't be executed by `anon`, `authenticated` or `service_role`.
-- [ ] 4.5 Reserved-key tests:
+- [x] 4.5 Reserved-key tests:
   - a freed `sam` key can be added as staff;
   - a key held by a kept persona is refused, and the persona stays unlinked.
-- [ ] 4.6 Run `npm run test:database`, all passing. Record the count after, and the remove/replace/convert lists.
+- [x] 4.6 Run `npm run test:database`, all passing. Record the count after, and the remove/replace/convert lists.
 
 ## 5. Tools and roster
 
-- [ ] 5.1 `tools/admin/workspace-setup.mjs`: call `initialize_workspace($1,$2::uuid[])` with no `presenterUserIds`.
+- [x] 5.1 `tools/admin/workspace-setup.mjs`: call `initialize_workspace($1,$2::uuid[])` with no `presenterUserIds`.
 - [x] 5.2 `tools/admin/roster.mjs`:
   - require staff and `defaultFollowup`;
   - remove `RESERVED_PERSON_KEYS`;
@@ -88,7 +88,7 @@
   - convert the presenter-shaped rosters;
   - add "an old roster's `presenters` is ignored with a note" and "a roster with no `defaultFollowup` is refused";
   - convert the reserved-key test to "any valid key is accepted by the parser".
-- [ ] 5.5 `tests/` for the seed: any envelope assertion loses `p_person_id`.
+- [x] 5.5 `tests/` for the seed: any envelope assertion loses `p_person_id`.
 
 ## 6. The browser
 
@@ -109,12 +109,12 @@
   - convert the rest: `fakeClient` defaults to `staff`, envelopes have no `p_person_id`, and requests have no `personId` key.
 
   Record the lists.
-- [ ] 6.5 Browser story (`tests/browser.mjs`):
+- [x] 6.5 Browser story (`tests/browser.mjs`):
   - replace `signInPresenter`/`assertPresenterScreen` and the presenter sections with the `unapproved` actor and "This account has no access", with the same zero counts;
   - drop `personId` from R62 and the other forged requests.
 
   The count stays at 83 tests and 40 phases, with no check trimmed.
-- [ ] 6.6 `grep -rn -i presenter src tools tests` and `grep -rn "p_person_id\|personId" src tools tests`: neither prints anything. Persona words are allowed only where they mean the staff member's own person or a kept row.
+- [x] 6.6 `grep -rn -i presenter src tools tests` and `grep -rnw "p_person_id|personId" src tools tests`: the only hits are deliberate, and `verify.md` lists them by kind: tests that assert absence or refusal, the roster's `presenters` note, and the staff member's own `personId` property. No live presenter or person-parameter code remains. Persona words are allowed only where they mean the staff member's own person or a kept row.
 
 ## 7. Docs
 
