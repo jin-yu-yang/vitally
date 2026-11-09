@@ -61,7 +61,7 @@ test("filing results schema against real Supabase", async (t) => {
         const applicant = await f.applicantA.from(table).select("*").eq("case_id", caseId);
         assert.equal(applicant.error, null, table);
         assert.deepEqual(applicant.data, [], table);
-        const staff = await f.presenter.from(table).select("*").eq("case_id", caseId);
+        const staff = await f.siteCoordinator.from(table).select("*").eq("case_id", caseId);
         assert.equal(staff.error, null, table);
         assert.equal(staff.data.length, 1, table);
         // A complete, otherwise-valid row, so only the missing insert grant can refuse it.
@@ -70,7 +70,7 @@ test("filing results schema against real Supabase", async (t) => {
           filing_returns: { attempt: 1, return_kind: "state", method: "efile" },
           filing_notes: { attempt: 1, note: "Fictional second note.", recorded_by: f.siteCoordinatorId },
         }[table];
-        for (const client of [f.applicantA, f.presenter]) {
+        for (const client of [f.applicantA, f.siteCoordinator]) {
           const { error } = await client
             .from(table)
             .insert({ workspace_id: f.workspaceId, case_id: caseId, ...row });
@@ -97,8 +97,8 @@ test("filing results schema against real Supabase", async (t) => {
         f.sql("update public.filing_notes set note='Changed' where case_id=$1", [caseId]),
       );
       await assert.rejects(() => f.sql("delete from public.filing_notes where case_id=$1", [caseId]));
-      const update = await f.presenter.from("filing_notes").update({ note: "Changed" }).eq("case_id", caseId);
-      const del = await f.presenter.from("filing_notes").delete().eq("case_id", caseId);
+      const update = await f.siteCoordinator.from("filing_notes").update({ note: "Changed" }).eq("case_id", caseId);
+      const del = await f.siteCoordinator.from("filing_notes").delete().eq("case_id", caseId);
       const after = await f.sql("select note from public.filing_notes where case_id=$1", [caseId]);
       assert.ok(update.error || after.rows[0].note === "Fictional fix note.");
       assert.ok(del.error || after.rows.length === 1);
@@ -550,7 +550,7 @@ test("return to signing and file again", async (t) => {
 
     await t.test("admin only", async () => {
       const caseId = await answeredCase({ federal: "efile", state: "efile" }, { federal: "rejected", state: "accepted" });
-      for (const client of [f.preparer, f.reviewer, f.presenter, f.applicantA])
+      for (const client of [f.preparer, f.reviewer, f.applicantA])
         await assert.rejects(
           () => act(caseId, "RETURN_TO_SIGNING", { confirmed: true }, client),
           rejected("FORBIDDEN"),
@@ -805,7 +805,7 @@ test("record filing result", async (t) => {
       const today = await nyDay();
       const caseId = await filedCase();
       const results = { federal: { result: "accepted", date: today } };
-      for (const client of [f.preparer, f.reviewer, f.presenter, f.applicantA])
+      for (const client of [f.preparer, f.reviewer, f.applicantA])
         await assert.rejects(() => record(caseId, results, {}, client), rejected("FORBIDDEN"));
       assert.deepEqual(await counts(caseId), { answered: 0, notes: 0, events: 0 });
     });
@@ -867,7 +867,6 @@ test("record filing result", async (t) => {
           p_action_id: randomUUID(),
           p_case_id: caseId,
           p_expected_revision: Number(revision),
-          p_person_id: null,
           p_type: "RECORD_FILING_RESULT",
           p_payload: { confirmed: true, results: { federal: { result: "accepted", date: today } } },
         });
@@ -948,8 +947,8 @@ test("filing details stay with staff", async (t) => {
         assert.equal(read.error, null, table);
         assert.deepEqual(read.data, [], table);
       }
-      // The presenter does read them, so the empty answers above are row security.
-      const staff = await f.presenter.from("filing_notes").select("note").eq("case_id", caseId);
+      // Staff do read them, so the empty answers above are row security.
+      const staff = await f.siteCoordinator.from("filing_notes").select("note").eq("case_id", caseId);
       assert.deepEqual(staff.data, [{ note: NOTE }]);
     });
 

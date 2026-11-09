@@ -150,7 +150,7 @@ the wide screen goes mostly unused.
 ### Accent & Interactive
 - **Lavender Slate** `#6A5ACD` (chosen to sit beside the PCDC 寿 logo, which stays `#546196`): primary buttons, active stepper node, links.
 - **Deep Lavender** `#5646b5`: primary button hover and pressed states.
-- **Pine Green** `#2f8a4c`: the presenter panel's accent border and "connected" states.
+- **Pine Green** `#2f8a4c`: "connected" states.
 - **Lantern Amber** `#996924`: the single warm accent (the dot after "ViTally").
   Its lighter forms mark corrections and waiting states.
 - **Focus Lavender** `#8a93bd`: 2px focus outline on form fields.
@@ -197,7 +197,6 @@ generous line-heights. Overlines use wide positive tracking so the caps read as 
   padding, weight 550 at 15px, a trailing arrow icon, and a very soft drop shadow.
   Full-width inside forms.
 - **Secondary**: white with a Field Lavender border, lavender text and a leading icon.
-  Persona chips add a small grey capability caption.
 - **Text**: no border, Quiet Slate, used for "Sign out", "Back to the work board" and
   "Use a different email address".
 - **Inline**: underlined link style, used for "Dismiss", "Get help from the office" and
@@ -210,8 +209,6 @@ generous line-heights. Overlines use wide positive tracking so the caps read as 
   reference (for example `VT-5ENA-WJMV`) plus a chevron and stage badges, followed by a
   two-column grid of caps labels over values (Service, Language, Work needed, Requires,
   Preparer, Reviewer, Last reminded, Updated).
-- **Presenter panel**: a panel with a Pine Green border and a 2px inset top rule. It
-  holds the persona picker and the demo controls.
 - **Modal**: 17px radius, 36px padding, 520px max width, a deep soft shadow, and an
   overline reading "ViTally · HERE TO HELP".
 
@@ -298,7 +295,7 @@ Morning Canvas `#f8f7fd` for the page, Hairline Lavender `#e7e4f2` for borders, 
 
 ### Incremental Iteration
 Keep the palette and the reassuring tone. Wider staff layouts are fair game: multi-column
-boards, a case sidebar, and a presenter panel collapsed into a compact toolbar. Show
+boards, and a case sidebar. Show
 event history in human language, and keep the "fictional data" disclaimers visible.
 
 ## 7. Accents, text colors and newer components (2026-09-27)

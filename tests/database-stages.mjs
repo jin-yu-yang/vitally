@@ -44,9 +44,9 @@ test("the main chain's new stages against real Supabase", async (t) => {
 
     await t.test("START_SCREENING refusals, in check order", async () => {
       const { caseId } = await f.submittedClientCase();
-      for (const personId of [f.alex, f.morgan, null])
+      for (const client of [f.preparer, f.reviewer])
         await assert.rejects(
-          () => f.actAsPersona(f.presenter, caseId, personId, "START_SCREENING", {}),
+          () => f.act(client, caseId, "START_SCREENING", {}),
           rejected("FORBIDDEN"),
         );
       // The client cannot start the office's screening either.
@@ -135,10 +135,10 @@ test("the main chain's new stages against real Supabase", async (t) => {
         () => f.act(f.siteCoordinator, caseId, "MARK_EFILED", EFILED),
         rejected("INVALID_TRANSITION"),
       );
-      for (const personId of [f.alex, f.morgan, null])
+      for (const client of [f.preparer, f.reviewer])
         await assert.rejects(
           () =>
-            f.actAsPersona(f.presenter, caseId, personId, "MARK_READY_TO_EFILE", CONFIRMED),
+            f.act(client, caseId, "MARK_READY_TO_EFILE", CONFIRMED),
           rejected("FORBIDDEN"),
         );
       for (const payload of [
@@ -154,9 +154,9 @@ test("the main chain's new stages against real Supabase", async (t) => {
       await f.act(f.siteCoordinator, caseId, "MARK_READY_TO_EFILE", CONFIRMED);
       assert.equal(await stageOf(caseId), "ready_to_efile");
       assert.ok((await f.clientMessages(caseId)).includes(SIGNED_LINE));
-      for (const personId of [f.alex, f.morgan, null])
+      for (const client of [f.preparer, f.reviewer])
         await assert.rejects(
-          () => f.actAsPersona(f.presenter, caseId, personId, "MARK_EFILED", EFILED),
+          () => f.act(client, caseId, "MARK_EFILED", EFILED),
           rejected("FORBIDDEN"),
         );
       await assert.rejects(

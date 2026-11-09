@@ -76,6 +76,8 @@ const ROLE_ACCOUNTS = Object.freeze([
   ["reviewer", "reviewer", "Jamie Ellis", ["review"]],
   ["intaker", "intaker", "Rowan Price", ["receive_documents", "assist"]],
 ]);
+// The person key every fixture workspace uses for its default follow-up person.
+const DEFAULT_FOLLOWUP_KEY = "site_coordinator";
 // One key for the advisory lock that keeps fixture workspace setup exclusive
 // across parallel test processes (see initializeOwned below).
 const SETUP_LOCK =
@@ -116,14 +118,12 @@ export const applyArgs = ({
   actionId = randomUUID(),
   caseId,
   revision,
-  personId = null,
   type,
   payload = {},
 }) => ({
   p_action_id: actionId,
   p_case_id: caseId,
   p_expected_revision: revision,
-  p_person_id: personId,
   p_type: type,
   p_payload: payload,
 });
@@ -133,14 +133,12 @@ export const assistanceArgs = ({
   actionId = randomUUID(),
   itemId,
   revision,
-  personId = null,
   type,
   note = null,
 }) => ({
   p_action_id: actionId,
   p_item_id: itemId,
   p_expected_revision: revision,
-  p_person_id: personId,
   p_type: type,
   p_note: note,
 });
@@ -160,13 +158,11 @@ export const SAMPLE_CONTACT = () => ({
 export const contactArgs = ({
   actionId = randomUUID(),
   caseId,
-  personId = null,
   followupId = null,
   entry,
 }) => ({
   p_action_id: actionId,
   p_case_id: caseId,
-  p_person_id: personId,
   p_followup_id: followupId,
   p_entry: entry,
 });
@@ -174,26 +170,14 @@ export const editContactArgs = ({
   actionId = randomUUID(),
   contactId,
   revision,
-  personId = null,
   entry,
 }) => ({
   p_action_id: actionId,
   p_contact_id: contactId,
   p_expected_revision: revision,
-  p_person_id: personId,
   p_entry: entry,
 });
-// `siteCoordinatorFollowsUp: false` leaves Sam as the default follow-up
-// person: the sample-data tests (tests/database-fixtures.mjs) check the seeded
-// samples' follow-ups against the default the samples are written for.
-// `roleAccounts: false` adds no role accounts at all, for the tests whose
-// subject is the initializer's own workspace (exactly the three demonstration
-// people, Sam the default); their reads then go through the presenter.
-export async function createDatabaseFixture({
-  afterInitialize,
-  roleAccounts = true,
-  siteCoordinatorFollowsUp = true,
-} = {}) {
+export async function createDatabaseFixture({ afterInitialize } = {}) {
   const target = await assertTestTarget();
   const runManifest = await createRun(),
     run = ownedRun(runManifest);
@@ -235,24 +219,17 @@ export async function createDatabaseFixture({
       await f.sql(SETUP_UNLOCK);
     }
   };
-  // Every helper below acts as the signed-in account itself and sends
-  // `p_person_id: null`: a staff account always acts as its own person, and an
-  // applicant names no person. When the RPCs drop the parameter, only these
-  // helpers' internals change. The `...AsPersona` helpers further down keep the
-  // old explicit person for the tests whose subject is presenter or persona
-  // behaviour; they go away with presenter mode.
-  const createCase = async (actor, actionId, { mode = "client", personId = null, answers = {} } = {}) => {
+  // Every helper below acts as the signed-in account itself: a staff account
+  // always acts as its own person, and an applicant as no person.
+  f.createCase = async (actor, actionId, { mode = "client", answers = {} } = {}) => {
     const { data, error } = await actor.rpc("vitally_create_case", {
       p_action_id: actionId,
       p_mode: mode,
-      p_person_id: personId,
       p_answers: answers,
     });
     if (error) throw databaseError(error);
     return data;
   };
-  f.createCase = (actor, actionId, { mode = "client", answers = {} } = {}) =>
-    createCase(actor, actionId, { mode, answers });
   // A draft with answers. Version 2 refuses a create that carries answers (011's
   // insert trigger, VT007), so the case is created empty and the answers are
   // saved straight after, as the client's own form does.
@@ -270,9 +247,8 @@ export async function createDatabaseFixture({
       (await f.sql("select answers->>'service' as service from public.cases where id=$1", [caseId]))
         .rows[0]?.service,
     );
-  // The client staff reads go through: the Site Coordinator, or the presenter
-  // in a fixture made with `roleAccounts: false`.
-  const staffReader = () => f.siteCoordinator ?? f.presenter;
+  // The client staff reads go through.
+  const staffReader = () => f.siteCoordinator;
   // A row the caller cannot see is NOT_FOUND, never a raw SDK row-count error.
   const visibleRow = async (client, table, id) => {
     const { data, error } = await client.from(table).select("*").eq("id", id);
@@ -306,7 +282,7 @@ export async function createDatabaseFixture({
       );
     return rows[0].id;
   };
-  const act = async (client, caseId, personId, type, payload = {}) => {
+  f.act = async (client, caseId, type, payload = {}) => {
     const related = RELATED_DEFAULTS[type];
     const body =
       related && !(related in payload)
@@ -317,14 +293,12 @@ export async function createDatabaseFixture({
       p_action_id: randomUUID(),
       p_case_id: caseId,
       p_expected_revision: current.revision,
-      p_person_id: personId,
       p_type: type,
       p_payload: body,
     });
     if (error) throw createAppError(error);
     return data;
   };
-  f.act = (client, caseId, type, payload = {}) => act(client, caseId, null, type, payload);
   // `f.act` for the assistance entry point. Tests that need an explicit
   // revision (races, replays, invisible items) call `rpc` with assistanceArgs.
   f.actAssistance = async (client, itemId, type, note = null) => {
@@ -342,16 +316,14 @@ export async function createDatabaseFixture({
     return data;
   };
   // A contact log entry, linked to a follow-up task when `followupId` is given.
-  const logContact = async (client, caseId, personId, entry, followupId = null) => {
+  f.logContact = async (client, caseId, entry, followupId = null) => {
     const { data, error } = await client.rpc(
       "vitally_log_contact",
-      contactArgs({ caseId, personId, followupId, entry }),
+      contactArgs({ caseId, followupId, entry }),
     );
     if (error) throw createAppError(error);
     return data;
   };
-  f.logContact = (client, caseId, entry, followupId = null) =>
-    logContact(client, caseId, null, entry, followupId);
   // The season-end close: `cases` is [{caseId, revision}].
   f.closeUnsigned = async (
     client,
@@ -360,7 +332,6 @@ export async function createDatabaseFixture({
   ) => {
     const { data, error } = await client.rpc("vitally_close_unsigned", {
       p_action_id: actionId,
-      p_person_id: null,
       p_cases: cases,
       p_confirmed: confirmed,
     });
@@ -381,13 +352,6 @@ export async function createDatabaseFixture({
     if (error) throw createAppError(error);
     return data;
   };
-  // Legacy, presenter mode only: the caller names a person explicitly. Kept for
-  // the tests whose subject is presenter or persona behaviour (persona
-  // refusals, a client or staff member naming a person). These go away with
-  // presenter mode.
-  f.createCaseAsPersona = createCase;
-  f.actAsPersona = act;
-  f.logContactAsPersona = logContact;
   // An unclaimed case waiting for a preparer, built only through public actions.
   f.readyCase = async () => {
     const created = await f.draftCase(f.applicantA);
@@ -523,8 +487,7 @@ export async function createDatabaseFixture({
   // Staff reads go through the production adapter on the Site Coordinator's
   // own client, so these helpers prove staff visibility *and* exercise the one
   // mapping the browser uses. A row staff cannot see is NOT_FOUND, exactly as
-  // it is for the application. (Since migration 038 staff see exactly what a
-  // presenter sees.)
+  // it is for the application.
   f.staffStore = () => createStore(staffReader());
   // The assistance item as staff read it.
   f.readStaffAssistance = async (itemId) => {
@@ -710,7 +673,6 @@ export async function createDatabaseFixture({
     for (const actor of [
       "applicantA",
       "applicantB",
-      "presenter",
       "outsider",
       "unapproved",
     ]) {
@@ -723,10 +685,22 @@ export async function createDatabaseFixture({
       f[`${actor}Email`] = email;
       f[actor] = client;
     }
+    // The staff accounts the workflow tests act as, one per role, added by the
+    // initializer's own transaction as the roster does. The Site Coordinator is
+    // the default follow-up person, as a site's lead would be.
+    const roleLogins = [];
+    for (const [role, personKey, name, capabilities] of ROLE_ACCOUNTS)
+      roleLogins.push({ role, personKey, name, capabilities, ...(await provision()) });
     f.setup = {
       workspaceId: f.workspaceId,
-      presenterUserIds: [f.presenterUserId],
       applicantUserIds: [f.applicantAUserId, f.applicantBUserId],
+      staff: roleLogins.map(({ userId, personKey, name, capabilities }) => ({
+        userId,
+        personKey,
+        name,
+        capabilities,
+      })),
+      defaultFollowup: DEFAULT_FOLLOWUP_KEY,
     };
     const initializeOwned = async (setup) => {
       run.pendingWorkspaces.add(setup.workspaceId);
@@ -752,58 +726,68 @@ export async function createDatabaseFixture({
         return result;
       });
     };
-    // Workflow tests depend on the shared initializer's permanent people and
-    // its default follow-up person; a partial workspace must fail, not skip.
-    // It runs before the role accounts are added (below), so the workspace
-    // still holds exactly the three demonstration people and Sam is still the
-    // default when it checks.
+    // Workflow tests depend on exactly the staff this setup names and on its
+    // default follow-up person; a partial workspace must fail, not skip. A
+    // new workspace has no other people. Returns the person ids by key.
     const initializeVerified = async (setup) => {
-      const { people } = await initializeOwned(setup);
+      await initializeOwned(setup);
+      const people = Object.fromEntries(
+        (
+          await f.sql(
+            "select person_key,id,user_id from public.people where workspace_id=$1",
+            [setup.workspaceId],
+          )
+        ).rows.map((row) => [row.person_key, row]),
+      );
       const workspace = (
         await f.sql(
-          "select w.default_followup_person_id,(select count(*) from public.people p where p.workspace_id=w.id) as people from public.workspaces w where w.id=$1",
+          "select default_followup_person_id from public.workspaces where id=$1",
           [setup.workspaceId],
         )
       ).rows[0];
+      const keys = setup.staff.map((member) => member.personKey);
       if (
         !workspace ||
-        Number(workspace.people) !== 3 ||
-        !people.alex ||
-        !people.morgan ||
-        workspace.default_followup_person_id !== people.sam
+        Object.keys(people).length !== keys.length ||
+        !setup.staff.every(
+          (member) => people[member.personKey]?.user_id === member.userId,
+        ) ||
+        workspace.default_followup_person_id !== people[DEFAULT_FOLLOWUP_KEY]?.id
       )
         throw Object.assign(new Error("Workspace prerequisites are missing."), {
           code: "SETUP_INCOMPLETE",
         });
-      return people;
+      return Object.fromEntries(keys.map((key) => [key, people[key].id]));
     };
     // Another workspace of this run, owned and cleaned up like the foreign one.
     f.initializeOwned = initializeOwned;
-    f.people = await initializeVerified(f.setup);
-    ({ alex: f.alex, morgan: f.morgan, sam: f.sam } = f.people);
-    // The staff accounts the workflow tests act as, one per role, made through
-    // the roster's own path. The Site Coordinator is the default follow-up
-    // person, as a site's lead would be. Fictional names only.
+    const rolePeople = await initializeVerified(f.setup);
     f.roleAccounts = {};
-    for (const [role, key, name, capabilities] of roleAccounts ? ROLE_ACCOUNTS : []) {
-      const member = await f.staff({ key, name, capabilities });
-      f.roleAccounts[role] = member;
-      f[role] = member.client;
-      f[`${role}Id`] = member.personId;
-      f[`${role}UserId`] = member.userId;
+    for (const { role, personKey, client, userId, email } of roleLogins) {
+      f.roleAccounts[role] = { client, userId, personId: rolePeople[personKey], email };
+      f[role] = client;
+      f[`${role}Id`] = rolePeople[personKey];
+      f[`${role}UserId`] = userId;
     }
-    if (roleAccounts && siteCoordinatorFollowsUp)
-      await f.withSetupLock(() =>
-        f.sql("select vitally_private.set_default_followup($1,$2)", [
-          f.workspaceId,
-          "site_coordinator",
-        ]),
-      );
-    f.foreignPeople = await initializeVerified({
+    // The other workspace has one staff member of its own, for the tests that
+    // reach across workspaces. Fictional name only.
+    const foreign = await provision();
+    const foreignPeople = await initializeVerified({
       workspaceId: f.foreignWorkspaceId,
-      presenterUserIds: [],
       applicantUserIds: [f.outsiderUserId],
+      staff: [
+        {
+          userId: foreign.userId,
+          personKey: DEFAULT_FOLLOWUP_KEY,
+          name: "Dale Reyes",
+          capabilities: ["admin", "followup"],
+        },
+      ],
+      defaultFollowup: DEFAULT_FOLLOWUP_KEY,
     });
+    f.foreignStaff = foreign.client;
+    f.foreignStaffId = foreignPeople[DEFAULT_FOLLOWUP_KEY];
+    f.foreignStaffUserId = foreign.userId;
     return f;
   } catch (error) {
     try {

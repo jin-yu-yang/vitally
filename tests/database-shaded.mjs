@@ -13,7 +13,7 @@ const insertShaded = (f, caseId, fields, overrides = {}) => {
     case_id: caseId,
     fields: JSON.stringify(fields),
     version: 1,
-    updated_by_person_id: f.morgan,
+    updated_by_person_id: f.reviewerId,
     ...overrides,
   };
   const keys = Object.keys(row);
@@ -36,7 +36,7 @@ test("shaded table is staff-only", async () => {
     const applicant = await f.applicantA.from("preparer_shaded_fields").select("*").eq("case_id", caseId);
     assert.equal(applicant.error, null);
     assert.deepEqual(applicant.data, []);
-    const staff = await f.presenter.from("preparer_shaded_fields").select("*").eq("case_id", caseId);
+    const staff = await f.siteCoordinator.from("preparer_shaded_fields").select("*").eq("case_id", caseId);
     assert.equal(staff.error, null);
     assert.equal(staff.data.length, 1);
     assert.deepEqual(staff.data[0].fields, { incomeW2s: true, incomeW2sCount: 2 });
@@ -50,7 +50,7 @@ test("shaded table is staff-only", async () => {
     assert.deepEqual(Object.fromEntries(privileges.map((row) => [row.p, row.granted])), {
       SELECT: true, INSERT: false, UPDATE: false, DELETE: true,
     });
-    for (const client of [f.applicantA, f.presenter]) {
+    for (const client of [f.applicantA, f.siteCoordinator]) {
       assert.ok(
         (
           await client
@@ -193,7 +193,6 @@ test("only the case's preparer may save", async () => {
       ["the reviewer", f.reviewer],
       ["an admin who is not the preparer", f.siteCoordinator],
       ["another volunteer", casey],
-      ["no staff person", f.presenter],
     ])
       await assert.rejects(() => save(f, caseId, { incomeW2s: true }, 0, client), refused("FORBIDDEN", "INELIGIBLE"), name);
     await assert.rejects(() => save(f, caseId, { incomeW2s: true }, 0, f.applicantA), refused("FORBIDDEN"), "the client");

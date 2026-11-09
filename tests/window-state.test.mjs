@@ -67,7 +67,7 @@ test("only known fields of the right shape survive a round trip", () => {
     openPanels: "confirmed",
     boardFilters: ["available"],
     selectedCaseId: 17,
-    access: "presenter",
+    access: "staff",
     answers: { firstName: "Mei" },
     authCode: "123456",
   });
@@ -248,7 +248,7 @@ test("a stored visited-steps record from 4b is ignored", () => {
 });
 
 test("a staff window neither stores nor restores a persona", () => {
-  // A persona left by a presenter window (or written by hand) under this key.
+  // A persona left by an earlier version of the app (or written by hand) under this key.
   const leftover = JSON.stringify({ screen: "staff", selectedPersonId: "person-sam" });
   const sessionStorage = fakeSession({ [windowStateKey("user-riley")]: leftover });
   const window = createWindowState({ sessionStorage });
@@ -262,7 +262,7 @@ test("a staff window neither stores nor restores a persona", () => {
 });
 
 test("a stored persona is ignored and never written", () => {
-  // A persona left in this tab by an earlier presenter window (or by hand).
+  // A persona left in this tab by an earlier version of the app (or by hand).
   const leftover = JSON.stringify({ selectedPersonId: "p1", screen: "board" });
   const sessionStorage = fakeSession({ [windowStateKey("user-1")]: leftover });
   const window = createWindowState({ sessionStorage });

@@ -42,12 +42,12 @@ erDiagram
   WORKSPACE ||--o{ PERSON : "has staff"
   MEMBERSHIP {
     uuid user_id
-    text access "applicant | presenter | staff"
+    text access "applicant | staff"
   }
   PERSON {
     uuid id
-    uuid user_id "the staff account that is this person; null for the demo personas"
-    text name "Alex, Morgan, Sam"
+    uuid user_id "the staff account that is this person"
+    text name "a staff member"
     text_array capabilities "prepare, review, admin, followup, receive_documents, assist"
   }
 ```
@@ -55,24 +55,20 @@ erDiagram
 - **Auth user** (`auth.users`): who signed in. Created only by the roster command, so only
   approved addresses can sign in.
 - **Membership** (`public.memberships`): which workspace the account belongs to, and whether it
-  is an `applicant` (a client), a `presenter` (the demonstration's staff account) or `staff` (a real
-  staff member's own account).
-- **Person** (`public.people`): a staff member with capabilities. Every staff action names the
-  person it is done as, and the database checks that person's capabilities.
+  is an `applicant` (a client) or `staff` (a staff member's own account).
+- **Person** (`public.people`): a staff member with capabilities. Every staff action is done as
+  the account's own person, and the database checks that person's capabilities.
 
-**Presenter accounts are not linked to people.** A presenter who signs in now gets one plain
-screen, "This account is no longer used", and the app reads nothing for it. There is no presenter
-panel and no persona to choose. The database still has the persona rule: a presenter's RPC call
-may name any person as `p_person_id` (the app never sends one now), and the question "is this
-account allowed to act as Alex?" is answered only by "it is a presenter". That rule stays in the
-database until #136 removes the presenter role.
+There is no presenter access and there are no demonstration people (Alex, Morgan, Sam): #136
+removed them. A former presenter address cannot sign in, and a window that was open shows "This
+account has no access". Migration 043 deleted the presenter accounts, and the demonstration
+people that nothing references.
 
 **Staff accounts are linked.** A `staff` membership has exactly one `people` row with a matching
-`user_id`, created from the roster. The database, not the browser, decides who is acting: every
-entry point that takes a person calls `vitally_private.acting_person` first, which gives a staff
-account its own person whatever the browser sent, and refuses it anyone else
-([Database: who is acting](database.md#who-is-acting)). A presenter may not act as a staff member's
-person. So receipts, case history, participation, reviews and the contact log name the real staff
+`user_id`, created from the roster. The database, not the browser, decides who is acting: the six entry points that act as a
+person take no person parameter and call `vitally_private.acting_person` first, which gives a
+staff account its own person
+([Database: who is acting](database.md#who-is-acting)). So receipts, case history, participation, reviews and the contact log name the real staff
 member, and the independence rule (a preparer never reviews their own case) holds across real
 accounts. The browser's principal carries `personId` and `personName` for a staff account, and
 `staffWindow()` and `actingPersonId()` in the controller route it to the staff screens as its own
@@ -87,14 +83,14 @@ Visibility is enforced by row-level security on every table (full policies in
 | Principal | Sees |
 | --- | --- |
 | Applicant | Their own cases, and on those only: document requests, their documents, their contact details (`case_contacts`), and plain-language progress messages (`client_events`). |
-| Presenter or staff | Every case in the workspace **except other people's unsubmitted client drafts**, plus all staff records: people, internal history, participation, follow-ups, the contact log (`contact_log`, `contact_log_versions`), reviews, assistance items, materials received. A staff account sees exactly what a presenter sees, including through Realtime; narrowing it is the roadmap's visibility work. |
+| Staff | Every case in the workspace **except other people's unsubmitted client drafts**, plus all staff records: people, internal history, participation, follow-ups, the contact log (`contact_log`, `contact_log_versions`), reviews, assistance items, materials received. Narrowing it is the roadmap's visibility work. |
 | Anonymous | Nothing. |
 
 The browser mirrors this: the applicant adapter never requests a staff table
 (`CLIENT_TABLES` in [`src/supabase-store.mjs`](../../src/supabase-store.mjs)).
 
 **Contact details are narrower on screen than in the database.** Row-level security lets every
-presenter or staff account read `case_contacts`, because it cannot tell personas apart. The screens apply decision
+staff account read `case_contacts`, because it cannot tell roles apart. The screens apply decision
 D5 themselves through `canSeeContact` in
 [`src/intake-catalogue.mjs`](../../src/intake-catalogue.mjs): office staff (`followup` or `admin`)
 on any case, a volunteer only on a case they prepare or review. The actions that change contact
@@ -124,7 +120,7 @@ resets are version 2. The columns stay so that a future version is a new value. 
 ## How a read works
 
 The store reads tables directly through PostgREST with the signed-in user's token. RLS filters
-rows. A presenter's case list also fetches per-case summaries (participants, open follow-ups,
+rows. A staff case list also fetches per-case summaries (participants, open follow-ups,
 open requests) so the work board can show what each case is waiting for. The store turns
 `snake_case` rows into the `camelCase` objects described at the bottom of
 [`src/contracts.mjs`](../../src/contracts.mjs).
@@ -211,8 +207,7 @@ reload. Details in [Front end: sign-in](frontend.md#sign-in) and
 | Inline RLS predicates, repeated per table | Avoids granting browsers EXECUTE on helper functions | Seven copies of the case-visibility rule must stay in agreement (a test checks this) | Revisit; a view or helper with care |
 | Vanilla ES modules, no framework, no build | Static hosting, nothing to install to view | Full-page re-render needs hand-written focus and draft preservation | Probably not; see [front end](frontend.md#moving-to-a-framework) |
 | Committed, pinned Supabase SDK bundle | Works from any static host, reproducible | Must be rebuilt by hand on upgrade | Replaced by a normal build if a framework is adopted |
-| Presenter personas | One person can demonstrate every role | Not a real staff identity model | **No.** Replaced by `staff` accounts once presenter mode is removed |
-| `staff` accounts linked to a person, acting person decided by the database | The browser never claims an identity; receipts and history name the real person | Two staff paths (presenter and staff) until presenter mode goes | Yes |
+| `staff` accounts linked to a person, acting person decided by the database | The browser never claims an identity; receipts and history name the real person | A staff account is exactly one person, so one account cannot demonstrate every role | Yes |
 
 ## Real versus simulated
 

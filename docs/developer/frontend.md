@@ -90,7 +90,7 @@ fields:
 
 | Field | Meaning |
 | --- | --- |
-| `session`, `principal` | Sign-in status (`unknown`, `none`, `present`) and `{userId, workspaceId, access, email, personId, personName}`. `access` is `applicant`, `presenter` or `staff` (a `presenter` gets one plain screen and nothing is loaded for it); `personId` and `personName` are a staff account's own roster person, null for the other two |
+| `session`, `principal` | Sign-in status (`unknown`, `none`, `present`) and `{userId, workspaceId, access, email, personId, personName}`. `access` is `applicant` or `staff`; `personId` and `personName` are a staff account's own roster person, null for an applicant |
 | `connection` | `online`, `reconnecting`, `offline` |
 | `cases`, `people`, `assistance`, `workspace` | Lists for the current screen (people, assistance and workspace for staff windows only) |
 | `savedCase` | The open case exactly as the server last returned it |
@@ -115,9 +115,9 @@ sign-in (`sendCode`, `verifyCode`, `editAuthEmail`, `editAuthCode`, `restartSign
 **`staffWindow()`** is everything a staff screen does (its reads, its eligibility rules and its
 actions), true only for a `staff` account (`isStaffWindow` in [`src/contracts.mjs`](../../src/contracts.mjs)
 says the same for the views). The person acting is always the account's own `principal.personId`; a
-client sends none. The store sends `p_person_id: null`, so the browser never claims an identity; the
-database resolves it ([Database: who is acting](database.md#who-is-acting)). A `presenter` is not a
-staff window: it gets one bare English screen (`presenterScreen` in `views.mjs`) and nothing is
+client sends none. None of the six RPCs takes a person, so the browser never claims an identity; the
+database resolves it ([Database: who is acting](database.md#who-is-acting)). An account with any
+other access (a former presenter) gets the "This account has no access" screen and nothing is
 loaded for it.
 
 Three rules the controller keeps:
@@ -141,7 +141,6 @@ Three rules the controller keeps:
 | Applicant | `applications` (list and lookup by Application ID), `reference` (new ID to keep), `intake` (the sub-step form, built by `src/intake-views.mjs`), `progress` (status, client number, requests, send document) |
 | Staff window, volunteer account | `staff`: the work board; `staff-case`: the case page with its tabs ([`staff-views.mjs`](../../src/staff-views.mjs)) |
 | Staff window, `admin` account | `staff`: the Follow-ups queue ([`office-views.mjs`](../../src/office-views.mjs)); `office-cases`: the case pool ([`pool-views.mjs`](../../src/pool-views.mjs)); `office-add-case`: Add a case for a walk-in client ([`office-views.mjs`](../../src/office-views.mjs)); `staff-case`: the office's case page ([`admin-views.mjs`](../../src/admin-views.mjs)) |
-| Presenter | One bare English screen: "This account is no longer used", the text "Presenter mode has been removed. Ask your site coordinator for a staff account." and Sign out (`presenterScreen` in `views.mjs`). No header, panel, persona picker, sample reset or checkpoints. The presenter gets only this plain screen. |
 | Staff account | The staff screens: the sidebar and the case page header say "Signed in as <name>", and the person is the account's own (`staffScreen` in `views.mjs` picks the office screens when that person has `admin`, and the volunteer work board otherwise). Always English |
 
 **Fill tools.** They follow the demo-tools switch. Three controls exist: the staff "Auto-fill fictional data" button, the client intake's fiction toolbar and the office's Add a case "Fill fictional details" pill. With the switch on, an "Auto-fill fictional data" button appears at the top of each questionnaire, the review-contact form and the filing dialogs (Mark ready to e-file, Mark e-filed, Record filing result, Return to signing). [`src/demo-fill.mjs`](../../src/demo-fill.mjs) fills the form with fictional values that the form's own payload builder accepts. It never overwrites typed text or a defaulted choice, and it sends nothing: the form's own button still submits. `demoFillButton(enabled)` renders nothing when the switch (`state.demoTools`) is off, and the `demo-fill` handler in `app.mjs` checks `demoToolsOn` again. The switch is on only when `/public-config.json` sends `demoTools: true` (`server.mjs` does so only with `VITALLY_DEMO_TOOLS=1` and a loopback `SUPABASE_URL`) and the config's `supabaseUrl` is loopback. When on, these controls show to whoever is on that screen; when off, to no one
@@ -919,7 +918,7 @@ the keyboard stays on the pressed one.
 | --- | --- | --- |
 | Unit (1500) | `npm test` | Controller against doubles, renderers as strings, payload builders, eligibility, store mapping, auth, focus logic. No browser, no network |
 | Sign-in gate (20) | `npm run test:auth-browser` | Real sign-in through the real form in Chrome and Firefox against the local stack |
-| Story (83) | `npm run test:browser` | The full demonstration in two browsers at once, both engine orders, plus regressions (conflicts, offline retry, privacy, keyboard). The main story signs in as the role-named staff accounts (Site Coordinator, Preparer, Reviewer), each once in a window of its own, and takes its cases from the seed module (`tools/admin/seed-cases.mjs`); no step signs in as the presenter except the one that checks its plain screen. The story's workspace is on version 2, and one phase works in Chinese in its own `zh-CN` context (every other context is pinned to `en-US`). `loginTestUserById` in `tests/support/browser-fixture.mjs` signs in without English locators. On a busy machine a Firefox-staff wait can time out ([setup](../setup.md#5-tests)); run it again |
+| Story (83) | `npm run test:browser` | The full demonstration in two browsers at once, both engine orders, plus regressions (conflicts, offline retry, privacy, keyboard). The main story signs in as the role-named staff accounts (Site Coordinator, Preparer, Reviewer), each once in a window of its own, and takes its cases from the seed module (`tools/admin/seed-cases.mjs`); one step checks that a former presenter address sees "This account has no access". The story's workspace is on version 2, and one phase works in Chinese in its own `zh-CN` context (every other context is pinned to `en-US`). `loginTestUserById` in `tests/support/browser-fixture.mjs` signs in without English locators. On a busy machine a Firefox-staff wait can time out ([setup](../setup.md#5-tests)); run it again |
 
 Run the browser suites with the `PATH` prefix from [`docs/setup.md`](../setup.md#5-tests). The
 story writes screenshots to `artifacts/browser/` (git-ignored). Helpers for driving the pages are in
@@ -942,7 +941,7 @@ After the database side exists ([database recipe](database.md#add-a-workflow-act
    `<form class="staff-form">` with `caseSubmit`. Pass the related row id as a `data-*-id`
    attribute and as the `scope` of every field id.
 4. Add a success message to `STAFF_NOTICES` in `app.mjs` if the action should announce itself.
-5. Unit-test the rendered button for eligible and ineligible personas.
+5. Unit-test the rendered button for eligible and ineligible people.
 
 ### Change the intake form
 

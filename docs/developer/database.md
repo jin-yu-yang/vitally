@@ -24,7 +24,7 @@ it. Run everything described here against the local stack from [`docs/setup.md`]
 
 ## Migrations
 
-The schema is forty-two plain SQL files in [`supabase/migrations/`](../../supabase/migrations/), applied
+The schema is forty-three plain SQL files (001 to 043) in [`supabase/migrations/`](../../supabase/migrations/), applied
 in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 
 | File | Adds |
@@ -71,6 +71,7 @@ in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 | `040_remove_sample_case_tools.sql` | Hand-written: the sample cases, the reset and checkpoint functions and their helpers, `vitally_private.fixture_client_bindings`, `cases.fixture`, `cases.fixture_key`, `assistance_items.fixture`, `workspaces.fixture_generation` and `action_receipts.generation` are removed; `origin` accepts only `client` and `assisted`; `initialize_workspace` loses its bindings parameter. No `CASCADE`: each dependent is dropped or rewritten by name |
 | `041_resolve_go_over_during_hold.sql` | Hand-written: `act_resolve_followup` copied from 033; resolving a `go_over_return` task while the case is `on_hold` with `hold_origin = 'review_approved'` also switches `signing_plan` to the reviewer's method, as at Ready to exit (#171) |
 | `042_let_follow_up_holders_work_any_follow_up.sql` | Hand-written: `lock_open_followup` no longer checks the assignee, so anyone holding `followup` works any open office follow-up (a contact linked to a missing or other-case task is still `FORBIDDEN`, and a resolve naming one stays `VALIDATION`); `add_staff_member`, copied from 038, refuses `followup` without `admin`; the check `people_followup_needs_admin` (#172) |
+| `043_remove_presenter_access.sql` | Hand-written: the `presenter` access type, the person parameter (`p_person_id`) of the six RPCs and the demonstration people (Alex, Morgan, Sam) are removed. It refuses with `VT008` if a presenter account is referenced ([setup](../setup.md#migration-failed-vt008)); deletes the presenter receipts, memberships and accounts and the demonstration people nothing references; re-adds the access check as `applicant` and `staff`; changes the 22 policies to `m.access = 'staff'` and renames the 16 `presenter_*` policies to `staff_*`; replaces `acting_person`, the six RPCs and `initialize_workspace`; and rewrites `check_operation_authority`, `contact_person`, `lock_case`, `lock_assistance_item`, `act_close_case` and `add_staff_member` |
 **Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
 never edit an applied one.** The build writes a file only when the hash differs from the newest
 catalogue migration's. The hash covers the catalogue and `LOADER_VERSION` in
@@ -115,16 +116,15 @@ do not copy them from older files:
 
 | Function | Current definition |
 | --- | --- |
-| `public.vitally_apply_action`, `vitally_private.check_operation_authority`, `check_payload`, `check_preparer_fields`, `act_save_preparer_fields` | `039_preparer_shaded_fields.sql` |
-| `vitally_private.acting_person`, `check_staff_links`, `set_default_followup` | `038_staff_identity.sql` |
-| `vitally_private.lock_case`, `lock_assistance_item`, `contact_person` | `038_staff_identity.sql` |
-| `vitally_private.filing_notes_append_only`, `reserve_receipt`, `initialize_workspace` (without the bindings parameter), `public.vitally_create_case` (answers must be `{}`) | `040_remove_sample_case_tools.sql` |
-| `public.vitally_log_contact`, `vitally_edit_contact` | `038_staff_identity.sql` |
+| `vitally_private.check_payload`, `check_preparer_fields`, `act_save_preparer_fields` | `039_preparer_shaded_fields.sql` |
+| `vitally_private.acting_person`, `add_staff_member`, `lock_case`, `lock_assistance_item`, `contact_person`, `check_operation_authority`, `act_close_case`, `initialize_workspace`, and the six RPCs `public.vitally_apply_action`, `vitally_assistance_action`, `vitally_close_unsigned`, `vitally_create_case`, `vitally_log_contact`, `vitally_edit_contact` | `043_remove_presenter_access.sql` |
+| `vitally_private.check_staff_links`, `set_default_followup` | `038_staff_identity.sql` |
+| `vitally_private.filing_notes_append_only`, `reserve_receipt` | `040_remove_sample_case_tools.sql` |
 | `vitally_private.check_authority`, `receive_document`, `act_verify_document` | `036_hold_and_closing.sql` |
 | `vitally_private.act_verify_intake` | `034_screening_checks.sql` |
 | `vitally_private.act_submit_review`, `act_resubmit_review`, `act_approve_review` | `033_review_questionnaires.sql` |
 | `vitally_private.act_resolve_followup` | `041_resolve_go_over_during_hold.sql` |
-| `vitally_private.lock_open_followup`, `add_staff_member` | `042_let_follow_up_holders_work_any_follow_up.sql` |
+| `vitally_private.lock_open_followup` | `042_let_follow_up_holders_work_any_follow_up.sql` |
 | `vitally_private.check_related`, `act_save_answers` | `023_remove_intake_v1.sql` |
 | `vitally_private.put_intake_field`, `load_intake_catalogue`, `check_intake_value` | `015_intake_loader.sql` |
 | `vitally_private.commit_action` | `008_case_timestamps.sql` |
@@ -188,8 +188,8 @@ erDiagram
 | Table | Purpose | Notable columns and rules |
 | --- | --- | --- |
 | `workspaces` | One site's data set | `default_followup_person_id` (who gets escalations), `current_season` (010), `default_intake_version` (011; new cases take it; default 2 since 020, and only 2 since 023) |
-| `memberships` | Account access to a workspace | `access` is `applicant`, `presenter` or `staff` (038); `active`; **one active membership per account** (unique index). A `staff` membership has exactly one linked `people` row |
-| `people` | Staff members | `person_key` (`alex`, `morgan`, `sam`, or a roster staff member's own key), `name`, `capabilities` from `prepare`, `review`, `admin`, `followup`, `receive_documents`, `assist`; `followup` requires `admin` (042, check `people_followup_needs_admin`); `user_id` (038; the staff account that is this person, null for the three demo personas; unique per workspace; composite foreign key to `memberships(workspace_id, user_id)`) |
+| `memberships` | Account access to a workspace | `access` is `applicant` or `staff` (`presenter` was removed in 043); `active`; **one active membership per account** (unique index). A `staff` membership has exactly one linked `people` row |
+| `people` | Staff members | `person_key` (a roster staff member's own key; 043 deleted the demonstration people Alex, Morgan and Sam that nothing referenced, and a referenced one stays as history), `name`, `capabilities` from `prepare`, `review`, `admin`, `followup`, `receive_documents`, `assist`; `followup` requires `admin` (042, check `people_followup_needs_admin`); `user_id` (038; the staff account that is this person, null only for a demonstration person kept as history; unique per workspace; composite foreign key to `memberships(workspace_id, user_id)`) |
 | `cases` | One client application | `reference` (`VT-XXXX-XXXX`, unique), `origin` (`client`, `assisted`), `owner_user_id` (the client account; null for assisted cases), `answers` (JSON object: the catalogue ids with structured values: strings, arrays, household member objects; never the contact fields), `stage`, `revision`, `preparation_version`, `intake_verified`, `preparer_id`, `reviewer_id`, `last_reminded_*`, `created_at`, `updated_at`, `season` and `client_number` (010; assigned on submit, never changed), `intake_version` (011; copied from the workspace on insert, never changed; only 2 since 023), `intake_visited` (017; the sub-steps the client has opened, a union of what each save sends), `signing_plan` and `signing_appointment_at` (033; the only part of a questionnaire a client reads: how and when to sign), `federal_method` and `state_method` (035; `efile` or `paper`; both null or any of the four pairs, 037), `federal_result` and `state_result` (035; `accepted` or `rejected` for an e-filed return, `given_to_client` (037, was `mailed`) for a paper one; null until its method is set and answered). A client reads these four columns and nothing else about a filing, `documents_origin` and `hold_origin` (036; the stage a documents request came from and the case returns to, `screening` or `preparation_ready`, and where a hold came from, `awaiting_documents` or `review_approved`; both null otherwise, and both cleared when the case returns), `closing_reason` (036; one of `out_of_scope`, `no_need_to_file`, `duplicate`, `dismissed`, `withdrawn`, `other`; null for a case closed before 036 and for any open case. A client reads the reason's key and never a note) |
 | `action_receipts` | One row per accepted or in-flight action | Unique `(workspace_id, actor_user_id, action_id)`; `request_digest` (SHA-256 of the envelope); `receipt` (the stored result). No foreign key to the target, so receipts outlive deleted cases |
 | `preparation_participants` | Who ever prepared a case | Primary key `(case_id, person_id)`. Written on a preparation claim and never removed. Blocks self-review |
@@ -235,13 +235,11 @@ Row-level security is enabled on every `public` table. Browsers have `SELECT` on
 `INSERT`, `UPDATE` or `DELETE` grant for `anon` or `authenticated` on any table, and `anon` has no
 grants at all.
 
-A `staff` account (038) sees exactly what a `presenter` sees: the 21 presenter policies and the
-presenter branch of each `visible_*` policy accept `access in ('presenter','staff')`, with every other
-condition unchanged, and Realtime follows the same policies. `filing_notes` is widened for reading
+The staff-only policies (named `staff_*` since 043) and the staff branch of each `visible_*` policy test `m.access = 'staff'`, and Realtime follows the same policies. `filing_notes` is widened for reading
 only; it stays append-only, with no staff write grant. Narrowing what staff see (to their own and
 claimable cases) is a later change; see the [roadmap](production-roadmap.md#1-staff-identity).
 
-| Table | Applicant (client) | Presenter or staff |
+| Table | Applicant (client) | Staff |
 | --- | --- | --- |
 | `cases` | Own cases | All cases except client drafts not yet submitted |
 | `document_requests`, `documents`, `client_events`, `case_contacts`, `case_document_cards` | On own cases | On visible cases (so a client's own draft's cards only after submit) |
@@ -262,7 +260,7 @@ exists (select 1 from memberships m
         where m.workspace_id = <row>.workspace_id
           and m.user_id = (select auth.uid()) and m.active
           and ((m.access = 'applicant' and <case>.owner_user_id = m.user_id)
-            or (m.access in ('presenter','staff') and (<case>.origin <> 'client' or <case>.stage <> 'draft'))))
+            or (m.access = 'staff' and (<case>.origin <> 'client' or <case>.stage <> 'draft'))))
 ```
 
 It is repeated rather than put in a helper function because a helper would need `EXECUTE` granted
@@ -276,16 +274,15 @@ caller itself, and returns a JSON receipt.
 
 | Function | Purpose | Returns |
 | --- | --- | --- |
-| `vitally_create_case(p_action_id uuid, p_mode text, p_person_id uuid, p_answers jsonb)` | New draft. `p_mode` is `client` (an applicant, no person) or `assisted` (a presenter acting as an `admin` person, for a walk-in client) | `{actionId, caseId, reference, revision}` |
-| `vitally_apply_action(p_action_id uuid, p_case_id uuid, p_expected_revision bigint, p_person_id uuid, p_type text, p_payload jsonb)` | Every case workflow action (the types in `CASE_ACTIONS`, [`src/contracts.mjs`](../../src/contracts.mjs)) | `{actionId, caseId, reference, revision}` |
-| `vitally_assistance_action(p_action_id uuid, p_item_id uuid, p_expected_revision bigint, p_person_id uuid, p_type text, p_note text)` | `CLAIM` or `RESOLVE` an assistance item | `{actionId, itemId, revision}` |
-| `vitally_log_contact(p_action_id uuid, p_case_id uuid, p_person_id uuid, p_followup_id uuid, p_entry jsonb)` | Log a contact on a case, optionally linked to an open follow-up task | `{actionId, contactId, caseId, revision}` |
-| `vitally_edit_contact(p_action_id uuid, p_contact_id uuid, p_expected_revision bigint, p_person_id uuid, p_entry jsonb)` | Edit a logged contact; appends a version | `{actionId, contactId, caseId, revision}` |
-| `vitally_close_unsigned(p_action_id uuid, p_person_id uuid, p_cases jsonb, p_confirmed boolean)` | Season end (037): close the listed signing cases as Dismissed, all or nothing ([below](#season-end-close)) | `{actionId, cases: [{caseId, reference, revision}]}` |
+| `vitally_create_case(p_action_id uuid, p_mode text, p_answers jsonb)` | New draft. `p_mode` is `client` (an applicant) or `assisted` (a staff account with the `admin` capability, for a walk-in client) | `{actionId, caseId, reference, revision}` |
+| `vitally_apply_action(p_action_id uuid, p_case_id uuid, p_expected_revision bigint, p_type text, p_payload jsonb)` | Every case workflow action (the types in `CASE_ACTIONS`, [`src/contracts.mjs`](../../src/contracts.mjs)) | `{actionId, caseId, reference, revision}` |
+| `vitally_assistance_action(p_action_id uuid, p_item_id uuid, p_expected_revision bigint, p_type text, p_note text)` | `CLAIM` or `RESOLVE` an assistance item | `{actionId, itemId, revision}` |
+| `vitally_log_contact(p_action_id uuid, p_case_id uuid, p_followup_id uuid, p_entry jsonb)` | Log a contact on a case, optionally linked to an open follow-up task | `{actionId, contactId, caseId, revision}` |
+| `vitally_edit_contact(p_action_id uuid, p_contact_id uuid, p_expected_revision bigint, p_entry jsonb)` | Edit a logged contact; appends a version | `{actionId, contactId, caseId, revision}` |
+| `vitally_close_unsigned(p_action_id uuid, p_cases jsonb, p_confirmed boolean)` | Season end (037): close the listed signing cases as Dismissed, all or nothing ([below](#season-end-close)) | `{actionId, cases: [{caseId, reference, revision}]}` |
 
-`p_person_id` is the staff person the caller acts as. Applicants must send `null`. Presenters send
-the persona they chose. A staff account sends `null` (or its own person's id); the database
-decides who it is ([below](#who-is-acting)).
+None of the six takes a person parameter (043 removed `p_person_id`). The database decides who
+the caller acts as ([below](#who-is-acting)).
 
 The exact signatures are pinned by a test ([`tests/support/rpc-signatures.mjs`](../../tests/support/rpc-signatures.mjs)),
 so adding a ninth function or changing an argument fails the database suite until the list is
@@ -293,29 +290,21 @@ updated.
 
 ### Who is acting
 
-Six entry points take `p_person_id`: `vitally_apply_action`, `vitally_close_unsigned`,
+Six entry points act as a person: `vitally_apply_action`, `vitally_close_unsigned`,
 `vitally_assistance_action`, `vitally_create_case` (assisted mode), `vitally_log_contact` and
-`vitally_edit_contact`. Each calls the private `vitally_private.acting_person(member, p_person_id)`
-right after it finds the membership, **before** it computes the request digest and reserves the
-receipt, then uses the person it returns wherever it used `p_person_id`. So a staff call looks like a
-presenter call with a valid persona, and the receipt, case history, participation, reviews and
-contact log all name the staff member's own person.
+`vitally_edit_contact`. None takes a person parameter. Each calls the private
+`vitally_private.acting_person(member)` right after it finds the membership, **before** it
+computes the request digest and reserves the receipt, then uses the person it returns. The receipt,
+case history, participation, reviews and contact log all name the staff member's own person.
 
-| Access | `p_person_id` | Result |
-| --- | --- | --- |
-| `applicant` | null | null (the client acts) |
-| `applicant` | a person | Passed through unchanged; the later checks refuse it (`FORBIDDEN`, or `NOT_FOUND` first when the case is not visible), as before 038 |
-| `presenter` | null | null (no staff action accepts a presenter without a persona, so the later checks refuse it as before) |
-| `presenter` | a person of the workspace with no `user_id` | that person |
-| `presenter` | a staff member's person, or an unknown id | `FORBIDDEN` |
-| `staff` | null, or its own person's id | its own person |
-| `staff` | anyone else | `FORBIDDEN` |
-
-A presenter cannot act as a staff member's person: otherwise presenter mode would be a way around
-real identity in a workspace that has both.
+| Access | Result |
+| --- | --- |
+| `applicant` | null (the client acts; the later checks refuse a staff-only action) |
+| `staff` | its own linked person (`FORBIDDEN` if it has none) |
+| anything else | `FORBIDDEN` |
 
 **The link.** `people.user_id` joins a person to the `staff` account that is that person (unique per
-workspace; the demo personas stay null). A deferred constraint trigger,
+workspace). A deferred constraint trigger,
 `vitally_private.check_staff_links`, runs at commit and enforces both directions: a linked
 membership must be `staff`, and every `staff` membership must have a linked person. Being deferred,
 it lets one transaction insert the membership and the person in either order, and a half-made staff
@@ -326,16 +315,16 @@ transaction (no browser role may execute them):
 
 - `vitally_private.add_staff_member(workspace, user, person_key, name, capabilities)` inserts the
   `staff` membership and the linked person. Repeating identical values changes nothing and returns
-  the existing person, so a roster re-run succeeds. It refuses (`VT007`) a reserved key (`alex`,
-  `morgan`, `sam`), a capability outside the known set, capabilities with `followup` but not `admin` (042), different values for an existing key or
+  the existing person, so a roster re-run succeeds. It refuses (`VT007`) a capability outside the known set, capabilities with `followup` but not `admin` (042), different values for an existing key or
   account, and an account with a membership in another workspace.
 - `vitally_private.set_default_followup(workspace, person_key)` moves
   `workspaces.default_followup_person_id`, and refuses a person who is not a staff member's or lacks
   `followup`. Open follow-ups keep their assignee; new ones go to the new default.
 
-`initialize_workspace` was redefined so that a re-run succeeds once staff exist: it checks that Alex,
-Morgan and Sam are unchanged, ignores linked staff, accepts any default whose person has `followup`,
-and sets Sam as default only for a new workspace.
+`initialize_workspace(workspace, applicants)` (043) creates the workspace and the applicant
+memberships only. A new workspace has no people and no default follow-up person until the roster
+adds staff and calls `set_default_followup`; on a re-run, an existing workspace's default must still
+hold `followup`.
 
 ### Calling it
 
@@ -346,7 +335,6 @@ const { data: receipt, error } = await supabase.rpc("vitally_apply_action", {
   p_action_id: crypto.randomUUID(),   // keep it: a retry must reuse it
   p_case_id: caseId,
   p_expected_revision: currentRevision,
-  p_person_id: actingPersonId,        // null for a client
   p_type: "REQUEST_DOCUMENT",
   p_payload: { title: "Mileage record", message: "Please send your 2025 mileage log." },
 });
@@ -467,7 +455,7 @@ admin-only actions and one submit rule shape the earlier stages:
 
 ## Action catalogue
 
-"Presenter + person" means a presenter account acting as a staff person; a `staff` account (038) is the same thing with its own person, so every "Presenter + person" row also admits staff. Capabilities in step 7
+"Staff + person" means a `staff` account acting as its own person. Capabilities in step 7
 are checked after the stage, so a wrong stage is reported before a missing qualification. Two
 shorthands in the table:
 
@@ -479,39 +467,39 @@ shorthands in the table:
 
 | Action | Who (step 4) | Allowed when (step 6) | Also requires (step 7) | Effect | Client message |
 | --- | --- | --- | --- | --- | --- |
-| `SAVE_ANSWERS` | Applicant owner, or presenter + `admin` person on an assisted case | `draft` | Every key and value passes `check_intake_value` against `intake_fields`; one bad value refuses the whole save | Merges answers; the four contact fields go to `case_contacts` instead, and a `null` clears a key | No |
+| `SAVE_ANSWERS` | Applicant owner, or staff + `admin` person on an assisted case | `draft` | Every key and value passes `check_intake_value` against `intake_fields`; one bad value refuses the whole save | Merges answers; the four contact fields go to `case_contacts` instead, and a `null` clears a key | No |
 | `SUBMIT` | Same as above | `draft` | No required, visible question missing (`intake_missing`, contact fields read from `case_contacts`); no eligibility screening | → `received` (a client's own case) or `screening` (an office-entered case, no owner); assigns the client number (010) | Yes |
-| `START_SCREENING` | Presenter + `admin` person | `received` | | → `screening` | Yes |
-| `VERIFY_INTAKE` | Presenter + `admin` person | `screening` | | → `preparation_ready`, `intake_verified` | Yes |
-| `CLAIM_PREPARATION` | Presenter + any person | `preparation_ready`, no preparer | `prepare` | → `preparing`; sets preparer; records participation | Yes |
-| `REQUEST_DOCUMENT` | Presenter + person | `preparing`, `corrections_required` | Current preparer | New `open` request | Yes (title) |
+| `START_SCREENING` | Staff + `admin` person | `received` | | → `screening` | Yes |
+| `VERIFY_INTAKE` | Staff + `admin` person | `screening` | | → `preparation_ready`, `intake_verified` | Yes |
+| `CLAIM_PREPARATION` | Staff + any person | `preparation_ready`, no preparer | `prepare` | → `preparing`; sets preparer; records participation | Yes |
+| `REQUEST_DOCUMENT` | Staff + person | `preparing`, `corrections_required` | Current preparer | New `open` request | Yes (title) |
 | `RESPOND_DOCUMENT` | Applicant owner | `preparing`, `corrections_required` | Request is `open` | Client document; request → `awaiting_verification` | Yes |
-| `RECORD_DOCUMENT_RESPONSE` | Presenter + `receive_documents` person, case has no owner | `preparing`, `corrections_required` | Request is `open` | Staff-recorded document; request → `awaiting_verification` | Yes |
-| `VERIFY_DOCUMENT` | Presenter + person | `preparing`, `corrections_required` | Current preparer; request `awaiting_verification` | Request → `verified` | Yes |
-| `ESCALATE_CONTACT` | Presenter + person | `preparing`, `corrections_required` | Current preparer; request `open`; no open task | Follow-up assigned to the workspace's default follow-up person | No |
-| `RECORD_CONTACT` | Presenter + `followup` person | (any; task must be open) | — (refused before any task check) | Refused since 031 (`VALIDATION`); contacts are logged with `vitally_log_contact` | No |
-| `RESOLVE_FOLLOWUP` | Presenter + `followup` person | (any; task must be open) | Task `open` (any `followup` holder, 042) | Task → `resolved`; (033) a `go_over_return` task also turns the case's `go_over_first` signing plan into the reviewer's signing method, (041) also while the case is on a Hold from `review_approved` | No |
-| `SUBMIT_REVIEW` | Presenter + person | `preparing` | Current preparer; intake verified; no unsettled request | Version + 1; → `review_ready`; active review superseded | Yes |
-| `CLAIM_REVIEW` | Presenter + person | `review_ready`, no reviewer | Not a participant (`SELF_REVIEW`); `review` | → `reviewing`; sets reviewer; new `active` review | Yes |
-| `REQUEST_CORRECTIONS` | Presenter + person | `reviewing` | Current reviewer; review at current version | Review → `corrections_requested` with findings; → `corrections_required`; reviewer cleared | Yes (no findings) |
-| `RESUBMIT_REVIEW` | Presenter + person | `corrections_required` | Current preparer; no unsettled request | Resolution saved; version + 1; → `review_ready` | Yes |
-| `APPROVE_REVIEW` | Presenter + person | `reviewing` | Current reviewer; review at current version | Questionnaire saved; review → `approved` with the contact step completed (outcome `reached` when the reviewer went over the return, none when not); signing plan saved; → `review_approved`; a `go_over_return` task for the office when the reviewer did not | Yes |
-| `RECORD_REVIEW_CONTACT` | Presenter + person | `review_approved` | Current reviewer; contact `pending` | Outcome saved; `reached` or `no_further_contact` completes it | Only when completed |
-| `MARK_READY_TO_EFILE` | Presenter + `admin` person | `review_approved` | The approved review's contact step is `completed`, and no `go_over_return` follow-up is open (else `INVALID_TRANSITION`): it waits for the contact step and for the office's go-over | → `ready_to_efile` | Yes |
-| `MARK_EFILED` | Presenter + `admin` person | `ready_to_efile` | Any of the four method pairs; a second filing takes exactly the rejected returns | Sets the methods, gives a paper return to the client (`given_to_client`), resets the outstanding e-filed results, adds a filing attempt; → `efiled`, or `accepted` when no e-filed return waits | Yes |
-| `RECORD_FILING_RESULT` | Presenter + `admin` person | `efiled`; `rejected` while a return is waiting | Only waiting e-filed returns; `accepted` or `rejected` only; date not future and not before the filing; a reject code exactly when rejected | Saves results on `cases` and `filing_returns`, plus a `filing_notes` row for a fix note; → `rejected`, `accepted` or stays | Yes (per return; no code, no note) |
-| `RETURN_TO_SIGNING` | Presenter + `admin` person | `rejected` | No return waiting | → `review_approved`; methods and results kept | Yes |
-| `REMIND` | Presenter + `admin` person | `preparation_ready` with no preparer, or `review_ready` with no reviewer | | Sets `last_reminded_at` (no message is sent) | No |
-| `REQUEST_DOCUMENTS_AT_INTAKE` | Presenter + `admin` person | `screening`, `preparation_ready` | | New `open` requests (1 to 5); → `awaiting_documents`; sets `documents_origin` | Yes (titles) |
-| `PUT_ON_HOLD` | Presenter + `admin` person | `awaiting_documents`, `review_approved` | | → `on_hold`; sets `hold_origin`; the note is staff history only | Yes (no note, no phone) |
-| `RESUME_FROM_HOLD` | Presenter + `admin` person | `on_hold` | | Back to `hold_origin` | Yes |
+| `RECORD_DOCUMENT_RESPONSE` | Staff + `receive_documents` person, case has no owner | `preparing`, `corrections_required` | Request is `open` | Staff-recorded document; request → `awaiting_verification` | Yes |
+| `VERIFY_DOCUMENT` | Staff + person | `preparing`, `corrections_required` | Current preparer; request `awaiting_verification` | Request → `verified` | Yes |
+| `ESCALATE_CONTACT` | Staff + person | `preparing`, `corrections_required` | Current preparer; request `open`; no open task | Follow-up assigned to the workspace's default follow-up person | No |
+| `RECORD_CONTACT` | Staff + `followup` person | (any; task must be open) | — (refused before any task check) | Refused since 031 (`VALIDATION`); contacts are logged with `vitally_log_contact` | No |
+| `RESOLVE_FOLLOWUP` | Staff + `followup` person | (any; task must be open) | Task `open` (any `followup` holder, 042) | Task → `resolved`; (033) a `go_over_return` task also turns the case's `go_over_first` signing plan into the reviewer's signing method, (041) also while the case is on a Hold from `review_approved` | No |
+| `SUBMIT_REVIEW` | Staff + person | `preparing` | Current preparer; intake verified; no unsettled request | Version + 1; → `review_ready`; active review superseded | Yes |
+| `CLAIM_REVIEW` | Staff + person | `review_ready`, no reviewer | Not a participant (`SELF_REVIEW`); `review` | → `reviewing`; sets reviewer; new `active` review | Yes |
+| `REQUEST_CORRECTIONS` | Staff + person | `reviewing` | Current reviewer; review at current version | Review → `corrections_requested` with findings; → `corrections_required`; reviewer cleared | Yes (no findings) |
+| `RESUBMIT_REVIEW` | Staff + person | `corrections_required` | Current preparer; no unsettled request | Resolution saved; version + 1; → `review_ready` | Yes |
+| `APPROVE_REVIEW` | Staff + person | `reviewing` | Current reviewer; review at current version | Questionnaire saved; review → `approved` with the contact step completed (outcome `reached` when the reviewer went over the return, none when not); signing plan saved; → `review_approved`; a `go_over_return` task for the office when the reviewer did not | Yes |
+| `RECORD_REVIEW_CONTACT` | Staff + person | `review_approved` | Current reviewer; contact `pending` | Outcome saved; `reached` or `no_further_contact` completes it | Only when completed |
+| `MARK_READY_TO_EFILE` | Staff + `admin` person | `review_approved` | The approved review's contact step is `completed`, and no `go_over_return` follow-up is open (else `INVALID_TRANSITION`): it waits for the contact step and for the office's go-over | → `ready_to_efile` | Yes |
+| `MARK_EFILED` | Staff + `admin` person | `ready_to_efile` | Any of the four method pairs; a second filing takes exactly the rejected returns | Sets the methods, gives a paper return to the client (`given_to_client`), resets the outstanding e-filed results, adds a filing attempt; → `efiled`, or `accepted` when no e-filed return waits | Yes |
+| `RECORD_FILING_RESULT` | Staff + `admin` person | `efiled`; `rejected` while a return is waiting | Only waiting e-filed returns; `accepted` or `rejected` only; date not future and not before the filing; a reject code exactly when rejected | Saves results on `cases` and `filing_returns`, plus a `filing_notes` row for a fix note; → `rejected`, `accepted` or stays | Yes (per return; no code, no note) |
+| `RETURN_TO_SIGNING` | Staff + `admin` person | `rejected` | No return waiting | → `review_approved`; methods and results kept | Yes |
+| `REMIND` | Staff + `admin` person | `preparation_ready` with no preparer, or `review_ready` with no reviewer | | Sets `last_reminded_at` (no message is sent) | No |
+| `REQUEST_DOCUMENTS_AT_INTAKE` | Staff + `admin` person | `screening`, `preparation_ready` | | New `open` requests (1 to 5); → `awaiting_documents`; sets `documents_origin` | Yes (titles) |
+| `PUT_ON_HOLD` | Staff + `admin` person | `awaiting_documents`, `review_approved` | | → `on_hold`; sets `hold_origin`; the note is staff history only | Yes (no note, no phone) |
+| `RESUME_FROM_HOLD` | Staff + `admin` person | `on_hold` | | Back to `hold_origin` | Yes |
 | `WITHDRAW` | The client (applicant owner) | `received` through `reviewing` (including `awaiting_documents`, `corrections_required`), and a documents `on_hold` | | → `closed` with reason `withdrawn`; cancels open requests and tasks; a `withdrawal_notice` task at `preparing`, `corrections_required` or `reviewing` when a preparer or reviewer is assigned | Yes |
-| `CLOSE_CASE` | Presenter + `admin` person | `received` through `corrections_required` (`screening` included), `awaiting_documents`, `on_hold` (036), `rejected` (035), or an assisted `draft`; `review_approved` and `ready_to_efile` with reason `withdrawn` only (036) | | → `closed` with `closing_reason`; cancels open requests and tasks; any close before filing (withdrawn, or any reason from a signing hold) opens the TaxSlayer `withdrawal_notice` task | Yes (reason only) |
+| `CLOSE_CASE` | Staff + `admin` person | `received` through `corrections_required` (`screening` included), `awaiting_documents`, `on_hold` (036), `rejected` (035), or an assisted `draft`; `review_approved` and `ready_to_efile` with reason `withdrawn` only (036) | | → `closed` with `closing_reason`; cancels open requests and tasks; any close before filing (withdrawn, or any reason from a signing hold) opens the TaxSlayer `withdrawal_notice` task | Yes (reason only) |
 | `UPDATE_CONTACT` | Owner on own draft; `followup` or `admin` person; a preparer or reviewer on their own case | Draft (owner); any (staff) | | Edits best time and note in `case_contacts`; never a phone | No |
-| `RECORD_MATERIALS` | Presenter + person (same authority as above); no applicant | Any | | Replaces the set of materials received | No |
-| `SET_DOCUMENT_CARD` | Applicant owner, or presenter + a person who works on the case (`works_on_case`, 018; never on a client's unsent draft) | Any but `closed` | | Upserts the card's `status` in `case_document_cards` (`not_done` stores null) | No |
-| `SET_DOCUMENT_GROUP` | Presenter + a person who works on the case (`works_on_case`, 018; never on a client's unsent draft) | Any but `closed` | `maybe` only undoes a staff `needed` | Sets or clears the card's `group_override` | No |
-| `SAVE_PREPARER_FIELDS` | Presenter + person (the person must have `prepare`, `INELIGIBLE` otherwise) | `preparing`, `corrections_required` | Current preparer; `basedOnVersion` equals the stored version (0 when there is no row), else `CONFLICT`; the year is before the season and a household row has a member | Replaces the whole set in `preparer_shaded_fields` and adds 1 to its version; the history lists the changed keys | No |
+| `RECORD_MATERIALS` | Staff + person (same authority as above); no applicant | Any | | Replaces the set of materials received | No |
+| `SET_DOCUMENT_CARD` | Applicant owner, or staff + a person who works on the case (`works_on_case`, 018; never on a client's unsent draft) | Any but `closed` | | Upserts the card's `status` in `case_document_cards` (`not_done` stores null) | No |
+| `SET_DOCUMENT_GROUP` | Staff + a person who works on the case (`works_on_case`, 018; never on a client's unsent draft) | Any but `closed` | `maybe` only undoes a staff `needed` | Sets or clears the card's `group_override` | No |
+| `SAVE_PREPARER_FIELDS` | Staff + person (the person must have `prepare`, `INELIGIBLE` otherwise) | `preparing`, `corrections_required` | Current preparer; `basedOnVersion` equals the stored version (0 when there is no row), else `CONFLICT`; the year is before the season and a household row has a member | Replaces the whole set in `preparer_shaded_fields` and adds 1 to its version; the history lists the changed keys | No |
 
 Payload shapes are whitelisted exactly in `vitally_private.check_payload`; an extra key is a
 `VALIDATION` error, not ignored. The browser builds them in
@@ -558,7 +546,7 @@ The browser side is in [Front end](frontend.md#the-shaded-section-of-the-13614-c
 
 - **The table.** `preparer_shaded_fields` holds one row per case: `fields` is a flat, sparse JSON
   object (a blank is absent, never an empty string), `version` counts saves (the first save is 1),
-  and `updated_by_person_id` says who saved last. Staff may read it (a presenter, never a client's
+  and `updated_by_person_id` says who saved last. Staff may read it (never a client's
   unsent draft); nothing but the action writes it. It is in the Realtime publication for staff only.
 - **The check.** `vitally_private.check_preparer_fields(jsonb)` is the shape check, used by the
   table's check constraint and by `check_payload`. It repeats the key table of
@@ -585,13 +573,13 @@ The browser side is in [Front end](frontend.md#the-shaded-section-of-the-13614-c
 
 ## Season-end close
 
-`vitally_close_unsigned(p_action_id, p_person_id, p_cases, p_confirmed)` (037) closes, as
+`vitally_close_unsigned(p_action_id, p_cases, p_confirmed)` (037) closes, as
 **Dismissed**, the cases an admin lists after the filing season: those at `review_approved` ("Ready
 to exit") or on a Hold that came from `review_approved`. It is its own RPC, not a case action,
 because it moves many cases in one call. `p_cases` is a non-empty array of `{caseId, revision}`
 with no repeats, and `p_confirmed` must be `true`.
 
-- **Checks:** a presenter acting as an `admin` person (else `FORBIDDEN`; the same authority as
+- **Checks:** a staff account whose person has `admin` (else `FORBIDDEN`; the same authority as
   `CLOSE_CASE`). An empty or malformed list, a repeated case, `p_confirmed` not true, or an action
   id reused with a different list is `VALIDATION`.
 - **All or nothing:** the cases are locked in a fixed order and every one is checked before any
@@ -613,14 +601,14 @@ stage. It lives beside the case workflow, not inside it:
 - **Its own functions.** `vitally_log_contact` and `vitally_edit_contact` do not go through
   `vitally_apply_action`. The log needs none of the case lifecycle, and leaving the shared action
   helpers alone keeps this change clear of other work that rewrites them. They still follow the
-  same pattern: membership, envelope check, receipt, lock, persona checks, write, store the
+  same pattern: membership, envelope check, receipt, lock, person checks, write, store the
   receipt. Errors use the same `VT00N` codes. `vitally_edit_contact` locks the entry's case before
   the entry, the same order as every other writer, so two windows cannot deadlock.
 - **The case row is untouched.** Neither function changes `cases.revision` or writes
   `case_events` or `client_events`, so logging a contact in one window never turns another
   window's open case form into a conflict. Each entry has its own `revision`, which an edit must
   send as `p_expected_revision`.
-- **Who may do what.** Any staff persona may log, unlinked, on a case they can open. Linking to a
+- **Who may do what.** Any staff member may log, unlinked, on a case they can open. Linking to a
   follow-up task (`p_followup_id`) needs `followup` and an open task on this case; since 042 any `followup` holder may link, not only the task's assignee. Only the logger or an `admin` may edit. An applicant is refused.
 - **Entries are checked in SQL** (`vitally_private.check_contact_entry`): the outcome must fit the
   method and direction (incoming and in-person contacts are always `reached`), "Other" needs a name,
@@ -657,7 +645,7 @@ learning about records they may not see.
 | 1 | Signed in with an active membership | `VT001` `FORBIDDEN` |
 | 2 | Resolve the acting person (`acting_person`, [above](#who-is-acting)), then reserve the receipt for this action id; identical replay returns the stored receipt; changed envelope refused | `VT007` `VALIDATION` |
 | 3 | Lock the case through the visibility rule; missing, other workspace and another client's case look identical | `VT002` `NOT_FOUND` |
-| 4 | Operational authority: applicant vs staff window (presenter or staff), the person belongs to this workspace, operational capabilities (`admin`, `followup`, `receive_documents`, `assist`); unknown action type | `VT001` `FORBIDDEN`, `VT007` |
+| 4 | Operational authority: applicant vs staff window (staff), the person belongs to this workspace, operational capabilities (`admin`, `followup`, `receive_documents`, `assist`); unknown action type | `VT001` `FORBIDDEN`, `VT007` |
 | 5 | Expected revision, then payload shape, then related records belong to this case | `VT003` `CONFLICT`, then `VT007` |
 | 6 | Stage window | `VT004` `INVALID_TRANSITION` |
 | 7 | Self-review, then `prepare`/`review` qualification, then current assignment, then readiness | `VT005` `SELF_REVIEW`, `VT006` `INELIGIBLE`, `VT001`, `VT004` |
@@ -698,7 +686,7 @@ adds twelve: `cases`, `document_requests`, `documents`, `client_events`, `worksp
 `assistance_items`, `reviews`. `011` adds `case_contacts`, `013` adds `case_materials` and `017` adds `case_document_cards`.
 `031` adds `contact_log` and `contact_log_versions` and removes `contact_attempts`; `033` adds the two questionnaire tables and `039` adds `preparer_shaded_fields`.
 `action_receipts` is not published. An applicant's window watches seven of them (`CLIENT_TABLES`),
-a presenter's all nineteen (`STAFF_TABLES`).
+a staff window's all nineteen (`STAFF_TABLES`).
 
 Realtime applies each subscriber's RLS, so the same visibility rules hold for events. Deletes are
 not published because a deleted row cannot be authorized. The browser treats events as "something

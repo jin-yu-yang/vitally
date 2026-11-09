@@ -147,22 +147,22 @@ test("document requests, receipts and verification keep the preparer in charge",
           );
         const caseId = await preparingCase(f);
         // Step 4: a document request is never a client action.
-        for (const [client, personId] of [
-          [f.presenter, null],
-          [f.applicantA, null],
-          [f.presenter, f.foreignPeople.alex],
-        ])
-          await assert.rejects(
-            () =>
-              f.actAsPersona(
-                client,
-                caseId,
-                personId,
-                "REQUEST_DOCUMENT",
-                f.sampleRequest,
-              ),
-            rejected("FORBIDDEN"),
-          );
+        await assert.rejects(
+          () =>
+            f.act(f.applicantA, caseId, "REQUEST_DOCUMENT", f.sampleRequest),
+          rejected("FORBIDDEN"),
+        );
+        // A staff member of another workspace cannot tell the case exists.
+        const foreign = await f.foreignStaff.rpc(
+          "vitally_apply_action",
+          applyArgs({
+            caseId,
+            revision: (await f.readStaffCase(caseId)).revision,
+            type: "REQUEST_DOCUMENT",
+            payload: f.sampleRequest,
+          }),
+        );
+        assert.equal(foreign.error?.code, "VT002");
         // Step 7: an admin title and a reviewer qualification are not `prepare`.
         for (const client of [f.siteCoordinator, f.reviewer])
           await assert.rejects(
@@ -226,11 +226,10 @@ test("document requests, receipts and verification keep the preparer in charge",
               f.act(client, caseId, "VERIFY_DOCUMENT", {}),
             rejected("INELIGIBLE"),
           );
-        for (const client of [f.applicantA, f.presenter])
-          await assert.rejects(
-            () => f.act(client, caseId, "VERIFY_DOCUMENT", {}),
-            rejected("FORBIDDEN"),
-          );
+        await assert.rejects(
+          () => f.act(f.applicantA, caseId, "VERIFY_DOCUMENT", {}),
+          rejected("FORBIDDEN"),
+        );
         assert.equal(
           (await f.readStaffCase(caseId)).requests[0].status,
           "awaiting_verification",
@@ -355,7 +354,7 @@ test("document requests, receipts and verification keep the preparer in charge",
       },
     );
     await t.test(
-      "receipts reject the wrong actor, the wrong case and a forged client",
+      "receipts reject the wrong actor and the wrong case",
       async () => {
         const owned = await requestedCase(f);
         const ownedStaff = await f.readStaffCase(owned);
@@ -367,21 +366,16 @@ test("document requests, receipts and verification keep the preparer in charge",
             }),
           rejected("FORBIDDEN"),
         );
-        // A client forging a staff identity on their own case is forbidden.
-        const forged = await f.applicantA.rpc(
-          "vitally_apply_action",
-          applyArgs({
-            caseId: owned,
-            revision: ownedStaff.revision,
-            personId: f.sam,
-            type: "RESPOND_DOCUMENT",
-            payload: {
-              requestId: ownedStaff.requests[0].id,
+        // Recording a response is staff work: the client answers with their own action.
+        const beforeClientAttempt = await f.stateSnapshot();
+        await assert.rejects(
+          () =>
+            f.act(f.applicantA, owned, "RECORD_DOCUMENT_RESPONSE", {
               filename: f.sampleFilename,
-            },
-          }),
+            }),
+          rejected("FORBIDDEN"),
         );
-        assert.equal(forged.error.code, "VT001");
+        assert.deepEqual(await f.stateSnapshot(), beforeClientAttempt);
         // Another applicant cannot even tell the case exists.
         const other = await f.applicantB.rpc(
           "vitally_apply_action",
@@ -396,18 +390,18 @@ test("document requests, receipts and verification keep the preparer in charge",
           }),
         );
         assert.equal(other.error.code, "VT002");
-        // A presenter is not the client, with or without a persona.
-        for (const personId of [null, f.alex])
+        // A staff member is not the client.
+        for (const staff of [f.siteCoordinator, f.preparer])
           await assert.rejects(
             () =>
-              f.actAsPersona(f.presenter, owned, personId, "RESPOND_DOCUMENT", {
+              f.act(staff, owned, "RESPOND_DOCUMENT", {
                 filename: f.sampleFilename,
               }),
             rejected("FORBIDDEN"),
           );
         const assisted = await f.assistedCase();
-        // The receipt capability is the Site Coordinator's alone, and it needs a person.
-        for (const client of [f.preparer, f.reviewer, f.presenter])
+        // The receipt capability is the Site Coordinator's alone.
+        for (const client of [f.preparer, f.reviewer])
           await assert.rejects(
             () =>
               f.act(
@@ -628,7 +622,7 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
   const f = await createDatabaseFixture();
   try {
     await t.test(
-      "escalation assigns Sam and resolution leaves preparation untouched",
+      "escalation assigns the default person and resolution leaves preparation untouched",
       async () => {
         const id = await f.readyCase();
         await f.act(f.preparer, id, "CLAIM_PREPARATION", {});
@@ -802,11 +796,11 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
           { reason: "Office contact needed" },
           { requestId: freshRequest, reason: "   " },
           { requestId: freshRequest, reason: "x".repeat(1001) },
-          { requestId: freshRequest, reason: "Needed", assignee: f.morgan },
+          { requestId: freshRequest, reason: "Needed", assignee: f.reviewerId },
           {
             requestId: freshRequest,
             reason: "Needed",
-            assigneePersonId: f.morgan,
+            assigneePersonId: f.reviewerId,
           },
         ]) {
           const response = await f.preparer.rpc(
@@ -928,7 +922,6 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
         for (const [client, who] of [
           [f.preparer, "preparer"],
           [f.reviewer, "reviewer"],
-          [f.presenter, "presenter"],
           [f.applicantA, "client"],
         ])
           for (const type of ["RECORD_CONTACT", "RESOLVE_FOLLOWUP"])
@@ -1118,8 +1111,14 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
       const caseId = await requestedCase(f);
       await f.act(f.preparer, caseId, "ESCALATE_CONTACT", { reason: "Office contact needed" });
       const [task] = (await f.readStaffCase(caseId)).followups;
-      // Sam is a persona no staff account is linked to.
-      await f.sql("update public.admin_followups set assignee_person_id=$2 where id=$1", [task.id, f.sam]);
+      // A person no staff account is linked to.
+      const unlinked = (
+        await f.sql(
+          "insert into public.people(workspace_id,person_key,name,capabilities) values($1,'unlinked_followup','Unlinked Helper',$2) returning id",
+          [f.workspaceId, ["admin", "followup"]],
+        )
+      ).rows[0].id;
+      await f.sql("update public.admin_followups set assignee_person_id=$2 where id=$1", [task.id, unlinked]);
       await f.logContact(f.siteCoordinator, caseId, SAMPLE_CONTACT(), task.id);
       await f.act(f.siteCoordinator, caseId, "RESOLVE_FOLLOWUP", {
         followupId: task.id,
@@ -1262,7 +1261,7 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
               payload: {
                 requestId,
                 reason: "Office contact needed",
-                assignee: f.morgan,
+                assignee: f.reviewerId,
               },
             },
             "VT007",

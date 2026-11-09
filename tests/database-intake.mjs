@@ -405,10 +405,10 @@ test("version-2 intake: versions, answers, submit and contacts", async (t) => {
       await save(f, caseId, { tp_phone: "2155550100" });
       assert.equal((await readContacts(f.applicantA, caseId)).length, 1);
       assert.deepEqual(await readContacts(f.applicantB, caseId), []);
-      assert.deepEqual(await readContacts(f.presenter, caseId), []);
+      assert.deepEqual(await readContacts(f.siteCoordinator, caseId), []);
       await save(f, caseId, completeAnswers());
       await f.act(f.applicantA, caseId, "SUBMIT", { confirmed: true });
-      const [seen] = await readContacts(f.presenter, caseId);
+      const [seen] = await readContacts(f.siteCoordinator, caseId);
       assert.equal(seen.phone, "2155550100");
       assert.deepEqual(await readContacts(f.applicantB, caseId), []);
 
@@ -416,7 +416,7 @@ test("version-2 intake: versions, answers, submit and contacts", async (t) => {
         mode: "assisted",
       });
       await save(f, assisted.caseId, { tp_phone: "2155550111" }, f.siteCoordinator);
-      const [assistedRow] = await readContacts(f.presenter, assisted.caseId);
+      const [assistedRow] = await readContacts(f.siteCoordinator, assisted.caseId);
       assert.equal(assistedRow.phone, "2155550111");
       assert.deepEqual(await readContacts(f.applicantA, assisted.caseId), []);
     });
@@ -852,21 +852,11 @@ test("contact and materials actions", async (t) => {
       assert.equal((await contactRow(f, caseId)).best_contact_note, null);
     });
 
-    await t.test("another applicant and a personless presenter are refused", async () => {
+    await t.test("another applicant is refused", async () => {
       const { caseId } = await v2Case(f);
       await assert.rejects(
         update(caseId, { bestContactNote: "Not mine" }, f.applicantB),
         rejected("NOT_FOUND"),
-      );
-      // An applicant cannot speak as a staff person.
-      await assert.rejects(
-        f.actAsPersona(f.applicantA, caseId, f.sam, "UPDATE_CONTACT", { bestContactNote: "Posing" }),
-        rejected("FORBIDDEN"),
-      );
-      const submitted = await submittedV2();
-      await assert.rejects(
-        update(submitted, { bestContactNote: "No person" }, f.presenter),
-        rejected("FORBIDDEN"),
       );
     });
 
@@ -975,7 +965,6 @@ test("contact and materials actions", async (t) => {
     await t.test("only staff who may act record materials", async () => {
       const caseId = await readyV2();
       await assert.rejects(record(caseId, ["w2"], f.applicantA), rejected("FORBIDDEN"));
-      await assert.rejects(record(caseId, ["w2"], f.presenter), rejected("FORBIDDEN"));
       await assert.rejects(record(caseId, ["w2"], f.preparer), rejected("FORBIDDEN"));
       await f.act(f.preparer, caseId, "CLAIM_PREPARATION", {});
       await record(caseId, ["w2"], f.preparer);
@@ -1012,7 +1001,7 @@ test("contact and materials actions", async (t) => {
         assert.equal(error, null);
         assert.deepEqual(data, []);
       }
-      const { data, error } = await f.presenter
+      const { data, error } = await f.siteCoordinator
         .from("case_materials")
         .select("*")
         .eq("case_id", caseId);

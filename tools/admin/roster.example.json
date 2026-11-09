@@ -1,6 +1,5 @@
 {
   "workspaceId": "replace-with-a-uuid",
-  "presenters": ["presenter@example.org"],
   "staff": [
     {
       "email": "site-coordinator@example.org",

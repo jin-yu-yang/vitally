@@ -12,7 +12,7 @@ const CLIENT_VISIBLE_TABLES = [
   "case_contacts",
   "case_document_cards",
 ];
-const PRESENTER_ONLY_TABLES = [
+const STAFF_ONLY_TABLES = [
   "preparation_participants",
   "admin_followups",
   "contact_log",
@@ -22,7 +22,7 @@ const PRESENTER_ONLY_TABLES = [
   "assistance_items",
   "case_materials",
 ];
-const WORKFLOW_TABLES = [...CLIENT_VISIBLE_TABLES, ...PRESENTER_ONLY_TABLES];
+const WORKFLOW_TABLES = [...CLIENT_VISIBLE_TABLES, ...STAFF_ONLY_TABLES];
 async function rows(client, table, filter = {}) {
   let q = client.from(table).select("*");
   for (const [k, v] of Object.entries(filter)) q = q.eq(k, v);
@@ -75,7 +75,7 @@ async function seedWorkflow(f, caseId) {
   );
   await f.sql(
     "insert into public.preparation_participants(workspace_id,case_id,person_id) values($1,$2,$3)",
-    [f.workspaceId, caseId, f.people.alex],
+    [f.workspaceId, caseId, f.preparerId],
   );
   await f.sql(
     "insert into public.document_requests(id,workspace_id,case_id,title,message,requested_by_person_id) values($1,$2,$3,$4,$5,$6)",
@@ -85,7 +85,7 @@ async function seedWorkflow(f, caseId) {
       caseId,
       "Mileage record",
       "Please add the fictional sample.",
-      f.people.alex,
+      f.preparerId,
     ],
   );
   await f.sql(
@@ -107,9 +107,9 @@ async function seedWorkflow(f, caseId) {
       f.workspaceId,
       caseId,
       seeded.requestId,
-      f.people.sam,
+      f.siteCoordinatorId,
       "Office contact needed",
-      f.people.alex,
+      f.preparerId,
     ],
   );
   await f.sql(
@@ -119,8 +119,8 @@ async function seedWorkflow(f, caseId) {
       f.workspaceId,
       caseId,
       seeded.followupId,
-      f.presenterUserId,
-      f.people.sam,
+      f.siteCoordinatorUserId,
+      f.siteCoordinatorId,
       "Left a fictional message.",
     ],
   );
@@ -130,7 +130,7 @@ async function seedWorkflow(f, caseId) {
   );
   await f.sql(
     "insert into public.reviews(id,workspace_id,case_id,preparation_version,reviewer_person_id) values($1,$2,$3,1,$4)",
-    [seeded.reviewId, f.workspaceId, caseId, f.people.morgan],
+    [seeded.reviewId, f.workspaceId, caseId, f.reviewerId],
   );
   await f.sql(
     "insert into public.case_events(id,workspace_id,case_id,actor_user_id,actor_person_id,action,detail) values($1,$2,$3,$4,$5,$6,$7)",
@@ -138,8 +138,8 @@ async function seedWorkflow(f, caseId) {
       seeded.caseEventId,
       f.workspaceId,
       caseId,
-      f.presenterUserId,
-      f.people.alex,
+      f.siteCoordinatorUserId,
+      f.preparerId,
       "REQUEST_DOCUMENT",
       {
         requestId: seeded.requestId,
@@ -167,7 +167,7 @@ async function seedWorkflow(f, caseId) {
   );
   await f.sql(
     "insert into public.case_materials(workspace_id,case_id,item,recorded_by_person_id) values($1,$2,$3,$4)",
-    [f.workspaceId, caseId, "w2", f.people.sam],
+    [f.workspaceId, caseId, "w2", f.siteCoordinatorId],
   );
   await f.sql(
     "insert into public.assistance_items(id,workspace_id,case_id,title,language,contact_preference) values($1,$2,$3,$4,$5,$6)",
@@ -191,7 +191,7 @@ async function seedWorkflow(f, caseId) {
   return seeded;
 }
 test("identity, references, ownership, and privileged setup on real Supabase", async (t) => {
-  const f = await createDatabaseFixture({ roleAccounts: false });
+  const f = await createDatabaseFixture();
   try {
     await t.test(
       "references are stable and unique; IDs and references do not authorize access",
@@ -272,57 +272,39 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
       },
     );
     await t.test(
-      "presenter sees staff-created and submitted cases, never private applicant drafts",
+      "staff see staff-created and submitted cases, never private applicant drafts",
       async () => {
         assert.deepEqual(
-          await rows(f.presenter, "cases", { id: f.first.caseId }),
+          await rows(f.siteCoordinator, "cases", { id: f.first.caseId }),
           [],
         );
+        // Client mode is only for an applicant, whatever the staff member holds.
         await assert.rejects(
-          () => f.createCase(f.presenter, crypto.randomUUID()),
+          () => f.createCase(f.siteCoordinator, crypto.randomUUID()),
           rejected("FORBIDDEN"),
         );
-        await assert.rejects(
-          () =>
-            f.createCaseAsPersona(f.presenter, crypto.randomUUID(), {
-              mode: "assisted",
-              personId: f.people.alex,
-            }),
-          rejected("FORBIDDEN"),
-        );
+        // An assisted case needs the admin capability.
         await assert.rejects(
           () =>
-            f.createCaseAsPersona(f.applicantA, crypto.randomUUID(), {
-              personId: f.people.sam,
-            }),
+            f.createCase(f.preparer, crypto.randomUUID(), { mode: "assisted" }),
           rejected("FORBIDDEN"),
         );
-        await assert.rejects(
-          () =>
-            f.createCaseAsPersona(f.applicantA, crypto.randomUUID(), {
-              mode: "assisted",
-              personId: f.people.sam,
-            }),
-          rejected("FORBIDDEN"),
-        );
-        await assert.rejects(
-          () =>
-            f.createCaseAsPersona(f.presenter, crypto.randomUUID(), {
-              mode: "assisted",
-              personId: f.foreignPeople.sam,
-            }),
-          rejected("FORBIDDEN"),
-        );
-        const assisted = await f.createCaseAsPersona(f.presenter, crypto.randomUUID(), {
+        // An applicant cannot create an assisted case, in this workspace or another.
+        for (const applicant of [f.applicantA, f.outsider])
+          await assert.rejects(
+            () =>
+              f.createCase(applicant, crypto.randomUUID(), { mode: "assisted" }),
+            rejected("FORBIDDEN"),
+          );
+        const assisted = await f.createCase(f.siteCoordinator, crypto.randomUUID(), {
           mode: "assisted",
-          personId: f.people.sam,
         });
-        const [staff] = await rows(f.presenter, "cases", {
+        const [staff] = await rows(f.siteCoordinator, "cases", {
           id: assisted.caseId,
         });
         assert.equal(staff.owner_user_id, null);
-        assert.equal(staff.created_by_user_id, f.presenterUserId);
-        assert.equal(staff.created_by_person_id, f.people.sam);
+        assert.equal(staff.created_by_user_id, f.siteCoordinatorUserId);
+        assert.equal(staff.created_by_person_id, f.siteCoordinatorId);
         assert.deepEqual(
           await rows(f.applicantA, "cases", { id: assisted.caseId }),
           [],
@@ -332,7 +314,7 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
           f.first.caseId,
         ]);
         assert.equal(
-          (await rows(f.presenter, "cases", { id: f.first.caseId })).length,
+          (await rows(f.siteCoordinator, "cases", { id: f.first.caseId })).length,
           1,
         );
       },
@@ -340,7 +322,7 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
     await t.test(
       "direct writes, anonymous APIs, outsider and unapproved accounts fail closed",
       async () => {
-        for (const actor of [f.applicantA, f.presenter])
+        for (const actor of [f.applicantA, f.siteCoordinator])
           for (const table of [
             "workspaces",
             "memberships",
@@ -370,7 +352,6 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
             await f.anonymous.rpc("vitally_create_case", {
               p_action_id: crypto.randomUUID(),
               p_mode: "client",
-              p_person_id: null,
               p_answers: {},
             })
           ).error,
@@ -386,15 +367,17 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
         );
         assert.equal((await rows(f.applicantA, "memberships")).length, 1);
         assert.deepEqual(await rows(f.applicantA, "people"), []);
-        assert.equal((await rows(f.presenter, "people")).length, 3);
+        assert.equal((await rows(f.siteCoordinator, "people")).length, 4);
         assert.ok(
           (await f.applicantA.from("action_receipts").select("*")).error,
         );
-        assert.ok((await f.presenter.rpc("initialize_workspace", {})).error);
+        assert.ok((await f.siteCoordinator.rpc("initialize_workspace", {})).error);
       },
     );
+    // Replaces "normal initializer preserves people, default and capabilities;
+    // adds roster only explicitly": the initializer no longer creates people.
     await t.test(
-      "normal initializer preserves people, default and capabilities; adds roster only explicitly",
+      "a re-run of the initializer is idempotent and staff-only",
       async () => {
         const before = await f.snapshot();
         // One lock around the pair, not one each: the two calls must still race
@@ -406,20 +389,27 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
           ]),
         );
         assert.deepEqual(result, concurrent);
-        assert.deepEqual(result.people, f.people);
+        assert.deepEqual(result, { workspaceId: f.workspaceId });
         assert.deepEqual(await f.snapshot(), before);
+        // Staff only: every person is a linked staff member, and nothing else.
         const people = (
           await f.sql(
-            "select person_key,capabilities from public.people where workspace_id=$1 order by person_key",
+            "select person_key,user_id,capabilities from public.people where workspace_id=$1 order by person_key",
             [f.workspaceId],
           )
         ).rows;
         assert.deepEqual(people, [
-          { person_key: "alex", capabilities: ["prepare"] },
-          { person_key: "morgan", capabilities: ["review"] },
           {
-            person_key: "sam",
-            capabilities: ["admin", "assist", "followup", "receive_documents"],
+            person_key: "intaker",
+            user_id: f.intakerUserId,
+            capabilities: ["receive_documents", "assist"],
+          },
+          { person_key: "preparer", user_id: f.preparerUserId, capabilities: ["prepare"] },
+          { person_key: "reviewer", user_id: f.reviewerUserId, capabilities: ["review"] },
+          {
+            person_key: "site_coordinator",
+            user_id: f.siteCoordinatorUserId,
+            capabilities: ["admin", "followup", "assist", "receive_documents"],
           },
         ]);
         const workspace = (
@@ -428,12 +418,12 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
             [f.workspaceId],
           )
         ).rows[0];
-        assert.equal(workspace.default_followup_person_id, f.people.sam);
+        assert.equal(workspace.default_followup_person_id, f.siteCoordinatorId);
         await assert.rejects(
           () =>
             f.sql(
               "update public.workspaces set default_followup_person_id=$1 where id=$2",
-              [f.foreignPeople.sam, f.workspaceId],
+              [f.foreignStaffId, f.workspaceId],
             ),
           (error) => error.code === "23503",
         );
@@ -443,8 +433,50 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
             applicantUserIds: [...f.setup.applicantUserIds, f.unapprovedUserId],
           }),
         );
-        assert.deepEqual(added.people, f.people);
+        assert.deepEqual(added, { workspaceId: f.workspaceId });
         assert.equal((await rows(f.unapproved, "memberships")).length, 1);
+        // Review Focus 4: the initializer alone leaves a new workspace with no
+        // default; the default follows only when the setup names one.
+        const defaultOf = async (workspaceId) =>
+          (
+            await f.sql(
+              "select default_followup_person_id as id from public.workspaces where id=$1",
+              [workspaceId],
+            )
+          ).rows[0].id;
+        const bare = crypto.randomUUID();
+        await f.initializeOwned({ workspaceId: bare, applicantUserIds: [] });
+        assert.equal(await defaultOf(bare), null);
+        assert.equal(
+          (
+            await f.sql("select count(*) as n from public.people where workspace_id=$1", [bare])
+          ).rows[0].n,
+          "0",
+          "a new workspace has no people of its own",
+        );
+        const lead = await f.provision();
+        const named = crypto.randomUUID();
+        await f.initializeOwned({
+          workspaceId: named,
+          applicantUserIds: [],
+          staff: [
+            {
+              userId: lead.userId,
+              personKey: "site_coordinator",
+              name: "Lee Adams",
+              capabilities: ["admin", "followup"],
+            },
+          ],
+          defaultFollowup: "site_coordinator",
+        });
+        const person = (
+          await f.sql(
+            "select id,user_id from public.people where workspace_id=$1 and person_key='site_coordinator'",
+            [named],
+          )
+        ).rows[0];
+        assert.equal(person.user_id, lead.userId);
+        assert.equal(await defaultOf(named), person.id);
       },
     );
     await t.test(
@@ -527,7 +559,7 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
           addPeople: [
             { key: "casey", name: "Casey", capabilities: ["prepare"] },
           ],
-          addCapabilities: [{ personId: f.people.alex, capability: "review" }],
+          addCapabilities: [{ personId: f.preparerId, capability: "review" }],
         };
         const result = await extendTestWorkspace(addition);
         const before = await f.snapshot();
@@ -538,7 +570,7 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
             extendTestWorkspace({
               ...addition,
               addCapabilities: [
-                { personId: f.foreignPeople.sam, capability: "review" },
+                { personId: f.foreignStaffId, capability: "review" },
               ],
             }),
           rejected("VALIDATION"),
@@ -558,7 +590,7 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
             extendTestWorkspace({
               ...addition,
               addCapabilities: [
-                { personId: f.people.alex, capability: "root" },
+                { personId: f.preparerId, capability: "root" },
               ],
             }),
           rejected("VALIDATION"),
@@ -588,7 +620,7 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
         );
         await assert.rejects(
           () =>
-            extendTestWorkspace({ ...addition, removePeople: [f.people.sam] }),
+            extendTestWorkspace({ ...addition, removePeople: [f.siteCoordinatorId] }),
           rejected("VALIDATION"),
         );
         await f.sql(
@@ -685,8 +717,8 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
     await f.close();
   }
 });
-test("workflow records stay owner-visible, presenter-only, and write-protected", async (t) => {
-  const f = await createDatabaseFixture({ roleAccounts: false });
+test("workflow records stay owner-visible, staff-only, and write-protected", async (t) => {
+  const f = await createDatabaseFixture();
   try {
     const submitted = await f.createCase(f.applicantA, crypto.randomUUID());
     const draft = await f.createCase(f.applicantA, crypto.randomUUID());
@@ -731,7 +763,7 @@ test("workflow records stay owner-visible, presenter-only, and write-protected",
     await t.test(
       "internal staff records are empty for applicants, never errors",
       async () => {
-        for (const table of PRESENTER_ONLY_TABLES) {
+        for (const table of STAFF_ONLY_TABLES) {
           const internal = await f.applicantA.from(table).select("*");
           assert.equal(internal.error, null, `${table} must not error`);
           assert.deepEqual(internal.data, [], `${table} must be empty`);
@@ -741,39 +773,39 @@ test("workflow records stay owner-visible, presenter-only, and write-protected",
           assert.equal(other.error, null, `${table} must not error`);
           assert.deepEqual(other.data, [], `${table} must hide other owners`);
         }
-        for (const actor of [f.applicantA, f.applicantB, f.presenter])
+        for (const actor of [f.applicantA, f.applicantB, f.siteCoordinator])
           assert.ok((await actor.from("action_receipts").select("*")).error);
       },
     );
     await t.test(
-      "the presenter reads every workflow record except private applicant drafts",
+      "staff read every workflow record except private applicant drafts",
       async () => {
         for (const table of CLIENT_VISIBLE_TABLES)
           assert.equal(
-            (await rows(f.presenter, table, { case_id: submitted.caseId }))
+            (await rows(f.siteCoordinator, table, { case_id: submitted.caseId }))
               .length,
             1,
-            `${table} must be visible to the presenter`,
+            `${table} must be visible to staff`,
           );
         const [participant] = await rows(
-          f.presenter,
+          f.siteCoordinator,
           "preparation_participants",
         );
-        assert.equal(participant.person_id, f.people.alex);
-        const [followup] = await rows(f.presenter, "admin_followups");
+        assert.equal(participant.person_id, f.preparerId);
+        const [followup] = await rows(f.siteCoordinator, "admin_followups");
         assert.equal(followup.id, seeded.followupId);
         assert.equal(followup.request_id, seeded.requestId);
-        assert.equal(followup.assignee_person_id, f.people.sam);
+        assert.equal(followup.assignee_person_id, f.siteCoordinatorId);
         assert.equal(followup.status, "open");
         assert.equal(followup.resolution_outcome, null);
-        const [contact] = await rows(f.presenter, "contact_log");
+        const [contact] = await rows(f.siteCoordinator, "contact_log");
         assert.equal(contact.followup_id, seeded.followupId);
         assert.equal(contact.outcome, "no_answer");
-        assert.equal(contact.logged_by_person_id, f.people.sam);
-        const [version] = await rows(f.presenter, "contact_log_versions");
+        assert.equal(contact.logged_by_person_id, f.siteCoordinatorId);
+        const [version] = await rows(f.siteCoordinator, "contact_log_versions");
         assert.equal(version.contact_id, seeded.contactId);
         assert.equal(version.version, 1);
-        const [event] = await rows(f.presenter, "case_events", {
+        const [event] = await rows(f.siteCoordinator, "case_events", {
           case_id: submitted.caseId,
         });
         assert.equal(event.action, "REQUEST_DOCUMENT");
@@ -781,7 +813,7 @@ test("workflow records stay owner-visible, presenter-only, and write-protected",
           requestId: seeded.requestId,
           internalNote: "Mileage looks incomplete.",
         });
-        const items = await rows(f.presenter, "assistance_items");
+        const items = await rows(f.siteCoordinator, "assistance_items");
         assert.equal(items.length, 2);
         const item = items.find((row) => row.id === seeded.assistanceId);
         assert.equal(item.case_id, submitted.caseId);
@@ -798,7 +830,7 @@ test("workflow records stay owner-visible, presenter-only, and write-protected",
         assert.equal(standalone.case_id, null);
         for (const table of ["client_events", "case_events"])
           assert.deepEqual(
-            await rows(f.presenter, table, { case_id: draft.caseId }),
+            await rows(f.siteCoordinator, table, { case_id: draft.caseId }),
             [],
             `${table} on a private draft`,
           );
@@ -845,20 +877,20 @@ test("workflow records stay owner-visible, presenter-only, and write-protected",
             `${table} must return after restoration`,
           );
         try {
-          await setActive(f.presenterUserId, false);
-          await readsNothing(f.presenter, "presenter");
+          await setActive(f.siteCoordinatorUserId, false);
+          await readsNothing(f.siteCoordinator, "staff");
         } finally {
-          await setActive(f.presenterUserId, true);
+          await setActive(f.siteCoordinatorUserId, true);
         }
         for (const table of WORKFLOW_TABLES)
           assert.ok(
-            (await rows(f.presenter, table)).length,
+            (await rows(f.siteCoordinator, table)).length,
             `${table} must return after restoration`,
           );
       },
     );
     await t.test(
-      "direct writes by applicants and presenters fail and change nothing",
+      "direct writes by applicants and staff fail and change nothing",
       async () => {
         const before = await workflowSnapshot(f);
         for (const table of WORKFLOW_TABLES)
@@ -869,9 +901,9 @@ test("workflow records stay owner-visible, presenter-only, and write-protected",
             insert: {
               workspace_id: f.workspaceId,
               case_id: submitted.caseId,
-              person_id: f.people.morgan,
+              person_id: f.reviewerId,
             },
-            update: { person_id: f.people.morgan },
+            update: { person_id: f.reviewerId },
           },
           document_requests: {
             filter: ["id", seeded.requestId],
@@ -880,7 +912,7 @@ test("workflow records stay owner-visible, presenter-only, and write-protected",
               case_id: submitted.caseId,
               title: "Direct request",
               message: "Written without an action.",
-              requested_by_person_id: f.people.alex,
+              requested_by_person_id: f.preparerId,
             },
             update: { status: "verified" },
           },
@@ -902,9 +934,9 @@ test("workflow records stay owner-visible, presenter-only, and write-protected",
               workspace_id: f.workspaceId,
               case_id: submitted.caseId,
               request_id: seeded.requestId,
-              assignee_person_id: f.people.sam,
+              assignee_person_id: f.siteCoordinatorId,
               reason: "Direct escalation",
-              created_by_person_id: f.people.alex,
+              created_by_person_id: f.preparerId,
             },
             update: { status: "cancelled" },
           },
@@ -913,8 +945,8 @@ test("workflow records stay owner-visible, presenter-only, and write-protected",
             insert: {
               workspace_id: f.workspaceId,
               case_id: submitted.caseId,
-              logged_by_user_id: f.presenterUserId,
-              logged_by_person_id: f.people.sam,
+              logged_by_user_id: f.siteCoordinatorUserId,
+              logged_by_person_id: f.siteCoordinatorId,
               direction: "outgoing",
               contacted_at: new Date().toISOString(),
               with_whom: "client",
@@ -931,8 +963,8 @@ test("workflow records stay owner-visible, presenter-only, and write-protected",
               version: 2,
               workspace_id: f.workspaceId,
               case_id: submitted.caseId,
-              edited_by_user_id: f.presenterUserId,
-              edited_by_person_id: f.people.sam,
+              edited_by_user_id: f.siteCoordinatorUserId,
+              edited_by_person_id: f.siteCoordinatorId,
               direction: "outgoing",
               contacted_at: new Date().toISOString(),
               with_whom: "client",
@@ -948,7 +980,7 @@ test("workflow records stay owner-visible, presenter-only, and write-protected",
               workspace_id: f.workspaceId,
               case_id: submitted.caseId,
               preparation_version: 2,
-              reviewer_person_id: f.people.morgan,
+              reviewer_person_id: f.reviewerId,
             },
             // Findings are internal: no browser role rewrites or reads them.
             update: { status: "approved", findings: "Direct finding." },
@@ -997,7 +1029,7 @@ test("workflow records stay owner-visible, presenter-only, and write-protected",
               workspace_id: f.workspaceId,
               case_id: submitted.caseId,
               item: "photo_id",
-              recorded_by_person_id: f.people.sam,
+              recorded_by_person_id: f.siteCoordinatorId,
             },
             update: { item: "photo_id" },
           },
@@ -1015,7 +1047,7 @@ test("workflow records stay owner-visible, presenter-only, and write-protected",
           Object.keys(probes).sort(),
           [...WORKFLOW_TABLES].sort(),
         );
-        for (const actor of [f.applicantA, f.presenter])
+        for (const actor of [f.applicantA, f.siteCoordinator])
           for (const [table, probe] of Object.entries(probes)) {
             assert.ok(
               (await actor.from(table).insert(probe.insert)).error,
@@ -1055,7 +1087,7 @@ test("workflow records stay owner-visible, presenter-only, and write-protected",
                 submitted.caseId,
                 "Cross-workspace",
                 "Rejected.",
-                f.foreignPeople.alex,
+                f.foreignStaffId,
               ],
             ),
           (error) => error.code === "23503",
@@ -1069,7 +1101,7 @@ test("workflow records stay owner-visible, presenter-only, and write-protected",
                 submitted.caseId,
                 "Cross-workspace person",
                 "Rejected.",
-                f.foreignPeople.alex,
+                f.foreignStaffId,
               ],
             ),
           (error) => error.code === "23503",
@@ -1099,7 +1131,7 @@ test("workflow records stay owner-visible, presenter-only, and write-protected",
                 seeded.requestId,
                 "unattributed.pdf",
                 "staff_recorded",
-                f.presenterUserId,
+                f.siteCoordinatorUserId,
                 null,
               ],
             ),
@@ -1113,9 +1145,9 @@ test("workflow records stay owner-visible, presenter-only, and write-protected",
                 f.workspaceId,
                 submitted.caseId,
                 seeded.requestId,
-                f.people.sam,
+                f.siteCoordinatorId,
                 "Duplicate escalation",
-                f.people.alex,
+                f.preparerId,
               ],
             ),
           (error) => error.code === "23505",
@@ -1196,9 +1228,9 @@ test("workflow records stay owner-visible, presenter-only, and write-protected",
           );
           assert.ok(
             expression.includes(
-              "(m.access = ANY (ARRAY['presenter'::text, 'staff'::text]))",
+              "(m.access = 'staff'::text)",
             ),
-            `${policy.name} must check presenter and staff access`,
+            `${policy.name} must check staff access`,
           );
           const ownerReadable = CLIENT_VISIBLE_TABLES.includes(policy.name);
           assert.equal(

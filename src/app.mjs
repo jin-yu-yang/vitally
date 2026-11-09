@@ -213,11 +213,10 @@ if (!config) {
   function screenFor(state) {
     if (!state.principal) {
       // The sign-in form is only for a visitor who is known to be signed out.
-      if (state.error?.code === "FORBIDDEN") return views.noAccessScreen(state);
+      if (views.showsNoAccess(state)) return views.noAccessScreen(state);
       if (state.session !== "none") return views.unreachableScreen(state);
       return client.accessScreen(state);
     }
-    if (state.principal?.access === "presenter") return views.presenterScreen(state);
     if (isStaffWindow(state.principal)) return views.staffScreen(state);
     return client.clientScreen(state);
   }
@@ -1196,7 +1195,7 @@ if (!config) {
       closeDialog("#office-queue-title");
     if (type === "SUBMIT") {
       // The office submits an assisted application from the case workspace and
-      // stays there; "progress" is a client screen and a presenter has none.
+      // stays there; "progress" is a client screen and staff have none.
       if (isStaffWindow(controller.getState().principal)) {
         notify("success", "The application is with the office. Record the intake checks next.", by);
         return;

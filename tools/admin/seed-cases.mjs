@@ -45,7 +45,6 @@ export async function applyAction(client, userId, caseId, type, payload = {}) {
     p_action_id: randomUUID(),
     p_case_id: caseId,
     p_expected_revision: rows[0].revision,
-    p_person_id: null,
     p_type: type,
     p_payload: JSON.stringify(payload),
   });
@@ -232,7 +231,6 @@ export async function seedCases(
     const created = await callRpc(client, actor.userId, "vitally_create_case", {
       p_action_id: randomUUID(),
       p_mode: mode,
-      p_person_id: null,
       p_answers: "{}",
     }).catch(refused(scenario, "CREATE_CASE"));
     run.caseIds.push(created.caseId);

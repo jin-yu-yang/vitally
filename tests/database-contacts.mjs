@@ -91,7 +91,7 @@ async function followupCase(f) {
 test("the contact log", async (t) => {
   const f = await createDatabaseFixture();
   try {
-    await t.test("each staff persona logs a contact at any stage", async () => {
+    await t.test("each staff member logs a contact at any stage", async () => {
       for (const [caseId, account] of [
         [await f.readyCase(), f.roleAccounts.preparer],
         [await f.preparedCase(), f.roleAccounts.reviewer],
@@ -276,20 +276,23 @@ test("the contact log", async (t) => {
 
     await t.test("who may log", async () => {
       const caseId = await f.readyCase();
-      for (const [client, personId] of [
-        [f.applicantA, f.alex],
-        [f.applicantA, null],
-        [f.presenter, null],
-        [f.presenter, f.foreignPeople.sam],
-      ])
-        await refuse(
-          f,
-          client,
-          "vitally_log_contact",
-          contactArgs({ caseId, personId, entry: SAMPLE_CONTACT() }),
-          "VT001",
-          String(personId),
-        );
+      await refuse(
+        f,
+        f.applicantA,
+        "vitally_log_contact",
+        contactArgs({ caseId, entry: SAMPLE_CONTACT() }),
+        "VT001",
+        "a client",
+      );
+      // A staff member of another workspace cannot tell the case exists.
+      await refuse(
+        f,
+        f.foreignStaff,
+        "vitally_log_contact",
+        contactArgs({ caseId, entry: SAMPLE_CONTACT() }),
+        "VT002",
+        "another workspace's staff",
+      );
       const draft = await f.draftCase(f.applicantA);
       await refuse(
         f,
@@ -402,22 +405,21 @@ test("the contact log", async (t) => {
       assert.equal((await contactRow(f, linked.contactId)).followup_id, followupId);
     });
 
-    await t.test("another persona cannot edit", async () => {
+    await t.test("another staff member cannot edit", async () => {
       const caseId = await f.readyCase();
       const { contactId } = await f.logContact(f.reviewer, caseId, SAMPLE_CONTACT());
-      for (const [client, personId, code] of [
-        [f.preparer, null, "VT001"],
-        [f.presenter, null, "VT001"],
-        [f.presenter, f.foreignPeople.sam, "VT001"],
-        [f.applicantA, null, "VT001"],
+      for (const [client, code, who] of [
+        [f.preparer, "VT001", "another staff member"],
+        [f.foreignStaff, "VT002", "another workspace's staff"],
+        [f.applicantA, "VT001", "a client"],
       ])
         await refuse(
           f,
           client,
           "vitally_edit_contact",
-          editContactArgs({ contactId, revision: 1, personId, entry: SAMPLE_CONTACT() }),
+          editContactArgs({ contactId, revision: 1, entry: SAMPLE_CONTACT() }),
           code,
-          String(personId),
+          who,
         );
       await refuse(
         f,
@@ -491,7 +493,7 @@ test("the contact log", async (t) => {
         row: await contactRow(f, contactId),
         versions: await versionRows(f, contactId),
       };
-      for (const client of [f.presenter, f.applicantA]) {
+      for (const client of [f.siteCoordinator, f.applicantA]) {
         for (const [table, key] of [
           ["contact_log", "id"],
           ["contact_log_versions", "contact_id"],
@@ -508,7 +510,7 @@ test("the contact log", async (t) => {
         const inserted = await client.from("contact_log").insert({
           workspace_id: f.workspaceId,
           case_id: caseId,
-          logged_by_user_id: f.presenterUserId,
+          logged_by_user_id: f.siteCoordinatorUserId,
           logged_by_person_id: f.preparerId,
           direction: "outgoing",
           contacted_at: new Date().toISOString(),
@@ -523,7 +525,7 @@ test("the contact log", async (t) => {
           version: 2,
           workspace_id: f.workspaceId,
           case_id: caseId,
-          edited_by_user_id: f.presenterUserId,
+          edited_by_user_id: f.siteCoordinatorUserId,
           edited_by_person_id: f.preparerId,
           direction: "outgoing",
           contacted_at: new Date().toISOString(),
@@ -551,11 +553,11 @@ test("the contact log", async (t) => {
         const client = await f.applicantA.from(table).select("*").eq("case_id", caseId);
         assert.equal(client.error, null);
         assert.deepEqual(client.data, [], table);
-        const staff = await f.presenter.from(table).select("*").eq("case_id", caseId);
+        const staff = await f.siteCoordinator.from(table).select("*").eq("case_id", caseId);
         assert.equal(staff.error, null);
         assert.equal(staff.data.length, 1, table);
       }
-      const staff = await f.presenter.from("contact_log").select("id").eq("id", contactId);
+      const staff = await f.siteCoordinator.from("contact_log").select("id").eq("id", contactId);
       assert.deepEqual(staff.data, [{ id: contactId }]);
     });
 
@@ -582,7 +584,7 @@ test("the contact log", async (t) => {
       for (const [outcome, note, createdAt] of attempts)
         await f.sql(
           "insert into public.contact_attempts(workspace_id,case_id,followup_id,actor_user_id,actor_person_id,outcome,note,created_at) values($1,$2,$3,$4,$5,$6,$7,$8)",
-          [f.workspaceId, caseId, followupId, f.presenterUserId, f.sam, outcome, note, createdAt],
+          [f.workspaceId, caseId, followupId, f.siteCoordinatorUserId, f.siteCoordinatorId, outcome, note, createdAt],
         );
       const moved = await f.sql("select vitally_private.move_contact_attempts() as n");
       assert.equal(moved.rows[0].n, 4);
@@ -603,8 +605,8 @@ test("the contact log", async (t) => {
         assert.equal(row.purpose, "request_documents");
         assert.equal(row.contacted_at.getTime(), at);
         assert.equal(row.logged_at.getTime(), at);
-        assert.equal(row.logged_by_person_id, f.sam);
-        assert.equal(row.logged_by_user_id, f.presenterUserId);
+        assert.equal(row.logged_by_person_id, f.siteCoordinatorId);
+        assert.equal(row.logged_by_user_id, f.siteCoordinatorUserId);
         assert.equal(Number(row.revision), 1);
         assert.equal(row.edited_at, null);
         assert.equal(row.outcome, outcome);
@@ -613,8 +615,8 @@ test("the contact log", async (t) => {
         assert.equal(versions.length, 1);
         assert.equal(Number(versions[0].version), 1);
         assert.equal(versions[0].created_at.getTime(), at);
-        assert.equal(versions[0].edited_by_person_id, f.sam);
-        assert.equal(versions[0].edited_by_user_id, f.presenterUserId);
+        assert.equal(versions[0].edited_by_person_id, f.siteCoordinatorId);
+        assert.equal(versions[0].edited_by_user_id, f.siteCoordinatorUserId);
         for (const field of ENTRY_FIELDS)
           assert.deepEqual(versions[0][field], row[field], field);
       }
@@ -643,7 +645,6 @@ test("the contact log", async (t) => {
       const args = applyArgs({
         caseId,
         revision: Number(revision),
-        personId: f.sam,
         type: "RECORD_CONTACT",
         payload: { followupId, note: "Left a message.", outcome: "no_answer" },
       });
@@ -655,16 +656,16 @@ test("the contact log", async (t) => {
           $6,$4,$8)`,
         [
           f.workspaceId,
-          f.presenterUserId,
+          f.siteCoordinatorUserId,
           args.p_action_id,
           caseId,
           args.p_expected_revision,
-          f.sam,
+          f.siteCoordinatorId,
           JSON.stringify(args.p_payload),
           JSON.stringify(stored),
         ],
       );
-      const { data, error } = await f.presenter.rpc("vitally_apply_action", args);
+      const { data, error } = await f.siteCoordinator.rpc("vitally_apply_action", args);
       assert.equal(error, null);
       assert.deepEqual(data, stored);
     });

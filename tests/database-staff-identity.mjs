@@ -24,11 +24,11 @@ import { initializeWorkspace } from "../tools/admin/workspace-setup.mjs";
 
 const ALL_CAPABILITIES = ["prepare", "review", "admin", "followup", "receive_documents", "assist"];
 const FORBIDDEN = "VT001";
-// The tables the staff screens read: what a presenter subscribes to, plus the
-// filing tables a presenter reads but does not subscribe to.
+// The tables the staff screens read: what staff subscribe to, plus the
+// filing tables staff read but do not subscribe to.
 const STAFF_READ_TABLES = [
   ...new Set([
-    ...SUBSCRIBED_TABLES.presenter,
+    ...SUBSCRIBED_TABLES.staff,
     "filing_attempts",
     "filing_returns",
     "filing_notes",
@@ -40,7 +40,7 @@ const CONTROL_ATTEMPT_MS = 2_500;
 // One refused raw call: the SQLSTATE and no receipt behind it.
 async function refuse(f, client, fn, args) {
   const { error } = await client.rpc(fn, args);
-  assert.equal(error?.code, FORBIDDEN, `${fn} naming someone else`);
+  assert.equal(error?.code, FORBIDDEN, `${fn} refused`);
   assert.equal(await f.receiptsFor(args.p_action_id), 0, `${fn} stored a receipt`);
 }
 
@@ -146,7 +146,8 @@ test("staff identity against real Supabase", async (t) => {
       capabilities: ALL_CAPABILITIES,
     });
 
-    await t.test("the three access types", async () => {
+    await t.test("two access types; presenter is refused", async () => {
+      // Replaces "the three access types".
       const access = async (userId) =>
         (
           await f.sql("select access from public.memberships where workspace_id=$1 and user_id=$2", [
@@ -154,7 +155,6 @@ test("staff identity against real Supabase", async (t) => {
             userId,
           ])
         ).rows.map((row) => row.access);
-      assert.deepEqual(await access(f.presenterUserId), ["presenter"]);
       assert.deepEqual(await access(riley.userId), ["staff"]);
       assert.deepEqual(await access(f.applicantAUserId), ["applicant"]);
       const linked = (
@@ -164,10 +164,16 @@ test("staff identity against real Supabase", async (t) => {
       ).rows;
       const byUser = Object.fromEntries(linked.map((row) => [row.user_id, row.id]));
       assert.equal(byUser[riley.userId], riley.personId);
-      assert.equal(byUser[f.presenterUserId], undefined);
       assert.equal(byUser[f.applicantAUserId], undefined);
-      for (const demo of [f.alex, f.morgan, f.sam])
-        assert.ok(!linked.some((row) => row.id === demo), "a demonstration person is linked");
+      await assert.rejects(
+        () =>
+          f.sql(
+            "insert into public.memberships(workspace_id,user_id,access) values($1,$2,'presenter')",
+            [f.workspaceId, f.unapprovedUserId],
+          ),
+        (error) => error.code === "23514",
+      );
+      assert.deepEqual(await f.readMembership(f.unapprovedUserId), []);
     });
 
     await t.test("another access value is refused", async () => {
@@ -197,53 +203,36 @@ test("staff identity against real Supabase", async (t) => {
       assert.deepEqual(await f.readMembership(f.unapprovedUserId), []);
     });
 
-    await t.test("a person cannot be linked to a presenter", async () => {
+    await t.test("a person cannot be linked to a client", async () => {
+      const person = (
+        await f.sql(
+          "insert into public.people(workspace_id,person_key,name,capabilities) values($1,'unlinked_person','Unlinked Person',$2) returning id",
+          [f.workspaceId, ["prepare"]],
+        )
+      ).rows[0].id;
       try {
         await f.sql(
-          "begin; update public.people set user_id='" + f.presenterUserId + "' where id='" + f.alex + "'",
+          "begin; update public.people set user_id='" + f.applicantAUserId + "' where id='" + person + "'",
         );
         await assert.rejects(() => f.sql("commit"));
       } finally {
         await f.sql("rollback");
       }
-      const { user_id } = (await f.sql("select user_id from public.people where id=$1", [f.alex]))
-        .rows[0];
+      const { user_id } = (await f.sql("select user_id from public.people where id=$1", [person])).rows[0];
       assert.equal(user_id, null);
+      await f.sql("delete from public.people where id=$1", [person]);
     });
 
-    await t.test("a staff call with no person acts as its own person", async () => {
+    await t.test("a staff call acts as its own person", async () => {
       const caseId = await f.readyCase();
       const receipt = await f.act(riley.client, caseId, "CLAIM_PREPARATION", {});
       assert.equal((await caseRow(f, caseId)).preparer_id, riley.personId);
       assert.equal(await receiptActor(f, receipt.actionId), riley.personId);
     });
 
-    await t.test("a staff call naming its own person is the same as null", async () => {
-      const caseId = await f.readyCase();
-      const receipt = await f.actAsPersona(riley.client, caseId, riley.personId, "CLAIM_PREPARATION", {});
-      assert.equal((await caseRow(f, caseId)).preparer_id, riley.personId);
-      assert.equal(await receiptActor(f, receipt.actionId), riley.personId);
-    });
-
-    await t.test("a staff call naming someone else is FORBIDDEN with no receipt", async () => {
-      const caseId = await f.readyCase();
-      const revision = await revisionOf(f, caseId);
-      const before = await historyOf(f, caseId);
-      for (const personId of [f.alex, jordan.personId]) {
-        await refuse(
-          f,
-          riley.client,
-          "vitally_apply_action",
-          applyArgs({ caseId, revision, personId, type: "CLAIM_PREPARATION" }),
-        );
-      }
-      const after = await caseRow(f, caseId);
-      assert.equal(after.preparer_id, null);
-      assert.equal(Number(after.revision), revision);
-      assert.deepEqual(await historyOf(f, caseId), before);
-    });
-
-    await t.test("every entry point resolves the person", async () => {
+    // Replaces "every entry point resolves the person": the half that names no
+    // person, for all six RPCs.
+    await t.test("every entry point records the staff member", async () => {
       const readyId = await f.readyCase();
       const unsignedId = await f.approvedCase({ wentOver: false });
       const { itemId } = await f.seedAssistance();
@@ -255,11 +244,10 @@ test("staff identity against real Supabase", async (t) => {
       const entries = [
         {
           fn: "vitally_apply_action",
-          args: (personId) =>
+          args: () =>
             applyArgs({
               caseId: readyId,
               revision: readyRevision,
-              personId,
               type: "CLAIM_PREPARATION",
             }),
           verify: async () =>
@@ -267,9 +255,8 @@ test("staff identity against real Supabase", async (t) => {
         },
         {
           fn: "vitally_close_unsigned",
-          args: (personId) => ({
+          args: () => ({
             p_action_id: randomUUID(),
-            p_person_id: personId,
             p_cases: unsigned,
             p_confirmed: true,
           }),
@@ -277,8 +264,7 @@ test("staff identity against real Supabase", async (t) => {
         },
         {
           fn: "vitally_assistance_action",
-          args: (personId) =>
-            assistanceArgs({ itemId, revision: 1, personId, type: "CLAIM" }),
+          args: () => assistanceArgs({ itemId, revision: 1, type: "CLAIM" }),
           verify: async () =>
             assert.equal(
               (
@@ -291,10 +277,9 @@ test("staff identity against real Supabase", async (t) => {
         },
         {
           fn: "vitally_create_case",
-          args: (personId) => ({
+          args: () => ({
             p_action_id: randomUUID(),
             p_mode: "assisted",
-            p_person_id: personId,
             p_answers: {},
           }),
           verify: async (data) =>
@@ -302,8 +287,7 @@ test("staff identity against real Supabase", async (t) => {
         },
         {
           fn: "vitally_log_contact",
-          args: (personId) =>
-            contactArgs({ caseId: logCase, personId, entry: SAMPLE_CONTACT() }),
+          args: () => contactArgs({ caseId: logCase, entry: SAMPLE_CONTACT() }),
           verify: async (data) =>
             assert.equal(
               (
@@ -316,11 +300,10 @@ test("staff identity against real Supabase", async (t) => {
         },
         {
           fn: "vitally_edit_contact",
-          args: (personId) =>
+          args: () =>
             editContactArgs({
               contactId,
               revision: 1,
-              personId,
               entry: { ...SAMPLE_CONTACT(), note: editNote },
             }),
           verify: async () =>
@@ -335,15 +318,47 @@ test("staff identity against real Supabase", async (t) => {
             ),
         },
       ];
-      for (const [index, entry] of entries.entries()) {
-        const other = index % 2 ? jordan.personId : f.alex;
-        await refuse(f, casey.client, entry.fn, entry.args(other));
-        const args = entry.args(null);
+      for (const entry of entries) {
+        const args = entry.args();
         const { data, error } = await casey.client.rpc(entry.fn, args);
-        assert.equal(error, null, `${entry.fn} with null`);
+        assert.equal(error, null, entry.fn);
         assert.equal(await receiptActor(f, args.p_action_id), casey.personId, entry.fn);
         await entry.verify(data);
       }
+    });
+
+    // Replaces staff-identity "a staff call naming its own person is the same
+    // as null", "a staff call naming someone else is FORBIDDEN with no
+    // receipt", "a client names a person" and "a tampered request", and
+    // database-store "a client who forges a staff person": what they protected
+    // still holds, the browser cannot choose its actor, because there is no
+    // parameter to name one with.
+    await t.test("a call carrying p_person_id matches no function and writes nothing", async () => {
+      const readyId = await f.readyCase();
+      const draft = await f.draftCase(f.applicantA);
+      for (const [who, client, spec] of [
+        ["a staff session", riley.client, { caseId: readyId, type: "CLAIM_PREPARATION" }],
+        [
+          "an applicant session",
+          f.applicantA,
+          {
+            caseId: draft.caseId,
+            type: "SAVE_ANSWERS",
+            payload: { answers: { addr_city: "Pittsburgh" } },
+          },
+        ],
+      ]) {
+        const before = await f.stateSnapshot();
+        const args = {
+          ...applyArgs({ ...spec, revision: await revisionOf(f, spec.caseId) }),
+          p_person_id: jordan.personId,
+        };
+        const { error } = await client.rpc("vitally_apply_action", args);
+        assert.equal(error?.code, "PGRST202", who);
+        assert.equal(await f.receiptsFor(args.p_action_id), 0, who);
+        assert.deepEqual(await f.stateSnapshot(), before, who);
+      }
+      assert.equal((await caseRow(f, readyId)).preparer_id, null);
     });
 
     await t.test("a staff member's contact log entry: only its logger or an admin edits it", async () => {
@@ -363,7 +378,6 @@ test("staff identity against real Supabase", async (t) => {
       const refused = editContactArgs({
         contactId,
         revision: 1,
-        personId: null,
         entry: { ...SAMPLE_CONTACT(), note: "Jordan's fictional edit." },
       });
       await refuse(f, jordan.client, "vitally_edit_contact", refused);
@@ -374,7 +388,6 @@ test("staff identity against real Supabase", async (t) => {
       const allowed = editContactArgs({
         contactId,
         revision: 1,
-        personId: null,
         entry: { ...SAMPLE_CONTACT(), note: "Dana's fictional edit." },
       });
       const { error } = await dana.client.rpc("vitally_edit_contact", allowed);
@@ -395,45 +408,31 @@ test("staff identity against real Supabase", async (t) => {
       assert.notEqual((await caseRow(f, caseId)).stage, "closed");
     });
 
-    await t.test("a replay keeps its actor", async () => {
+    // Replaces "a replay keeps its actor": the digest now holds the resolved
+    // person, so an identical replay is the one replay left.
+    await t.test("an identical replay keeps its actor", async () => {
       const caseId = await f.readyCase();
-      const first = applyArgs({
+      const args = applyArgs({
         caseId,
         revision: await revisionOf(f, caseId),
         type: "CLAIM_PREPARATION",
       });
-      const one = await riley.client.rpc("vitally_apply_action", first);
+      const one = await riley.client.rpc("vitally_apply_action", args);
       assert.equal(one.error, null);
-      const two = await riley.client.rpc("vitally_apply_action", {
-        ...first,
-        p_person_id: riley.personId,
-      });
+      const two = await riley.client.rpc("vitally_apply_action", args);
       assert.equal(two.error, null);
       assert.deepEqual(two.data, one.data);
-      assert.equal(await f.receiptsFor(first.p_action_id), 1);
-      assert.equal(await receiptActor(f, first.p_action_id), riley.personId);
+      assert.equal(await f.receiptsFor(args.p_action_id), 1);
+      assert.equal(await receiptActor(f, args.p_action_id), riley.personId);
       const claims = (await historyOf(f, caseId)).filter((row) => row.action === "CLAIM_PREPARATION");
       assert.equal(claims.length, 1);
     });
 
-    await t.test("a staff member reusing a presenter's action id makes a new request", async () => {
-      // Receipts belong to the account that reserved them: Riley's call with the
-      // presenter's action id is judged as Riley's own request, never as a
-      // replay of the presenter's.
-      const presenterCase = await f.readyCase();
+    // Receipts belong to the account that reserved them.
+    await t.test("two staff accounts share one action id", async () => {
       const rileyCase = await f.readyCase();
+      const robinCase = await f.readyCase();
       const actionId = randomUUID();
-      const presenterCall = await f.presenter.rpc(
-        "vitally_apply_action",
-        applyArgs({
-          actionId,
-          caseId: presenterCase,
-          revision: await revisionOf(f, presenterCase),
-          personId: f.alex,
-          type: "CLAIM_PREPARATION",
-        }),
-      );
-      assert.equal(presenterCall.error, null);
       const rileyCall = await riley.client.rpc(
         "vitally_apply_action",
         applyArgs({
@@ -444,10 +443,20 @@ test("staff identity against real Supabase", async (t) => {
         }),
       );
       assert.equal(rileyCall.error, null);
-      assert.notDeepEqual(rileyCall.data, presenterCall.data);
-      assert.equal(rileyCall.data.caseId, rileyCase);
+      const robinCall = await robin.client.rpc(
+        "vitally_apply_action",
+        applyArgs({
+          actionId,
+          caseId: robinCase,
+          revision: await revisionOf(f, robinCase),
+          type: "CLAIM_PREPARATION",
+        }),
+      );
+      assert.equal(robinCall.error, null);
+      assert.notDeepEqual(robinCall.data, rileyCall.data);
+      assert.equal(robinCall.data.caseId, robinCase);
       assert.equal((await caseRow(f, rileyCase)).preparer_id, riley.personId);
-      assert.equal((await caseRow(f, presenterCase)).preparer_id, f.alex);
+      assert.equal((await caseRow(f, robinCase)).preparer_id, robin.personId);
       const receipts = (
         await f.sql(
           "select actor_user_id,actor_person_id from public.action_receipts where action_id=$1",
@@ -456,47 +465,8 @@ test("staff identity against real Supabase", async (t) => {
       ).rows;
       const byAccount = Object.fromEntries(receipts.map((row) => [row.actor_user_id, row.actor_person_id]));
       assert.equal(receipts.length, 2);
-      assert.equal(byAccount[f.presenterUserId], f.alex);
       assert.equal(byAccount[riley.userId], riley.personId);
-    });
-
-    await t.test("a presenter chooses a demo persona", async () => {
-      const caseId = await f.readyCase();
-      const receipt = await f.actAsPersona(f.presenter, caseId, f.alex, "CLAIM_PREPARATION", {});
-      assert.equal((await caseRow(f, caseId)).preparer_id, f.alex);
-      assert.equal(await receiptActor(f, receipt.actionId), f.alex);
-    });
-
-    await t.test("a presenter tries a staff member's person", async () => {
-      const caseId = await f.readyCase();
-      await refuse(
-        f,
-        f.presenter,
-        "vitally_apply_action",
-        applyArgs({
-          caseId,
-          revision: await revisionOf(f, caseId),
-          personId: riley.personId,
-          type: "CLAIM_PREPARATION",
-        }),
-      );
-      assert.equal((await caseRow(f, caseId)).preparer_id, null);
-    });
-
-    await t.test("a client names a person", async () => {
-      const draft = await f.draftCase(f.applicantA);
-      await refuse(
-        f,
-        f.applicantA,
-        "vitally_apply_action",
-        applyArgs({
-          caseId: draft.caseId,
-          revision: await revisionOf(f, draft.caseId),
-          personId: f.alex,
-          type: "SAVE_ANSWERS",
-          payload: { answers: {} },
-        }),
-      );
+      assert.equal(byAccount[robin.userId], robin.personId);
     });
 
     await t.test("two staff members share a case", async () => {
@@ -526,27 +496,6 @@ test("staff identity against real Supabase", async (t) => {
       assert.equal(row.stage, "review_approved");
     });
 
-    await t.test("a tampered request", async () => {
-      const caseId = await f.readyCase();
-      const before = await historyOf(f, caseId);
-      const args = applyArgs({
-        caseId,
-        revision: await revisionOf(f, caseId),
-        personId: jordan.personId,
-        type: "CLAIM_PREPARATION",
-      });
-      await refuse(f, riley.client, "vitally_apply_action", args);
-      assert.deepEqual(await historyOf(f, caseId), before);
-      assert.equal(
-        (
-          await f.sql("select count(*) as count from public.preparation_participants where case_id=$1", [
-            caseId,
-          ])
-        ).rows[0].count,
-        "0",
-      );
-    });
-
     await t.test("a preparer who can also review cannot claim the review", async () => {
       const caseId = await f.readyCase();
       await f.act(robin.client, caseId, "CLAIM_PREPARATION", {});
@@ -562,9 +511,11 @@ test("staff identity against real Supabase", async (t) => {
       assert.equal((await caseRow(f, caseId)).reviewer_id, jordan.personId);
     });
 
-    await t.test("staff read the same rows as a presenter, and no private draft", async () => {
+    // Every staff table's rows are exactly what a privileged read of the
+    // workspace returns, minus the rows of a private client draft.
+    await t.test("staff rows equal a privileged read minus private drafts", async () => {
       // Some rows in every part of the case: a prepared case with a request,
-      // and a client's private draft that neither may read.
+      // and a client's private draft that staff may not read.
       const caseId = await f.readyCase();
       await f.act(f.preparer, caseId, "CLAIM_PREPARATION", {});
       await f.act(f.preparer, caseId, "REQUEST_DOCUMENT", f.sampleRequest);
@@ -587,27 +538,48 @@ test("staff identity against real Supabase", async (t) => {
         assert.equal(error, null, `${table} read`);
         return data;
       };
-      const asJson = (rows) => rows.map((row) => JSON.stringify(row)).sort();
+      const privileged = async (table) => {
+        const owned = table === "workspaces" ? "t.id=$1" : "t.workspace_id=$1";
+        const hasCaseId =
+          (
+            await f.sql(
+              "select 1 from information_schema.columns where table_schema='public' and table_name=$1 and column_name='case_id'",
+              [table],
+            )
+          ).rowCount === 1;
+        const notDraft =
+          table === "cases"
+            ? " and (t.origin<>'client' or t.stage<>'draft')"
+            : hasCaseId
+              ? " and not exists(select 1 from public.cases c where c.id=t.case_id and c.origin='client' and c.stage='draft')"
+              : "";
+        return (
+          await f.sql(`select to_jsonb(t.*) as record from public.${table} t where ${owned}${notDraft}`, [
+            f.workspaceId,
+          ])
+        ).rows.map((row) => row.record);
+      };
+      // Sorted keys, because to_jsonb orders keys and PostgREST keeps column order.
+      const canonical = (row) =>
+        JSON.stringify(Object.fromEntries(Object.entries(row).sort(([a], [b]) => a.localeCompare(b))));
+      const asJson = (rows) => rows.map(canonical).sort();
       const workspaceOf = (table, row) => (table === "workspaces" ? row.id : row.workspace_id);
       for (const table of STAFF_READ_TABLES) {
-        const presenterRows = await read(f.presenter, table);
+        const expected = asJson(await privileged(table));
         const staffRows = await read(riley.client, table);
-        const asPresenter = asJson(presenterRows);
-        assert.deepEqual(asJson(staffRows), asPresenter, `${table} rows`);
+        assert.deepEqual(asJson(staffRows), expected, `${table} rows`);
         if (["cases", "case_events", "people", "document_requests", "contact_log"].includes(table))
-          assert.ok(asPresenter.length > 0, `${table} has rows to compare`);
+          assert.ok(expected.length > 0, `${table} has rows to compare`);
         assert.ok(
-          !asPresenter.some((row) => row.includes(draft.caseId)),
+          !expected.some((row) => row.includes(draft.caseId)),
           `${table} shows a private draft`,
         );
         // Nothing in another workspace: every row is this workspace's.
         for (const row of staffRows)
           assert.equal(workspaceOf(table, row), f.workspaceId, `${table} shows another workspace's row`);
       }
-      for (const client of [f.presenter, riley.client]) {
-        const { data } = await client.from("cases").select("id").eq("id", draft.caseId);
-        assert.deepEqual(data, []);
-      }
+      const { data } = await riley.client.from("cases").select("id").eq("id", draft.caseId);
+      assert.deepEqual(data, []);
     });
 
     await t.test("a staff channel receives a case update live", async () => {
@@ -639,8 +611,6 @@ test("staff identity against real Supabase", async (t) => {
     await t.test("add_staff_member refuses what the roster must refuse", async () => {
       const refused = (userId, key, name, capabilities) =>
         assert.rejects(() => addStaffMember(f, userId, key, name, capabilities), rejected("VALIDATION"), key);
-      // A key reserved for the demonstration personas.
-      await refused(f.unapprovedUserId, "sam", "Sam Imposter", ["prepare"]);
       // Different values for an existing key or account.
       await refused(riley.userId, "riley", "Riley Parker", ["prepare"]);
       await refused(riley.userId, "riley", "Riley Park", ["prepare", "review"]);
@@ -664,7 +634,7 @@ test("staff identity against real Supabase", async (t) => {
       const riley2 = await personRow(f, "riley");
       assert.equal(riley2.name, "Riley Park");
       assert.deepEqual(riley2.capabilities, ["prepare"]);
-      for (const key of ["sam", "quinn", "zed"]) {
+      for (const key of ["quinn", "zed"]) {
         const extra = await f.sql(
           "select id from public.people where workspace_id=$1 and person_key=$2 and user_id is not null",
           [f.workspaceId, key],
@@ -719,24 +689,17 @@ test("staff identity against real Supabase", async (t) => {
         f,
         parker.client,
         "vitally_apply_action",
-        applyArgs({ caseId, revision, personId: null, type: "CLAIM_PREPARATION" }),
-      );
-      await refuse(
-        f,
-        parker.client,
-        "vitally_apply_action",
-        applyArgs({ caseId, revision, personId: parker.personId, type: "CLAIM_PREPARATION" }),
+        applyArgs({ caseId, revision, type: "CLAIM_PREPARATION" }),
       );
       await refuse(
         f,
         parker.client,
         "vitally_log_contact",
-        contactArgs({ caseId, personId: null, entry: SAMPLE_CONTACT() }),
+        contactArgs({ caseId, entry: SAMPLE_CONTACT() }),
       );
       await refuse(f, parker.client, "vitally_create_case", {
         p_action_id: randomUUID(),
         p_mode: "assisted",
-        p_person_id: null,
         p_answers: {},
       });
       const { data, error } = await parker.client.from("cases").select("*");
@@ -746,9 +709,15 @@ test("staff identity against real Supabase", async (t) => {
     });
 
     await t.test("set_default_followup refuses a person without followup", async () => {
-      // Riley lacks `followup`; Sam has it but is no staff member's person; and
-      // no person has the last key.
-      for (const key of ["riley", "sam", "nobody"])
+      // Riley lacks `followup`; the unlinked person has it but is no staff
+      // member's person; and no person has the last key.
+      const unlinked = (
+        await f.sql(
+          "insert into public.people(workspace_id,person_key,name,capabilities) values($1,'unlinked_default','Unlinked Default',$2) returning id",
+          [f.workspaceId, ["admin", "followup"]],
+        )
+      ).rows[0].id;
+      for (const key of ["riley", "unlinked_default", "nobody"])
         await assert.rejects(
           () =>
             f.withSetupLock(() =>
@@ -757,6 +726,7 @@ test("staff identity against real Supabase", async (t) => {
           rejected("VALIDATION"),
           key,
         );
+      await f.sql("delete from public.people where id=$1", [unlinked]);
       const { default_followup_person_id } = (
         await f.sql("select default_followup_person_id from public.workspaces where id=$1", [
           f.workspaceId,
@@ -834,7 +804,10 @@ test("staff identity against real Supabase", async (t) => {
           f.workspaceId,
         ])
       ).rows;
-      await f.withSetupLock(() => initializeWorkspace(f.setup));
+      // No staff and no default here: the re-run alone must leave the default alone.
+      await f.withSetupLock(() =>
+        initializeWorkspace({ workspaceId: f.workspaceId, applicantUserIds: f.setup.applicantUserIds }),
+      );
       const after = (
         await f.sql("select person_key from public.people where workspace_id=$1 order by person_key", [
           f.workspaceId,
@@ -869,14 +842,55 @@ test("staff identity against real Supabase", async (t) => {
       }
     });
 
-    await t.test("a workspace with staff and no presenter works for staff and clients", async () => {
+    await t.test("a freed persona key can be added as staff", async () => {
+      const sam = await hire({ key: "sam", name: "Sam Rivera", capabilities: ["prepare"] });
+      const row = (
+        await f.sql("select id,user_id from public.people where workspace_id=$1 and person_key='sam'", [
+          f.workspaceId,
+        ])
+      ).rows[0];
+      assert.deepEqual(row, { id: sam.personId, user_id: sam.userId });
+      assert.deepEqual(await f.readMembership(sam.userId), [
+        { workspace_id: f.workspaceId, user_id: sam.userId, access: "staff", active: true },
+      ]);
+    });
+
+    await t.test("a kept persona's key is refused", async () => {
+      // A workspace of its own, so the key is held by exactly the unlinked row.
+      const workspaceId = randomUUID();
+      await f.initializeOwned({ workspaceId, applicantUserIds: [] });
+      await f.sql(
+        "insert into public.people(workspace_id,person_key,name,capabilities) values($1,'sam','Sam Rivera',$2)",
+        [workspaceId, ["prepare"]],
+      );
+      const account = await f.provision();
+      // Identical values: the refusal is about the unlinked row holding the key.
+      await assert.rejects(
+        () =>
+          f.withSetupLock(() =>
+            f.sql("select vitally_private.add_staff_member($1,$2,$3,$4,$5::text[])", [
+              workspaceId,
+              account.userId,
+              "sam",
+              "Sam Rivera",
+              ["prepare"],
+            ]),
+          ),
+        rejected("VALIDATION"),
+      );
+      const row = (
+        await f.sql("select user_id from public.people where workspace_id=$1 and person_key='sam'", [
+          workspaceId,
+        ])
+      ).rows[0];
+      assert.equal(row.user_id, null);
+      assert.deepEqual(await f.readMembership(account.userId), []);
+    });
+
+    await t.test("a workspace set up with its own staff works for staff and clients", async () => {
       const workspaceId = randomUUID();
       const client = await f.provision();
-      const people = await f.initializeOwned({
-        workspaceId,
-        presenterUserIds: [],
-        applicantUserIds: [client.userId],
-      }).then((result) => result.people);
+      await f.initializeOwned({ workspaceId, applicantUserIds: [client.userId] });
       const lead = await f.staff({
         key: "lead",
         name: "Lee Adams",
@@ -892,11 +906,6 @@ test("staff identity against real Supabase", async (t) => {
       await f.withSetupLock(() =>
         f.sql("select vitally_private.set_default_followup($1,$2)", [workspaceId, "lead"]),
       );
-      const presenters = await f.sql(
-        "select count(*) as count from public.memberships where workspace_id=$1 and access='presenter'",
-        [workspaceId],
-      );
-      assert.equal(presenters.rows[0].count, "0");
       // A case worked by staff alone: the client submits, the lead screens it,
       // the preparer claims it and asks for a document.
       const started = async () => {
@@ -925,7 +934,7 @@ test("staff identity against real Supabase", async (t) => {
         await f.sql("select assignee_person_id from public.admin_followups where case_id=$1", [escalated])
       ).rows;
       assert.deepEqual(followups, [{ assignee_person_id: lead.personId }]);
-      // A withdrawal notice goes to the staff default, not to Sam.
+      // A withdrawal notice goes to the staff default.
       const withdrawn = await started();
       await f.act(client.client, withdrawn, "WITHDRAW", { confirmed: true });
       const notices = (
@@ -935,7 +944,6 @@ test("staff identity against real Supabase", async (t) => {
         )
       ).rows;
       assert.deepEqual(notices, [{ assignee_person_id: lead.personId }]);
-      assert.notEqual(lead.personId, people.sam);
     });
   } finally {
     await f.close();

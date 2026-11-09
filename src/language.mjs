@@ -38,10 +38,9 @@ export function writeLanguage(lang, { storage }) {
   }
 }
 
-// Staff screens and a presenter's plain screen are English whatever this
-// browser chose.
+// Staff screens are English whatever this browser chose.
 export const viewLang = (state) =>
-  isStaffWindow(state?.principal) || state?.principal?.access === "presenter"
+  isStaffWindow(state?.principal)
     ? "en"
     : isLang(state?.lang) ? state.lang : "en";
 

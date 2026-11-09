@@ -109,9 +109,8 @@ stack never sends real mail: every code lands in its local mailbox (Mailpit), a 
    "$VITALLY_NODE" -e "console.log(crypto.randomUUID())"
    ```
 
-3. Create the accounts. The example roster makes one presenter, `presenter@example.org`, one
-   client, `client-a@example.org`, and four staff accounts named for
-   their roles:
+3. Create the accounts. The example roster makes one client, `client-a@example.org`, and four
+   staff accounts named for their roles:
 
    | Address | Person | Can |
    | --- | --- | --- |
@@ -156,10 +155,8 @@ stack never sends real mail: every code lands in its local mailbox (Mailpit), a 
    second browser) and repeat steps 2–4 with `client-a@example.org`.
 
 A new code for the same address can be requested only about once a minute; the form shows a
-countdown. The presenter account, `presenter@example.org`, is still in the example roster. It
-shows one plain screen, "This account is no longer used", with **Sign out**. There are no
-sample cases, persona picker or checkpoint loader. For rehearsal
-cases, run `npm run seed:local` (below). Stop the app with Ctrl+C in its terminal.
+countdown. A workspace starts with no sample cases and no demonstration people (Alex, Morgan
+and Sam are gone). For rehearsal cases, run `npm run seed:local` (below). Stop the app with Ctrl+C in its terminal.
 
 **Seed the rehearsal cases.** To fill the rehearsal workspace with cases at every stage, run the
 seed command. It is local only: it refuses any target that is not the local test stack, and it does
@@ -396,7 +393,7 @@ check failed. Check, in this order:
 
 ## 4. Migrations
 
-Forty-two migrations, applied in order. 020, the version-2 switch-over, was added after 021 and 022: a stack that already has them applies it last, and a new one applies it in number order. Both give the same result. Re-running the migrator on an already-migrated stack is safe,
+Forty-three migrations (001 to 043), applied in order. 020, the version-2 switch-over, was added after 021 and 022: a stack that already has them applies it last, and a new one applies it in number order. Both give the same result. Re-running the migrator on an already-migrated stack is safe,
 but not because the files themselves are re-runnable — `001` and `002` create their tables with a
 plain `create table`, which fails the second time. What makes it safe is the ledger
 `tools/admin/migrate.mjs` keeps: `vitally_private.schema_migrations`, one row per file with a
@@ -447,6 +444,7 @@ already applied, so **the migrations are run only through the migrator, never by
 | `040_remove_sample_case_tools.sql` | Hand-written: the sample cases, the reset and checkpoint functions, the client bindings and the `fixture` columns are removed, and `origin` accepts only `client` and `assisted`. A workspace starts with no cases; use `npm run seed:local` for rehearsal cases |
 | `041_resolve_go_over_during_hold.sql` | Hand-written: resolving a go-over task while the case is on a Hold from Ready to exit also switches the signing plan to the reviewer's method (#171) |
 | `042_let_follow_up_holders_work_any_follow_up.sql` | Hand-written: anyone holding `followup` works any open office follow-up, whoever it is assigned to, and `followup` requires `admin` (#172) |
+| `043_remove_presenter_access.sql` | Hand-written: the `presenter` access type, the person parameter of the six RPCs and the demonstration people (Alex, Morgan, Sam) are removed. It refuses with `VT008` if a presenter account is referenced ([below](#migration-failed-vt008)). |
 
 Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
 never edit an applied one. The build writes one only when the catalogue's hash differs from the
@@ -479,7 +477,7 @@ PATH="$VITALLY_NODE_BIN:/Users/jinyuyang/.docker/bin:$PATH" \
   "$VITALLY_NODE" --env-file=.env.test tools/admin/migrate.mjs
 ```
 
-Expected output: `Approved test migrations applied.` The migrator uses one guarded persistent
+Expected output: `Approved test migrations applied.` (If it prints `Migration failed (VT008).`, see [Migration failed (VT008)](#migration-failed-vt008).) The migrator uses one guarded persistent
 PostgreSQL connection and a transaction, records checksums in a private schema, and refuses
 changes to an already-applied migration file (a further change needs a new migration number). It
 never deletes or resets a database. This is also `npm run db:migrate:test` under the same scoped
@@ -501,6 +499,34 @@ migration and regenerates it with `npm run build:intake` instead of adding a sec
 change to the loader or the `intake_fields` columns bumps `LOADER_VERSION` in
 `tools/build-intake-catalogue.mjs` so the build writes a new catalogue migration. The full rules
 and the commands are in [`docs/developer/database.md`](developer/database.md#migrations).
+
+### Migration failed (VT008)
+
+`Migration failed (VT008).` means migration 043 (it removes the presenter access type) refused to
+run, and **nothing was changed**. A presenter account is still referenced by a case, a case
+event, a document, a contact attempt, a contact-log entry or version, a person, a case it
+created, or another membership, and deleting the account would lose or break that row. The
+migrator prints only the code; the full message ("043 refused: presenter accounts are referenced
+(<kind>=<count>, ...)") names each kind and its count. This read-only query shows the same
+counts (each row is a kind with a count above zero; no rows means 043 would not refuse):
+
+```sql
+with p as (select workspace_id, user_id from public.memberships where access = 'presenter')
+select kind, n from (
+  select 'cases.owner_user_id' as kind, (select count(*) from public.cases t join p on p.workspace_id = t.workspace_id and p.user_id = t.owner_user_id) as n
+  union all select 'case_events.actor_user_id', (select count(*) from public.case_events t join p on p.workspace_id = t.workspace_id and p.user_id = t.actor_user_id)
+  union all select 'documents.submitted_by_user_id', (select count(*) from public.documents t join p on p.workspace_id = t.workspace_id and p.user_id = t.submitted_by_user_id)
+  union all select 'contact_attempts.actor_user_id', (select count(*) from public.contact_attempts t join p on p.workspace_id = t.workspace_id and p.user_id = t.actor_user_id)
+  union all select 'contact_log.logged_by_user_id', (select count(*) from public.contact_log t join p on p.workspace_id = t.workspace_id and p.user_id = t.logged_by_user_id)
+  union all select 'contact_log_versions.edited_by_user_id', (select count(*) from public.contact_log_versions t join p on p.workspace_id = t.workspace_id and p.user_id = t.edited_by_user_id)
+  union all select 'people.user_id', (select count(*) from public.people t join p on p.workspace_id = t.workspace_id and p.user_id = t.user_id)
+  union all select 'cases.created_by_user_id', (select count(*) from public.cases t where t.created_by_user_id in (select user_id from p))
+  union all select 'memberships.user_id', (select count(*) from public.memberships t join p on p.user_id = t.user_id and p.workspace_id <> t.workspace_id)
+) x where n > 0;
+```
+
+Decide with the project owner what to do with those rows (for example, move them to a staff
+person's account) and run the migrator again. Do not edit the migration file.
 
 ## 5. Tests
 
@@ -528,7 +554,7 @@ minutes), on change `require-15080-signatures-and-household-middle-name`. Before
 phase ran once per browser order, hence two fewer tests). Earlier still, it passed 59/59 twice in a row on 2026-10-10
 (about 12 minutes each, on a machine with a load average of 7–8 on 8 cores). Earlier runs had
 stopped intermittently in the
-Chrome-client/Firefox-staff permutation on two Firefox-staff waits. Both are fixed: a persona press
+Chrome-client/Firefox-staff permutation on two Firefox-staff waits. Both are fixed: a role-switch press
 now waits for a still page, as every other story press does; and the walk-in's materials wait came
 from an app bug, now fixed, where a redraw unticked a box that was ticked but not yet saved. If a
 run still stops on a Firefox-staff wait, run it again; a run on a quiet machine is the better check.
@@ -668,7 +694,7 @@ a changed file.
   client presses "Send sample document" within about a second of the office's own work on that
   case, the save is refused as a stale revision — correct per spec (a stale revision must never
   report false success) — and the refusal now stays on screen until the client presses again. A
-  presenter driving both windows in a demonstration should expect this occasionally and simply
+  person driving both windows in a demonstration should expect this occasionally and simply
   press again.
 - **An accepted case action produces two `cases` UPDATE events** (one from the action's own
   handler, one from the shared commit path). Anything that waits on a Realtime update should match
@@ -688,7 +714,7 @@ machine that serves it. Classroom demos type their answers, or run from a local 
 What the user needs to provide:
 
 1. **A school sender email/account** (for the preferred Gmail SMTP path) **or** a
-   presenter-controlled, DNS-verified domain for the Resend SMTP fallback — a school address alone
+   group-controlled, DNS-verified domain for the Resend SMTP fallback — a school address alone
    cannot be used as an unverified sender.
 2. **One approved test-client email address**, for the first real, authorized email-delivery
    check. Additional roster members can be added later.
@@ -757,7 +783,7 @@ privileged test cleanup against the classroom project.**
      link.
    - Turn off new-user sign-ups and anonymous sign-ins; keep the Email provider on; set the Site
      URL to the hosting address once it exists.
-4. **Admit the roster** with the roster command (format below). Start with one presenter and the
+4. **Admit the roster** with the roster command (format below). Start with one staff member (the roster also needs a `defaultFollowup`) and the
    one approved test-client address, send that client one real code, and only then add the class:
 
    ```sh
@@ -774,14 +800,14 @@ matching `.vitally-roster*.json` and are never committed.
 | Field | Meaning |
 | --- | --- |
 | `workspaceId` | A lower-case UUID. Generate it once and keep it: re-running the same roster with more addresses adds them to the same workspace. |
-| `presenters` | Group members who run the demonstration. A presenter who signs in sees only the plain "This account is no longer used" screen (the role is removed in #136). Optional, but the roster needs at least one presenter or one staff member. |
-| `staff` | Optional. Real staff members, each `{ "email", "name", "personKey", "capabilities" }`. Each gets a `staff` account linked to its own new person, which it always acts as, with the staff screens and no demo tools. `capabilities` is non-empty, from `prepare`, `review`, `admin`, `followup`, `receive_documents`, `assist`; an entry with `followup` must also have `admin`; `personKey` is unique and not `alex`, `morgan` or `sam`. Re-running is harmless, but an existing member's values cannot be changed. For a rehearsal, use fictional names and addresses. |
-| `defaultFollowup` | Optional: the `personKey` of a `staff` entry with `followup`, who then gets new follow-ups. Required when the roster has no presenter. See [Back end: the roster](developer/backend.md#the-roster). |
+| `staff` | Required, at least one entry. Real staff members, each `{ "email", "name", "personKey", "capabilities" }`. Each gets a `staff` account linked to its own new person, which it always acts as, with the staff screens and no demo tools. `capabilities` is non-empty, from `prepare`, `review`, `admin`, `followup`, `receive_documents`, `assist`; an entry with `followup` must also have `admin`; `personKey` is unique. Re-running is harmless, but an existing member's values cannot be changed. For a rehearsal, use fictional names and addresses. |
+| `defaultFollowup` | Required: the `personKey` of a `staff` entry with `followup`, who then gets new follow-ups. See [Back end: the roster](developer/backend.md#the-roster). |
 | `applicants` | Classmates who play clients. Each sees only their own applications. |
 | `sampleCaseOwners` | Removed in #135. A roster that still has it runs, and the command prints a note that it was ignored. |
+| `presenters` | Removed in #136. A roster that still has it runs, and the command prints "presenters is no longer used and was ignored; those addresses get no access." A former presenter address cannot sign in; an open window shows "This account has no access". |
 
 For each address the command finds the existing Auth account or creates one already confirmed
-and without a password (sign-in is by one-time code only), then grants presenter, staff or applicant
+and without a password (sign-in is by one-time code only), then grants staff or applicant
 access through the shared `initializeWorkspace` routine. Addresses are matched exactly, ignoring
 case. One account belongs to one workspace with one role; the routine refuses a roster that would
 move someone or change their role (`VALIDATION`). The command never removes anyone, and its

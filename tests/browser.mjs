@@ -100,7 +100,7 @@ import HANT from "../src/zh-hant.mjs";
 //     which the application labels as simulated on screen.
 //
 // Two denials cannot be expressed by any screen — an applicant sending a staff
-// `personId`, and an applicant asking for another applicant's case by id or
+// action on their own case, and an applicant asking for another applicant's case by id or
 // reference. Those are exercised from this process with the applicant's own
 // authenticated client and asserted as FORBIDDEN/NOT_FOUND (Ruling R62).
 // Everything else runs through the pages.
@@ -291,29 +291,35 @@ async function openTab(context, appOrigin) {
   return { page, errors, pageErrors };
 }
 
-// What a presenter account gets once it has signed in (#134): one plain
-// English screen with Sign out, and nothing of a staff window.
-const PRESENTER_HEADING = "This account is no longer used";
-const PRESENTER_TEXT = "Presenter mode has been removed. Ask your site coordinator for a staff account.";
+// What an account with no membership gets once it has signed in: one plain
+// screen with Sign out, and nothing of a staff or client window.
+const NO_ACCESS_HEADING = "This account has no access";
+const NO_ACCESS_TEXT =
+  "ViTally is a closed demo: an organiser adds each address before it can be used. Ask the person running this session to add yours, then sign in again.";
 
 /**
- * The presenter signs in through the real form with `loginTestUser`: the same
- * intercepted send, the same real verification, the same 30-second wait and
- * the same proof of the SDK's session. Only the window state differs: the
- * controller loads nothing for a presenter, so the window stores nothing
- * either, and that is asserted.
+ * The `unapproved` actor (signed up, no membership) signs in through the real
+ * form with `loginTestUser`: the same intercepted send, the same real
+ * verification, the same 30-second wait and the same proof of the SDK's
+ * session. Only the window state differs: the controller loads nothing for
+ * an account with no access, so the window stores nothing either, and that is
+ * asserted.
  */
-async function signInPresenter({ page, actor, fixture }) {
-  await loginTestUser({ page, actor, fixture, heading: PRESENTER_HEADING, windowState: false });
+async function signInNoAccess({ page, actor, fixture }) {
+  await loginTestUser({ page, actor, fixture, heading: NO_ACCESS_HEADING, windowState: false });
 }
 
-/** The presenter's plain screen is on show, with no board, picker, reset, checkpoint or indicator. */
-async function assertPresenterScreen(page) {
-  await waitForText(page, PRESENTER_HEADING, RENDER_MS);
+/** The no-access screen is on show, with no board, picker, reset, checkpoint or indicator. */
+async function assertNoAccessScreen(page) {
+  await waitForText(page, NO_ACCESS_HEADING, RENDER_MS);
   const screen = await page.evaluate(() => ({
     heading: document.querySelector("#main h1")?.textContent.trim() ?? null,
-    text: document.querySelector("#main .page-intro p")?.textContent.trim() ?? null,
-    actions: [...document.querySelectorAll("#app [data-action]")].map((node) => node.dataset.action),
+    text: document.querySelector("#main .panel p")?.textContent.trim() ?? null,
+    // The screen itself offers Sign out and nothing else. The page around it
+    // is the client frame (#169): its header and banner are not the screen.
+    actions: [...document.querySelectorAll("#main [data-action]")].map((node) => node.dataset.action),
+    // The whole page, in DOM order, so a new header button cannot slip in.
+    pageActions: [...document.querySelectorAll("#app [data-action]")].map((node) => node.dataset.action),
     board: document.querySelectorAll(".staff-board, .board-row, #office-queue-title, #case-title").length,
     sidebar: document.querySelectorAll(".sidebar-account").length,
     personas: document.querySelectorAll('[data-action="select-person"], #persona-title').length,
@@ -324,9 +330,10 @@ async function assertPresenterScreen(page) {
   assert.deepEqual(
     screen,
     {
-      heading: PRESENTER_HEADING,
-      text: PRESENTER_TEXT,
+      heading: NO_ACCESS_HEADING,
+      text: NO_ACCESS_TEXT,
       actions: ["sign-out"],
+      pageActions: ["open-applications", "set-language", "set-language", "set-language", "open-help", "dismiss-error", "sign-out"],
       board: 0,
       sidebar: 0,
       personas: 0,
@@ -334,8 +341,21 @@ async function assertPresenterScreen(page) {
       checkpoint: 0,
       indicator: 0,
     },
-    "the presenter window shows more than the plain screen",
+    "the no-access window shows more than the no-access screen",
   );
+}
+
+/**
+ * Dismiss on the banner and the logo in the header take nothing from the
+ * screen: the heading and Sign out are still there, as before.
+ */
+async function assertNoAccessSticks(page) {
+  await clickAction(page, "dismiss-error");
+  await waitForText(page, NO_ACCESS_HEADING, RENDER_MS);
+  await clickAction(page, "open-applications");
+  await waitForText(page, NO_ACCESS_HEADING, RENDER_MS);
+  assert.equal(await page.locator('#main [data-action="sign-out"]').count(), 1, "Sign out is gone after Dismiss and the logo");
+  assert.equal(await page.locator("#main h1").innerText(), NO_ACCESS_HEADING);
 }
 
 /**
@@ -932,14 +952,15 @@ async function runPermutation(t, roles) {
 
     const applicantA = fixture.actor("applicantA");
     const applicantB = fixture.actor("applicantB");
-    const presenter = fixture.actor("presenter");
-    // A demonstration persona's person, for the leftover-persona check: a
-    // stored persona is ignored by every account (#134).
-    const { sam } = fixture.database;
+    // The account that signed up but was never given a membership.
+    const unapproved = fixture.actor("unapproved");
     // The role-named staff accounts the main story signs in as (#132): the
     // Preparer takes Alex's steps, the Reviewer Morgan's, and the Site
     // Coordinator Sam's office work and follow-ups.
     const { siteCoordinatorId, preparerId, reviewerId } = fixture.database;
+    // A real person of the workspace, for the leftover-persona check: a
+    // stored persona is ignored by every account, even a real person's.
+    const stalePersonId = siteCoordinatorId;
     const ROLES = Object.freeze(["siteCoordinator", "preparer", "reviewer"]);
     const roleHeading = Object.freeze({
       siteCoordinator: OFFICE_BOARD_HEADING,
@@ -948,8 +969,8 @@ async function runPermutation(t, roles) {
     });
 
     const clientWin = await openWindow(clientEngine);
-    // The presenter's window: it shows the plain screen, and nothing else (#134).
-    const staffWin = await openWindow(staffEngine);
+    // The no-access window: it shows the no-access screen, and nothing else.
+    const noAccessWin = await openWindow(staffEngine);
     // One window per role account, each in its own context, signed in once.
     roleWins = {
       siteCoordinator: await openWindow(staffEngine, {
@@ -960,7 +981,7 @@ async function runPermutation(t, roles) {
       reviewer: await openWindow(staffEngine),
     };
     client = clientWin.page;
-    const presenterPage = staffWin.page;
+    const noAccessPage = noAccessWin.page;
     staff = roleWins.preparer.page;
 
     // Which window the story drives now. A window just chosen may be on
@@ -1032,19 +1053,21 @@ async function runPermutation(t, roles) {
 
     await phase("both windows sign in with a generated code and real verification", async () => {
       await loginTestUser({ page: client, actor: applicantA, fixture });
-      // The presenter signs in through the same real form and gets the plain
-      // screen: no board, no picker, no reset, no checkpoint and no
-      // indicator (#134).
-      await signInPresenter({ page: presenterPage, actor: presenter, fixture });
-      await assertPresenterScreen(presenterPage);
+      // The account with no membership signs in through the same real form and
+      // gets the no-access screen: no board, no picker, no reset, no checkpoint
+      // and no indicator.
+      await signInNoAccess({ page: noAccessPage, actor: unapproved, fixture });
+      await assertNoAccessScreen(noAccessPage);
+      // Dismiss and the logo leave it where it is, with Sign out.
+      await assertNoAccessSticks(noAccessPage);
       // Its Sign out works. The account signs in again in a fresh document (the
       // auth module's resend cooldown lives in the one it signed out of), to
-      // the same plain screen, which the last staff phase reads once more.
-      await clickAction(presenterPage, "sign-out");
-      await waitForText(presenterPage, "Sign in with your email", RENDER_MS);
-      await presenterPage.goto(fixture.appOrigin);
-      await signInPresenter({ page: presenterPage, actor: presenter, fixture });
-      await assertPresenterScreen(presenterPage);
+      // the same no-access screen, which the last staff phase reads once more.
+      await clickAction(noAccessPage, "sign-out");
+      await waitForText(noAccessPage, "Sign in with your email", RENDER_MS);
+      await noAccessPage.goto(fixture.appOrigin);
+      await signInNoAccess({ page: noAccessPage, actor: unapproved, fixture });
+      await assertNoAccessScreen(noAccessPage);
       for (const role of ROLES) {
         const page = roleWins[role].page;
         await loginTestUser({ page, actor: fixture.actor(role), fixture, heading: roleHeading[role] });
@@ -1053,10 +1076,10 @@ async function runPermutation(t, roles) {
       // From here on, every notice either window shows is recorded — including
       // the ones the next re-read erases before anybody could read them.
       await watchAlerts(client);
-      await watchAlerts(presenterPage);
+      await watchAlerts(noAccessPage);
       for (const role of ROLES) await watchAlerts(roleWins[role].page);
       evidence.story.signIn =
-        "applicant A in the client window, the Site Coordinator, Preparer and Reviewer each in a staff window of their own, and the presenter on the plain screen, signed out and in again";
+        "applicant A in the client window, the Site Coordinator, Preparer and Reviewer each in a staff window of their own, and the account with no membership on the no-access screen, signed out and in again";
     });
 
     // The story's workspace starts with no cases: nothing in the app makes
@@ -4079,7 +4102,6 @@ async function runPermutation(t, roles) {
           caseId: classCase.id,
           revision: 1,
           type: "CLAIM_PREPARATION",
-          personId: preparerId,
         }),
       );
       assert.ok(forged.error, "another applicant acted on a case that is not theirs");
@@ -4105,7 +4127,6 @@ async function runPermutation(t, roles) {
           actionId,
           caseId: classCase.id,
           revision: Number(current.revision),
-          personId: siteCoordinatorId,
           type: "VERIFY_INTAKE",
           payload: {
             // The class case is not an online one, so the three checks.
@@ -7906,24 +7927,24 @@ async function runPermutation(t, roles) {
       const caseId = await within("building a case ready for preparation", fixture.database.readyCase());
       const { reference } = await caseById(fixture, caseId);
 
-      // The presenter's window still shows the plain screen (a presenter
-      // gets the plain message), and reads as no staff account.
-      await assertPresenterScreen(presenterPage);
-      assert.equal(await readSignedInAs(presenterPage), null, "the presenter window reads as a staff account");
+      // The no-access window still shows the no-access screen, and reads as no
+      // staff account.
+      await assertNoAccessScreen(noAccessPage);
+      assert.equal(await readSignedInAs(noAccessPage), null, "the no-access window reads as a staff account");
 
       const rileyWin = await openWindow(staffEngine);
       const jordanWin = await openWindow(clientEngine);
       const riley = rileyWin.page;
       const jordan = jordanWin.page;
       try {
-        // A leftover persona: this window's storage says Sam before Riley
-        // signs in, as a presenter window acting as Sam used to leave it.
+        // A leftover persona: this window's storage names another person before Riley
+        // signs in, as a window that acted as a persona used to leave it.
         await riley.evaluate(
           ([key, personId]) => sessionStorage.setItem(key, JSON.stringify({ selectedPersonId: personId })),
-          [fixture.sessionStateKey(rileyAccount.userId), sam],
+          [fixture.sessionStateKey(rileyAccount.userId), stalePersonId],
         );
         // Really there before the sign-in, so what follows proves it ignored.
-        assert.equal((await readWindowState(riley, rileyAccount.userId))?.selectedPersonId, sam);
+        assert.equal((await readWindowState(riley, rileyAccount.userId))?.selectedPersonId, stalePersonId);
         await loginTestUser({ page: riley, actor: rileyActor, fixture, heading: WORK_BOARD_HEADING });
         await loginTestUser({ page: jordan, actor: jordanActor, fixture, heading: WORK_BOARD_HEADING });
         await watchAlerts(riley);
@@ -7945,7 +7966,7 @@ async function runPermutation(t, roles) {
           assert.deepEqual(
             controls,
             { personas: 0, actingAs: 0, reset: 0, checkpoint: 0 },
-            `${name}'s window shows a presenter control`,
+            `${name}'s window shows a demonstration control`,
           );
         }
         // No persona button is pressed in Riley's window.
@@ -7987,10 +8008,9 @@ async function runPermutation(t, roles) {
             ARRIVAL_MS,
           );
 
-        // Riley claims and hands the case to review, as Riley — never as Sam.
+        // Riley claims and hands the case to review, as Riley.
         await openCaseByReference(riley, reference);
-        // The case header says who is signed in, where a presenter's says
-        // who it acts as.
+        // The case header says who is signed in.
         assert.equal(
           (await riley.locator(".staff-header .field-note").innerText()).trim(),
           "Signed in as Riley Park.",
@@ -8001,7 +8021,7 @@ async function runPermutation(t, roles) {
         await jordanRow("Riley Park");
 
         // The shaded section, as a staff account (#103): its tools once did
-        // nothing for one while every presenter run passed. A field is as tall
+        // nothing for one in the old demonstration runs. A field is as tall
         // as its cell: the page's field rule once made one 44px, and the text
         // typed in it landed on the row below.
         const rowOneChild = riley.locator(
@@ -8196,20 +8216,20 @@ async function runPermutation(t, roles) {
         assertConsoleQuiet(rileyWin, { name: "Riley's staff window", allow: REFUSAL_LINES });
         assertConsoleQuiet(jordanWin, { name: "Jordan's staff window", allow: REFUSAL_LINES });
         evidence.story.staffAccounts =
-          "Riley Park (prepare, review) and Jordan Lee (review) signed in through the real form in two engines; Signed in as, no presenter controls; a leftover Sam persona ignored; the presenter window on the plain screen before and after a reload; Riley prepared and filled the shaded section in the editor, a field as tall as its cell; Jordan's board followed live, Riley's own review refused (SELF_REVIEW), Jordan claimed and approved; history, receipts and events name each";
+          "Riley Park (prepare, review) and Jordan Lee (review) signed in through the real form in two engines; Signed in as, no demonstration controls; a leftover stored persona ignored; the no-access window on the no-access screen before and after a reload; Riley prepared and filled the shaded section in the editor, a field as tall as its cell; Jordan's board followed live, Riley's own review refused (SELF_REVIEW), Jordan claimed and approved; history, receipts and events name each";
       } finally {
         await rileyWin.context.close();
         await jordanWin.context.close();
       }
-      // Read again on a reload, the presenter's window is still the plain
+      // Read again on a reload, the no-access window is still the plain
       // screen: nothing there offers the two accounts' people, or anyone.
-      await presenterPage.reload();
-      await assertPresenterScreen(presenterPage);
-      await watchAlerts(presenterPage);
+      await noAccessPage.reload();
+      await assertNoAccessScreen(noAccessPage);
+      await watchAlerts(noAccessPage);
       for (const name of ["Riley Park", "Jordan Lee"])
         assert.ok(
-          !(await presenterPage.locator("#app").innerText()).includes(name),
-          `the presenter window names ${name}`,
+          !(await noAccessPage.locator("#app").innerText()).includes(name),
+          `the no-access window names ${name}`,
         );
     });
 
@@ -8222,8 +8242,8 @@ async function runPermutation(t, roles) {
           name: "client window",
           allow: REFUSAL_LINES,
         }),
-        staff: assertConsoleQuiet(staffWin, {
-          name: "staff window",
+        staff: assertConsoleQuiet(noAccessWin, {
+          name: "no-access window",
           allow: REFUSAL_LINES,
         }),
         ...Object.fromEntries(

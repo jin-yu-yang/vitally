@@ -252,21 +252,19 @@ test("case actions apply the shared check order against real Supabase", async (t
         const args = applyArgs({
           caseId,
           revision,
-          personId: f.alex,
           type: "CLAIM_PREPARATION",
         });
-        const first = await f.presenter.rpc("vitally_apply_action", args);
+        const first = await f.preparer.rpc("vitally_apply_action", args);
         assert.equal(first.error, null);
-        const replay = await f.presenter.rpc("vitally_apply_action", args);
+        const replay = await f.preparer.rpc("vitally_apply_action", args);
         assert.equal(replay.error, null);
         assert.deepEqual(replay.data, first.data);
         for (const changed of [
           { ...args, p_payload: { note: "different" } },
           { ...args, p_expected_revision: revision + 1 },
-          { ...args, p_person_id: f.sam },
           { ...args, p_type: "SAVE_ANSWERS", p_payload: { answers: {} } },
         ]) {
-          const response = await f.presenter.rpc(
+          const response = await f.preparer.rpc(
             "vitally_apply_action",
             changed,
           );
@@ -293,13 +291,12 @@ test("case actions apply the shared check order against real Supabase", async (t
         const verify = applyArgs({
           caseId,
           revision: 4,
-          personId: f.sam,
           type: "VERIFY_INTAKE",
           payload: { checks: f.intakeChecks },
         });
-        const accepted = await f.presenter.rpc("vitally_apply_action", verify);
+        const accepted = await f.siteCoordinator.rpc("vitally_apply_action", verify);
         assert.equal(accepted.error, null);
-        const replay = await f.presenter.rpc("vitally_apply_action", verify);
+        const replay = await f.siteCoordinator.rpc("vitally_apply_action", verify);
         assert.equal(replay.error, null);
         assert.deepEqual(replay.data, accepted.data);
         const receipt = async () =>
@@ -314,27 +311,27 @@ test("case actions apply the shared check order against real Supabase", async (t
         // The capability the action needed is re-checked on every replay.
         await f.sql(
           "update public.people set capabilities=$1 where id=$2",
-          [["assist", "receive_documents"], f.sam],
+          [["assist", "receive_documents"], f.siteCoordinatorId],
         );
         try {
-          const stripped = await f.presenter.rpc(
+          const stripped = await f.siteCoordinator.rpc(
             "vitally_apply_action",
             verify,
           );
           assert.equal(stripped.error.code, "VT001");
         } finally {
           await f.sql("update public.people set capabilities=$1 where id=$2", [
-            ["admin", "assist", "followup", "receive_documents"],
-            f.sam,
+            ["admin", "followup", "assist", "receive_documents"],
+            f.siteCoordinatorId,
           ]);
         }
         // So is the membership the caller acts under.
         await f.sql(
           "update public.memberships set active=false where workspace_id=$1 and user_id=$2",
-          [f.workspaceId, f.presenterUserId],
+          [f.workspaceId, f.siteCoordinatorUserId],
         );
         try {
-          const revoked = await f.presenter.rpc(
+          const revoked = await f.siteCoordinator.rpc(
             "vitally_apply_action",
             verify,
           );
@@ -342,14 +339,14 @@ test("case actions apply the shared check order against real Supabase", async (t
         } finally {
           await f.sql(
             "update public.memberships set active=true where workspace_id=$1 and user_id=$2",
-            [f.workspaceId, f.presenterUserId],
+            [f.workspaceId, f.siteCoordinatorUserId],
           );
         }
         // Neither rejection touched the stored receipt or the case.
         assert.deepEqual(await receipt(), stored);
         assert.equal(await revisionOf(f, caseId), revision);
         // Restored authority replays the same receipt again.
-        const restored = await f.presenter.rpc("vitally_apply_action", verify);
+        const restored = await f.siteCoordinator.rpc("vitally_apply_action", verify);
         assert.equal(restored.error, null);
         assert.deepEqual(restored.data, accepted.data);
         // The applicant's own accepted envelope follows the same rule.
@@ -442,9 +439,9 @@ test("case actions apply the shared check order against real Supabase", async (t
           applyArgs({ ...spec, caseId }),
         );
         assert.equal(outsider.error.code, "VT002");
-        // A presenter cannot reach a private client draft either.
+        // A staff member cannot reach a private client draft either.
         const draft = await draftCase(f);
-        const hidden = await f.presenter.rpc(
+        const hidden = await f.siteCoordinator.rpc(
           "vitally_apply_action",
           applyArgs({
             ...spec,
@@ -452,7 +449,6 @@ test("case actions apply the shared check order against real Supabase", async (t
             // probe is current and tests visibility, not staleness.
             revision: 2,
             caseId: draft.caseId,
-            personId: f.sam,
           }),
         );
         assert.equal(hidden.error.code, "VT002");
@@ -482,30 +478,28 @@ test("case actions apply the shared check order against real Supabase", async (t
       },
     );
     await t.test(
-      "forged staff identity, missing capability and foreign people are forbidden",
+      "missing capability is forbidden and another workspace's staff cannot reach the case",
       async () => {
-        const draft = await draftCase(f);
-        const forged = await f.applicantA.rpc(
-          "vitally_apply_action",
-          applyArgs({
-            caseId: draft.caseId,
-            revision: 2,
-            personId: f.sam,
-            type: "SAVE_ANSWERS",
-            payload: { answers: { addr_city: "Pittsburgh" } },
-          }),
-        );
-        assert.equal(forged.error.code, "VT001");
-        assert.equal(await revisionOf(f, draft.caseId), 2);
         const received = (await f.submittedClientCase()).caseId;
-        for (const personId of [f.alex, f.morgan, null, f.foreignPeople.sam])
+        for (const client of [f.preparer, f.reviewer])
           await assert.rejects(
             () =>
-              f.actAsPersona(f.presenter, received, personId, "VERIFY_INTAKE", {
+              f.act(client, received, "VERIFY_INTAKE", {
                 checks: f.intakeChecks,
               }),
             rejected("FORBIDDEN"),
           );
+        // A staff member of another workspace cannot tell the case exists.
+        const foreign = await f.foreignStaff.rpc(
+          "vitally_apply_action",
+          applyArgs({
+            caseId: received,
+            revision: await revisionOf(f, received),
+            type: "VERIFY_INTAKE",
+            payload: { checks: f.intakeChecks },
+          }),
+        );
+        assert.equal(foreign.error?.code, "VT002");
         await assert.rejects(
           () =>
             f.act(f.applicantA, received, "VERIFY_INTAKE", {
@@ -514,36 +508,34 @@ test("case actions apply the shared check order against real Supabase", async (t
           rejected("FORBIDDEN"),
         );
         // Positive control: the same action succeeds for an admin-capable person.
-        await f.actAsPersona(f.presenter, received, f.sam, "START_SCREENING", {});
-        await f.actAsPersona(f.presenter, received, f.sam, "VERIFY_INTAKE", {
+        await f.act(f.siteCoordinator, received, "START_SCREENING", {});
+        await f.act(f.siteCoordinator, received, "VERIFY_INTAKE", {
           checks: f.intakeChecks,
         });
         // Step 4 lets any same-workspace person attempt a claim; step 7 does not.
-        for (const personId of [f.sam, f.morgan])
+        for (const client of [f.siteCoordinator, f.reviewer])
           await assert.rejects(
-            () => f.actAsPersona(f.presenter, received, personId, "CLAIM_PREPARATION", {}),
+            () => f.act(client, received, "CLAIM_PREPARATION", {}),
             rejected("INELIGIBLE"),
           );
         assert.equal((await caseRow(f, received)).stage, "preparation_ready");
         assert.equal(await participantsOf(f, received), 0);
-        await f.actAsPersona(f.presenter, received, f.alex, "CLAIM_PREPARATION", {});
-        assert.equal((await caseRow(f, received)).preparer_id, f.alex);
+        await f.act(f.preparer, received, "CLAIM_PREPARATION", {});
+        assert.equal((await caseRow(f, received)).preparer_id, f.preparerId);
       },
     );
     await t.test(
-      "an admin presenter owns an assisted intake, never a client's own case",
+      "an admin staff member owns an assisted intake, never a client's own case",
       async () => {
-        const assisted = await f.createCaseAsPersona(f.presenter, crypto.randomUUID(), {
+        const assisted = await f.createCase(f.siteCoordinator, crypto.randomUUID(), {
           mode: "assisted",
-          personId: f.sam,
           answers: {},
         });
-        // Alex cannot assist without the admin capability, and a presenter
-        // acting with no person at all is making a client's request.
-        for (const personId of [f.alex, f.morgan, null])
+        // Staff cannot assist without the admin capability.
+        for (const client of [f.preparer, f.reviewer])
           await assert.rejects(
             () =>
-              f.actAsPersona(f.presenter, assisted.caseId, personId, "SAVE_ANSWERS", {
+              f.act(client, assisted.caseId, "SAVE_ANSWERS", {
                 answers: makeSampleAnswers(),
               }),
             rejected("FORBIDDEN"),
@@ -555,15 +547,14 @@ test("case actions apply the shared check order against real Supabase", async (t
             }),
           rejected("NOT_FOUND"),
         );
-        const saved = await f.actAsPersona(
-          f.presenter,
+        const saved = await f.act(
+          f.siteCoordinator,
           assisted.caseId,
-          f.sam,
           "SAVE_ANSWERS",
           { answers: makeSampleAnswers() },
         );
         assert.equal(saved.revision, 2);
-        await f.actAsPersona(f.presenter, assisted.caseId, f.sam, "SUBMIT", {
+        await f.act(f.siteCoordinator, assisted.caseId, "SUBMIT", {
           confirmed: true,
         });
         const staff = await f.readStaffCase(assisted.caseId);
@@ -576,15 +567,15 @@ test("case actions apply the shared check order against real Supabase", async (t
             entry.actorPersonId,
           ]),
           [
-            ["SAVE_ANSWERS", f.sam],
-            ["SUBMIT", f.sam],
+            ["SAVE_ANSWERS", f.siteCoordinatorId],
+            ["SUBMIT", f.siteCoordinatorId],
           ],
         );
         // A client-owned case stays the client's to answer, at any stage.
         const owned = (await f.submittedClientCase()).caseId;
         await assert.rejects(
           () =>
-            f.actAsPersona(f.presenter, owned, f.sam, "SAVE_ANSWERS", {
+            f.act(f.siteCoordinator, owned, "SAVE_ANSWERS", {
               answers: { addr_city: "Pittsburgh" },
             }),
           rejected("FORBIDDEN"),
@@ -596,46 +587,44 @@ test("case actions apply the shared check order against real Supabase", async (t
       async () => {
         const caseId = await f.readyCase();
         const ready = await f.readStaffCase(caseId);
-        // Authority answers before the revision: the owner forging a staff
-        // person at a stale revision is still FORBIDDEN, not a conflict.
-        const forged = await f.applicantA.rpc(
+        // Authority answers before the revision: a preparer asking for an
+        // admin action at a stale revision is still FORBIDDEN, not a conflict.
+        const forbidden = await f.preparer.rpc(
           "vitally_apply_action",
           applyArgs({
             caseId,
             revision: ready.revision - 1,
-            personId: f.sam,
-            type: "SUBMIT",
-            payload: { confirmed: true },
+            type: "VERIFY_INTAKE",
+            payload: { checks: f.intakeChecks },
           }),
         );
-        assert.equal(forged.error.code, "VT001");
-        // Sam would be INELIGIBLE at step 7, but a stale revision stops at step 5.
-        const stale = await f.presenter.rpc(
+        assert.equal(forbidden.error.code, "VT001");
+        // The Site Coordinator would be INELIGIBLE at step 7, but a stale
+        // revision stops at step 5.
+        const stale = await f.siteCoordinator.rpc(
           "vitally_apply_action",
           applyArgs({
             caseId,
             revision: ready.revision - 1,
-            personId: f.sam,
             type: "CLAIM_PREPARATION",
           }),
         );
         assert.equal(stale.error.code, "VT003");
-        await f.actAsPersona(f.presenter, caseId, f.alex, "CLAIM_PREPARATION", {});
+        await f.act(f.preparer, caseId, "CLAIM_PREPARATION", {});
         // At the old revision the same attempt still conflicts first.
-        const old = await f.presenter.rpc(
+        const old = await f.preparer.rpc(
           "vitally_apply_action",
           applyArgs({
             caseId,
             revision: ready.revision,
-            personId: f.alex,
             type: "CLAIM_PREPARATION",
           }),
         );
         assert.equal(old.error.code, "VT003");
         // At a fresh revision the wrong stage answers before qualification.
-        for (const personId of [f.alex, f.sam])
+        for (const client of [f.preparer, f.siteCoordinator])
           await assert.rejects(
-            () => f.actAsPersona(f.presenter, caseId, personId, "CLAIM_PREPARATION", {}),
+            () => f.act(client, caseId, "CLAIM_PREPARATION", {}),
             rejected("INVALID_TRANSITION"),
           );
         for (const [type, payload] of [
@@ -648,7 +637,7 @@ test("case actions apply the shared check order against real Supabase", async (t
           );
         await assert.rejects(
           () =>
-            f.actAsPersona(f.presenter, caseId, f.sam, "VERIFY_INTAKE", {
+            f.act(f.siteCoordinator, caseId, "VERIFY_INTAKE", {
               checks: f.intakeChecks,
             }),
           rejected("INVALID_TRANSITION"),
@@ -765,16 +754,15 @@ test("case actions apply the shared check order against real Supabase", async (t
         const before = await f.stateSnapshot();
         const attempts = [
           [
-            f.presenter,
-            { caseId, revision, personId: f.sam, type: "CLAIM_PREPARATION" },
+            f.siteCoordinator,
+            { caseId, revision, type: "CLAIM_PREPARATION" },
             "VT006",
           ],
           [
-            f.presenter,
+            f.preparer,
             {
               caseId,
               revision: revision - 1,
-              personId: f.alex,
               type: "CLAIM_PREPARATION",
             },
             "VT003",
@@ -804,9 +792,8 @@ test("case actions apply the shared check order against real Supabase", async (t
             {
               caseId,
               revision,
-              personId: f.sam,
-              type: "SUBMIT",
-              payload: { confirmed: true },
+              type: "VERIFY_INTAKE",
+              payload: { checks: f.intakeChecks },
             },
             "VT001",
           ],
@@ -900,13 +887,12 @@ test("installed entry points deny anonymous callers and serve members", async (t
             draftRevision: 2,
             assistanceItemId: seeded.itemId,
             assistanceRevision: 1,
-            assistPersonId: f.sam,
             contactCaseId,
             contactEntry: SAMPLE_CONTACT(),
           };
           // An entry for the edit entry point to correct.
           context.contactId = (
-            await f.logContactAsPersona(f.presenter, contactCaseId, f.sam, context.contactEntry)
+            await f.logContact(f.siteCoordinator, contactCaseId, context.contactEntry)
           ).contactId;
           const before = await f.stateSnapshot();
           const denied = await f.anonymous.rpc(entry.name, entry.args(context));
@@ -937,7 +923,7 @@ test("installed entry points deny anonymous callers and serve members", async (t
       },
     );
     await t.test(
-      "the private roster functions cannot be called by the anonymous client or a presenter",
+      "the private roster functions cannot be called by the anonymous client or a staff member",
       async () => {
         // A staff member with `followup` (and so `admin`, 042), so moving the default to them is a
         // request the function itself would accept from the roster command.
@@ -971,7 +957,7 @@ test("installed entry points deny anonymous callers and serve members", async (t
         for (const entry of PRIVATE_SETUP_FUNCTIONS)
           for (const [who, client] of [
             ["anonymous", f.anonymous],
-            ["presenter", f.presenter],
+            ["staff member", f.preparer],
           ])
             for (const target of [client, client.schema("vitally_private")]) {
               const { error } = await target.rpc(entry.name, entry.args(context));

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { appShell, staffSidebar, staffScreen, presenterScreen, page, clientHeader, languageSwitch, dialog, DRAWERS } from "../src/views.mjs";
+import { appShell, staffSidebar, staffScreen, noAccessScreen, showsNoAccess, page, clientHeader, languageSwitch, dialog, DRAWERS } from "../src/views.mjs";
 import { icon, ICON_NAMES, describeFocus, focusSelectors } from "../src/ui.mjs";
 import { TEXT, SENTENCES } from "../src/client-text.mjs";
 import { toggleLabel } from "../src/sidebar-peek.mjs";
@@ -1288,29 +1288,53 @@ test("app.mjs opens, closes and announces the two e-file confirmations", () => {
   assert.match(dialog({ dialog: "mark-efiled", savedCase: { reference: "VT-X" } }), /Mark e-filed\?/);
 });
 
-test("a presenter is not a staff window", () => {
-  assert.equal(isStaffWindow({ access: "presenter" }), false);
+test("only a staff account is a staff window", () => {
   assert.equal(isStaffWindow({ access: "staff" }), true);
   assert.equal(isStaffWindow({ access: "applicant" }), false);
+  assert.equal(isStaffWindow(null), false, "no principal: the no-access window");
 });
 
-test("the presenter screen says the account is no longer used", () => {
-  const html = presenterScreen({ principal: { access: "presenter" } });
-  assert.ok(html.includes("This account is no longer used"));
-  assert.ok(html.includes("Presenter mode has been removed. Ask your site coordinator for a staff account."));
+const noAccessState = (extra = {}) => ({
+  principal: null,
+  connection: "online",
+  screen: "no-access",
+  error: { code: "FORBIDDEN", message: "You do not have access to this step." },
+  ...extra,
+});
+
+test("the no-access screen offers only Sign out", () => {
+  const html = noAccessScreen(noAccessState());
+  assert.ok(html.includes("This account has no access"));
   assert.deepEqual([...html.matchAll(/data-action="([^"]+)"/g)].map((m) => m[1]), ["sign-out"]);
   for (const gone of ["select-person", "open-reset-fixtures", "open-checkpoint", "Class workspace", "board-row"])
     assert.ok(!html.includes(gone), gone);
 });
 
-test("a presenter gets the plain screen in a bare English frame", () => {
-  const state = { principal: { access: "presenter" }, connection: "online", screen: "presenter", lang: "zh-Hans" };
-  const html = page(state, presenterScreen(state));
-  assert.equal([...html.matchAll(/data-action="sign-out"/g)].length, 1);
-  for (const gone of ["set-language", "open-help", "open-applications", "client-bar", "client-shell", "site-footer", 'class="skip"'])
-    assert.ok(!html.includes(gone), gone);
-  assert.ok(!/[一-鿿]/.test(html), "no Chinese characters");
-  assert.ok(html.includes("This account is no longer used"));
+test("the no-access screen stays up when the error is dismissed, and says so in the language", () => {
+  const dismissed = noAccessState({ error: null, session: "present" });
+  assert.equal(showsNoAccess(dismissed), true);
+  assert.equal(showsNoAccess(noAccessState()), true);
+  // A different error (the server cannot be reached) is not hidden by it.
+  assert.equal(showsNoAccess(noAccessState({ error: { code: "NETWORK", message: "x" } })), false);
+  assert.equal(showsNoAccess({ principal: null, session: "present", screen: "access", error: null }), false);
+  const html = noAccessScreen(dismissed);
+  assert.ok(html.includes("This account has no access"));
+  assert.deepEqual([...html.matchAll(/data-action="([^"]+)"/g)].map((m) => m[1]), ["sign-out"]);
+  const zh = noAccessScreen({ ...dismissed, lang: "zh-Hans" });
+  assert.ok(zh.includes("此账户无权使用"));
+  assert.ok(!zh.includes("You do not have access"));
+});
+
+test("the no-access screen uses the client frame and follows the language", () => {
+  const state = noAccessState({ lang: "zh-Hans" });
+  const html = page(state, noAccessScreen(state));
+  // The whole-page frame, not only the inner screen (#169).
+  assert.ok(html.includes('<div class="client-shell">'), "client frame element");
+  assert.ok(html.includes("site-footer"), "client footer");
+  assert.ok(!html.includes("app-shell"), "not the staff frame");
+  assert.ok(html.includes("此账户无权使用"));
+  assert.ok(!html.includes("This account has no access"));
+  assert.equal([...html.matchAll(/data-action="sign-out"/g)].length, 1, "one Sign out in the whole page");
 });
 
 test("a refusal shows in the error banner and the staff window stays usable", () => {
@@ -1339,7 +1363,7 @@ test("no staff screen offers a persona, a reset or a checkpoint", () => {
     savedCase: { id: "c1", reference: "VT-TEST-0001", stage: "preparing", revision: 1, answers: {} },
   });
   for (const html of [board, casePage])
-    for (const gone of ["select-person", "open-reset-fixtures", "open-checkpoint", "presenter-panel", "Class workspace"])
+    for (const gone of ["select-person", "open-reset-fixtures", "open-checkpoint", "Class workspace"])
       assert.ok(!html.includes(gone), gone);
 });
 
@@ -1348,7 +1372,7 @@ test("a staff account's screens name it and act as no one", () => {
   const base = { principal: { access: "staff", personId: "p-sam", personName: "Sam" }, connection: "online", people: [sam], cases: [], assistance: [] };
   const board = staffScreen({ ...base, screen: "staff" });
   assert.match(board.match(/<div class="account-row">[\s\S]*?<\/span><\/div>/)[0].replace(/<[^>]+>/g, " ").replace(/\s+/g, " "), /Signed in as Sam/);
-  assert.doesNotMatch(board, /Presenter controls|No persona chosen|Acting as/);
+  assert.doesNotMatch(board, /No persona chosen|Acting as/);
   const onCase = staffScreen({
     ...base,
     people: [{ id: "p-sam", name: "Sam", capabilities: ["prepare"] }],

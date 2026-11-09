@@ -175,7 +175,7 @@ test("independent review corrects, re-reviews and approves a prepared case", asy
           ],
         );
         // Internal details carry ids and versions; the findings live on the
-        // presenter-only review row.
+        // staff-only review row.
         for (const entry of c.internalHistory.filter((event) =>
           event.action.includes("REVIEW"),
         ))
@@ -311,7 +311,7 @@ test("independent review corrects, re-reviews and approves a prepared case", asy
           "REQUEST_CORRECTIONS",
           "APPROVE_REVIEW",
         ]);
-        // Qualification precedes assignment: Sam is refused for the capability
+        // Qualification precedes assignment: the Site Coordinator is refused for the capability
         // they lack, Riley for the assignment they do not hold.
         for (const type of ["REQUEST_CORRECTIONS", "APPROVE_REVIEW"]) {
           await assert.rejects(
@@ -605,14 +605,14 @@ test("independent review corrects, re-reviews and approves a prepared case", asy
         assert.equal(events.error, null);
         assert.ok(events.data.length > 0);
         for (const event of events.data) assertPlainClientMessage(event.message);
-        // Internal history stays presenter-only.
+        // Internal history stays staff-only.
         const internal = await f.applicantA
           .from("case_events")
           .select("*")
           .eq("case_id", caseId);
         assert.equal(internal.error, null);
         assert.deepEqual(internal.data, []);
-        // Every review action is a presenter action on a staff person.
+        // Every review action is a staff member's.
         const revision = (await f.readStaffCase(caseId)).revision;
         for (const [type, payload] of Object.entries(REVIEW_PAYLOADS)) {
           await assert.rejects(
@@ -620,18 +620,12 @@ test("independent review corrects, re-reviews and approves a prepared case", asy
             rejected("FORBIDDEN"),
             `${type} with no staff person`,
           );
-          await assert.rejects(
-            () => f.actAsPersona(f.applicantA, caseId, f.morgan, type, payload),
-            rejected("FORBIDDEN"),
-            `${type} with a forged staff person`,
-          );
           // Another client's attempt never reaches the case at all.
           const { error } = await f.applicantB.rpc(
             "vitally_apply_action",
             applyArgs({
               caseId,
               revision,
-              personId: f.morgan,
               type,
               payload,
             }),
@@ -657,7 +651,7 @@ test("independent review corrects, re-reviews and approves a prepared case", asy
           ],
           [
             f.applicantB,
-            { caseId, revision, personId: f.morgan, type: "APPROVE_REVIEW", payload: { questionnaire: REVIEWER } },
+            { caseId, revision, type: "APPROVE_REVIEW", payload: { questionnaire: REVIEWER } },
             "VT002",
           ],
           [
@@ -783,7 +777,7 @@ test("review submission waits for documents, not for office contact", async (t) 
         assert.deepEqual(staff.participants, [f.preparerId]);
         assert.equal(staff.requests[0].status, "verified");
         assert.deepEqual(staff.reviews, []);
-        // The same task, still open, still Sam's.
+        // The same task, still open, still the Site Coordinator's.
         assert.equal(staff.followups.length, 1);
         assert.equal(staff.followups[0].id, held.followups[0].id);
         assert.equal(staff.followups[0].status, "open");
@@ -793,7 +787,7 @@ test("review submission waits for documents, not for office contact", async (t) 
           preparationVersion: 1,
         });
         assertPlainClientMessage(messageOf(staff, "SUBMIT_REVIEW"));
-        // Sam still owns the open task after the hand-off.
+        // The Site Coordinator still owns the open task after the hand-off.
         await f.logContact(
           f.siteCoordinator,
           caseId,
@@ -1254,10 +1248,10 @@ test("questionnaire tables are staff-only", async () => {
       const applicant = await f.applicantA.from(table).select("*").eq("case_id", caseId);
       assert.equal(applicant.error, null, table);
       assert.deepEqual(applicant.data, [], table);
-      const staff = await f.presenter.from(table).select("*").eq("case_id", caseId);
+      const staff = await f.siteCoordinator.from(table).select("*").eq("case_id", caseId);
       assert.equal(staff.error, null, table);
       assert.equal(staff.data.length, 1, table);
-      for (const client of [f.applicantA, f.presenter])
+      for (const client of [f.applicantA, f.siteCoordinator])
         assert.ok(
           (await client.from(table).insert({ workspace_id: f.workspaceId, case_id: caseId })).error,
           `${table} insert`,

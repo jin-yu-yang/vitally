@@ -303,8 +303,8 @@ test("visits and document cards on the server", async (t) => {
     });
 
     await t.test("a volunteer who does not work on the case may not mark a card", async () => {
-      // Alex has the prepare capability but no claim on this case. Until 018 he
-      // was refused for lacking admin; now it is works_on_case that refuses him.
+      // The Preparer has the prepare capability but no claim on this case. Until 018
+      // they were refused for lacking admin; now it is works_on_case that refuses them.
       const caseId = await submittedCase(f);
       await assert.rejects(
         card(f, f.preparer, caseId, "w2.household", "later"),
@@ -320,10 +320,10 @@ test("visits and document cards on the server", async (t) => {
     await t.test("the preparer and the reviewer may mark and move; others on that case may not", async () => {
       const caseId = await claimedCase(f);
       const slot = `ssn.hh.${HH_A}`;
-      // Alex as its preparer.
+      // The Preparer as its preparer.
       await card(f, f.preparer, caseId, "w2.household", "later");
       await group(f, f.preparer, caseId, slot, "needed");
-      // Morgan as its reviewer.
+      // The Reviewer as its reviewer.
       await card(f, f.reviewer, caseId, "ssn.tp", "none");
       await group(f, f.reviewer, caseId, slot, "maybe");
       assert.deepEqual(await cardRows(f, caseId), [
@@ -331,7 +331,7 @@ test("visits and document cards on the server", async (t) => {
         { slot_id: "ssn.tp", status: "none", group_override: null },
         { slot_id: "w2.household", status: "later", group_override: null },
       ]);
-      // Alex on a case he does not prepare is still refused, and nothing is written.
+      // The Preparer on a case they do not prepare is still refused, and nothing is written.
       const other = await submittedCase(f);
       await assert.rejects(
         card(f, f.preparer, other, "w2.household", "later"),
@@ -342,7 +342,7 @@ test("visits and document cards on the server", async (t) => {
         rejected("FORBIDDEN"),
       );
       assert.deepEqual(await cardRows(f, other), []);
-      // Sam (office) may on any submitted case.
+      // The Site Coordinator (office) may on any submitted case.
       await card(f, f.siteCoordinator, other, "w2.household", "later");
       await group(f, f.siteCoordinator, other, "w2.household", "needed");
       assert.equal((await cardRows(f, other)).length, 1);
@@ -446,10 +446,10 @@ test("visits and document cards on the server", async (t) => {
       await card(f, f.applicantA, caseId, "ssn.tp", "none");
       assert.deepEqual(await readCards(f.applicantA, caseId), ["ssn.tp", "w2.household"]);
       assert.deepEqual(await readCards(f.applicantB, caseId), []);
-      assert.deepEqual(await readCards(f.presenter, caseId), []);
+      assert.deepEqual(await readCards(f.siteCoordinator, caseId), []);
       await f.act(f.applicantA, caseId, "SAVE_ANSWERS", { answers: completeAnswers() });
       await f.act(f.applicantA, caseId, "SUBMIT", { confirmed: true });
-      assert.deepEqual(await readCards(f.presenter, caseId), ["ssn.tp", "w2.household"]);
+      assert.deepEqual(await readCards(f.siteCoordinator, caseId), ["ssn.tp", "w2.household"]);
       assert.deepEqual(await readCards(f.applicantB, caseId), []);
     });
 

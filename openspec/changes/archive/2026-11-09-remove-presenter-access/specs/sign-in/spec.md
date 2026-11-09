@@ -1,0 +1,249 @@
+## REMOVED Requirements
+
+### Requirement: A signed-in account acts as a client, a presenter or a staff member
+
+**Reason**: The presenter access type is removed, and so are its scenarios.
+
+**Migration**: Replaced by "A signed-in account acts as a client or a staff member".
+
+### Requirement: A staff account always acts as its own person
+
+**Reason**: The RPCs no longer take `p_person_id`, so the scenarios about sending null, one's own id or another id no longer apply, and the old "signatures SHALL NOT change" rule is reversed.
+
+**Migration**: Replaced by "A staff account acts as its own person with no person parameter", which lists the new signatures.
+
+### Requirement: A client acts as themselves, as before
+
+**Reason**: The scenario about a client naming a person through `p_person_id` no longer applies.
+
+**Migration**: Replaced by "A client acts with no person".
+
+### Requirement: The roster creates staff members as new people
+
+**Reason**: The keys `alex`, `morgan` and `sam` are no longer reserved, and new workspaces no longer get the demonstration personas.
+
+**Migration**: Replaced by "The roster creates staff members as new people, with no reserved keys".
+
+### Requirement: A presenter cannot act as a staff member's person
+
+**Reason**: Presenter access is removed. No account can choose a person any more, and the RPCs no longer take `p_person_id`.
+
+**Migration**: None for callers. Staff act as their own person and clients as no person, both resolved by the database (requirement "A staff account acts as its own person with no person parameter").
+
+### Requirement: A workspace can have staff and no presenter
+
+**Reason**: No workspace can have a presenter any more, so the "no presenter" case is the only case.
+
+**Migration**: Replaced by "A roster needs staff and a default follow-up person". A roster that relied on a presenter must list staff and a `defaultFollowup`.
+
+### Requirement: A presenter account gets a plain screen and no staff screens
+
+**Reason**: Migration 043 deletes every presenter membership and account, and the database refuses the `presenter` access value, so no presenter can sign in or reach the browser. The plain screen and its guard are removed with it.
+
+**Migration**: A former presenter address can no longer sign in. A window still signed in as one gets the no-access screen (requirement "Presenter accounts are removed with their test-run history").
+
+## ADDED Requirements
+
+### Requirement: A signed-in account acts as a client or a staff member
+Every active membership SHALL have exactly one access type:
+- `applicant`: a client;
+- `staff`: a staff member who signs in as themselves.
+
+The database SHALL refuse any other access value, including `presenter`.
+
+A `staff` membership SHALL be linked to exactly one person in its workspace, and that person SHALL be linked to no other membership. An `applicant` membership SHALL have no linked person.
+
+#### Scenario: The two access types
+- **WHEN** a roster creates one staff member and one client in a workspace
+- **THEN** their memberships have access `staff` and `applicant`, and only the staff membership has a linked person
+
+#### Scenario: Another access value is refused
+- **WHEN** an operator tries to store a membership with access `admin` or `presenter`
+- **THEN** the database refuses it
+
+#### Scenario: A staff member cannot be saved without a person
+- **WHEN** a transaction creates a `staff` membership and commits without linking a person to it
+- **THEN** the commit is refused, and neither the membership nor anything else from that transaction is saved
+
+#### Scenario: A person cannot be linked to a client
+- **WHEN** a transaction links a person to an `applicant` membership
+- **THEN** the commit is refused
+
+### Requirement: A staff account acts as its own person with no person parameter
+For a `staff` member, every public RPC that acts on the workspace SHALL act as the person linked to the signed-in account. The browser SHALL have no way to name another person. These RPCs and their signatures are:
+- `vitally_apply_action(p_action_id uuid, p_case_id uuid, p_expected_revision bigint, p_type text, p_payload jsonb)`;
+- `vitally_assistance_action(p_action_id uuid, p_item_id uuid, p_expected_revision bigint, p_type text, p_note text)`;
+- `vitally_close_unsigned(p_action_id uuid, p_cases jsonb, p_confirmed boolean)`;
+- `vitally_create_case(p_action_id uuid, p_mode text, p_answers jsonb)`;
+- `vitally_log_contact(p_action_id uuid, p_case_id uuid, p_followup_id uuid, p_entry jsonb)`;
+- `vitally_edit_contact(p_action_id uuid, p_contact_id uuid, p_expected_revision bigint, p_entry jsonb)`.
+
+None of them SHALL take a person parameter. Each SHALL be executable by `authenticated` and by no other client role.
+
+The acting person SHALL be resolved before the request digest and the receipt, so `action_receipts.actor_person_id` records the staff member's person. The request digest SHALL keep its `personId` entry, filled with the resolved person, so receipts stored before the parameter was removed still match their replays.
+
+#### Scenario: A staff call
+- **WHEN** a staff member whose person can prepare claims preparation
+- **THEN** the claim succeeds, the case's preparer is the staff member's person, and the receipt's actor is that person
+
+#### Scenario: A request that names a person
+- **WHEN** a request to any of the six RPCs carries a `p_person_id` argument
+- **THEN** no function matches the call, nothing is written, and no receipt is stored
+
+#### Scenario: Every entry point resolves the person
+- **WHEN** a staff member calls each of `vitally_apply_action`, `vitally_close_unsigned`, `vitally_assistance_action`, `vitally_create_case` in assisted mode, `vitally_log_contact` and `vitally_edit_contact`
+- **THEN** each call acts as, and is recorded as, the staff member's own person
+
+#### Scenario: Capabilities still apply
+- **WHEN** a staff member whose person has only `prepare` tries to close a case
+- **THEN** the call is refused with `FORBIDDEN`
+
+#### Scenario: A replay keeps its actor
+- **WHEN** a staff member repeats an identical request with the same action id
+- **THEN** both calls return the stored receipt with the same actor, and no second change is made
+
+#### Scenario: The old signatures are gone
+- **WHEN** the database catalog is read
+- **THEN** no public function takes `p_person_id`, and `public` holds exactly these six RPCs, each with execute granted to `authenticated` only
+
+### Requirement: A client acts with no person
+An `applicant` SHALL act with no person. The RPCs take no person parameter, so a client's request SHALL have no way to name one. Clients' behaviour SHALL NOT otherwise change.
+
+#### Scenario: A client's action records no person
+- **WHEN** a client submits their application
+- **THEN** the receipt's actor person is empty and the actor account is the client's
+
+#### Scenario: A client's request that names a person
+- **WHEN** a client's request to `vitally_apply_action` carries a staff member's person id as `p_person_id`
+- **THEN** no function matches the call, and nothing is written
+
+### Requirement: The roster creates staff members as new people, with no reserved keys
+The roster file SHALL accept a `staff` list. Each entry SHALL have:
+- an `email`;
+- a `name` of 1 to 80 characters;
+- a `personKey` that is a valid person key;
+- `capabilities` from `prepare`, `review`, `admin`, `followup`, `receive_documents` and `assist`.
+
+For each entry, the roster command SHALL create a confirmed, password-free Auth account if none exists. In one database transaction with the rest of the workspace setup, it SHALL create the `staff` membership and a new person with that key, name and capabilities, linked to the membership. Re-running the same roster SHALL create nothing new and SHALL succeed.
+
+The roster command SHALL refuse:
+- a key or address that appears twice;
+- an address that is also listed as a client;
+- an address with an active membership in another workspace;
+- a capability outside the list above, or a staff entry with no capabilities;
+- a re-run that gives an existing staff member a different name, key or capabilities;
+- a key already held in the workspace by any person who is not exactly that staff member, including a kept demonstration persona.
+
+No person key SHALL be reserved by name. A new workspace SHALL be created with no unlinked people.
+
+The roster command SHALL never print an email address.
+
+#### Scenario: A staff member is added
+- **WHEN** an operator adds `{ email, name: "Riley Park", personKey: "riley", capabilities: ["prepare"] }` to the `staff` list and runs the roster command
+- **THEN** a confirmed account exists for that address, with a `staff` membership linked to a new person `riley` named "Riley Park" with `prepare`
+
+#### Scenario: Running the roster again
+- **WHEN** the operator runs the same roster again
+- **THEN** it succeeds and creates no account, membership or person
+
+#### Scenario: A freed key
+- **WHEN** a staff entry uses the key `sam` in a workspace that has no person with that key
+- **THEN** the staff member is added as a new person `sam`
+
+#### Scenario: A key held by a kept persona
+- **WHEN** a staff entry uses the key `sam` in a workspace that kept its unlinked Sam
+- **THEN** the database refuses the roster, nothing is created in the workspace, and the kept Sam stays unlinked
+
+#### Scenario: Changed capabilities on a re-run
+- **WHEN** the operator changes `riley`'s capabilities to `["prepare","review"]` and runs the roster again
+- **THEN** the roster command refuses it, and `riley` keeps `prepare` only
+
+#### Scenario: A new workspace has no personas
+- **WHEN** a roster runs on a new workspace
+- **THEN** the workspace's people are exactly its staff members; it has no Alex, Morgan or Sam
+
+### Requirement: A roster needs staff and a default follow-up person
+A roster SHALL list at least one staff member and SHALL name a `defaultFollowup`. A roster that still has a `presenters` list SHALL be accepted, and the command SHALL print "presenters is no longer used and was ignored; those addresses get no access." It SHALL create no account and no membership for those addresses. A workspace SHALL work for its staff and clients.
+
+#### Scenario: A staff roster
+- **WHEN** a roster lists staff members and clients and a `defaultFollowup` naming a staff member with `followup`
+- **THEN** the roster command succeeds, the staff members can sign in and work cases, and new follow-ups go to that staff member
+
+#### Scenario: An empty staff side
+- **WHEN** a roster lists only clients
+- **THEN** the roster command refuses it
+
+#### Scenario: An old roster with presenters
+- **WHEN** a roster that also lists `presenters` is run
+- **THEN** the command prints that presenters is no longer used and those addresses get no access, and no account or membership is created for them
+
+### Requirement: Presenter accounts are removed with their test-run history
+Migration 043 SHALL remove presenter access from every stack it runs on, in one transaction. It SHALL first check whether a presenter account is referenced, and SHALL refuse with SQLSTATE `VT008`, changing nothing, if any of these exist:
+- a case, case event, document, contact attempt, contact log entry, contact log version or person that references a presenter's membership;
+- a case created by a presenter account;
+- any other membership of a presenter account.
+
+Its message SHALL give the count for each kind.
+
+Otherwise it SHALL delete, in order:
+1. every action receipt whose actor account is a presenter account;
+2. every presenter membership;
+3. every presenter account, with the Auth rows that belong to it;
+4. every unlinked person with key `alex`, `morgan` or `sam` that no row references. A reference is any column that refers to people, or an action receipt's actor person.
+
+It SHALL keep each such person that something still references. It SHALL then refuse the `presenter` access value.
+
+After the migration, no function, constraint, policy or view in the database SHALL mention `presenter`. Each staff read policy formerly named `presenter_<table>` SHALL be named `staff_<table>`.
+
+A former presenter address SHALL be treated at sign-in like any address not on the roster. A window still signed in as a former presenter SHALL show the no-access screen ("This account has no access", with Sign out) and SHALL load and subscribe to nothing.
+
+#### Scenario: A stack with test-run presenters
+- **WHEN** 043 runs on a stack whose presenter accounts have only receipts
+- **THEN** their receipts, memberships and accounts are deleted, and every other row is unchanged except unreferenced personas
+
+#### Scenario: A presenter referenced by real work
+- **WHEN** 043 runs on a stack where a case event's actor is a presenter account
+- **THEN** 043 fails with `VT008`, its message counts the referencing rows, and nothing on the stack changes
+
+#### Scenario: Personas nothing references
+- **WHEN** 043 runs on a workspace whose Alex, Morgan and Sam are referenced only by presenter receipts
+- **THEN** all three are deleted
+
+#### Scenario: A persona that is still referenced
+- **WHEN** 043 runs on a workspace whose default follow-up person is Sam
+- **THEN** Sam is kept, unlinked, and stays the default follow-up person
+
+#### Scenario: A former presenter tries to sign in
+- **WHEN** a former presenter address asks for a sign-in code after 043
+- **THEN** the sign-in form answers as it does for an address not on the roster, and no code is sent
+
+#### Scenario: A window still signed in
+- **WHEN** a window was signed in as a presenter before 043, and refreshes afterwards
+- **THEN** it shows "This account has no access" with Sign out, and loads no cases, people or workspace details
+
+#### Scenario: The catalog has no presenter
+- **WHEN** the database catalog is read after 043
+- **THEN** no function source, constraint, policy name, policy expression or view contains `presenter`
+
+## MODIFIED Requirements
+
+### Requirement: The roster can choose the default follow-up person
+The roster file SHALL require a `defaultFollowup`, naming the `personKey` of a staff entry whose capabilities include `followup`. The workspace's default follow-up person SHALL become that person, and follow-ups escalated afterwards SHALL be assigned to them. Follow-ups already open SHALL keep their assignee. Withdrawal notices SHALL go to the default follow-up person, as escalated follow-ups do.
+
+The roster command SHALL refuse a `defaultFollowup` that is missing, that names no staff entry, or that names a person without `followup`.
+
+#### Scenario: A staff member takes new follow-ups
+- **WHEN** the roster sets `defaultFollowup` to a staff member with `followup`, and a document request then goes unanswered and is escalated
+- **THEN** the new follow-up is assigned to that staff member
+
+#### Scenario: Open follow-ups stay where they are
+- **WHEN** a staff member has an open follow-up and the roster sets `defaultFollowup` to another staff member
+- **THEN** the open follow-up is still assigned to the first staff member
+
+#### Scenario: No default given
+- **WHEN** a roster has staff members and no `defaultFollowup`
+- **THEN** the roster command refuses it, and nothing is created in the workspace
+
+#### Scenario: A default without the capability
+- **WHEN** `defaultFollowup` names a staff member whose capabilities do not include `followup`
+- **THEN** the roster command refuses the roster, and the default does not change

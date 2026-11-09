@@ -168,7 +168,7 @@ function fakeStore({
         revision: current.revision + 1,
         status: request.type === "CLAIM" ? "assigned" : "resolved",
         assigneeId:
-          request.type === "CLAIM" ? request.personId : current.assigneeId,
+          request.type === "CLAIM" ? "person-sam" : current.assigneeId,
         resolutionNote: request.note ?? current.resolutionNote,
       });
     },
@@ -599,7 +599,7 @@ test("save state moves unsaved to saving to saved, and an edit whitelists its ke
   assert.equal(controller.getState().editBaseRevision, null);
   assert.equal(store.writes[0].payload.answers.tp_first_name, "Mei");
   assert.equal(Object.hasOwn(store.writes[0].payload.answers, "ownerUserId"), false);
-  assert.equal(store.writes[0].personId, null);
+  assert.ok(!("personId" in store.writes[0]));
   assert.equal(controller.getState().savedCase.revision, 2);
   controller.stop();
 });
@@ -998,7 +998,6 @@ test("runAction rejects an unknown type locally and sends no staff person for an
       actionId: "id",
       caseId: "case-a",
       expectedRevision: 3,
-      personId: null,
       type: "RESPOND_DOCUMENT",
       payload: { requestId: "req-1", filename: "demo-mileage-record-2025.pdf" },
     },
@@ -1044,7 +1043,6 @@ test("a staff member opens a case on the staff workspace and claims it", async (
       actionId: "id",
       caseId: "case-a",
       expectedRevision: 4,
-      personId: null,
       type: "CLAIM_REVIEW",
       payload: {},
     },
@@ -1172,7 +1170,7 @@ test("starting a new application is explicit, idempotent and selects the new cas
   assert.equal(store.writes.length, 2, "a second click while pending is a no-op");
   assert.equal(store.writes[1].actionId, "action-1");
   assert.equal(store.writes[1].mode, "client");
-  assert.equal(store.writes[1].personId, null);
+  assert.ok(!("personId" in store.writes[1]));
   assert.deepEqual(store.writes[1].answers, {});
   const state = controller.getState();
   assert.equal(state.selectedCaseId, state.savedCase.id);
@@ -1536,7 +1534,6 @@ test("an assistance action carries the item's own revision and re-reads the list
     actionId: "action-1",
     itemId: "item-1",
     expectedRevision: 4,
-    personId: null,
     type: "CLAIM",
     note: null,
   });
@@ -1549,7 +1546,6 @@ test("an assistance action carries the item's own revision and re-reads the list
     actionId: "action-2",
     itemId: "item-1",
     expectedRevision: 5,
-    personId: null,
     type: "RESOLVE",
     note: "Filled it in together.",
   });
@@ -1642,7 +1638,7 @@ test("the office answers for a walk-in client and sends no person", async () => 
   await controller.saveAnswers();
   // The database derives the staff member's person from the account.
   assert.equal(store.writes[0].type, "SAVE_ANSWERS");
-  assert.equal(store.writes[0].personId, null);
+  assert.ok(!("personId" in store.writes[0]));
   assert.equal(store.writes[0].expectedRevision, 2);
   assert.deepEqual(store.writes[0].payload, { answers: { tp_first_name: "Mei" } });
   // A client still answers for themselves.
@@ -2736,7 +2732,7 @@ test("staff never send visits, and their visits never make the draft dirty", asy
   controller.editAnswers({ tp_first_name: "Ming" });
   await controller.saveAnswers();
   assert.equal(Object.hasOwn(store.writes[0].payload, "visited"), false);
-  assert.equal(store.writes[0].personId, null);
+  assert.ok(!("personId" in store.writes[0]));
   controller.stop();
 });
 
@@ -2752,7 +2748,7 @@ test("on a submitted case, visits are never pending and a card mark sends only t
   );
   assert.deepEqual(store.writes[0].payload, { slotId: "w2.household", status: "later" });
   assert.equal(store.writes[0].expectedRevision, 1);
-  assert.equal(store.writes[0].personId, null);
+  assert.ok(!("personId" in store.writes[0]));
   assert.equal(controller.getState().savedCase.documentCards[0].status, "later");
   assert.equal(controller.getState().dirty, false);
   controller.stop();
@@ -3579,12 +3575,12 @@ test("the first Save draft creates one empty case, adopts it in place and saves 
   const draft = controller.getState().draftAnswers;
   assert.deepEqual(await controller.saveOfficeDraft(), { sent: false });
   assert.deepEqual(creates(store), [
-    { actionId: "action-1", mode: "assisted", personId: null, answers: {} },
+    { actionId: "action-1", mode: "assisted", answers: {} },
   ]);
   const saves = writesOf(store, "SAVE_ANSWERS");
   assert.equal(saves.length, 1);
   assert.equal(saves[0].caseId, "case-2");
-  assert.equal(saves[0].personId, null);
+  assert.ok(!("personId" in saves[0]));
   assert.deepEqual(saves[0].payload.answers, withholdInvalid(draft, 2));
   assert.equal(Object.hasOwn(saves[0].payload, "visited"), false, "the office never sends visits");
   const state = controller.getState();
@@ -3841,7 +3837,7 @@ test("Send needs the confirmation; ticked, a complete new draft is created, save
   );
   const submit = writesOf(store, "SUBMIT")[0];
   assert.deepEqual(submit.payload, { confirmed: true });
-  assert.equal(submit.personId, null);
+  assert.ok(!("personId" in submit));
   assert.equal(submit.expectedRevision, 2, "the saved revision");
   const state = controller.getState();
   assert.equal(state.screen, "staff-case");
@@ -5198,7 +5194,6 @@ test("logging sends the task and no person, then re-reads the case", async () =>
   assert.deepEqual(store.writes.at(-1), {
     actionId: "action-1",
     caseId: "case-a",
-    personId: null,
     followupId: "followup-1",
     entry: CONTACT_ENTRY,
   });
@@ -5221,7 +5216,6 @@ test("editing sends the revision on screen", async () => {
     actionId: "action-2",
     contactId: "contact-1",
     expectedRevision: 3,
-    personId: null,
     entry: { ...CONTACT_ENTRY, note: "Changed." },
   });
   assert.equal(controller.getState().savedCase.contacts[0].note, "Changed.");
@@ -5319,7 +5313,7 @@ test("an admin staff member opening a Request sent case starts screening, once",
   assert.equal(startWrites(store).length, 1);
   assert.deepEqual(
     { ...startWrites(store)[0], actionId: "id" },
-    { actionId: "id", caseId: "case-r", expectedRevision: 3, personId: null, type: "START_SCREENING", payload: {} },
+    { actionId: "id", caseId: "case-r", expectedRevision: 3, type: "START_SCREENING", payload: {} },
   );
   assert.equal(controller.getState().savedCase.stage, "screening", "the case was re-read");
   await controller.selectCase("case-r");
@@ -5687,7 +5681,6 @@ test("closeUnsigned sends the ticked list and applies revisions", async () => {
   await controller.closeUnsigned([{ caseId: "case-a", revision: 4 }]);
   assert.deepEqual(store.writes.at(-1), {
     actionId: "action-7",
-    personId: null,
     cases: [{ caseId: "case-a", revision: 4 }],
     confirmed: true,
   });
@@ -5769,7 +5762,7 @@ test("saveShadedSection sends the latest revision", async () => {
   assert.equal(sent.type, "SAVE_PREPARER_FIELDS");
   assert.equal(sent.caseId, "case-s");
   assert.equal(sent.expectedRevision, 9);
-  assert.equal(sent.personId, null);
+  assert.ok(!("personId" in sent));
   assert.deepEqual(sent.payload, { fields, basedOnVersion: 0 });
   // Saved, in place beside the upload control.
   assert.deepEqual(controller.getState().shadedStatus, { caseId: "case-s", text: "Saved" });
@@ -6183,11 +6176,11 @@ test("a staff controller's actions carry no person", async () => {
   await controller.start();
   await controller.selectCase("case-a");
   await controller.runAction("CLAIM_PREPARATION", {});
-  assert.equal(store.writes.at(-1).personId, null);
+  assert.ok(!("personId" in store.writes.at(-1)));
   await controller.logContact("case-a", CONTACT_ENTRY);
-  assert.equal(store.writes.at(-1).personId, null);
+  assert.ok(!("personId" in store.writes.at(-1)));
   await controller.runAssistanceAction("CLAIM", "item-1");
-  assert.equal(store.writes.at(-1).personId, null);
+  assert.ok(!("personId" in store.writes.at(-1)));
   controller.stop();
 });
 
@@ -6208,7 +6201,7 @@ test("a staff window ignores a persona left in its storage and never stores one"
   assert.equal(controller.getState().selectedCaseId, "case-a");
   assert.ok(!("selectedPersonId" in controller.getState()), "the leftover is not restored");
   await controller.runAction("CLAIM_PREPARATION", {});
-  assert.equal(store.writes.at(-1).personId, null, "Riley never acts as Sam");
+  assert.ok(!("personId" in store.writes.at(-1)), "Riley never acts as Sam");
   const record = JSON.parse(sessionStorage.raw("vitally:client:v1:user-riley"));
   assert.equal(record.selectedCaseId, "case-a");
   assert.ok(!("selectedPersonId" in record), "no persona is written for staff");
@@ -6223,7 +6216,7 @@ test("screening starts for an admin staff member only", async () => {
   await first.controller.selectCase("case-r");
   await tick();
   assert.equal(startWrites(admin).length, 1);
-  assert.equal(startWrites(admin)[0].personId, null, "the store derives the person");
+  assert.ok(!("personId" in startWrites(admin)[0]), "the store derives the person");
   first.controller.stop();
 
   const preparer = staffStore({
@@ -6254,29 +6247,15 @@ test("a staff member without admin starts no screening, whatever persona the win
   controller.stop();
 });
 
-test("a presenter's window loads nothing", async () => {
-  const sessionStorage = fakeSession({
-    "vitally:client:v1:p1": JSON.stringify({ screen: "case", selectedCaseId: "case-a" }),
-  });
-  const store = fakeStore({
-    principal: { userId: "p1", workspaceId: "w1", access: "presenter" },
-    people: [{ id: "person-1", name: "Alex", capabilities: ["prepare"] }],
-    cases: [{ id: "case-a", reference: "VT-AAAA-BBBB", stage: "received", revision: 1, answers: {} }],
-  });
-  const { controller } = build({ store, sessionStorage });
-  await controller.start();
-  assert.equal(controller.getState().screen, "presenter");
-  for (const read of ["listCases", "listPeople", "getCase:case-a", "listAssistance", "getWorkspace"])
-    assert.ok(!store.calls.includes(read), `${read} was called`);
-  assert.equal(store.subscriptions, 0);
-  controller.stop();
-});
-
-function inertPresenter() {
+// An account with no membership (an account that lost its membership): the
+// store's getPrincipal answers FORBIDDEN, and the window shows `no-access`.
+// getPrincipal is the only store call it may ever make, however often the
+// window is woken (refresh() re-asks it, so a granted membership is noticed).
+function noMembership() {
   const saved = JSON.stringify({ screen: "case", selectedCaseId: "case-a" });
   const sessionStorage = fakeSession({ "vitally:client:v1:p1": saved });
   const store = fakeStore({
-    principal: { userId: "p1", workspaceId: "w1", access: "presenter" },
+    principal: Object.assign(new Error("no access"), { code: "FORBIDDEN" }),
     cases: [{ id: "case-a", reference: "VT-AAAA-BBBB", stage: "received", revision: 1, answers: {} }],
   });
   const { controller, events } = build({ store, sessionStorage });
@@ -6284,37 +6263,134 @@ function inertPresenter() {
     await controller.start();
     const calls = store.calls.length;
     await trigger({ controller, events });
-    assert.deepEqual(store.calls.slice(calls), []);
+    assert.deepEqual(
+      store.calls.slice(calls).filter((call) => call !== "getPrincipal"),
+      [],
+    );
     assert.equal(store.subscriptions, 0);
     assert.equal(sessionStorage.raw("vitally:client:v1:p1"), saved);
-    assert.equal(controller.getState().screen, "presenter");
+    assert.equal(controller.getState().screen, "no-access");
+    assert.equal(controller.getState().principal, null);
     controller.stop();
   };
   return { store, quiet };
 }
 
-test("a presenter's window reads and saves nothing on tab focus", async () => {
-  await inertPresenter().quiet(({ events }) => events.emit("focus"));
+test("a window with no membership shows no-access and loads nothing", async () => {
+  const { store, quiet } = noMembership();
+  await quiet(async () => {});
+  assert.deepEqual(store.calls, ["getPrincipal"]);
 });
 
-test("a presenter's window reads and saves nothing when back online", async () => {
-  await inertPresenter().quiet(({ events }) => events.emit("online"));
+test("a window with no membership reads and saves nothing on tab focus", async () => {
+  await noMembership().quiet(({ events }) => events.emit("focus"));
 });
 
-test("a presenter's window reads and saves nothing on Try again (retry-connection)", async () => {
+test("a window with no membership reads and saves nothing when back online", async () => {
+  await noMembership().quiet(({ events }) => events.emit("online"));
+});
+
+test("a window with no membership reads and saves nothing on Try again (retry-connection)", async () => {
   // app.mjs sends retry-connection to controller.refresh().
-  await inertPresenter().quiet(({ controller }) => controller.refresh());
+  await noMembership().quiet(({ controller }) => controller.refresh());
 });
 
-test("a presenter's window makes no store call at all after getPrincipal", async () => {
-  const { store, quiet } = inertPresenter();
+test("a window with no membership makes no store call but getPrincipal, however often it is woken", async () => {
+  const { store, quiet } = noMembership();
   await quiet(async ({ controller, events }) => {
     await events.emit("focus");
     await events.emit("online");
     await controller.refresh();
     await controller.refresh();
   });
+  assert.ok(store.calls.length >= 1);
+  assert.ok(store.calls.every((call) => call === "getPrincipal"), store.calls.join());
+});
+
+test("a window with no membership stays on no-access after Dismiss and after the logo, and reads nothing", async () => {
+  const { store, quiet } = noMembership();
+  await quiet(async ({ controller }) => {
+    controller.dismissError();
+    assert.equal(controller.getState().screen, "no-access");
+    assert.equal(controller.getState().error, null);
+    // The logo asks to open the applications.
+    controller.navigate("applications");
+    assert.equal(controller.getState().screen, "no-access");
+    controller.navigate("progress");
+    assert.equal(controller.getState().screen, "no-access");
+  });
   assert.deepEqual(store.calls, ["getPrincipal"]);
+});
+
+test("a no-access window whose account is later given a membership leaves no-access on refresh", async () => {
+  const store = fakeStore({
+    principal: Object.assign(new Error("no access"), { code: "FORBIDDEN" }),
+    cases: [],
+  });
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(controller.getState().screen, "no-access");
+  controller.dismissError();
+  store.getPrincipal = async () => ({ userId: "user-1", workspaceId: "w1", access: "applicant" });
+  await controller.refresh();
+  assert.notEqual(controller.getState().screen, "no-access");
+  assert.ok(controller.getState().principal);
+  controller.stop();
+});
+
+test("a principal whose access is neither staff nor applicant gets no-access and nothing is read", async () => {
+  const store = fakeStore({
+    principal: { userId: "p1", workspaceId: "w1", access: "viewer" },
+    cases: [{ id: "case-a", reference: "VT-AAAA-BBBB", stage: "received", revision: 1, answers: {} }],
+  });
+  const { controller, events } = build({ store });
+  await controller.start();
+  await events.emit("focus");
+  await controller.refresh();
+  assert.equal(controller.getState().screen, "no-access");
+  assert.equal(controller.getState().principal, null);
+  assert.equal(store.subscriptions, 0);
+  assert.ok(store.calls.every((call) => call === "getPrincipal"), store.calls.join());
+  controller.stop();
+});
+
+// A payload already queued on a released channel can still call onChange. The
+// handler's `!state.principal` guard is all that keeps a late change from
+// reading for a window with no principal (no membership, or signed out).
+test("a late change on a released channel reads nothing for a no-access or signed-out window", async () => {
+  const store = staffStore({
+    cases: [{ id: "case-a", reference: "VT-AAAA-BBBB", stage: "preparing", revision: 2, answers: {} }],
+  });
+  const { controller } = build({ store });
+  await controller.start();
+  const late = store.handlers;
+  controller.stop();
+  const staffPrincipal = store.getPrincipal;
+  store.getPrincipal = async () => {
+    store.calls.push("getPrincipal");
+    throw Object.assign(new Error("no access"), { code: "FORBIDDEN" });
+  };
+  await controller.start();
+  assert.equal(controller.getState().screen, "no-access");
+  let calls = store.calls.length;
+  await late.onChange({ table: "workspaces" });
+  await late.onChange({ table: "cases", caseId: "case-a" });
+  await late.onChange({ table: "assistance_items" });
+  assert.deepEqual(store.calls.slice(calls), []);
+  assert.equal(controller.getState().screen, "no-access");
+  controller.stop();
+
+  // And after a sign-out of a window that did have a principal.
+  store.getPrincipal = staffPrincipal;
+  await controller.start();
+  const second = store.handlers;
+  await controller.signOut();
+  calls = store.calls.length;
+  await second.onChange({ table: "workspaces" });
+  await second.onChange({ table: "cases", caseId: "case-a" });
+  await second.onChange({ table: "assistance_items" });
+  assert.deepEqual(store.calls.slice(calls), []);
+  controller.stop();
 });
 
 test("a staff action sends no persona", async () => {
@@ -6326,58 +6402,8 @@ test("a staff action sends no persona", async () => {
   await controller.selectCase("case-a");
   await controller.runAction("CLAIM_PREPARATION", {});
   assert.equal(store.writes.at(-1).type, "CLAIM_PREPARATION");
-  assert.equal(store.writes.at(-1).personId, null);
+  assert.ok(!("personId" in store.writes.at(-1)));
   assert.ok(!("selectedPersonId" in controller.getState()));
   controller.stop();
 });
 
-// A change can still arrive on a channel this window released (a staff
-// session's, before the same window started again as a presenter). The
-// realtime path's three loads are each inert on their own.
-test("every data load is inert for a presenter", async () => {
-  const store = staffStore({
-    cases: [{ id: "case-a", reference: "VT-AAAA-BBBB", stage: "preparing", revision: 2, answers: {} }],
-  });
-  const { controller } = build({ store });
-  await controller.start();
-  const late = store.handlers;
-  controller.stop();
-  store.getPrincipal = async () => {
-    store.calls.push("getPrincipal");
-    return { userId: "p1", workspaceId: "w1", access: "presenter" };
-  };
-  await controller.start();
-  assert.equal(controller.getState().screen, "presenter");
-  const calls = store.calls.length;
-  assert.equal(store.calls.at(-1), "getPrincipal");
-  // A workspace change touches the list, the workspace and the assistance.
-  await late.onChange({ table: "workspaces" });
-  await late.onChange({ table: "cases", caseId: "case-a" });
-  await late.onChange({ table: "assistance_items" });
-  assert.deepEqual(store.calls.slice(calls), []);
-  assert.equal(controller.getState().screen, "presenter");
-  controller.stop();
-
-  // And each load on its own, called directly in a window a presenter signed
-  // in to first, reads nothing and leaves the lists as they were.
-  const fresh = fakeStore({
-    principal: { userId: "p1", workspaceId: "w1", access: "presenter" },
-    cases: [{ id: "case-a", reference: "VT-AAAA-BBBB", stage: "preparing", revision: 2, answers: {} }],
-  });
-  const presenter = build({ store: fresh }).controller;
-  await presenter.start();
-  assert.deepEqual(fresh.calls, ["getPrincipal"]);
-  const before = presenter.getState();
-  await presenter.testing.loadList();
-  // loadWorkspace's inert() guard sits in front of its staff-only check
-  // (`!staffWindow()`), which also returns for a presenter, so removing that
-  // guard can't fail this test. The review checks it by grep instead, as each
-  // data load's first line.
-  await presenter.testing.loadWorkspace();
-  await presenter.testing.loadAssistance();
-  assert.deepEqual(fresh.calls, ["getPrincipal"]);
-  assert.deepEqual(presenter.getState().lists, before.lists);
-  assert.equal(presenter.getState().workspace, before.workspace);
-  assert.equal(presenter.getState().screen, "presenter");
-  presenter.stop();
-});
