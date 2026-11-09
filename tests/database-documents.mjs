@@ -366,6 +366,16 @@ test("document requests, receipts and verification keep the preparer in charge",
             }),
           rejected("FORBIDDEN"),
         );
+        // Recording a response is staff work: the client answers with their own action.
+        const beforeClientAttempt = await f.stateSnapshot();
+        await assert.rejects(
+          () =>
+            f.act(f.applicantA, owned, "RECORD_DOCUMENT_RESPONSE", {
+              filename: f.sampleFilename,
+            }),
+          rejected("FORBIDDEN"),
+        );
+        assert.deepEqual(await f.stateSnapshot(), beforeClientAttempt);
         // Another applicant cannot even tell the case exists.
         const other = await f.applicantB.rpc(
           "vitally_apply_action",

@@ -223,7 +223,7 @@ test("staff identity against real Supabase", async (t) => {
       await f.sql("delete from public.people where id=$1", [person]);
     });
 
-    await t.test("a staff call with no person acts as its own person", async () => {
+    await t.test("a staff call acts as its own person", async () => {
       const caseId = await f.readyCase();
       const receipt = await f.act(riley.client, caseId, "CLAIM_PREPARATION", {});
       assert.equal((await caseRow(f, caseId)).preparer_id, riley.personId);
