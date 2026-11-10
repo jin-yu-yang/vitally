@@ -547,11 +547,12 @@ export function closeUnsignedDialogBody(state = {}) {
 
 // The one announcement of a failure while a drawer is open (pitfall 8): the
 // page banner steps aside, so its two controls live here instead — in every
-// branch of both drawers, or a failure would be announced nowhere.
-const drawerError = (ui) =>
+// branch of both drawers, or a failure would be announced nowhere. A drawer
+// about something other than a case names it in the conflict's heading.
+export const drawerError = (ui, conflictHeading = "This case changed while you were working") =>
   ui?.error
     ? `<div class="notice error" role="alert" id="drawer-error">${icon("help")}<div><h3>${esc(
-        ui.error.code === "CONFLICT" ? "This case changed while you were working" : "That did not go through",
+        ui.error.code === "CONFLICT" ? conflictHeading : "That did not go through",
       )}</h3><p>${esc(ui.error.message)}</p><div class="conflict-choices">${when(
         ui.retryable,
         button("Try again", "retry-action", "secondary"),

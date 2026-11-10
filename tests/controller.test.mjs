@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createController } from "../src/controller.mjs";
+import { createController, VOLUNTEER_CONFLICT_MESSAGE } from "../src/controller.mjs";
 import { SHADED_EDITOR, SHADED_UPLOAD } from "../src/contracts.mjs";
 import { POOL_FILTER_KEYS } from "../src/pool-views.mjs";
 import { saveStatus } from "../src/client-views.mjs";
@@ -5096,9 +5096,11 @@ test("an applicant's help-request list counts as loaded, and sign-out starts ove
   const store = fakeStore();
   const { controller } = build({ store });
   await controller.start();
-  assert.deepEqual(controller.getState().lists, { cases: "ready", assistance: "ready" });
+  // The Roster's list is a staff admin's, read only on its screen: an
+  // applicant never reads it.
+  assert.deepEqual(controller.getState().lists, { cases: "ready", assistance: "ready", volunteers: "loading" });
   await controller.signOut();
-  assert.deepEqual(controller.getState().lists, { cases: "loading", assistance: "loading" });
+  assert.deepEqual(controller.getState().lists, { cases: "loading", assistance: "loading", volunteers: "loading" });
   controller.stop();
 });
 
@@ -6405,5 +6407,269 @@ test("a staff action sends no persona", async () => {
   assert.ok(!("personId" in store.writes.at(-1)));
   assert.ok(!("selectedPersonId" in controller.getState()));
   controller.stop();
+});
+
+// ---------------------------------------------------------------------------
+// The volunteer Roster (change add-volunteer-roster-records, design D9)
+// ---------------------------------------------------------------------------
+
+const ROSTER_VOLUNTEER = Object.freeze({
+  id: "v-1",
+  name: "Mira Patel",
+  email: "mira@example.test",
+  phone: null,
+  works: "on_site",
+  languages: ["english"],
+  otherLanguage: null,
+  roles: ["preparer"],
+  certificates: [],
+  revision: 4,
+  hasSignIn: false,
+});
+
+const VOLUNTEER_PAYLOAD = Object.freeze({
+  name: "Mira Patel",
+  email: "mira@example.test",
+  phone: "215-555-0199",
+  works: "remote",
+  languages: ["english"],
+  otherLanguage: null,
+  roles: ["preparer", "reviewer"],
+  certificates: ["vsc"],
+});
+
+// The admin store, with the Roster's two calls. `volunteers` is what the next
+// read returns; `failRead` / `failSave` make the next call reject.
+const rosterStore = (overrides = {}) => {
+  const store = adminStaffStore(overrides);
+  store.volunteers = [{ ...ROSTER_VOLUNTEER }];
+  store.failRead = null;
+  store.failSave = null;
+  store.listVolunteers = async () => {
+    store.calls.push("listVolunteers");
+    if (store.failRead) {
+      const error = store.failRead;
+      store.failRead = null;
+      throw error;
+    }
+    return store.volunteers.map((entry) => ({ ...entry }));
+  };
+  store.saveVolunteer = async (request) => {
+    store.calls.push("saveVolunteer");
+    store.writes.push({ type: "saveVolunteer", ...request });
+    if (store.failSave) {
+      const error = store.failSave;
+      store.failSave = null;
+      throw error;
+    }
+    return { actionId: request.actionId, personId: request.volunteerId ?? "v-new", revision: 1 };
+  };
+  return store;
+};
+const volunteerReads = (store) => store.calls.filter((entry) => entry === "listVolunteers").length;
+
+test("the Roster is a staff screen: navigated to and restored from a saved session", async () => {
+  const shared = fakeSession();
+  const store = rosterStore();
+  const first = build({ store, sessionStorage: shared });
+  await first.controller.start();
+  assert.equal(volunteerReads(store), 0, "nothing is read off the Roster");
+  first.controller.navigate("office-volunteers");
+  assert.equal(first.controller.getState().screen, "office-volunteers");
+  first.controller.stop();
+
+  const again = rosterStore();
+  const second = build({ store: again, sessionStorage: shared });
+  await second.controller.start();
+  const state = second.controller.getState();
+  assert.equal(state.screen, "office-volunteers");
+  assert.equal(volunteerReads(again), 1, "a restored Roster loads its list");
+  assert.equal(state.lists.volunteers, "ready");
+  assert.deepEqual(state.volunteers.map((entry) => entry.id), ["v-1"]);
+  second.controller.stop();
+});
+
+test("the Roster's state starts empty, with its filters and no form error", async () => {
+  const { controller } = build({ store: rosterStore() });
+  const state = controller.getState();
+  assert.deepEqual(state.volunteers, []);
+  assert.equal(state.lists.volunteers, "loading");
+  assert.deepEqual(state.volunteerFilters, { search: "", role: "all" });
+  assert.equal(state.volunteerFormError, null);
+});
+
+test("loadVolunteers reads the list, and a failed first read says it failed with Try again", async () => {
+  const store = rosterStore();
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  store.failRead = Object.assign(new Error("offline"), { code: "OFFLINE" });
+  await controller.loadVolunteers();
+  let state = controller.getState();
+  assert.equal(state.lists.volunteers, "failed");
+  assert.equal(state.error.code, "OFFLINE");
+  assert.equal(state.retryable, true);
+  await controller.retryLast();
+  state = controller.getState();
+  assert.equal(state.lists.volunteers, "ready");
+  assert.equal(state.volunteers.length, 1);
+  assert.equal(state.error, null);
+  controller.stop();
+});
+
+test("a failed read on a restored Roster marks the list failed", async () => {
+  const sessionStorage = fakeSession();
+  const seed = build({ store: rosterStore(), sessionStorage });
+  await seed.controller.start();
+  seed.controller.navigate("office-volunteers");
+  seed.controller.stop();
+  const store = rosterStore();
+  store.failRead = Object.assign(new Error("boom"), { code: "SERVER_ERROR" });
+  const { controller } = build({ store, sessionStorage });
+  await controller.start();
+  const state = controller.getState();
+  assert.equal(state.lists.volunteers, "failed");
+  assert.equal(state.retryable, true);
+  controller.stop();
+});
+
+test("a non-admin's window never reads the Roster", async () => {
+  const store = rosterStore({ people: [{ id: "person-sam", name: "Sam", capabilities: ["prepare"] }] });
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  assert.equal(volunteerReads(store), 0);
+  assert.deepEqual(controller.getState().volunteers, []);
+  controller.stop();
+});
+
+test("setVolunteerFilter keeps the search and the role", async () => {
+  const { controller } = build({ store: rosterStore() });
+  await controller.start();
+  controller.setVolunteerFilter("search", "mira");
+  controller.setVolunteerFilter("role", "reviewer");
+  controller.setVolunteerFilter("bogus", "x");
+  assert.deepEqual(controller.getState().volunteerFilters, { search: "mira", role: "reviewer" });
+  controller.stop();
+});
+
+test("a volunteer with a problem is not sent, and the drawer says why", async () => {
+  const store = rosterStore();
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", null);
+  const saved = await controller.saveVolunteer({ ...VOLUNTEER_PAYLOAD, email: "other@example.test", roles: [] });
+  assert.equal(saved, false);
+  assert.equal(controller.getState().volunteerFormError, "Choose at least one role.");
+  assert.equal(store.calls.includes("saveVolunteer"), false);
+  // A duplicate of a listed email, in another case.
+  assert.equal(await controller.saveVolunteer({ ...VOLUNTEER_PAYLOAD, email: "MIRA@example.test" }), false);
+  assert.equal(controller.getState().volunteerFormError, "That email is already on the Roster.");
+  controller.clearVolunteerFormError();
+  assert.equal(controller.getState().volunteerFormError, null);
+  controller.stop();
+});
+
+test("an Add sends a fresh action id and no revision, then reloads the list", async () => {
+  const store = rosterStore();
+  const ids = ["action-1", "action-2"];
+  const { controller } = build({ store, newActionId: () => ids.shift() });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", null);
+  const payload = { ...VOLUNTEER_PAYLOAD, email: "noor@example.test", name: "Noor Haddad" };
+  const reads = volunteerReads(store);
+  assert.equal(await controller.saveVolunteer(payload), true);
+  assert.deepEqual(store.writes.at(-1), {
+    type: "saveVolunteer",
+    actionId: "action-1",
+    volunteerId: null,
+    expectedRevision: null,
+    volunteer: payload,
+  });
+  assert.equal(volunteerReads(store), reads + 1);
+  assert.equal(controller.getState().busy, false);
+  assert.equal(controller.getState().volunteerFormError, null);
+  controller.stop();
+});
+
+test("an Edit sends the volunteer's id and revision, each time with a fresh action id", async () => {
+  const store = rosterStore();
+  const ids = ["action-1", "action-2"];
+  const { controller } = build({ store, newActionId: () => ids.shift() });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", { volunteerId: "v-1" });
+  assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
+  assert.deepEqual(store.writes.at(-1), {
+    type: "saveVolunteer",
+    actionId: "action-1",
+    volunteerId: "v-1",
+    expectedRevision: 4,
+    volunteer: VOLUNTEER_PAYLOAD,
+  });
+  assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
+  assert.equal(store.writes.at(-1).actionId, "action-2");
+  controller.stop();
+});
+
+test("a conflicting save says someone else changed the volunteer, reloads and rethrows", async () => {
+  const store = rosterStore();
+  const { controller } = build({ store, newActionId: () => "action-1" });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", { volunteerId: "v-1" });
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, revision: 5, name: "Mira P." }];
+  store.failSave = Object.assign(new Error("stale"), { code: "CONFLICT" });
+  const reads = volunteerReads(store);
+  await assert.rejects(() => controller.saveVolunteer(VOLUNTEER_PAYLOAD), (error) => error.code === "CONFLICT");
+  const state = controller.getState();
+  assert.equal(state.error.code, "CONFLICT");
+  assert.equal(
+    state.error.message,
+    "Someone else changed this volunteer. Close this and open it again to see their changes.",
+  );
+  assert.equal(state.error.message, VOLUNTEER_CONFLICT_MESSAGE);
+  assert.equal(volunteerReads(store), reads + 1);
+  assert.equal(state.volunteers[0].revision, 5);
+  assert.equal(state.busy, false);
+  assert.equal(state.dialog, "volunteer", "the drawer stays open");
+  controller.stop();
+});
+
+test("any other refusal is shown in the drawer and rethrown, without a reload", async () => {
+  const store = rosterStore();
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", { volunteerId: "v-1" });
+  store.failSave = Object.assign(new Error("Not allowed."), { code: "FORBIDDEN" });
+  const reads = volunteerReads(store);
+  await assert.rejects(() => controller.saveVolunteer(VOLUNTEER_PAYLOAD), (error) => error.code === "FORBIDDEN");
+  assert.equal(controller.getState().error.code, "FORBIDDEN");
+  assert.equal(volunteerReads(store), reads);
+  controller.stop();
+});
+
+test("signing out forgets the Roster", async () => {
+  const store = rosterStore();
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.setVolunteerFilter("search", "mira");
+  await controller.signOut();
+  const state = controller.getState();
+  assert.deepEqual(state.volunteers, []);
+  assert.equal(state.lists.volunteers, "loading");
+  assert.deepEqual(state.volunteerFilters, { search: "", role: "all" });
+  assert.equal(state.volunteerFormError, null);
 });
 

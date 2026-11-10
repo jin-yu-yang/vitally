@@ -342,7 +342,7 @@ test("the drawer is the modal frame at the edge, and each dialog names its place
 });
 
 test("the drawer list is exported once, for the renderer and app.mjs's focus fallback alike", () => {
-  assert.deepEqual([...DRAWERS], ["log-call", "resolve-help"]);
+  assert.deepEqual([...DRAWERS], ["log-call", "resolve-help", "volunteer"]);
   assert.ok(Object.isFrozen(DRAWERS));
   const app = readFileSync(fileURLToPath(new URL("../src/app.mjs", import.meta.url)), "utf8");
   assert.doesNotMatch(app, /\["log-call",\s*"resolve-help"\]/);
