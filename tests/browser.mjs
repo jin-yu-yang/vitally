@@ -8329,11 +8329,24 @@ test("no address survives the redaction every message goes through", () => {
   assert.equal(redactAddresses(undefined), undefined);
 });
 
+test(
+  "Chrome client and Firefox staff run the whole demonstration story",
+  { timeout: PERMUTATION_TIMEOUT_MS },
+  (t) => runPermutation(t, { client: "chrome", staff: "firefox" }),
+);
+
+test(
+  "Firefox client and Chrome staff run the whole demonstration story",
+  { timeout: PERMUTATION_TIMEOUT_MS },
+  (t) => runPermutation(t, { client: "firefox", staff: "chrome" }),
+);
+
 // The Roster (change add-volunteer-roster-records) has its own test, outside
 // the story and its time limit: it adds no phase to either order. Chrome
 // only, on a fixture of its own, as the Site Coordinator (the admin) and,
 // for the check that nobody else is offered it, the Preparer. Fictional
-// people and example.org addresses only.
+// people and example.org addresses only. It runs after both orders, so a
+// story leg starts the same way it does on main.
 test(
   "An admin adds, finds and edits a volunteer on the Roster",
   { timeout: 300_000 },
@@ -8570,16 +8583,4 @@ test(
       await fixture.close();
     }
   },
-);
-
-test(
-  "Chrome client and Firefox staff run the whole demonstration story",
-  { timeout: PERMUTATION_TIMEOUT_MS },
-  (t) => runPermutation(t, { client: "chrome", staff: "firefox" }),
-);
-
-test(
-  "Firefox client and Chrome staff run the whole demonstration story",
-  { timeout: PERMUTATION_TIMEOUT_MS },
-  (t) => runPermutation(t, { client: "firefox", staff: "chrome" }),
 );
