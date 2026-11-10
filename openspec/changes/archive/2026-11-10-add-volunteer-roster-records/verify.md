@@ -26,13 +26,24 @@ PRECHECK: 12 commits on the branch beyond `main` (`f2547a6..35a73fa`), and 16 ti
 
 ## 2. Task Completion (`tasks.md`)
 
-- [ ] Every `- [ ]` is now `- [x]`: 16 of 17.
+- [x] Every `- [ ]` is now `- [x]`: 17 of 17. 5.2 was ticked after archive, once the runs below passed.
 
-**Open tasks:**
+**Update 2026-11-10, after archive.**
+- **What changed on `main`:** #183's fix landed as #184 (each window's errors recorded when an order stops) and #185 (story presses wait for a page still in DOM and network terms, and are confirmed). `main` (`ffc6596`) was merged into this branch as `b7a6f24`. `npm test` gave 1564 of 1565 after the merge, the one failure being the known Windows-only test.
+- **The run rule:** the user's rule was 4 runs of `story (chrome-client)` on the merged branch.
+- **How they ran:** on a throwaway copy, `diag/roster-after-185` = `b7a6f24` plus the CI-only trim commit, which runs only that job, in parallel. It is never merged.
 
-| Task | Why it's open | Blocks archive? |
-|---|---|---|
-| 5.2 Run all checks | Every suite passed except the browser story's Chrome client / Firefox staff order, which fails intermittently on this branch and on `main` (#183, below). The user ruled on 2026-11-10 to fix #183 first. Then `main` is merged into this branch and its `story (chrome-client)` runs 4 times. 5.2 is ticked, and this report updated, after those runs. | No. It blocks the PR, which isn't opened until then. |
+| Run | Result | Tests | Story total | Presses resent | Retries |
+|---|---|---|---|---|---|
+| [42782105947](https://github.com/jin-yu-yang/vitally/actions/runs/42782105947) | pass | 43 of 43 | 579 s | none | none |
+| [42782111399](https://github.com/jin-yu-yang/vitally/actions/runs/42782111399) | pass | 43 of 43 | 531 s | none | 1 stale-revision conflict (`ESCALATE_CONTACT`) |
+| [42782116028](https://github.com/jin-yu-yang/vitally/actions/runs/42782116028) | pass | 43 of 43 | 543 s | none | 1 stale-revision conflict (`ESCALATE_CONTACT`) |
+| [42782119868](https://github.com/jin-yu-yang/vitally/actions/runs/42782119868) | pass | 43 of 43 | 577 s | none | none |
+
+- **The Roster test passed in every run.**
+- **The conflicts are allowed:** the story already resends a stale-revision conflict, and the end-of-story check accepts it.
+- **The other jobs:** the database, sign-in and `story (firefox-client)` jobs on this commit come from the PR's own CI, linked in the PR.
+- **Still open, outside this change:** the app defect behind #183, a live redraw dropping a click on staff pages, is tracked as #186 with a fix in progress.
 
 ### Test counts
 
@@ -155,6 +166,7 @@ ls docs/superpowers/specs/*.md
 
 - [ ] ✅ PASS
 - [x] ⚠️ PASS WITH WARNINGS — continue to the retrospective and archive. Task 5.2 stays open until #183 is fixed, `main` is merged in, and the branch's `story (chrome-client)` has run 4 times. The PR waits for that.
+  - **Update 2026-11-10:** done. 4 of 4 passed after `main` (with #184 and #185) was merged in (§2). The remaining warnings are the recorded deviations and minor behaviour above.
 - [ ] ❌ FAIL
 
 **Next step:** write the retrospective, delete the subagent workspace, archive. After #183's fix merges: merge `main`, run the chrome-client story 4 times, tick 5.2 and update this report, then push and open the PR.

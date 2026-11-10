@@ -3,6 +3,8 @@
 > Written: 2026-11-10 (after verify passed with warnings; task 5.2 still open, see §2)
 > Commit range: `f2547a6..35a73fa` (`main` to the branch head)
 > Worktree: `.claude/worktrees/add-volunteer-roster-records`
+>
+> **Update 2026-11-10**: §0's "16 of 17" and §2's first miss are superseded by `verify.md` §2. Task 5.2 was done after #184 and #185 merged and `main` was merged in (`b7a6f24`), with 4 of 4 `story (chrome-client)` passes. The app defect behind it is #186.
 
 ---
 

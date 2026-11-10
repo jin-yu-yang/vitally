@@ -27,4 +27,4 @@
 ## 5. Documentation and checks
 
 - [x] 5.1 Update the migration list in `docs/setup.md` and the tables in `docs/developer/database.md`
-- [ ] 5.2 Run `npm test`, `npm run db:migrate:test` onto a stack already at `main`'s migrations, `npm run test:database`, `npm run test:auth-browser` and `npm run test:browser`
+- [x] 5.2 Run `npm test`, `npm run db:migrate:test` onto a stack already at `main`'s migrations, `npm run test:database`, `npm run test:auth-browser` and `npm run test:browser`
