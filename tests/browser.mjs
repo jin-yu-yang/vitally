@@ -8329,6 +8329,249 @@ test("no address survives the redaction every message goes through", () => {
   assert.equal(redactAddresses(undefined), undefined);
 });
 
+// The Roster (change add-volunteer-roster-records) has its own test, outside
+// the story and its time limit: it adds no phase to either order. Chrome
+// only, on a fixture of its own, as the Site Coordinator (the admin) and,
+// for the check that nobody else is offered it, the Preparer. Fictional
+// people and example.org addresses only.
+test(
+  "An admin adds, finds and edits a volunteer on the Roster",
+  { timeout: 300_000 },
+  async () => {
+    const fixture = await createBrowserFixture();
+    const NAME = "Rowan Ellery";
+    const EDITED_NAME = "Rowan Ellery-Park";
+    const EMAIL = "rowan.ellery@example.org";
+    const PHONE = "(215) 555-0177";
+    const OTHER_LANGUAGE = "Tagalog";
+    const rowOf = (page, name) =>
+      page.locator("tr.volunteer-row").filter({
+        has: page.locator(".volunteer-name", { hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&")}$`) }),
+      });
+    const rowNames = (page) =>
+      page.evaluate(() => [...document.querySelectorAll("tr.volunteer-row .volunteer-name")].map((n) => n.textContent.trim()));
+    const drawerOpen = (page, title) =>
+      waitFor(
+        page,
+        `the volunteer drawer titled ${JSON.stringify(title)}`,
+        (wanted) =>
+          Boolean(document.querySelector("#volunteer-form")) &&
+          (document.querySelector(".modal")?.innerText ?? "").includes(wanted),
+        title,
+        RENDER_MS,
+      );
+    const drawerClosed = (page) =>
+      waitFor(page, "the volunteer drawer to close", () => !document.querySelector("#volunteer-form"), undefined, ARRIVAL_MS);
+    // What the drawer holds now: its text, which boxes are ticked, and whether
+    // the Other language field is really shown (Playwright's visibility, so a
+    // stylesheet that beat `hidden` would be caught).
+    const drawerValues = async (page) => ({
+      ...(await page.evaluate(() => {
+        const form = document.querySelector("#volunteer-form");
+        return {
+          name: form.querySelector("#volunteer-name").value,
+          phone: form.querySelector("#volunteer-phone").value,
+          otherLanguage: form.querySelector("#volunteer-other-language-input").value,
+          ticked: [...form.querySelectorAll('input[type="checkbox"]:checked')].map((box) => box.id),
+        };
+      })),
+      otherShown: await page.locator("#volunteer-other-language").isVisible(),
+    });
+    try {
+      const engine = await fixture.launch("chrome");
+      const admin = await engine.newPage({ viewport: DESKTOP });
+      const page = admin.page;
+      await guardToast(page);
+
+      // 1. The admin opens the Roster: the workspace's staff are on it, with
+      //    nothing recorded for them yet.
+      await loginTestUser({ page, actor: fixture.actor("siteCoordinator"), fixture, heading: OFFICE_BOARD_HEADING });
+      assert.equal(await readSignedInAs(page), ROLE_NAMES.siteCoordinator);
+      await clickAction(page, "open-volunteers");
+      await waitFor(
+        page,
+        "the Roster to list the staff",
+        (name) =>
+          [...document.querySelectorAll("tr.volunteer-row .volunteer-name")].some((n) => n.textContent.trim() === name),
+        ROLE_NAMES.siteCoordinator,
+        ARRIVAL_MS,
+      );
+      await waitForText(page, "Roles and certificates are recorded here. They don't change what anyone can do in ViTally yet.");
+      for (const name of Object.values(ROLE_NAMES)) {
+        const row = rowOf(page, name);
+        assert.equal(await row.count(), 1, `${name} is not on the Roster once`);
+        assert.match(await row.innerText(), /No roles recorded/, `${name} shows roles before anyone recorded them`);
+      }
+      const staffCount = (await rowNames(page)).length;
+
+      // 2. Add a volunteer. The Other language field shows only while Other
+      //    is ticked. Then a live change redraws the page under the open
+      //    drawer, and what was typed and ticked is still there.
+      await clickAction(page, "open-add-volunteer");
+      await drawerOpen(page, "Add a volunteer");
+      assert.equal(await page.locator("#volunteer-other-language").isVisible(), false, "Other language shows before Other is ticked");
+      await page.locator("#volunteer-language-other").check();
+      await page.locator("#volunteer-other-language").waitFor({ state: "visible", timeout: RENDER_MS });
+      await page.locator("#volunteer-language-other").uncheck();
+      await page.locator("#volunteer-other-language").waitFor({ state: "hidden", timeout: RENDER_MS });
+      await page.locator("#volunteer-name").fill(NAME);
+      await page.locator("#volunteer-language-english").check();
+      await page.locator("#volunteer-language-other").check();
+      await page.locator("#volunteer-other-language-input").fill(OTHER_LANGUAGE);
+      await page.locator("#volunteer-role-preparer").check();
+      const typed = await drawerValues(page);
+      // A `people` change is not one the window redraws for (handleChange
+      // re-reads only for cases, workspaces and assistance items), so the
+      // change is a no-op update of the workspace row, which every staff
+      // window re-reads and redraws for. The redraw is proved, not assumed:
+      // the name field is marked, and the wait is for that mark to be gone
+      // (a new field). The update is repeated, inside one ARRIVAL_MS bound,
+      // in case the realtime channel was not yet joined when it was sent.
+      await page.evaluate(() => {
+        document.querySelector("#volunteer-name").dataset.beforeRedraw = "1";
+      });
+      const redrawBy = Date.now() + ARRIVAL_MS;
+      let redrawn = false;
+      while (!redrawn && Date.now() < redrawBy) {
+        await fixture.database.sql(
+          "update public.workspaces set default_followup_person_id=default_followup_person_id where id=$1",
+          [fixture.database.workspaceId],
+        );
+        redrawn = await page
+          .waitForFunction(() => !document.querySelector("#volunteer-name")?.dataset.beforeRedraw, undefined, {
+            timeout: 2_000,
+            polling: 100,
+          })
+          .then(() => true, () => false);
+      }
+      assert.ok(redrawn, `no live redraw reached the open drawer within ${ARRIVAL_MS}ms`);
+      await waitForQuiet(page);
+      assert.deepEqual(await drawerValues(page), typed, "the redraw lost what was typed or ticked in the drawer");
+      assert.equal(typed.otherShown, true);
+
+      // 3. Finish the form and save: the drawer closes and the row appears.
+      await page.locator("#volunteer-email").fill(EMAIL);
+      await page.locator("#volunteer-phone").fill(PHONE);
+      await page.locator("#volunteer-certificate-vsc").check();
+      await page.locator('#volunteer-form button[type="submit"]').click({ timeout: CLICK_MS });
+      await drawerClosed(page);
+      await rowOf(page, NAME).waitFor({ timeout: ARRIVAL_MS });
+      const added = await rowOf(page, NAME).innerText();
+      for (const fact of [EMAIL, PHONE, "Preparer", "VSC", `English, ${OTHER_LANGUAGE}`])
+        assert.ok(added.includes(fact), `the new row does not show ${fact}: ${added}`);
+      assert.equal((await rowNames(page)).length, staffCount + 1);
+      const volunteerId = await rowOf(page, NAME).locator('[data-action="open-edit-volunteer"]').getAttribute("data-volunteer-id");
+      assert.ok(volunteerId);
+
+      // Text typed for one volunteer and closed without saving goes with the
+      // drawer: Add, and that volunteer's Edit again, open clean.
+      const avery = rowOf(page, ROLE_NAMES.siteCoordinator).locator('[data-action="open-edit-volunteer"]');
+      await waitForQuiet(page);
+      await avery.click({ timeout: CLICK_MS });
+      await drawerOpen(page, ROLE_NAMES.siteCoordinator);
+      await page.locator("#volunteer-name").fill("Leftover Name");
+      await page.locator("#volunteer-phone").fill("(215) 555-0199");
+      await page.locator("#volunteer-role-greeter").check();
+      await page.locator("#volunteer-language-other").check();
+      await page.locator("#volunteer-other-language-input").fill("Leftover language");
+      await clickAction(page, "close-dialog");
+      await drawerClosed(page);
+      await clickAction(page, "open-add-volunteer");
+      await drawerOpen(page, "Add a volunteer");
+      assert.deepEqual(
+        await drawerValues(page),
+        { name: "", phone: "", otherLanguage: "", ticked: [], otherShown: false },
+        "Add opened with text or ticks left from another volunteer's closed drawer",
+      );
+      await clickAction(page, "close-dialog");
+      await drawerClosed(page);
+      await waitForQuiet(page);
+      await avery.click({ timeout: CLICK_MS });
+      await drawerOpen(page, ROLE_NAMES.siteCoordinator);
+      assert.deepEqual(
+        await drawerValues(page),
+        { name: ROLE_NAMES.siteCoordinator, phone: "", otherLanguage: "", ticked: [], otherShown: false },
+        "Edit opened again with the text or ticks typed before Cancel",
+      );
+      await clickAction(page, "close-dialog");
+      await drawerClosed(page);
+
+      // 4. Search by part of the phone: only that row, and every keystroke's
+      //    redraw keeps the keyboard in the box, with the caret where it was
+      //    (a key typed at the start leaves the caret after it, not at the end).
+      const search = page.locator("#volunteer-search");
+      await waitForQuiet(page);
+      await search.click({ timeout: CLICK_MS });
+      await page.keyboard.type("55-0177");
+      await page.keyboard.press("Home");
+      await page.keyboard.type("5");
+      await waitFor(
+        page,
+        "the search to show only the new volunteer",
+        (name) => {
+          const names = [...document.querySelectorAll("tr.volunteer-row .volunteer-name")].map((n) => n.textContent.trim());
+          return names.length === 1 && names[0] === name;
+        },
+        NAME,
+        RENDER_MS,
+      );
+      assert.deepEqual(
+        await page.evaluate(() => {
+          const box = document.activeElement;
+          return { id: box?.id, value: box?.value, start: box?.selectionStart, end: box?.selectionEnd };
+        }),
+        { id: "volunteer-search", value: "555-0177", start: 1, end: 1 },
+        "the search box lost the keyboard or its caret",
+      );
+      await waitForText(page, `1 of ${staffCount + 1} volunteers`, RENDER_MS);
+      await search.fill("");
+      await waitFor(
+        page,
+        "the cleared search to show everyone",
+        (count) => document.querySelectorAll("tr.volunteer-row").length === count,
+        staffCount + 1,
+        RENDER_MS,
+      );
+      await page.locator("#volunteer-role-filter").selectOption("reviewer");
+      await waitForTextGone(page, NAME, RENDER_MS);
+      assert.equal(await rowOf(page, NAME).count(), 0);
+      await page.locator("#volunteer-role-filter").selectOption("all");
+      await rowOf(page, NAME).waitFor({ timeout: RENDER_MS });
+
+      // 5. Edit the new volunteer's name and save: the table shows it, and
+      //    the keyboard is back on that row's Edit button.
+      const editButton = `[data-action="open-edit-volunteer"][data-volunteer-id="${volunteerId}"]`;
+      await waitForQuiet(page);
+      await page.locator(editButton).click({ timeout: CLICK_MS });
+      await drawerOpen(page, NAME);
+      await page.locator("#volunteer-name").fill(EDITED_NAME);
+      await page.locator('#volunteer-form button[type="submit"]').click({ timeout: CLICK_MS });
+      await drawerClosed(page);
+      await rowOf(page, EDITED_NAME).waitFor({ timeout: ARRIVAL_MS });
+      assert.equal(await rowOf(page, NAME).count(), 0, "the old name is still on the Roster");
+      await waitFor(
+        page,
+        "the keyboard to be back on the edited row's Edit button",
+        (selector) => document.activeElement?.matches?.(selector) === true,
+        editButton,
+        RENDER_MS,
+      );
+      assert.equal(await page.locator(editButton).getAttribute("aria-label"), `Edit ${EDITED_NAME}`);
+      assertConsoleQuiet(admin, { name: "the admin's Roster window" });
+
+      // 6. Somebody without admin is not offered the Roster.
+      const preparer = await engine.newPage({ viewport: DESKTOP });
+      await guardToast(preparer.page);
+      await loginTestUser({ page: preparer.page, actor: fixture.actor("preparer"), fixture, heading: WORK_BOARD_HEADING });
+      assert.equal(await readSignedInAs(preparer.page), ROLE_NAMES.preparer);
+      assert.equal(await preparer.page.locator('[data-action="open-volunteers"]').count(), 0, "the Preparer is offered the Roster");
+      assertConsoleQuiet(preparer, { name: "the Preparer's window" });
+    } finally {
+      await fixture.close();
+    }
+  },
+);
+
 test(
   "Chrome client and Firefox staff run the whole demonstration story",
   { timeout: PERMUTATION_TIMEOUT_MS },
