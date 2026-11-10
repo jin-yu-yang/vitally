@@ -16,6 +16,15 @@ import { sessionStateKey } from "./browser-fixture.mjs";
 //   * **Nothing here hides a defect.** A helper clicks what the screen offers
 //     and asserts what the screen says. When a screen cannot express a step,
 //     the story reports it (Ruling R61) instead of reaching past the page.
+//   * **A press goes into a still page, and is confirmed to have arrived.**
+//     Still means nothing is coming as well as nothing happening: no redraw,
+//     no read of the database in flight, and no change notification just in
+//     (`waitForQuiet`). A staff press then checks that its click reached the
+//     control it was aimed at (`pressControl`). A press that reached nothing
+//     provably sent nothing, so it alone is sent once more, and every such
+//     repeat is recorded (`redeliveredPresses`); a press that reached its
+//     control is never repeated here, and the caller's own wait for what it
+//     should show stays the check that it worked (#183).
 
 // A change that has to travel: an action, a Realtime notification, a re-read.
 export const ARRIVAL_MS = 20_000;
@@ -192,45 +201,247 @@ export const pageText = (page) => page.locator("#app").innerText();
 // all; at this length none did. It is the cost of pressing only into a page
 // that is actually still.
 const QUIET_MS = 600;
+// How long a press's click is given to reach its control once it was sent.
+// The click event is dispatched as the pointer comes up, so this only has to
+// cover the round trip that reads the page's record of it.
+const DELIVERY_MS = 1_000;
+// How often the stillness conditions are looked at.
+const QUIET_POLL_MS = 100;
+
+// ---------------------------------------------------------------------------
+// What the page is fetching and being told, seen from outside it
+// ---------------------------------------------------------------------------
+
+// Each page's application traffic, attached once: the requests to the database
+// (`/rest/v1/`: table reads and RPCs alike) that have been sent and not yet
+// answered, when one last started or ended, and when a Realtime change
+// notification (`postgres_changes`) last arrived on any of its sockets. A page
+// event stays with its page across reloads, so attaching once is enough.
+const traffic = new WeakMap();
+
+// A read that has gone unanswered for this long is not a redraw about to land
+// but a request an offline engine left hanging (Firefox keeps one pending
+// instead of failing it), so it stops holding the page.
+const ABANDONED_MS = ARRIVAL_MS;
+const inFlight = (record, now) =>
+  [...record.pending].filter(([, sent]) => now - sent < ABANDONED_MS).map(([request]) => request);
 
 /**
- * Wait until the page has stopped rebuilding itself.
+ * Start watching one page's database reads and change notifications, if this
+ * page is not watched yet. Called as soon as a story window opens (from
+ * `guardToast`, before sign-in, so the Realtime socket is seen from its first
+ * frame) and again, lazily, by `waitForQuiet`. A reply to a request sent
+ * before the watch began is simply not counted, never counted below zero.
+ */
+export function trackAppTraffic(page) {
+  let record = traffic.get(page);
+  if (record) return record;
+  record = { pending: new Map(), lastRequest: 0, lastChange: 0 };
+  traffic.set(page, record);
+  const isRead = (request) => request.url().includes("/rest/v1/");
+  page.on("request", (request) => {
+    if (!isRead(request)) return;
+    record.lastRequest = Date.now();
+    record.pending.set(request, record.lastRequest);
+  });
+  const settled = (request) => {
+    if (record.pending.delete(request)) record.lastRequest = Date.now();
+  };
+  page.on("requestfinished", settled);
+  page.on("requestfailed", settled);
+  page.on("websocket", (socket) =>
+    socket.on("framereceived", ({ payload }) => {
+      if (String(payload).includes("postgres_changes")) record.lastChange = Date.now();
+    }),
+  );
+  return record;
+}
+
+// How long ago `#app` (or the toast beside it) last changed, in this
+// document; the observer is installed on the first look, which therefore
+// reads as "just changed". Null while there is no `#app` to watch.
+const domStillFor = () => {
+  const app = document.querySelector("#app");
+  if (!app) return null;
+  if (!window.__vitallyQuiet) {
+    window.__vitallyQuiet = { last: performance.now() };
+    window.__vitallyQuiet.observer = new MutationObserver(() => {
+      window.__vitallyQuiet.last = performance.now();
+    });
+    window.__vitallyQuiet.observer.observe(app, { childList: true, subtree: true });
+    // The toast lives beside #app, not in it: a toast arriving or going
+    // is the page changing too.
+    const toast = document.querySelector("#toast");
+    if (toast)
+      window.__vitallyQuiet.observer.observe(toast, { childList: true, subtree: true, characterData: true });
+    return 0;
+  }
+  return performance.now() - window.__vitallyQuiet.last;
+};
+
+/**
+ * Wait until the page has stopped rebuilding itself **and nothing is on its
+ * way to rebuild it**.
  *
  * `render()` replaces `#app`'s whole contents, and a burst of them arrives
- * whenever the other window works: every accepted action publishes two `cases`
+ * whenever another window works: every accepted action publishes two `cases`
  * rows, and each one makes this window re-read and re-render. A click sent into
  * that burst is a race — the control it was aimed at is replaced underneath it,
  * and an action built from a revision the burst has already moved is refused.
- * So a click waits for stillness first, exactly as Playwright's own
- * actionability check waits for an element to stop moving.
+ * A spell with no redraw is not enough on its own: a re-read takes seconds in
+ * Firefox, so a notification can have arrived, or a read can be in flight,
+ * while the page looks still, and its redraw then lands under the press (#183).
  *
- * This is a condition, not a sleep: it watches real DOM mutations and gives up
- * loudly at its bound.
+ * So the page counts as still only when, at one and the same look, all three
+ * hold: `#app` has not changed for `quiet` ms; no read of the database is in
+ * flight, nor started or ended in the last `quiet` ms (a refresh is a chain of
+ * reads, one after another; a read left unanswered for `ABANDONED_MS` no
+ * longer counts); and no change notification has arrived in the
+ * last `quiet` ms. That is the same idea as Playwright's own actionability
+ * check, which waits for an element to stop moving.
+ *
+ * This is a condition, not a sleep: it watches real DOM mutations and real
+ * traffic, and gives up loudly at its bound, saying which condition never held.
  */
 export async function waitForQuiet(page, { quiet = QUIET_MS, timeout = ARRIVAL_MS } = {}) {
-  await waitFor(
-    page,
-    `the page to stop rebuilding itself for ${quiet}ms`,
-    (settle) => {
-      const app = document.querySelector("#app");
-      if (!app) return false;
-      if (!window.__vitallyQuiet) {
-        window.__vitallyQuiet = { last: performance.now() };
-        window.__vitallyQuiet.observer = new MutationObserver(() => {
-          window.__vitallyQuiet.last = performance.now();
-        });
-        window.__vitallyQuiet.observer.observe(app, { childList: true, subtree: true });
-        // The toast lives beside #app, not in it: a toast arriving or going
-        // is the page changing too.
-        const toast = document.querySelector("#toast");
-        if (toast)
-          window.__vitallyQuiet.observer.observe(toast, { childList: true, subtree: true, characterData: true });
-        return false;
-      }
-      return performance.now() - window.__vitallyQuiet.last > settle;
-    },
-    quiet,
-    timeout,
+  const record = trackAppTraffic(page);
+  const started = Date.now();
+  let blocked = [];
+  for (;;) {
+    if (page.isClosed()) throw new Error("The page closed while waiting for it to hold still.");
+    // A look that cannot be taken (the document is being replaced) is a page
+    // that is not still yet.
+    const dom = await page.evaluate(domStillFor).catch(() => null);
+    const now = Date.now();
+    blocked = [];
+    if (dom === null) blocked.push("there was no page to watch (#app was missing or the document was loading)");
+    else if (dom <= quiet) blocked.push(`the page was still rebuilding itself (it last changed ${Math.round(dom)}ms before)`);
+    const reads = inFlight(record, now);
+    if (reads.length)
+      blocked.push(
+        `${reads.length} request(s) to the database were in flight (${reads
+          .map((request) => new URL(request.url()).pathname)
+          .join(", ")})`,
+      );
+    else if (now - record.lastRequest <= quiet)
+      blocked.push(`a request to the database had ended only ${now - record.lastRequest}ms before`);
+    if (now - record.lastChange <= quiet)
+      blocked.push(`a change notification had arrived only ${now - record.lastChange}ms before`);
+    if (!blocked.length) return;
+    if (now - started >= timeout) break;
+    await new Promise((resolve) => setTimeout(resolve, QUIET_POLL_MS));
+  }
+  throw new Error(
+    redactAddresses(
+      `Timed out after ${timeout}ms waiting for the page to hold still for ${quiet}ms. ` +
+        `At the last look ${blocked.join("; ")}. `,
+    ) + `The screen read: ${await screenText(page)}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// A press that knows whether it arrived
+// ---------------------------------------------------------------------------
+
+// Every press that reached nothing and was sent again, in the order it
+// happened, with the page it was on: the story puts them in its evidence by
+// window. Recorded, never asserted, and never left out.
+const redelivered = [];
+let pressCount = 0;
+
+/**
+ * The presses that reached nothing and were sent once more, since `since`
+ * (a `Date.now()` value): `{ page, what, at, repeat }`, where `repeat` says
+ * whether the second press arrived.
+ */
+export const redeliveredPresses = (since = 0) => redelivered.filter((entry) => entry.at >= since);
+
+/**
+ * Press one control with the pointer, into a still page, and make sure the
+ * click reached it.
+ *
+ * Before the click, a one-shot listener is put on `document` in the capture
+ * phase, so it hears the click before the application does. It notes the press
+ * when the click's target is inside an element matching `selector` (and, when
+ * `text` is given, one whose words include it) — matched by selector, not by
+ * element, so a control redrawn identically still counts. If the click
+ * replaced the document (a reload, a sign-out), the listener's record goes with
+ * it, and that counts as arrived too: something clearly happened.
+ *
+ * A click that reached nothing is the one a redraw swallowed: the pointer went
+ * down on one control and came up on its replacement, so the browser fired no
+ * click and the application never heard of it. Such a press sent nothing, so
+ * sending it again is safe even for a toggle or a workflow action: it is sent
+ * once more, after the page is still again, and recorded. Twice is a failure,
+ * with what the screen read. A press that did arrive is never repeated here;
+ * whether it did what it should is the caller's own wait.
+ *
+ * `prepare` runs before each attempt's stillness wait — a form's fill, which a
+ * redraw can have emptied before the repeat.
+ */
+export async function pressControl(page, locator, { selector, text = null, what = selector, prepare, timeout = CLICK_MS }) {
+  let entry = null;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    if (prepare) await prepare();
+    await waitForQuiet(page);
+    pressCount += 1;
+    const token = `press-${pressCount}`;
+    await page.evaluate(
+      ({ token: mark, selector: wanted, text: words }) => {
+        window.__vitallyPress?.remove?.();
+        const record = { token: mark, heard: false };
+        const listener = (event) => {
+          const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+          const hit = target?.closest(wanted);
+          if (!hit || (words && !(hit.textContent ?? "").includes(words))) return;
+          record.heard = true;
+        };
+        record.remove = () => document.removeEventListener("click", listener, true);
+        document.addEventListener("click", listener, true);
+        window.__vitallyPress = record;
+      },
+      { token, selector, text },
+    );
+    let delivered;
+    try {
+      await locator.click({ timeout });
+      delivered = await page
+        .waitForFunction(
+          // No record, or another one: the click replaced this document.
+          (mark) => !window.__vitallyPress || window.__vitallyPress.token !== mark || window.__vitallyPress.heard,
+          token,
+          { timeout: DELIVERY_MS, polling: 50 },
+        )
+        .then(
+          () => true,
+          (error) => {
+            if (error?.name === "TimeoutError") return false;
+            // The document went while it was being read: the press did something.
+            if (!page.isClosed() && /context|navigat|destroyed|detached/i.test(String(error?.message))) return true;
+            throw error;
+          },
+        );
+    } finally {
+      await page
+        .evaluate((mark) => {
+          if (window.__vitallyPress?.token !== mark) return;
+          window.__vitallyPress.remove();
+          window.__vitallyPress = null;
+        }, token)
+        .catch(() => {});
+    }
+    if (entry) entry.repeat = delivered ? "arrived" : "reached nothing again";
+    if (delivered) return { attempts: attempt };
+    if (!entry) {
+      entry = { page, what, at: Date.now(), repeat: null };
+      redelivered.push(entry);
+    }
+  }
+  throw new Error(
+    `The press on ${what} reached nothing twice: neither click arrived at a control matching ` +
+      `${JSON.stringify(selector)}${text ? ` and reading ${JSON.stringify(text)}` : ""} ` +
+      `(a redraw between the pointer going down and coming up swallows a click). ` +
+      `The screen read: ${await screenText(page)}`,
   );
 }
 
@@ -253,8 +464,8 @@ export async function rebuiltBy(page, change, what = "a change from elsewhere") 
 }
 
 export async function clickAction(page, action, { attributes = "", timeout = CLICK_MS } = {}) {
-  await waitForQuiet(page);
-  await page.locator(`[data-action="${action}"]${attributes}`).first().click({ timeout });
+  const selector = `[data-action="${action}"]${attributes}`;
+  await pressControl(page, page.locator(selector).first(), { selector, what: `the ${action} control`, timeout });
 }
 
 /**
@@ -268,7 +479,8 @@ export async function revealCaseControl(page, selector) {
     selector,
   );
   if (!panel) return;
-  await page.locator(`[role="tab"][aria-controls="${panel}"]`).click({ timeout: CLICK_MS });
+  const tab = `[role="tab"][aria-controls="${panel}"]`;
+  await pressControl(page, page.locator(tab), { selector: tab, what: `the tab for ${panel}` });
   await waitFor(
     page,
     `the ${panel} tab to be shown`,
@@ -280,8 +492,8 @@ export async function revealCaseControl(page, selector) {
 
 /** Show one case-page tab by its key (overview, intake, documents, followup, history). */
 export async function openCaseTab(page, key) {
-  await waitForQuiet(page);
-  await page.locator(`#case-tab-${key}`).click({ timeout: CLICK_MS });
+  const tab = `#case-tab-${key}`;
+  await pressControl(page, page.locator(tab), { selector: tab, what: `the ${key} tab` });
   await waitFor(
     page,
     `the ${key} tab to be shown`,
@@ -292,12 +504,10 @@ export async function openCaseTab(page, key) {
 }
 
 export async function clickCaseAction(page, type, { attributes = "", timeout = CLICK_MS } = {}) {
+  const selector = `[data-case-action="${type}"]${attributes}`;
   await waitForQuiet(page);
-  await revealCaseControl(page, `[data-case-action="${type}"]${attributes}`);
-  await page
-    .locator(`[data-case-action="${type}"]${attributes}`)
-    .first()
-    .click({ timeout });
+  await revealCaseControl(page, selector);
+  await pressControl(page, page.locator(selector).first(), { selector, what: `the ${type} action`, timeout });
 }
 
 export const caseActionCount = (page, type, attributes = "") =>
@@ -342,9 +552,13 @@ export const HAS_DETAIL = ({ label, value }) =>
  *     window's work can move it first, so the server refuses it as a conflict
  *     and the screen says to check it and try again.
  *
- * The second is repeated on sight, because a conflict is proof nothing was
- * applied. The first is repeated only when `safeToRepeat()` says the server
- * state has not moved — so a slow-but-accepted action is never sent twice.
+ * The first is caught inside `press()` now: the press helpers confirm their
+ * click reached its control and send it once more if it did not
+ * (`pressControl`), so a press that gets here arrived. The second is repeated
+ * on sight, because a conflict is proof nothing was applied. A press that
+ * arrived and still produced nothing (`lost`) is repeated only when
+ * `safeToRepeat()` says the server state has not moved — so a slow-but-accepted
+ * action is never sent twice — and the story reports every one (Ruling R65).
  * Anything else is reported, with what the page said since the press.
  *
  * `refusals` carries, for each conflict, both what the window *recorded* and
@@ -389,7 +603,7 @@ export async function pressUntilEffect(
     }
   }
   throw new Error(
-    `${what} never arrived: ${conflicts} stale-revision refusals and ${lost} presses that reached nothing, in ${tries} attempts.`,
+    `${what} never arrived: ${conflicts} stale-revision refusals and ${lost} presses that arrived and produced nothing, in ${tries} attempts.`,
   );
 }
 
@@ -447,16 +661,19 @@ export async function submitCaseForm(page, type, fields = {}, { attributes = "" 
   await form.waitFor({ state: "visible", timeout: RENDER_MS });
   // Still before the boxes are filled — a rebuild would empty a select, whose
   // value the wiring layer does not keep — and still again before the press.
+  // A press that reached nothing is filled again before it is sent again,
+  // since the redraw that swallowed it may have emptied the form.
   await waitForQuiet(page);
-  for (const [label, value] of Object.entries(fields)) {
-    const field = await fieldByLabel(form, label, type);
-    await field.waitFor({ state: "visible", timeout: RENDER_MS });
-    const tag = await field.evaluate((element) => element.tagName);
-    if (tag === "SELECT") await field.selectOption(value, { timeout: CLICK_MS });
-    else await field.fill(value, { timeout: CLICK_MS });
-  }
-  await waitForQuiet(page);
-  await form.locator(selector).click({ timeout: CLICK_MS });
+  const fill = async () => {
+    for (const [label, value] of Object.entries(fields)) {
+      const field = await fieldByLabel(form, label, type);
+      await field.waitFor({ state: "visible", timeout: RENDER_MS });
+      const tag = await field.evaluate((element) => element.tagName);
+      if (tag === "SELECT") await field.selectOption(value, { timeout: CLICK_MS });
+      else await field.fill(value, { timeout: CLICK_MS });
+    }
+  };
+  await pressControl(page, form.locator(selector), { selector, what: `the ${type} form's submit`, prepare: fill });
 }
 
 /**
@@ -467,7 +684,7 @@ export async function submitCaseForm(page, type, fields = {}, { attributes = "" 
 export async function tickBox(page, id) {
   await waitForQuiet(page);
   await revealCaseControl(page, `#${id}`);
-  await page.locator(`#${id}`).click({ timeout: CLICK_MS });
+  await pressControl(page, page.locator(`#${id}`), { selector: `#${id}`, what: `the checkbox #${id}` });
   await waitFor(
     page,
     `the checkbox #${id} to come back ticked`,
@@ -593,6 +810,10 @@ async function hideToast(page) {
  * across reloads, so this is registered once per page.
  */
 export async function guardToast(page) {
+  // Every story window calls this as soon as it opens, so it is also where the
+  // page's database reads and change notifications start being watched
+  // (`waitForQuiet`), before sign-in opens the Realtime socket.
+  trackAppTraffic(page);
   await page.addLocatorHandler(page.locator("#toast.visible"), () => hideToast(page), { noWaitAfter: true });
 }
 
@@ -656,13 +877,13 @@ export async function openCaseByReference(page, reference) {
   // The volunteer board shows one tab at a time; its search reaches every case.
   if (await page.locator("#field-board-search").count()) await findOnBoard(page, reference);
   // A board redraws itself after an action (two `cases` rows, each re-read),
-  // and a row replaced under the press loses the click, so the case never opens.
-  await waitForQuiet(page);
-  await page
-    .locator("button.board-reference")
-    .filter({ hasText: reference })
-    .first()
-    .click({ timeout: CLICK_MS });
+  // and a row replaced under the press loses the click, so the case never
+  // opens: the press waits for a still board and confirms it arrived.
+  await pressControl(
+    page,
+    page.locator("button.board-reference").filter({ hasText: reference }).first(),
+    { selector: "button.board-reference", text: reference, what: `the board row for ${reference}` },
+  );
   await waitForCaseWorkspace(page, reference);
 }
 
@@ -799,7 +1020,8 @@ export async function readBoardTotals(page) {
 export async function findOnBoard(page, reference) {
   await waitForQuiet(page);
   await page.locator("#field-board-search").fill(reference, { timeout: CLICK_MS });
-  await page.locator('#board-search-form button[type="submit"]').click({ timeout: CLICK_MS });
+  const submit = '#board-search-form button[type="submit"]';
+  await pressControl(page, page.locator(submit), { selector: submit, what: "the board search" });
   await waitFor(
     page,
     `${reference} to be found on the board`,

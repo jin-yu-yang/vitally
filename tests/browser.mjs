@@ -46,6 +46,7 @@ import {
   openCaseByReference,
   openCaseTab,
   pageText,
+  pressControl,
   pressToastDismiss,
   pressUntil,
   pressUntilEffect,
@@ -57,6 +58,7 @@ import {
   readSignedInAs,
   readWindowState,
   rebuiltBy,
+  redeliveredPresses,
   redactAddresses,
   revealCaseControl,
   screenshotDir,
@@ -774,6 +776,9 @@ const DRAFT_NOT_MADE = "The draft could not be made. Try again.";
 // ---------------------------------------------------------------------------
 
 async function runPermutation(t, roles) {
+  // When this order began: the presses it had to send again are the ones
+  // recorded from here on.
+  const orderStarted = Date.now();
   // The story's workspace is version 2, the column default: its seeded cases,
   // its client forms and Add a case all follow.
   const fixture = await createBrowserFixture();
@@ -803,6 +808,7 @@ async function runPermutation(t, roles) {
         await timed(name, body);
       } catch (error) {
         failure = error;
+        evidence.failedPhase = name;
         throw error;
       }
     });
@@ -814,6 +820,10 @@ async function runPermutation(t, roles) {
   let client = null;
   let staff = null;
   let roleWins = null;
+  // The story's long-lived windows, by name, as each opens. The last phase
+  // checks their console lines; an order that stops before it records them
+  // from here instead (#183), so a failure says whether a page threw.
+  const storyWindows = {};
   let classCase = null;
   // The seed's run directory: both seed runs share it, so the second one
   // replaces exactly the set the first one recorded.
@@ -885,11 +895,15 @@ async function runPermutation(t, roles) {
       type,
       await pressUntilEffect(page, {
         press: async () => {
+          const submit = `button[type="submit"][data-case-action="${type}"]`;
           await waitForQuiet(page);
-          await revealCaseControl(page, `button[type="submit"][data-case-action="${type}"]`);
-          await fill();
-          await waitForQuiet(page);
-          await page.locator(`button[type="submit"][data-case-action="${type}"]`).first().click({ timeout: CLICK_MS });
+          await revealCaseControl(page, submit);
+          // The fill runs again before a press that reached nothing is resent.
+          await pressControl(page, page.locator(submit).first(), {
+            selector: submit,
+            what: `the ${type} questionnaire's submit`,
+            prepare: fill,
+          });
         },
         ...expectation(expect),
         safeToRepeat: await unmovedSince(caseId),
@@ -980,6 +994,7 @@ async function runPermutation(t, roles) {
       preparer: await openWindow(staffEngine),
       reviewer: await openWindow(staffEngine),
     };
+    Object.assign(storyWindows, { client: clientWin, noAccess: noAccessWin, ...roleWins });
     client = clientWin.page;
     const noAccessPage = noAccessWin.page;
     staff = roleWins.preparer.page;
@@ -3902,6 +3917,7 @@ async function runPermutation(t, roles) {
 
     const staffB = await openWindow(staffEngine);
     const clientB = await openWindow(clientEngine);
+    storyWindows.clientB = clientB;
     const draftWin = await openWindow(clientEngine);
 
     await phase("two simultaneous claims leave exactly one owner", async () => {
@@ -8257,8 +8273,11 @@ async function runPermutation(t, roles) {
           allow: REFUSAL_LINES,
         }),
       };
-      // A press that reached nothing at all is an application defect, not a
-      // retry case: the page rebuilt itself under the pointer (Ruling R65).
+      // Ruling R65. A press whose click never reached its control (a redraw
+      // under the pointer) is caught, resent once and recorded by the press
+      // helpers (`evidence.redeliveredPresses`), so it no longer counts here.
+      // What still does is a workflow press the application *received* that
+      // produced nothing at all and had to be sent again: a real defect.
       assert.deepEqual(
         evidence.retries.filter((entry) => entry.lost > 0),
         [],
@@ -8276,6 +8295,20 @@ async function runPermutation(t, roles) {
     // (including the ones already erased) and the class case as the server
     // holds it are what say how far the story got and what stopped it.
     try {
+      // Every press whose click reached nothing and was sent once more (#183),
+      // by window, with how many seconds into the order it happened. Recorded,
+      // never asserted; an empty record means there were none.
+      const windowName = (page) =>
+        Object.entries(storyWindows).find(([, win]) => win?.page === page)?.[0] ?? "another window";
+      evidence.redeliveredPresses = {};
+      for (const entry of redeliveredPresses(orderStarted)) {
+        const name = windowName(entry.page);
+        (evidence.redeliveredPresses[name] ??= []).push({
+          what: entry.what,
+          atSecond: Math.round((entry.at - orderStarted) / 1000),
+          repeat: entry.repeat,
+        });
+      }
       evidence.alerts = {
         client: client ? await readAlerts(client) : null,
         staff: staff ? await readAlerts(staff) : null,
@@ -8288,6 +8321,16 @@ async function runPermutation(t, roles) {
           : {}),
       };
       if (classCase) evidence.classCase = await caseById(fixture, classCase.id);
+      // A stopped order never reached the phase that checks console lines, so
+      // each window's own record goes in as collected: console error lines and
+      // the page's uncaught exceptions. Recorded, never asserted.
+      if (evidence.failedPhase)
+        evidence.windowErrors = Object.fromEntries(
+          Object.entries(storyWindows).map(([name, win]) => [
+            name,
+            { errors: [...win.errors], pageErrors: [...win.pageErrors] },
+          ]),
+        );
     } catch (error) {
       evidence.evidenceGathering = String(error?.message ?? error);
     }
