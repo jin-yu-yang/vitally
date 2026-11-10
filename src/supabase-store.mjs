@@ -1,5 +1,6 @@
 import { createAppError } from "./errors.mjs";
 import { isAuthTransportError } from "./auth.mjs";
+import { combineVolunteers } from "./volunteer-roster.mjs";
 
 // The one data adapter. Everything the browser knows about the database goes
 // through this file: the five application RPCs, the RLS-scoped SELECT reads,
@@ -666,6 +667,34 @@ export function createStore(client) {
         p_expected_revision: action.expectedRevision,
         p_type: action.type,
         p_payload: action.payload,
+      });
+    },
+
+    // The admin Roster (migration 044): the workspace's volunteers for the
+    // current season. The tables are admin-only under RLS and are not watched.
+    async listVolunteers() {
+      await requireStaffAccess();
+      const season = (await read(client.from("workspaces").select("current_season")))[0]
+        ?.current_season;
+      const bySeason = (table) =>
+        season == null
+          ? []
+          : read(client.from(table).select("*").eq("season", season));
+      const [profiles, entries, certificates, people] = await Promise.all([
+        read(client.from("volunteer_profiles").select("*")),
+        bySeason("roster_entries"),
+        bySeason("certificates"),
+        read(client.from("people").select("id,name,user_id")),
+      ]);
+      return combineVolunteers({ profiles, entries, certificates, people });
+    },
+
+    async saveVolunteer(request) {
+      return await call("vitally_save_volunteer", {
+        p_action_id: actionId(request),
+        p_volunteer_id: request.volunteerId ?? null,
+        p_expected_revision: request.expectedRevision ?? null,
+        p_volunteer: request.volunteer,
       });
     },
 
