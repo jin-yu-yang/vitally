@@ -8409,6 +8409,10 @@ const PRESS_HOLD_TIMEOUT_MS = 180_000;
 const PRESS_SAFETY_MS = 2_000;
 const PRESS_CHECK_MS = 1_900;
 const PRESS_HOLD_ATTEMPTS = 3;
+// How long the window's realtime channel may take to join, and how often the
+// warm-up's update is made again meanwhile.
+const PRESS_CHANNEL_MS = 60_000;
+const PRESS_REDRAW_RETRY_MS = 3_000;
 // What a press may land on when it is meant to land on nothing.
 const PRESSABLE =
   "button,a,input,select,textarea,label,summary,[data-action],[data-case-action],[data-assistance-action]";
@@ -8439,8 +8443,34 @@ async function runPressHold(t, engineName) {
         [fixture.database.workspaceId],
       );
     // First with nothing pressed, until it has rebuilt the page: the window's
-    // realtime channel is joined and a workspace change redraws it.
-    await rebuiltBy(page, touchWorkspace, "a no-change update of the workspace");
+    // realtime channel is joined and a workspace change redraws it. A change
+    // made before the channel is joined is never delivered, and on a fresh
+    // stack the first join can take a while, so the update is made again
+    // every PRESS_REDRAW_RETRY_MS until one redraws the page, within a bound.
+    const warmedUp = Date.now();
+    let warmUpdates = 0;
+    await page.evaluate(() => document.querySelector("#main")?.setAttribute("data-rebuild-marker", "1"));
+    for (;;) {
+      await touchWorkspace();
+      warmUpdates += 1;
+      const rebuilt = await page
+        .waitForFunction(
+          () => Boolean(document.querySelector("#main")) && !document.querySelector("#main[data-rebuild-marker]"),
+          undefined,
+          { timeout: PRESS_REDRAW_RETRY_MS, polling: 100 },
+        )
+        .then(() => true, (error) => {
+          if (error?.name === "TimeoutError") return false;
+          throw error;
+        });
+      if (rebuilt) break;
+      if (Date.now() - warmedUp >= PRESS_CHANNEL_MS)
+        throw new Error(
+          `${warmUpdates} no-change updates of the workspace in ${PRESS_CHANNEL_MS}ms never redrew the page ` +
+            `(is the window's realtime channel joined?). The screen read: ${await mainHeading(page)}`,
+        );
+    }
+    t.diagnostic(`press-hold ${engineName} warm-up: ${warmUpdates} update(s), ${Date.now() - warmedUp}ms`);
 
     // Mark `#main`, press and hold the control, and cause a redraw. Returns
     // once the redraw has been asked for (the re-read is answered and the
