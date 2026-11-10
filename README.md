@@ -138,11 +138,11 @@ npm run test:browser        # the full demonstration story, both engines, both d
 
 ## Rehearsing the demonstration
 
-[`docs/demo-script.md`](docs/demo-script.md) is the rehearsal script: the two-minute main story,
-the full story the browser test suite runs, the assisted-intake (walk-in) path, the demo
-wording, what is simulated versus real, and what to expect and say about the known behaviors
-the test suite has pinned (a stale-revision refusal, the `review_ready` fixture's staff-recorded
-document, and so on).
+[`docs/demo-script.md`](docs/demo-script.md) is the demonstration script for the local role
+accounts: the windows to open, what is simulated versus real, the seeded cases, the main story
+(one case from application to Accepted), a short story, the Roster, and what to expect and say
+about the known behaviors. Before a review or demo, work through
+[Before a review or demo](docs/setup.md#before-a-review-or-demo) in `docs/setup.md`.
 
 ## For developers
 
