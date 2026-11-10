@@ -34,7 +34,7 @@ function addresses(raw, field, { required = false } = {}) {
   });
 }
 
-// Mirrors vitally_private.add_staff_member (latest in migration 042) so the operator gets
+// Mirrors vitally_private.add_staff_member (latest in migration 044) so the operator gets
 // a clear message before any account is created; the database refuses them again.
 export const STAFF_CAPABILITIES = Object.freeze([
   "prepare",
@@ -197,7 +197,7 @@ export async function applyRoster(
       }
       ids.set(address, account.id);
     }
-  await initialize({
+  const setup = await initialize({
     workspaceId: roster.workspaceId,
     applicantUserIds: roster.applicants.map((address) => ids.get(address)),
     staff: roster.staff.map(({ email, personKey, name, capabilities }) => ({
@@ -214,7 +214,18 @@ export async function applyRoster(
     staff: roster.staff.length,
     created,
     confirmed,
+    linked: setup?.linked ?? [],
   };
+}
+
+// One line per entry linked to a volunteer already on the Roster, by key:
+// linking trusts an email an admin typed, so the operator is told.
+export function rosterLinkNotes(result) {
+  return result.linked.map(
+    ({ personKey, nameDiffers }) =>
+      `${personKey} was linked to a volunteer already on the Roster.` +
+      (nameDiffers ? " The name on the Roster was kept and differs from the file." : ""),
+  );
 }
 
 const HINTS = {
@@ -249,6 +260,7 @@ async function main() {
       `${result.staff} staff, ${result.applicants} applicant(s); ` +
       `${result.created} account(s) created, ${result.confirmed} confirmed.`,
   );
+  for (const note of rosterLinkNotes(result)) console.log(note);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url))

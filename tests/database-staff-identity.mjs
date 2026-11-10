@@ -611,8 +611,14 @@ test("staff identity against real Supabase", async (t) => {
     await t.test("add_staff_member refuses what the roster must refuse", async () => {
       const refused = (userId, key, name, capabilities) =>
         assert.rejects(() => addStaffMember(f, userId, key, name, capabilities), rejected("VALIDATION"), key);
-      // Different values for an existing key or account.
-      await refused(riley.userId, "riley", "Riley Parker", ["prepare"]);
+      // Different capabilities for an existing key or account. The name is not
+      // compared since 044 (add-volunteer-roster-records, design D5): a renamed
+      // re-run succeeds and keeps the stored name.
+      await addStaffMember(f, riley.userId, "riley", "Riley Parker", ["prepare"]);
+      assert.equal(
+        (await f.sql("select name from public.people where id=$1", [riley.personId])).rows[0].name,
+        "Riley Park",
+      );
       await refused(riley.userId, "riley", "Riley Park", ["prepare", "review"]);
       // The same account under another key, and the key of another account.
       await refused(riley.userId, "riley_two", "Riley Park", ["prepare"]);

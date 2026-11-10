@@ -10,12 +10,14 @@ import { openDatabase } from "../tools/admin/database.mjs";
 // reach. Every check reads the catalog over a plain connection; the refused
 // inserts run in a transaction that is rolled back.
 
-// The row-security policies at 043, one per table, by table and name. 043
-// renames the sixteen staff-only policies and drops or adds none.
+// The row-security policies at 044, one per table, by table and name. 043
+// renames the sixteen staff-only policies and drops or adds none; 044 adds the
+// three admin-only Roster policies.
 const POLICIES = Object.freeze([
   ["admin_followups", "staff_admin_followups"],
   ["assistance_items", "staff_assistance_items"],
   ["case_contacts", "visible_case_contacts"],
+  ["certificates", "admin_certificates"],
   ["case_document_cards", "visible_case_document_cards"],
   ["case_events", "staff_case_events"],
   ["case_materials", "staff_case_materials"],
@@ -36,9 +38,11 @@ const POLICIES = Object.freeze([
   ["preparer_shaded_fields", "staff_preparer_shaded_fields"],
   ["reviewer_questionnaires", "staff_reviewer_questionnaires"],
   ["reviews", "staff_reviews"],
+  ["roster_entries", "admin_roster_entries"],
+  ["volunteer_profiles", "admin_volunteer_profiles"],
   ["workspaces", "member_workspace"],
 ]);
-// The six public RPCs after 043, by name and identity arguments.
+// The seven public RPCs after 044, by name and identity arguments.
 const RPCS = Object.freeze([
   "vitally_apply_action(p_action_id uuid, p_case_id uuid, p_expected_revision bigint, p_type text, p_payload jsonb)",
   "vitally_assistance_action(p_action_id uuid, p_item_id uuid, p_expected_revision bigint, p_type text, p_note text)",
@@ -46,6 +50,7 @@ const RPCS = Object.freeze([
   "vitally_create_case(p_action_id uuid, p_mode text, p_answers jsonb)",
   "vitally_log_contact(p_action_id uuid, p_case_id uuid, p_followup_id uuid, p_entry jsonb)",
   "vitally_edit_contact(p_action_id uuid, p_contact_id uuid, p_expected_revision bigint, p_entry jsonb)",
+  "vitally_save_volunteer(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_volunteer jsonb)",
 ]);
 // The signatures 043 drops by name.
 const OLD_SIGNATURES = Object.freeze([
@@ -140,7 +145,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
     });
 
-    await t.test("the public API is exactly six RPCs", async () => {
+    await t.test("the public API is exactly seven RPCs", async () => {
       const { rows } = await sql(
         `select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as signature
            from pg_proc p where p.pronamespace='public'::regnamespace`,
@@ -235,6 +240,54 @@ test("the catalog after the sample-case tools and presenter access are removed",
         [reference(), workspaceId, randomUUID()],
         "cases_origin_check",
         [["insert into public.workspaces(id) values($1)", [workspaceId]]],
+      );
+    });
+
+    await t.test("vitally_policy holds exactly the admin check, with exactly its grants", async () => {
+      const { rows } = await sql(
+        `select p.oid, p.oid::regprocedure::text as signature, p.prosecdef, p.provolatile, p.proconfig,
+                p.proargnames, p.pronargs
+           from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='vitally_policy' order by 2`,
+      );
+      assert.deepEqual(
+        rows.map((row) => row.signature.replace(/^vitally_policy\./, "")),
+        ["is_workspace_admin(uuid)"],
+      );
+      const [helper] = rows;
+      assert.equal(helper.prosecdef, true);
+      assert.equal(helper.provolatile, "s");
+      assert.deepEqual(helper.proconfig, ['search_path=""']);
+      assert.deepEqual(helper.proargnames, ["p_workspace_id"]);
+      assert.equal(helper.pronargs, 1);
+      for (const row of rows)
+        for (const name of row.proargnames ?? [])
+          assert.doesNotMatch(name, /user|account|member|person/i, row.signature);
+      const grants = await sql(
+        `select a.grantee, r.rolname, a.privilege_type
+           from pg_proc p cross join lateral aclexplode(p.proacl) a
+           left join pg_roles r on r.oid=a.grantee
+          where p.oid=$1 and a.grantee<>p.proowner`,
+        [helper.oid],
+      );
+      assert.deepEqual(
+        grants.rows.map(({ rolname, privilege_type }) => [rolname, privilege_type]),
+        [["authenticated", "EXECUTE"]],
+      );
+      assert.equal(grants.rows.some((row) => Number(row.grantee) === 0), false, "public");
+      for (const role of ["anon", "service_role"]) {
+        const access = await sql("select has_function_privilege($1, $2::oid, 'execute') as ok", [role, helper.oid]);
+        assert.equal(access.rows[0].ok, false, role);
+      }
+      const schema = await sql(
+        `select r.rolname, a.privilege_type
+           from pg_namespace n cross join lateral aclexplode(n.nspacl) a
+           left join pg_roles r on r.oid=a.grantee
+          where n.nspname='vitally_policy' and a.grantee<>n.nspowner`,
+      );
+      assert.deepEqual(
+        schema.rows.map(({ rolname, privilege_type }) => [rolname, privilege_type]),
+        [["authenticated", "USAGE"]],
       );
     });
 

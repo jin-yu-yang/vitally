@@ -389,7 +389,8 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
           ]),
         );
         assert.deepEqual(result, concurrent);
-        assert.deepEqual(result, { workspaceId: f.workspaceId });
+        // No staff member is linked to a Roster volunteer on a re-run (044).
+        assert.deepEqual(result, { workspaceId: f.workspaceId, linked: [] });
         assert.deepEqual(await f.snapshot(), before);
         // Staff only: every person is a linked staff member, and nothing else.
         const people = (
@@ -433,7 +434,7 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
             applicantUserIds: [...f.setup.applicantUserIds, f.unapprovedUserId],
           }),
         );
-        assert.deepEqual(added, { workspaceId: f.workspaceId });
+        assert.deepEqual(added, { workspaceId: f.workspaceId, linked: [] });
         assert.equal((await rows(f.unapproved, "memberships")).length, 1);
         // Review Focus 4: the initializer alone leaves a new workspace with no
         // default; the default follows only when the setup names one.
