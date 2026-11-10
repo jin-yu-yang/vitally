@@ -803,6 +803,7 @@ async function runPermutation(t, roles) {
         await timed(name, body);
       } catch (error) {
         failure = error;
+        evidence.failedPhase = name;
         throw error;
       }
     });
@@ -814,6 +815,10 @@ async function runPermutation(t, roles) {
   let client = null;
   let staff = null;
   let roleWins = null;
+  // The story's long-lived windows, by name, as each opens. The last phase
+  // checks their console lines; an order that stops before it records them
+  // from here instead (#183), so a failure says whether a page threw.
+  const storyWindows = {};
   let classCase = null;
   // The seed's run directory: both seed runs share it, so the second one
   // replaces exactly the set the first one recorded.
@@ -980,6 +985,7 @@ async function runPermutation(t, roles) {
       preparer: await openWindow(staffEngine),
       reviewer: await openWindow(staffEngine),
     };
+    Object.assign(storyWindows, { client: clientWin, noAccess: noAccessWin, ...roleWins });
     client = clientWin.page;
     const noAccessPage = noAccessWin.page;
     staff = roleWins.preparer.page;
@@ -3902,6 +3908,7 @@ async function runPermutation(t, roles) {
 
     const staffB = await openWindow(staffEngine);
     const clientB = await openWindow(clientEngine);
+    storyWindows.clientB = clientB;
     const draftWin = await openWindow(clientEngine);
 
     await phase("two simultaneous claims leave exactly one owner", async () => {
@@ -8288,6 +8295,16 @@ async function runPermutation(t, roles) {
           : {}),
       };
       if (classCase) evidence.classCase = await caseById(fixture, classCase.id);
+      // A stopped order never reached the phase that checks console lines, so
+      // each window's own record goes in as collected: console error lines and
+      // the page's uncaught exceptions. Recorded, never asserted.
+      if (evidence.failedPhase)
+        evidence.windowErrors = Object.fromEntries(
+          Object.entries(storyWindows).map(([name, win]) => [
+            name,
+            { errors: [...win.errors], pageErrors: [...win.pageErrors] },
+          ]),
+        );
     } catch (error) {
       evidence.evidenceGathering = String(error?.message ?? error);
     }
