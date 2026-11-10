@@ -824,6 +824,22 @@ async function runPermutation(t, roles) {
   // checks their console lines; an order that stops before it records them
   // from here instead (#183), so a failure says whether a page threw.
   const storyWindows = {};
+  // Every press whose click reached nothing and was sent once more since this
+  // order began (#183), by window, with how many seconds into the order it
+  // happened. The last phase asserts there were none (#186); the evidence
+  // records them either way.
+  const redeliveredByWindow = () => {
+    const windowName = (page) =>
+      Object.entries(storyWindows).find(([, win]) => win?.page === page)?.[0] ?? "another window";
+    const byWindow = {};
+    for (const entry of redeliveredPresses(orderStarted))
+      (byWindow[windowName(entry.page)] ??= []).push({
+        what: entry.what,
+        atSecond: Math.round((entry.at - orderStarted) / 1000),
+        repeat: entry.repeat,
+      });
+    return byWindow;
+  };
   let classCase = null;
   // The seed's run directory: both seed runs share it, so the second one
   // replaces exactly the set the first one recorded.
@@ -8273,15 +8289,24 @@ async function runPermutation(t, roles) {
           allow: REFUSAL_LINES,
         }),
       };
-      // Ruling R65. A press whose click never reached its control (a redraw
-      // under the pointer) is caught, resent once and recorded by the press
-      // helpers (`evidence.redeliveredPresses`), so it no longer counts here.
-      // What still does is a workflow press the application *received* that
-      // produced nothing at all and had to be sent again: a real defect.
+      // Ruling R65. A workflow press the application *received* that produced
+      // nothing at all and had to be sent again is a real defect.
       assert.deepEqual(
         evidence.retries.filter((entry) => entry.lost > 0),
         [],
         "a press reached nothing at all and had to be sent again",
+      );
+      // And so, now, is a press whose click never reached its control. The
+      // press helpers still catch one, send it once more and record it
+      // (`evidence.redeliveredPresses`, #183), so the order can finish and say
+      // where it happened; but the app holds every redraw while a press is in
+      // progress (#186), so a redraw under the pointer can no longer swallow a
+      // click, and one that never arrived is an app defect again.
+      const redeliveredNow = redeliveredByWindow();
+      assert.deepEqual(
+        redeliveredNow,
+        {},
+        `a press never reached its control and had to be sent again: ${redactAddresses(JSON.stringify(redeliveredNow))}`,
       );
       // Recorded, not asserted: the measurement that matters is the one each
       // screenshot took at 390px, and every one of those is asserted there.
@@ -8296,19 +8321,9 @@ async function runPermutation(t, roles) {
     // holds it are what say how far the story got and what stopped it.
     try {
       // Every press whose click reached nothing and was sent once more (#183),
-      // by window, with how many seconds into the order it happened. Recorded,
-      // never asserted; an empty record means there were none.
-      const windowName = (page) =>
-        Object.entries(storyWindows).find(([, win]) => win?.page === page)?.[0] ?? "another window";
-      evidence.redeliveredPresses = {};
-      for (const entry of redeliveredPresses(orderStarted)) {
-        const name = windowName(entry.page);
-        (evidence.redeliveredPresses[name] ??= []).push({
-          what: entry.what,
-          atSecond: Math.round((entry.at - orderStarted) / 1000),
-          repeat: entry.repeat,
-        });
-      }
+      // by window. Recorded here even when a phase threw, and asserted empty
+      // by the last phase (#186); an empty record means there were none.
+      evidence.redeliveredPresses = redeliveredByWindow();
       evidence.alerts = {
         client: client ? await readAlerts(client) : null,
         staff: staff ? await readAlerts(staff) : null,
@@ -8371,6 +8386,230 @@ test("no address survives the redaction every message goes through", () => {
   assert.equal(redactAddresses(null), null);
   assert.equal(redactAddresses(undefined), undefined);
 });
+
+// ---------------------------------------------------------------------------
+// A press held while a live redraw arrives (#186)
+// ---------------------------------------------------------------------------
+
+// Every redraw replaces the whole page (`root.innerHTML`), so a redraw between
+// the pointer going down and coming up replaces the pressed button, and the
+// browser sends the click to the common ancestor instead: the press does
+// nothing. The app holds a redraw while a press is in progress, on every page,
+// and draws it once the press ends. This presses and holds a staff button
+// while a realtime redraw is asked for, in each engine, and checks that the
+// page is not replaced under the pointer, that the click is handled on
+// release, and that a press dragged off its button still lets the held redraw
+// run, and does nothing.
+
+const PRESS_HOLD_TIMEOUT_MS = 180_000;
+// The app lets go of a press it never heard end after 2 s (`holdTimer` in
+// src/app.mjs). A check made later than this could see that safety release
+// rather than the hold, so it counts only when it came sooner; a press whose
+// redraw arrived too late for that is let go off its button and made again.
+const PRESS_SAFETY_MS = 2_000;
+const PRESS_CHECK_MS = 1_900;
+const PRESS_HOLD_ATTEMPTS = 3;
+// How long the window's realtime channel may take to join, and how often the
+// warm-up's update is made again meanwhile.
+const PRESS_CHANNEL_MS = 60_000;
+const PRESS_REDRAW_RETRY_MS = 3_000;
+// What a press may land on when it is meant to land on nothing.
+const PRESSABLE =
+  "button,a,input,select,textarea,label,summary,[data-action],[data-case-action],[data-assistance-action]";
+
+const mainHeading = (page) => page.evaluate(() => document.querySelector("#main h1")?.textContent.trim() ?? null);
+
+async function runPressHold(t, engineName) {
+  const fixture = await createBrowserFixture();
+  let win = null;
+  const attempts = [];
+  try {
+    const engine = await fixture.launch(engineName);
+    win = await openWindow(engine);
+    const { page } = win;
+    await loginTestUser({
+      page,
+      actor: fixture.actor("siteCoordinator"),
+      fixture,
+      heading: OFFICE_BOARD_HEADING,
+    });
+    await waitForText(page, OFFICE_BOARD_HEADING, RENDER_MS);
+    await waitForQuiet(page);
+    // An unchanged-value update of the workspace: every staff window re-reads
+    // everything it holds and redraws.
+    const touchWorkspace = () =>
+      fixture.database.sql(
+        "update public.workspaces set default_followup_person_id=default_followup_person_id where id=$1",
+        [fixture.database.workspaceId],
+      );
+    // First with nothing pressed, until it has rebuilt the page: the window's
+    // realtime channel is joined and a workspace change redraws it. A change
+    // made before the channel is joined is never delivered, and on a fresh
+    // stack the first join can take a while, so the update is made again
+    // every PRESS_REDRAW_RETRY_MS until one redraws the page, within a bound.
+    const warmedUp = Date.now();
+    let warmUpdates = 0;
+    await page.evaluate(() => document.querySelector("#main")?.setAttribute("data-rebuild-marker", "1"));
+    for (;;) {
+      await touchWorkspace();
+      warmUpdates += 1;
+      const rebuilt = await page
+        .waitForFunction(
+          () => Boolean(document.querySelector("#main")) && !document.querySelector("#main[data-rebuild-marker]"),
+          undefined,
+          { timeout: PRESS_REDRAW_RETRY_MS, polling: 100 },
+        )
+        .then(() => true, (error) => {
+          if (error?.name === "TimeoutError") return false;
+          throw error;
+        });
+      if (rebuilt) break;
+      if (Date.now() - warmedUp >= PRESS_CHANNEL_MS)
+        throw new Error(
+          `${warmUpdates} no-change updates of the workspace in ${PRESS_CHANNEL_MS}ms never redrew the page ` +
+            `(is the window's realtime channel joined?). The screen read: ${await mainHeading(page)}`,
+        );
+    }
+    t.diagnostic(`press-hold ${engineName} warm-up: ${warmUpdates} update(s), ${Date.now() - warmedUp}ms`);
+
+    // Mark `#main`, press and hold the control, and cause a redraw. Returns
+    // once the redraw has been asked for (the re-read is answered and the
+    // page's traffic has stopped), with the marker's state at that moment and
+    // how long the pointer had been down. A check the safety release could
+    // have overtaken is not made: that press is let go on empty space (a press
+    // that ends off its control is no click), the page settles, and the press
+    // is made again, at most PRESS_HOLD_ATTEMPTS times.
+    const pressAndHold = async (selector, what) => {
+      for (let attempt = 1; attempt <= PRESS_HOLD_ATTEMPTS; attempt += 1) {
+        await waitForQuiet(page);
+        const control = page.locator(selector).first();
+        await control.waitFor({ state: "visible", timeout: RENDER_MS });
+        const box = await control.boundingBox();
+        assert.ok(box, `${what} has no box to press`);
+        await page.evaluate(() => {
+          document.querySelector("#main")?.setAttribute("data-press-marker", "1");
+          // Window, capture phase: this hears the pointer go down no later
+          // than the app's own listener on #app does.
+          window.__pressHeldSince = null;
+          window.addEventListener("pointerdown", () => { window.__pressHeldSince = performance.now(); }, {
+            capture: true,
+            once: true,
+          });
+        });
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        const reread = page.waitForResponse(
+          (response) => new URL(response.url()).pathname === "/rest/v1/workspaces",
+          { timeout: ARRIVAL_MS },
+        );
+        await touchWorkspace();
+        // The proof that the redraw was asked for: this window read the
+        // workspace again after the update, and everything it read with it
+        // has been answered (the redraw is requested at the end of that chain).
+        const response = await reread;
+        assert.equal(response.ok(), true, `the workspace re-read failed with ${response.status()}`);
+        await waitForQuiet(page, { quiet: 200 });
+        const look = await page.evaluate(() => ({
+          downSeen: window.__pressHeldSince !== null,
+          heldFor: window.__pressHeldSince === null ? null : performance.now() - window.__pressHeldSince,
+          marker: Boolean(document.querySelector("#main[data-press-marker]")),
+        }));
+        assert.ok(look.downSeen, `the page never heard the pointer go down on ${what}`);
+        attempts.push({ what, attempt, heldForMs: Math.round(look.heldFor), marker: look.marker });
+        if (look.heldFor < PRESS_CHECK_MS) return look;
+        // Too late to tell the hold from its safety release: let go off the
+        // control, wait for the page, and press again.
+        await releaseOnEmptySpace();
+        await waitForQuiet(page);
+      }
+      throw new Error(
+        `The redraw never arrived within ${PRESS_CHECK_MS}ms of the press on ${what} ` +
+          `(the app lets go of a press after ${PRESS_SAFETY_MS}ms), in ${PRESS_HOLD_ATTEMPTS} attempts: ` +
+          JSON.stringify(attempts),
+      );
+    };
+    // Empty space: the centre of `#main`'s heading, which is no control.
+    const releaseOnEmptySpace = async () => {
+      const spot = await page.evaluate((pressable) => {
+        const heading = document.querySelector("#main h1");
+        if (!heading) return null;
+        const rect = heading.getBoundingClientRect();
+        const x = rect.left + Math.min(rect.width, 40) / 2;
+        const y = rect.top + rect.height / 2;
+        const hit = document.elementFromPoint(x, y);
+        return hit && !hit.closest(pressable) ? { x, y } : null;
+      }, PRESSABLE);
+      assert.ok(spot, "there was no empty space to let go on (#main's heading is missing or covered)");
+      await page.mouse.move(spot.x, spot.y, { steps: 4 });
+      await page.mouse.up();
+    };
+
+    // 1. A press held while the redraw arrives: the page is not replaced
+    //    under the pointer, and the click is handled on release.
+    assert.equal(await mainHeading(page), "Follow-ups");
+    const held = await pressAndHold('#app-sidebar [data-action="open-cases"]', "the sidebar's All cases");
+    assert.equal(
+      held.marker,
+      true,
+      `a live redraw replaced the page ${Math.round(held.heldFor)}ms into a press on All cases, ` +
+        "while the pointer was still down (#186)",
+    );
+    await page.mouse.up();
+    // The click came in the same task as the pointer going up, before the
+    // held redraw: it reached All cases, and Case pool is drawn.
+    await waitFor(
+      page,
+      "the released press on All cases to show Case pool",
+      () => document.querySelector("#main h1")?.textContent.trim() === "Case pool",
+      undefined,
+      RENDER_MS,
+    );
+    await waitFor(
+      page,
+      "the page to be drawn again after the press",
+      () => Boolean(document.querySelector("#main")) && !document.querySelector("#main[data-press-marker]"),
+      undefined,
+      RENDER_MS,
+    );
+
+    // 2. A press dragged off its control: no click, but the held redraw
+    //    still runs once the pointer comes up.
+    await waitForQuiet(page);
+    const dragged = await pressAndHold('#app-sidebar [data-action="open-board"]', "the sidebar's Follow-ups");
+    assert.equal(
+      dragged.marker,
+      true,
+      `a live redraw replaced the page ${Math.round(dragged.heldFor)}ms into a press on Follow-ups, ` +
+        "while the pointer was still down (#186)",
+    );
+    await releaseOnEmptySpace();
+    await waitFor(
+      page,
+      "the redraw held during a press dragged off its control to run when the pointer came up",
+      () => Boolean(document.querySelector("#main")) && !document.querySelector("#main[data-press-marker]"),
+      undefined,
+      RENDER_MS,
+    );
+    await waitForQuiet(page);
+    assert.equal(await mainHeading(page), "Case pool", "a press let go off its control still did something");
+
+    assertConsoleQuiet(win, { name: `${engineName} staff window` });
+  } finally {
+    // Every press made, with how long the pointer had been down at its check.
+    t.diagnostic(`press-hold ${engineName} ${JSON.stringify(attempts)}`);
+    await fixture.close();
+  }
+}
+
+for (const [engineName, label] of [
+  ["chrome", "Chrome"],
+  ["firefox", "Firefox"],
+])
+  test(
+    `${label}: a staff press held while a live redraw arrives is not dropped, and the redraw runs after (#186)`,
+    { timeout: PRESS_HOLD_TIMEOUT_MS },
+    (t) => runPressHold(t, engineName),
+  );
 
 test(
   "Chrome client and Firefox staff run the whole demonstration story",
