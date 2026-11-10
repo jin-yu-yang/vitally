@@ -193,7 +193,7 @@ The subagent ledger (`progress.md`) isn't kept. Everything it recorded:
   - a dense regex escape;
   - a redundant `otherShown` check.
 - **Final review:**
-  - Minor 2: a re-save after a lost answer shows a misleading message;
+  - Minor 2: a re-save after a lost answer shows a misleading message (fixed after the PR review: see `verify.md`, "After the PR review");
   - Minor 3: Save after a conflict succeeds in the same drawer;
   - Minor 5: the backfill was checked by hand (all in `verify.md`);
   - `docs/developer/README.md:74`'s "8 RPCs" is left out of scope.

@@ -388,6 +388,9 @@ export function createController({
   // The envelope of the last action whose outcome is unknown. Kept as the very
   // object that was sent, because retrying a copy would be a second action.
   let pendingAction = null;
+  // The Roster save whose outcome is unknown, likewise the very request sent
+  // (`saveVolunteer`). Window memory only: a reload starts without it.
+  let pendingVolunteerSave = null;
   // The screening start for the open case, if one is due or held:
   // `{ action, inFlight, gaveUp }` (`startScreeningIfDue`).
   let screeningStart = null;
@@ -1253,6 +1256,7 @@ export function createController({
     state.volunteers = [];
     state.volunteerFilters = { search: "", role: "all" };
     state.volunteerFormError = null;
+    pendingVolunteerSave = null;
     state.assistance = [];
     state.workspace = null;
     state.openPanels = [];
@@ -2696,40 +2700,59 @@ export function createController({
   // for the volunteer it names, at the revision this window read. A problem the
   // window can see (a missing role, a listed email) is said beside the form and
   // nothing is sent. A refusal is shown in the drawer and thrown, shaped like
-  // `runContactWrite`; a CONFLICT also re-reads the list. A landed save whose
+  // `runContactWrite`, and any failure re-reads the list. A landed save whose
   // re-read fails is a stale list, never a failed save.
+  //
+  // A save whose answer never came (UNKNOWN_OUTCOME) may have landed, so, as
+  // `dispatch` does, it is kept: Save pressed again for the same volunteer with
+  // the same values sends that very request, and its stored receipt answers
+  // instead of a second save (which an Add's own email would refuse). It skips
+  // the window's checks, which the re-read list may now fail on the save's own
+  // result. Changed values are a new save, with a new action id.
   async function saveVolunteer(values) {
     if (state.busy) return false;
     const volunteerId = state.dialogContext?.volunteerId ?? null;
-    const current = volunteerId
-      ? (state.volunteers.find((entry) => entry?.id === volunteerId) ?? null)
-      : null;
-    if (volunteerId && !current)
-      throw refuse("NOT_FOUND", STAFF_VOLUNTEER_GONE_MESSAGE);
-    const problem = volunteerProblem(values, state.volunteers, volunteerId);
-    if (problem) {
-      state.volunteerFormError = problem;
-      show();
-      return false;
+    let request =
+      pendingVolunteerSave &&
+      pendingVolunteerSave.volunteerId === volunteerId &&
+      JSON.stringify(pendingVolunteerSave.volunteer) === JSON.stringify(values)
+        ? pendingVolunteerSave
+        : null;
+    pendingVolunteerSave = null;
+    if (!request) {
+      const current = volunteerId
+        ? (state.volunteers.find((entry) => entry?.id === volunteerId) ?? null)
+        : null;
+      if (volunteerId && !current)
+        throw refuse("NOT_FOUND", STAFF_VOLUNTEER_GONE_MESSAGE);
+      const problem = volunteerProblem(values, state.volunteers, volunteerId);
+      if (problem) {
+        state.volunteerFormError = problem;
+        show();
+        return false;
+      }
+      request = {
+        actionId: newActionId(),
+        volunteerId,
+        expectedRevision: current ? Number(current.revision) : null,
+        volunteer: values,
+      };
     }
     state.volunteerFormError = null;
     state.busy = true;
     state.error = null;
     show();
     try {
-      await store.saveVolunteer({
-        actionId: newActionId(),
-        volunteerId,
-        expectedRevision: current ? Number(current.revision) : null,
-        volunteer: values,
-      });
+      await store.saveVolunteer(request);
     } catch (error) {
       state.busy = false;
+      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingVolunteerSave = request;
       noteFailure(
         error,
         error?.code === "CONFLICT" ? { message: VOLUNTEER_CONFLICT_MESSAGE } : undefined,
       );
-      if (error?.code === "CONFLICT") await readVolunteers().catch(() => {});
+      // What the save did, or what changed under it: the list as it is now.
+      await readVolunteers().catch(() => {});
       show();
       throw error;
     }

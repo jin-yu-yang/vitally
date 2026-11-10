@@ -1193,19 +1193,23 @@ test("app.mjs says back online only after a real loss (design D7)", () => {
   assert.match(app, /let drawnConnection = "unknown";/);
 });
 
-test("a press holds a render on every page; an IME composition only on the version-2 form (#186)", () => {
+test("a press and an IME composition hold a render on every page (#186, review of #187)", () => {
   const app = appSource();
+  assert.match(app, /import \{ createRedrawHold \} from "\.\/redraw-hold\.mjs";/);
   const renderBody = app.slice(app.indexOf("function render(focus = false) {"), app.indexOf("function v2OnPage("));
-  // The press half no longer asks whether the version-2 form is on the page:
-  // a realtime redraw under a staff button swallowed its click.
-  assert.match(renderBody, /if \(pointerHeld \|\| \(v2OnPage\(\) && composing\)\) \{\s*heldRender = heldRender \|\| focus;\s*return;\s*\}/);
-  assert.doesNotMatch(renderBody, /v2OnPage\(\) && \(pointerHeld/);
-  // The flush asks the same, and runs a task after the pointer comes up, so
-  // the press's own click is handled before the held render replaces it.
+  // Neither half asks whether the version-2 form is on the page: a realtime
+  // redraw under a staff button swallowed its click, and one under a staff
+  // field mid-composition lost the half-typed text.
+  assert.match(renderBody, /if \(redrawHold\.request\(focus\)\) return;\s*(\/\/[^\n]*\n\s*)?redrawHold\.drawn\(\);/);
+  assert.doesNotMatch(app, /v2OnPage\(\) && composing|pointerHeld|heldRender/);
+  // The flush asks the same; the hold schedules it a task after the pointer
+  // comes up or the composition ends (redraw-hold.test.mjs).
   const flush = app.slice(app.indexOf("function flushHeld() {"), app.indexOf("function afterPress("));
-  assert.match(flush, /if \(pointerHeld \|\| \(v2OnPage\(\) && composing\)\) return;/);
-  assert.match(app, /pointerHeld = false;\s*clearTimeout\(holdTimer\);\s*setTimeout\(flushHeld, 0\);/);
+  assert.match(flush, /if \(redrawHold\.holding\(\)\) return;/);
   assert.match(app, /window\.addEventListener\("pointerup", release, true\);/);
+  assert.match(app, /root\.addEventListener\("pointerdown", \(\) => \{\s*redrawHold\.press\(\);/);
+  assert.match(app, /root\.addEventListener\("compositionstart", \(\) => redrawHold\.compositionStart\(\)\);/);
+  assert.match(app, /root\.addEventListener\("compositionend", \(\) => redrawHold\.compositionEnd\(\)\);/);
 });
 
 test("the page behind an open dialog is inert, on every render, and never when it closes", () => {

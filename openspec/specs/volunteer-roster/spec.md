@@ -126,6 +126,10 @@ Add a volunteer SHALL open a drawer with name, email, phone (optional), works, l
 - **WHEN** the same save is sent twice with the same action id
 - **THEN** one volunteer exists and both calls return the same result
 
+#### Scenario: Save again after a lost answer
+- **WHEN** an admin's save lands but its answer never reaches the window, and the admin presses Save again without changing the form
+- **THEN** the window re-reads the list after the failure, sends the same action id again, the stored result answers, and the drawer closes with one volunteer and one receipt
+
 ### Requirement: An admin can edit a volunteer
 Edit SHALL open the same drawer filled in with the volunteer's values, and saving SHALL replace them. A certificate that stays ticked SHALL keep its original confirmation date and confirmer. A certificate that is unticked SHALL be deleted. The email of a volunteer who has a sign-in SHALL be read-only in the drawer and SHALL be refused by the database if changed. A save based on values someone else has since changed SHALL be refused with a conflict, and the drawer SHALL say so.
 

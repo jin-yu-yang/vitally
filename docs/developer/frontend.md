@@ -276,7 +276,9 @@ when that may happen:
    with its direction (`describeFocus` in `ui.mjs`, `restoreField` in `app.mjs`). If only its
    start came back, text typed over a selection right after a redraw would go in front of the old
    value instead of replacing it (#120, "Otherwindow CityPhiladelphia"). A step change scrolls to
-   the top and focuses `#main`. A redraw during IME composition waits for `compositionend`.
+   the top and focuses `#main`. A redraw during IME composition waits for `compositionend`, on
+   every page, not only this form (`src/redraw-hold.mjs`, which also holds a redraw during a
+   press, #186).
 
 Before a save or a step change, `sweepV2Form` reads the whole form into the draft once more (for
 values that arrived without an `input` event, such as autofill); it is skipped while a redraw is

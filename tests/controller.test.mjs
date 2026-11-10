@@ -6643,9 +6643,10 @@ test("a conflicting save says someone else changed the volunteer, reloads and re
   controller.stop();
 });
 
-test("any other refusal is shown in the drawer and rethrown, without a reload", async () => {
+test("any other refusal is shown in the drawer and rethrown, and the list is read again", async () => {
   const store = rosterStore();
-  const { controller } = build({ store });
+  const ids = ["action-1", "action-2"];
+  const { controller } = build({ store, newActionId: () => ids.shift() });
   await controller.start();
   controller.navigate("office-volunteers");
   await controller.loadVolunteers();
@@ -6654,7 +6655,137 @@ test("any other refusal is shown in the drawer and rethrown, without a reload", 
   const reads = volunteerReads(store);
   await assert.rejects(() => controller.saveVolunteer(VOLUNTEER_PAYLOAD), (error) => error.code === "FORBIDDEN");
   assert.equal(controller.getState().error.code, "FORBIDDEN");
-  assert.equal(volunteerReads(store), reads);
+  assert.equal(volunteerReads(store), reads + 1);
+  // A refusal is a known outcome: pressing Save again is a new save.
+  assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
+  assert.equal(store.writes.at(-1).actionId, "action-2");
+  controller.stop();
+});
+
+// The store as the database answers: a save is kept by its action id, and the
+// same id answers with the stored receipt; another id for a listed email is a
+// VALIDATION refusal. `dropNextReply` lets the next save land and then throws
+// as a lost answer does (OFFLINE: the fetch never got its response).
+const receiptStore = () => {
+  const store = rosterStore();
+  const receipts = new Map();
+  store.receipts = receipts;
+  store.dropNextReply = false;
+  store.saveVolunteer = async (request) => {
+    store.calls.push("saveVolunteer");
+    store.writes.push({ type: "saveVolunteer", ...request });
+    if (receipts.has(request.actionId)) return receipts.get(request.actionId);
+    const email = request.volunteer.email.toLowerCase();
+    const listed = store.volunteers.find((entry) => entry.email === email && entry.id !== request.volunteerId);
+    if (listed) throw Object.assign(new Error("Please check the information and try again."), { code: "VALIDATION" });
+    const id = request.volunteerId ?? `v-${receipts.size + 2}`;
+    const before = store.volunteers.find((entry) => entry.id === id);
+    if (before && Number(before.revision) !== request.expectedRevision)
+      throw Object.assign(new Error("stale"), { code: "CONFLICT" });
+    const revision = before ? Number(before.revision) + 1 : 1;
+    store.volunteers = [
+      ...store.volunteers.filter((entry) => entry.id !== id),
+      { ...ROSTER_VOLUNTEER, ...request.volunteer, email, id, revision },
+    ];
+    const receipt = { actionId: request.actionId, personId: id, revision };
+    receipts.set(request.actionId, receipt);
+    if (store.dropNextReply) {
+      store.dropNextReply = false;
+      throw Object.assign(new Error("Failed to fetch"), { code: "OFFLINE" });
+    }
+    return receipt;
+  };
+  return store;
+};
+
+test("an Add whose answer was lost: Save again sends the same action id, and the receipt closes it as one volunteer", async () => {
+  const store = receiptStore();
+  const ids = ["action-1", "action-2"];
+  const { controller } = build({ store, newActionId: () => ids.shift() });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", null);
+  const payload = { ...VOLUNTEER_PAYLOAD, email: "noor@example.test", name: "Noor Haddad" };
+  store.dropNextReply = true;
+  const reads = volunteerReads(store);
+  await assert.rejects(() => controller.saveVolunteer(payload), (error) => error.code === "OFFLINE");
+  let state = controller.getState();
+  assert.equal(state.error.code, "OFFLINE");
+  assert.equal(state.dialog, "volunteer", "the drawer stays open");
+  // The list is read again, and shows what the lost save did.
+  assert.equal(volunteerReads(store), reads + 1);
+  assert.equal(state.volunteers.filter((entry) => entry.email === "noor@example.test").length, 1);
+  // Save again, with the same values: the same request, which the window's own
+  // "already on the Roster" check would otherwise stop.
+  assert.equal(await controller.saveVolunteer({ ...payload }), true);
+  state = controller.getState();
+  assert.deepEqual(store.writes.map((write) => write.actionId), ["action-1", "action-1"]);
+  assert.equal(store.receipts.size, 1, "one receipt");
+  assert.equal(state.volunteers.filter((entry) => entry.email === "noor@example.test").length, 1, "one volunteer");
+  assert.equal(state.error, null);
+  assert.equal(state.volunteerFormError, null);
+  assert.equal(state.busy, false);
+  // That save is spent: another Save is a new one.
+  controller.openDialog("volunteer", null);
+  assert.equal(await controller.saveVolunteer({ ...payload, email: "sam@example.test", name: "Sam Ortiz" }), true);
+  assert.equal(store.writes.at(-1).actionId, "action-2");
+  controller.stop();
+});
+
+test("an Edit whose answer was lost is sent again at the revision it was read at", async () => {
+  const store = receiptStore();
+  const ids = ["action-1", "action-2"];
+  const { controller } = build({ store, newActionId: () => ids.shift() });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", { volunteerId: "v-1" });
+  store.dropNextReply = true;
+  await assert.rejects(() => controller.saveVolunteer(VOLUNTEER_PAYLOAD), (error) => error.code === "OFFLINE");
+  assert.equal(controller.getState().volunteers[0].revision, 5, "the re-read shows the landed edit");
+  assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
+  assert.deepEqual(
+    store.writes.map(({ actionId, expectedRevision }) => ({ actionId, expectedRevision })),
+    [{ actionId: "action-1", expectedRevision: 4 }, { actionId: "action-1", expectedRevision: 4 }],
+  );
+  assert.equal(controller.getState().error, null);
+  controller.stop();
+});
+
+test("after a lost answer, changed values are a new save with a new action id", async () => {
+  const store = rosterStore();
+  const ids = ["action-1", "action-2"];
+  const { controller } = build({ store, newActionId: () => ids.shift() });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", { volunteerId: "v-1" });
+  store.failSave = Object.assign(new Error("boom"), { code: "SERVER_ERROR" });
+  await assert.rejects(() => controller.saveVolunteer(VOLUNTEER_PAYLOAD), (error) => error.code === "SERVER_ERROR");
+  assert.equal(await controller.saveVolunteer({ ...VOLUNTEER_PAYLOAD, phone: "215-555-0100" }), true);
+  assert.deepEqual(store.writes.map((write) => write.actionId), ["action-1", "action-2"]);
+  controller.stop();
+});
+
+test("signing out forgets a save whose answer was lost", async () => {
+  const store = rosterStore();
+  const ids = ["action-1", "action-2"];
+  const { controller } = build({ store, newActionId: () => ids.shift() });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", null);
+  const payload = { ...VOLUNTEER_PAYLOAD, email: "noor@example.test" };
+  store.failSave = Object.assign(new Error("offline"), { code: "OFFLINE" });
+  await assert.rejects(() => controller.saveVolunteer(payload), (error) => error.code === "OFFLINE");
+  await controller.signOut();
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", null);
+  assert.equal(await controller.saveVolunteer(payload), true);
+  assert.deepEqual(store.writes.map((write) => write.actionId), ["action-1", "action-2"]);
   controller.stop();
 });
 

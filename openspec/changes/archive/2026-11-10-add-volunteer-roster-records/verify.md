@@ -100,7 +100,7 @@ A press on a Firefox staff page sometimes never reaches the app, so the screen d
 
 ### Known minor behaviour, recorded rather than fixed (final review)
 
-- **Misleading message after a lost answer:** if a save's answer is lost, for example offline, pressing Save again says the volunteer changed, though the first save landed.
+- **Misleading message after a lost answer:** if a save's answer is lost, for example offline, pressing Save again says the volunteer changed, though the first save landed. *Fixed after the PR review (see "After the PR review" below).*
 - **Save after a conflict:** after a conflict, the same drawer can Save again and succeed over the newer values. The drawer's message asks the admin to close and reopen it.
 - **Try again can go away:** after a failed list load, dismissing the error removes Try again. Opening the Roster again reloads it.
 
@@ -170,3 +170,24 @@ ls docs/superpowers/specs/*.md
 - [ ] ❌ FAIL
 
 **Next step:** write the retrospective, delete the subagent workspace, archive. After #183's fix merges: merge `main`, run the chrome-client story 4 times, tick 5.2 and update this report, then push and open the PR.
+
+## After the PR review (#187, 2026-11-10)
+
+The review asked for two fixes, made in the PR:
+
+- **IME composition on staff pages.**
+  - **The fault:** a redraw during an IME composition lost the half-typed text everywhere except the version-2 form, including the Roster's name field and search box.
+  - **The fix:** the composition hold now applies on every page, and flushes once at `compositionend`. It is in `src/redraw-hold.mjs`, which also keeps #188's press hold as it was.
+  - **Not covered by a spec:** this is app-wide behaviour, so it is a bug fix with no spec change, like #188.
+- **A save whose answer was lost.**
+  - Save pressed again with the same values now sends the same request, so its receipt answers.
+  - Any failed save re-reads the list.
+  - The `volunteer-roster` spec gains the scenario "Save again after a lost answer", here and in `openspec/specs/`.
+  - This fixes the first of the known minor behaviours above.
+
+**Checks for the review fixes:**
+- `npm test`: 1574 of 1575. The one failure is the known Windows-only `write-test-env` test.
+- **The new and touched browser tests, locally:** the Chrome IME test, both press-hold tests and the Roster test (with its new lost-answer step). All passed; the one Chrome press-hold failure is described next.
+  - **One Chrome press-hold failure:** the first local run failed before any check. The update sent during the press was never re-read within 20 s, though the warm-up's update had just been. The press path is unchanged by this fix, and the next 3 runs of that test passed.
+- **Without the fixes:** the IME browser test fails ("a live redraw replaced the name field mid-composition"), and so do the three changed or new controller save tests.
+- `npx openspec validate --all`: 13 of 13.

@@ -58,6 +58,7 @@ import * as views from "./views.mjs";
 import * as client from "./client-views.mjs";
 import { POOL_FILTER_KEYS } from "./pool-views.mjs";
 import { createSidebarPeek, peekZone, toggleLabel } from "./sidebar-peek.mjs";
+import { createRedrawHold } from "./redraw-hold.mjs";
 import { STORAGE_KEY, createLanguageRequests, isLang, loadHantWithin, viewLang } from "./language.mjs";
 import { createHantLoader, hantReady } from "./hant.mjs";
 import { t, SENTENCES } from "./client-text.mjs";
@@ -170,12 +171,13 @@ if (!config) {
   let heldInDialog = null;
   let quiet = false;
   let sampleSeed = 0;
-  // The redraw hold. While a pointer is down anywhere on the page, a requested
-  // render waits: replacing the page between mousedown and mouseup would
-  // swallow the click (#186: a realtime redraw on a staff page did). On the
-  // version-2 form an IME composition holds a render too (spec §2.4 rules 1
-  // and 4).
-  let pointerHeld = false, composing = false, heldRender = null; // heldRender: the `focus` argument of the held call
+  // The redraw hold (redraw-hold.mjs). While a pointer is down, or an IME
+  // composition is in progress, anywhere on the page, a requested render
+  // waits: replacing the page between mousedown and mouseup would swallow the
+  // click (#186: a realtime redraw on a staff page did), and replacing it
+  // mid-composition would lose the half-typed text (spec §2.4 rules 1 and 4
+  // for the version-2 form; every staff page too, for a name typed in Chinese).
+  const redrawHold = createRedrawHold({ flush: () => flushHeld() });
   let holdTimer = null;
   // In-place DOM updates waiting for the press to end (afterPress).
   let heldUpdates = [];
@@ -265,16 +267,13 @@ if (!config) {
     // gone, so it closes without asking, and #app is usable again.
     if (shadedEditor && editorGone(controller.getState(), shadedEditorCase)) shadedEditor.close();
     if (quiet) return;
-    // On every page a render waits for the press to end, and on the
-    // version-2 form for the composition too; `flushHeld` draws it then,
-    // unless another render drew first. The press's own click (and a submit
-    // button's submit) comes in the same task as pointerup, which ends the
-    // hold, so the click's own render is never held.
-    if (pointerHeld || (v2OnPage() && composing)) {
-      heldRender = heldRender || focus;
-      return;
-    }
-    heldRender = null; // a real render: any held request is now satisfied (spec §2.4 rule 1)
+    // On every page a render waits for the press and the composition to end;
+    // `flushHeld` draws it then, unless another render drew first. The
+    // press's own click (and a submit button's submit) comes in the same task
+    // as pointerup, which ends the hold, so the click's own render is never
+    // held.
+    if (redrawHold.request(focus)) return;
+    redrawHold.drawn(); // a real render: any held request is now satisfied (spec §2.4 rule 1)
     const state = controller.getState();
     // A case's place is its sub-step (resolved as the page resolves it), so
     // scroll and focus restore compare sub-steps. Add a case is one place: an
@@ -373,23 +372,21 @@ if (!config) {
     drawnConnection = state.connection;
   }
 
-  // ---- the redraw hold: a press on every page (#186), the version-2 form's
-  // IME composition (spec §2.4) ---------------------------------------------
+  // ---- the redraw hold: a press (#186) and an IME composition, on every
+  // page (spec §2.4 for the version-2 form) ----------------------------------
 
   function v2OnPage() {
     return Boolean(root.querySelector(V2_FORMS));
   }
 
   root.addEventListener("pointerdown", () => {
-    pointerHeld = true;
+    redrawHold.press();
     clearTimeout(holdTimer);
     holdTimer = setTimeout(release, 2000); // safety: a pointerup that never arrives
   }, true);
   function release() {
-    if (!pointerHeld) return;
-    pointerHeld = false;
     clearTimeout(holdTimer);
-    setTimeout(flushHeld, 0); // after the click
+    redrawHold.release(); // flushes a task later: after the click
   }
   window.addEventListener("pointerup", release, true);
   window.addEventListener("pointercancel", release, true);
@@ -413,20 +410,26 @@ if (!config) {
     peek.focus(peekZone(event.target) === "sidebar" && keyboardFocus(event.target)));
   root.addEventListener("focusout", (event) => {
     if (peekZone(event.relatedTarget) !== "sidebar") peek.focus(false);
+    // A composition cannot go on in a field that lost the keyboard; browsers
+    // end it with compositionend, and this is the safety if one doesn't, so a
+    // staff page never stops redrawing.
+    redrawHold.compositionEnd();
   });
-  root.addEventListener("compositionstart", () => { composing = true; });
-  root.addEventListener("compositionend", () => { composing = false; setTimeout(flushHeld, 0); });
+  root.addEventListener("compositionstart", () => redrawHold.compositionStart());
+  // One flush, a task later: after the composition's last input.
+  root.addEventListener("compositionend", () => redrawHold.compositionEnd());
   function flushHeld() {
-    // The same test as render's hold: a composition in a staff text box does
-    // not keep a press's held render waiting.
-    if (pointerHeld || (v2OnPage() && composing)) return;
-    if (heldRender !== null) render(heldRender); // render() sets heldRender = null
+    // The same test as render's hold: whichever of a press and a composition
+    // ends first, the other keeps the held render waiting.
+    if (redrawHold.holding()) return;
+    const held = redrawHold.pending();
+    if (held !== null) render(held); // render() clears it
     for (const fn of heldUpdates.splice(0)) fn(); // each looks its node up by id; a gone node is a no-op
   }
   // A DOM update caused by `change` can move the layout (a note gaining text
   // pushes Continue down), so it waits for any press in progress, like a render.
   function afterPress(fn) {
-    if (pointerHeld || composing) heldUpdates.push(fn);
+    if (redrawHold.holding()) heldUpdates.push(fn);
     else setTimeout(fn, 0);
   }
 
@@ -904,7 +907,7 @@ if (!config) {
     // during the press) and the boxes still show the old values: sweeping them
     // would write those back over the office's edit. Every keystroke is
     // already in the draft through `input`; the sweep only catches autofill.
-    if (heldRender !== null) return;
+    if (redrawHold.pending() !== null) return;
     quiet = true;
     try {
       controller.editAnswers(readForm(form));
@@ -2380,12 +2383,14 @@ if (!config) {
         for (const [id, draft] of checkDrafts(field)) keepDraft(id, draft);
     } else if (field.name === "volunteerSearch") {
       // The Roster filters as it is typed; the redraw replaces the box, so
-      // the keyboard and the caret go back into it.
+      // the keyboard and the caret go back into it. Mid-composition the
+      // redraw is held and the box is the same one: touching its selection
+      // then would end the composition.
       const start = field.selectionStart;
       const end = field.selectionEnd;
       controller.setVolunteerFilter("search", field.value);
       const box = root.querySelector("#volunteer-search");
-      if (box) {
+      if (box && box !== field) {
         box.focus();
         if (typeof start === "number" && typeof end === "number") box.setSelectionRange(start, end);
       }
