@@ -997,9 +997,6 @@ test("Realtime carries one applicant's rows to that applicant only", async (t) =
   }
 });
 
-// A client subscribed to its own case sees the stage and the result columns
-// move, and never a reject code or a fix note: the filing tables are not in the
-// publication, and the history lines name neither.
 // OpenSpec change add-volunteer-roster-records (design D3): the row policy on
 // `people` decides what each staff channel receives, so a volunteer with no
 // sign-in is streamed to admins only.
@@ -1062,6 +1059,9 @@ test("a volunteer with no sign-in reaches admins only", async () => {
   }
 });
 
+// A client subscribed to its own case sees the stage and the result columns
+// move, and never a reject code or a fix note: the filing tables are not in the
+// publication, and the history lines name neither.
 test("realtime carries no code", async () => {
   const f = await createDatabaseFixture();
   const CODE = "IND-031-04";
