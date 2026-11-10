@@ -64,6 +64,7 @@ import { t, SENTENCES } from "./client-text.mjs";
 import { createToastTimer } from "./toast.mjs";
 import { contactEntryFromForm, contactSummary, contactSummaries } from "./contact-log.mjs";
 import { decorateStaffCase, outcomeGroup, staffEligibility } from "./staff-views.mjs";
+import { volunteerFromForm } from "./volunteer-roster.mjs";
 
 // Bootstrap and DOM wiring, and nothing else. No state lives here (the
 // controller owns it), no HTML is written here (the view modules own it), and
@@ -303,6 +304,7 @@ if (!config) {
     restoreFormDrafts();
     syncContactForms();
     syncCloseUnsigned();
+    syncVolunteerOther();
     showDraftLink();
     markPressed(state);
     tickCooldown(state);
@@ -436,6 +438,23 @@ if (!config) {
     if (!form) return;
     for (const field of form.querySelectorAll("input[type=checkbox][id], input[type=radio][id]"))
       formDrafts.delete(field.id);
+  }
+
+  // The volunteer drawer is one form for every volunteer, so its typed text
+  // goes with its ticks: a name typed for one would otherwise appear in the
+  // next one's drawer. Every field's draft, whether the form is drawn or not.
+  function forgetVolunteerDrafts() {
+    clearFormDrafts(root.querySelector("#volunteer-form"));
+    for (const id of [...formDrafts.keys()])
+      if (id.startsWith("volunteer-") && id !== "volunteer-search") formDrafts.delete(id);
+  }
+
+  // The Other language box shows its field only while Other is ticked: at
+  // once on a tick, and after a redraw that put an unsent tick back.
+  function syncVolunteerOther() {
+    const box = root.querySelector("#volunteer-language-other");
+    const field = root.querySelector("#volunteer-other-language");
+    if (box && field) field.hidden = !box.checked;
   }
 
   // One input event's draft for a field, or null: the field is back to what
@@ -981,11 +1000,17 @@ if (!config) {
   // row has gone, to the fallback. A drawer's row can go while it is open
   // (another window resolved the task), so a drawer always has one: the queue.
   function closeDialog(fallbackFocusSelector) {
+    const dialog = controller.getState().dialog;
+    // The volunteer drawer opens from the Roster, which has no queue.
     const fallback =
       fallbackFocusSelector ??
-      (views.DRAWERS.includes(controller.getState().dialog)
-        ? "#office-queue-title"
-        : null);
+      (dialog === "volunteer"
+        ? "#main"
+        : views.DRAWERS.includes(dialog)
+          ? "#office-queue-title"
+          : null);
+    // The volunteer drawer's typed text goes with it (forgetVolunteerDrafts).
+    if (dialog === "volunteer") forgetVolunteerDrafts();
     // A dialog's form closes with it; ticks left unsent go too.
     for (const form of root.querySelectorAll(".modal form")) clearFormTicks(form);
     controller.closeDialog();
@@ -1310,6 +1335,14 @@ if (!config) {
     clearFormDrafts(form);
     closeDialog("#office-queue-title");
     notify("success", "The unsigned cases were closed as Dismissed.", by);
+  }
+
+  // The volunteer drawer. The controller checks the values and says what is
+  // wrong in the drawer (false, nothing sent); a refusal stays in the drawer
+  // too, so it closes only on a save that landed.
+  async function submitVolunteer(form, by) {
+    const saved = await controller.saveVolunteer(volunteerFromForm(new FormData(form)));
+    if (saved) closeDialog("#main");
   }
 
   async function submitContact(form, by) {
@@ -1777,6 +1810,12 @@ if (!config) {
       formDrafts.clear();
       controller.navigate("office-cases");
     },
+    // navigate() reads nothing; the Roster's list is read on arrival.
+    "open-volunteers": () => {
+      formDrafts.clear();
+      controller.navigate("office-volunteers");
+      void controller.loadVolunteers();
+    },
     // Pressed again while on the page: a fresh draft, which is what it asks for.
     "open-add-case": async () => {
       formDrafts.clear();
@@ -1827,6 +1866,21 @@ if (!config) {
         if (leaveAddCaseFirst("open-cases", target)) break;
         EXITS["open-cases"]();
         break;
+      case "open-volunteers":
+        if (leaveAddCaseFirst("open-volunteers", target)) break;
+        EXITS["open-volunteers"]();
+        break;
+      case "open-add-volunteer":
+      case "open-edit-volunteer": {
+        // A fresh drawer: no earlier refusal, no earlier sentence about a
+        // field, and nothing typed for another volunteer.
+        const id = target.dataset.volunteerId || null;
+        controller.dismissError();
+        controller.clearVolunteerFormError();
+        forgetVolunteerDrafts();
+        openDialog("volunteer", id ? { volunteerId: id } : null, describeFocus(target));
+        break;
+      }
       case "demo-fill":
         // Fills the form with fictional answers; nothing is sent until the
         // form's own submit button is pressed (demo-fill.mjs). A demo tool:
@@ -2316,6 +2370,17 @@ if (!config) {
       // is.
       else if (!field.matches("[data-action], #field-confirmed"))
         for (const [id, draft] of checkDrafts(field)) keepDraft(id, draft);
+    } else if (field.name === "volunteerSearch") {
+      // The Roster filters as it is typed; the redraw replaces the box, so
+      // the keyboard and the caret go back into it.
+      const start = field.selectionStart;
+      const end = field.selectionEnd;
+      controller.setVolunteerFilter("search", field.value);
+      const box = root.querySelector("#volunteer-search");
+      if (box) {
+        box.focus();
+        if (typeof start === "number" && typeof end === "number") box.setSelectionRange(start, end);
+      }
     } else if (field.name === "lookup") controller.setLookup(field.value);
     else if (field.name === "boardSearch") controller.setBoardSearchDraft(field.value);
     // Kept in state so a re-render re-renders them rather than blanking them.
@@ -2333,6 +2398,15 @@ if (!config) {
     if (field.matches?.("select[data-board-filter]")) {
       controller.setBoardFilter(field.dataset.boardFilter, field.value);
       root.querySelector(`#${field.id}`)?.focus();
+      return;
+    }
+    if (field.matches?.("select[data-volunteer-filter]")) {
+      controller.setVolunteerFilter(field.dataset.volunteerFilter, field.value);
+      root.querySelector(`#${field.id}`)?.focus();
+      return;
+    }
+    if (field.closest?.("#volunteer-form") && field.name === "language" && field.value === "other") {
+      syncVolunteerOther();
       return;
     }
     if (field.id === "field-confirmed") {
@@ -2378,7 +2452,10 @@ if (!config) {
       }
       return;
     }
-    if (!form.reportValidity()) return;
+    // The volunteer drawer skips `reportValidity`, which ignores `novalidate`:
+    // a half-typed `type="email"` would get the browser's bubble instead of
+    // the drawer's own sentence (volunteerProblem).
+    if (form.id !== "volunteer-form" && !form.reportValidity()) return;
     const values = new FormData(form);
     try {
       // A staff form carries its action on its own submit button and names its
@@ -2393,6 +2470,8 @@ if (!config) {
       );
       if (form.matches(".contact-form")) {
         await submitContact(form, by);
+      } else if (form.id === "volunteer-form") {
+        await submitVolunteer(form, by);
       } else if (caseControl) {
         await runCaseAction(caseControl, form, by);
       } else if (assistControl) {
