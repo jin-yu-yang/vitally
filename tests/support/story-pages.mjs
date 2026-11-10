@@ -24,7 +24,9 @@ import { sessionStateKey } from "./browser-fixture.mjs";
 //     provably sent nothing, so it alone is sent once more, and every such
 //     repeat is recorded (`redeliveredPresses`); a press that reached its
 //     control is never repeated here, and the caller's own wait for what it
-//     should show stays the check that it worked (#183).
+//     should show stays the check that it worked (#183). The app holds every
+//     redraw while a press is in progress (#186), so a press that reached
+//     nothing is an app defect: the story fails on any recorded repeat.
 
 // A change that has to travel: an action, a Realtime notification, a re-read.
 export const ARRIVAL_MS = 20_000;
@@ -345,7 +347,7 @@ export async function waitForQuiet(page, { quiet = QUIET_MS, timeout = ARRIVAL_M
 
 // Every press that reached nothing and was sent again, in the order it
 // happened, with the page it was on: the story puts them in its evidence by
-// window. Recorded, never asserted, and never left out.
+// window, never leaves one out, and fails if there is any (#186).
 const redelivered = [];
 let pressCount = 0;
 
@@ -370,11 +372,15 @@ export const redeliveredPresses = (since = 0) => redelivered.filter((entry) => e
  *
  * A click that reached nothing is the one a redraw swallowed: the pointer went
  * down on one control and came up on its replacement, so the browser fired no
- * click and the application never heard of it. Such a press sent nothing, so
- * sending it again is safe even for a toggle or a workflow action: it is sent
- * once more, after the page is still again, and recorded. Twice is a failure,
- * with what the screen read. A press that did arrive is never repeated here;
- * whether it did what it should is the caller's own wait.
+ * click and the application never heard of it. The app now holds every redraw
+ * while a press is in progress (#186), so this should not happen; when it
+ * does, it is an app defect, and the story fails on it in its last phase.
+ * Such a press sent nothing, so sending it again is safe even for a toggle or
+ * a workflow action: it is sent once more, after the page is still again, and
+ * recorded, so the order can go on and its evidence say where it happened.
+ * Twice is a failure at once, with what the screen read. A press that did
+ * arrive is never repeated here; whether it did what it should is the
+ * caller's own wait.
  *
  * `prepare` runs before each attempt's stillness wait — a form's fill, which a
  * redraw can have emptied before the repeat.

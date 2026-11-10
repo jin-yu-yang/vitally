@@ -169,9 +169,11 @@ if (!config) {
   let heldInDialog = null;
   let quiet = false;
   let sampleSeed = 0;
-  // The version-2 form's redraw hold (spec §2.4 rules 1 and 4). While a pointer
-  // is down on the page, or an IME is composing, a requested render waits:
-  // replacing the page between mousedown and mouseup would swallow the click.
+  // The redraw hold. While a pointer is down anywhere on the page, a requested
+  // render waits: replacing the page between mousedown and mouseup would
+  // swallow the click (#186: a realtime redraw on a staff page did). On the
+  // version-2 form an IME composition holds a render too (spec §2.4 rules 1
+  // and 4).
   let pointerHeld = false, composing = false, heldRender = null; // heldRender: the `focus` argument of the held call
   let holdTimer = null;
   // In-place DOM updates waiting for the press to end (afterPress).
@@ -262,9 +264,12 @@ if (!config) {
     // gone, so it closes without asking, and #app is usable again.
     if (shadedEditor && editorGone(controller.getState(), shadedEditorCase)) shadedEditor.close();
     if (quiet) return;
-    // On the version-2 form a render waits for the press (or the composition)
-    // to end; `flushHeld` draws it then, unless another render drew first.
-    if (v2OnPage() && (pointerHeld || composing)) {
+    // On every page a render waits for the press to end, and on the
+    // version-2 form for the composition too; `flushHeld` draws it then,
+    // unless another render drew first. The press's own click (and a submit
+    // button's submit) comes in the same task as pointerup, which ends the
+    // hold, so the click's own render is never held.
+    if (pointerHeld || (v2OnPage() && composing)) {
       heldRender = heldRender || focus;
       return;
     }
@@ -366,7 +371,8 @@ if (!config) {
     drawnConnection = state.connection;
   }
 
-  // ---- the version-2 form's redraw hold (spec §2.4) ----------------------
+  // ---- the redraw hold: a press on every page (#186), the version-2 form's
+  // IME composition (spec §2.4) ---------------------------------------------
 
   function v2OnPage() {
     return Boolean(root.querySelector(V2_FORMS));
@@ -409,7 +415,9 @@ if (!config) {
   root.addEventListener("compositionstart", () => { composing = true; });
   root.addEventListener("compositionend", () => { composing = false; setTimeout(flushHeld, 0); });
   function flushHeld() {
-    if (pointerHeld || composing) return;
+    // The same test as render's hold: a composition in a staff text box does
+    // not keep a press's held render waiting.
+    if (pointerHeld || (v2OnPage() && composing)) return;
     if (heldRender !== null) render(heldRender); // render() sets heldRender = null
     for (const fn of heldUpdates.splice(0)) fn(); // each looks its node up by id; a gone node is a no-op
   }

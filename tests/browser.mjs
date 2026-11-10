@@ -824,6 +824,22 @@ async function runPermutation(t, roles) {
   // checks their console lines; an order that stops before it records them
   // from here instead (#183), so a failure says whether a page threw.
   const storyWindows = {};
+  // Every press whose click reached nothing and was sent once more since this
+  // order began (#183), by window, with how many seconds into the order it
+  // happened. The last phase asserts there were none (#186); the evidence
+  // records them either way.
+  const redeliveredByWindow = () => {
+    const windowName = (page) =>
+      Object.entries(storyWindows).find(([, win]) => win?.page === page)?.[0] ?? "another window";
+    const byWindow = {};
+    for (const entry of redeliveredPresses(orderStarted))
+      (byWindow[windowName(entry.page)] ??= []).push({
+        what: entry.what,
+        atSecond: Math.round((entry.at - orderStarted) / 1000),
+        repeat: entry.repeat,
+      });
+    return byWindow;
+  };
   let classCase = null;
   // The seed's run directory: both seed runs share it, so the second one
   // replaces exactly the set the first one recorded.
@@ -8273,15 +8289,24 @@ async function runPermutation(t, roles) {
           allow: REFUSAL_LINES,
         }),
       };
-      // Ruling R65. A press whose click never reached its control (a redraw
-      // under the pointer) is caught, resent once and recorded by the press
-      // helpers (`evidence.redeliveredPresses`), so it no longer counts here.
-      // What still does is a workflow press the application *received* that
-      // produced nothing at all and had to be sent again: a real defect.
+      // Ruling R65. A workflow press the application *received* that produced
+      // nothing at all and had to be sent again is a real defect.
       assert.deepEqual(
         evidence.retries.filter((entry) => entry.lost > 0),
         [],
         "a press reached nothing at all and had to be sent again",
+      );
+      // And so, now, is a press whose click never reached its control. The
+      // press helpers still catch one, send it once more and record it
+      // (`evidence.redeliveredPresses`, #183), so the order can finish and say
+      // where it happened; but the app holds every redraw while a press is in
+      // progress (#186), so a redraw under the pointer can no longer swallow a
+      // click, and one that never arrived is an app defect again.
+      const redeliveredNow = redeliveredByWindow();
+      assert.deepEqual(
+        redeliveredNow,
+        {},
+        `a press never reached its control and had to be sent again: ${redactAddresses(JSON.stringify(redeliveredNow))}`,
       );
       // Recorded, not asserted: the measurement that matters is the one each
       // screenshot took at 390px, and every one of those is asserted there.
@@ -8296,19 +8321,9 @@ async function runPermutation(t, roles) {
     // holds it are what say how far the story got and what stopped it.
     try {
       // Every press whose click reached nothing and was sent once more (#183),
-      // by window, with how many seconds into the order it happened. Recorded,
-      // never asserted; an empty record means there were none.
-      const windowName = (page) =>
-        Object.entries(storyWindows).find(([, win]) => win?.page === page)?.[0] ?? "another window";
-      evidence.redeliveredPresses = {};
-      for (const entry of redeliveredPresses(orderStarted)) {
-        const name = windowName(entry.page);
-        (evidence.redeliveredPresses[name] ??= []).push({
-          what: entry.what,
-          atSecond: Math.round((entry.at - orderStarted) / 1000),
-          repeat: entry.repeat,
-        });
-      }
+      // by window. Recorded here even when a phase threw, and asserted empty
+      // by the last phase (#186); an empty record means there were none.
+      evidence.redeliveredPresses = redeliveredByWindow();
       evidence.alerts = {
         client: client ? await readAlerts(client) : null,
         staff: staff ? await readAlerts(staff) : null,
