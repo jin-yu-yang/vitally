@@ -135,28 +135,32 @@ stack never sends real mail: every code lands in its local mailbox (Mailpit), a 
    current role accounts. If you copied the file before this change, copy it again and keep your
    workspace ID.
 
-**Use them (every time).**
+**Sign in (every time).**
 
 1. Start the app with `PATH="$VITALLY_NODE_BIN:$PATH" npm start` and open
    <http://127.0.0.1:4173>.
 2. Type `site-coordinator@example.org` and press **Send verification code**.
 3. Open <http://127.0.0.1:54324> in another tab, open the newest message, and copy the code.
 4. Paste it into **Verification code** and press **Verify and continue**. You are signed in as
-   Sky Chen, the site coordinator, with the office screens.
-5. To rehearse as another role, sign in as `preparer@example.org`, `reviewer@example.org` or
-   `intaker@example.org` the same way (the code arrives in Mailpit like any other). The preparer's
-   screen says "Signed in as Rowan Diaz (preparer)". Each account acts only as its own
-   person, with that person's capabilities. The fill buttons ("Fill fictional details",
-   "Auto-fill fictional data") appear for anyone, staff included, only when `.env.local` sets
-   `VITALLY_DEMO_TOOLS=1`. To add another fictional staff rehearsal account, append an entry to
-   the `staff` list of `.vitally-roster.local.json` (see [Rosters](#rosters)) with a fictional
-   address and run the roster command again.
-6. To play the client at the same time, open <http://127.0.0.1:4173> in a private window (or a
-   second browser) and repeat steps 2–4 with `client-a@example.org`.
+   Sky Chen, the site coordinator, with the office screens (Follow-ups, All cases, Volunteers).
 
-A new code for the same address can be requested only about once a minute; the form shows a
-countdown. A workspace starts with no sample cases and no demonstration people (Alex, Morgan
-and Sam are gone). For rehearsal cases, run `npm run seed:local` (below). Stop the app with Ctrl+C in its terminal.
+Each account acts only as its own person, with that person's capabilities. To add another
+fictional staff account, append an entry to the `staff` list of `.vitally-roster.local.json`
+(see [Rosters](#rosters)) with a fictional address and run the roster command again.
+
+**One window per account.** A demo usually has four windows: the office (`site-coordinator@`),
+the preparer (`preparer@`, "Signed in as Rowan Diaz (preparer)"), the reviewer (`reviewer@`) and
+the client (`client-a@`). A browser keeps one sign-in for this site, shared by all its tabs and
+windows, and all its private windows share another. So each account needs its own browser profile:
+on Windows, for example, Chrome, a Chrome Incognito window, Edge and an Edge InPrivate window.
+A new tab in the same profile opens as the account already signed in there, and signing out in one
+tab signs out every tab of that profile. Sign each window in
+with steps 2–4; every code arrives in Mailpit. A new code for the same address can be requested
+only about once a minute (the form shows a countdown), so sign the windows in before you start.
+[`docs/demo-script.md`](demo-script.md) is the script to follow in them.
+
+A workspace starts with no cases. For rehearsal cases and Roster volunteers, run
+`npm run seed:local` (below). Stop the app with Ctrl+C in its terminal.
 
 **Seed the rehearsal cases.** To fill the rehearsal workspace with cases at every stage, run the
 seed command. It is local only: it refuses any target that is not the local test stack, and it does
@@ -173,17 +177,25 @@ through the same functions the app uses, and builds:
 - ten office-entered cases: preparation ready, waiting on documents, an escalated follow-up for the
   Site Coordinator, ready for review, corrections required, review approved, state return rejected,
   accepted, on hold and withdrawn;
-- one open help request on client A's case.
+- one open help request on client A's case;
+- eight fictional volunteers on the Roster, with no sign-in (listed in
+  [`docs/demo-script.md`](demo-script.md#the-roster)).
 
 On the corrections-required case the case has no current reviewer, because asking for corrections
 clears it. The Reviewer is named on that review round.
 
-It prints `Seeded 11 cases (removed N from the previous run).` and records the cases in
-`.vitally-runs/seed-<workspaceId>.json`. A re-run replaces the previous set and leaves every other
-case alone. If it stops with `SEED_SETUP`, a role account or client A is missing from the
-workspace, or the default follow-up person is not the site coordinator account (this happens on a
-stack set up from the old example roster). In both cases, run the roster command again with the
-current example roster.
+It prints `Seeded 11 cases (removed N from the previous run) and 8 volunteers on the Roster.` and
+records the cases in `.vitally-runs/seed-<workspaceId>.json`. A re-run replaces the previous set and
+the eight volunteers, and leaves every other case and volunteer alone. If it stops with
+`SEED_SETUP`, a role account or client A is missing from the workspace, or the default follow-up
+person is not the site coordinator account (this happens on a stack set up from the old example
+roster). In both cases, run the roster command again with the current example roster.
+
+The run file belongs to the checkout the seed ran in. A seed run from another checkout or worktree
+does not know that set and leaves it in place, so the workspace ends up with two of every case:
+`removed 0` on a workspace you have seeded before is the sign. To recover, add the `caseIds` and
+`assistanceIds` from the other checkout's `.vitally-runs/seed-<workspaceId>.json` to this one's, and
+seed again. It should then report `removed` with the total of both sets.
 
 Seed before you open the app, or reload any window that is already open afterwards.
 
@@ -193,6 +205,47 @@ restart the app. They appear only when `SUPABASE_URL` points at this machine (`1
 
 The rehearsal workspace is permanent and separate from the test suites' own workspaces; the
 database suite and the sign-in gate pass with it present.
+
+### Before a review or demo
+
+Work through this on the day, in the checkout you will present from, running every command from
+its root. The stack must already be running ([Start and stop](#start-and-stop)).
+
+1. **The roster file.** `.vitally-roster.local.json` must have:
+   - your `workspaceId` (keep the one you have; a new ID makes a new, empty workspace);
+   - in `staff`, the `site_coordinator` (with `admin`, `followup`, `assist`, `receive_documents`),
+     `preparer` (`prepare`) and `reviewer` (`review`) entries of
+     [`tools/admin/roster.example.json`](../tools/admin/roster.example.json); `intaker` is optional;
+   - `"defaultFollowup": "site_coordinator"`;
+   - `client-a@example.org` as the first entry of `applicants`;
+   - no `presenters` and no `sampleCaseOwners` (both are ignored with a note, but they belong to
+     the old roster).
+
+   The quickest way is to copy the example file and put your `workspaceId` back in. Keep the old
+   file under a name the `.gitignore` still covers, such as `.vitally-roster.local.bak.json` (a
+   name ending in `.json.bak` is not ignored). Accounts that are no longer listed are not removed:
+   they keep a Roster row each.
+2. **The target manifest.** In `.env.test`, `VITALLY_TARGET_MANIFEST` is the absolute path to this
+   checkout's `.vitally-targets.json`, and that file exists
+   ([Private test configuration](#private-test-configuration)). A checkout that was moved or renamed
+   keeps the old path, and every command below then fails with `TARGET_REJECTED`.
+3. **Migrations:** `npm run db:migrate:test` prints `Approved test migrations applied.`
+4. **Roster command** ([Create the rehearsal accounts](#signing-in-locally), step 3). It prints the
+   workspace, `4 staff, 1 applicant(s)` and how many accounts it created.
+5. **Seed:** `VITALLY_ALLOW_LOCAL_SEED=1 npm run seed:local` prints
+   `Seeded 11 cases (removed N from the previous run) and 8 volunteers on the Roster.` On a
+   workspace you have seeded before, `removed 0` means an earlier set is still there (see the run
+   file note above).
+6. **Optional: the fill buttons.** Add `VITALLY_DEMO_TOOLS=1` to `.env.local` only if you will
+   fill a new application live.
+7. **Start the app and sign in** each window ([Sign in](#signing-in-locally), one browser profile
+   per account), then check, in the site coordinator's window:
+   - Follow-ups says **8 open**, one row of each kind;
+   - **Volunteers** lists the eight fictional volunteers (Maya Lindgren to Lucy Fong), plus a "No
+     roles recorded" row for each staff account: **12 of 12 volunteers** when the four role
+     accounts are the only staff.
+
+The seed resets the cases, so after a rehearsal run steps 5 and 7 again before the real thing.
 
 ### The vendor bundle
 
@@ -543,7 +596,7 @@ the not-married intake wording (2026-10-14, change `add-unmarried-intake-wording
 | Unit | `"$VITALLY_NODE" --test tests/*.test.mjs` | 1500/1500 | Pure domain/contract logic, the intake catalogue and version-2 renderer, the client text in three languages (every client screen swept in 简体 and 繁體, and the Traditional map checked against `opencc-js`), the auth/store adapters against fakes, the pure view renderers, the controller's async state machine, server allowlist/config logic — no network, no database. |
 | Database | `PATH="$VITALLY_NODE_BIN:/Users/jinyuyang/.docker/bin:$PATH" "$VITALLY_NODE" --env-file=.env.test --test tests/database*.mjs` | 448/448 | Every migration, RLS policy, RPC, and error/ordering rule against the real isolated stack: ownership, authority, idempotent replay, concurrency, Realtime publication/isolation, client numbers, and the version-2 intake checks compared with the browser's. |
 | Auth gate | `PATH="$VITALLY_NODE_BIN:/Users/jinyuyang/.docker/bin:$PATH" "$VITALLY_NODE" --env-file=.env.test --test tests/auth-browser.mjs` | 20/20, ~20–95 s | Real Chrome and real Firefox, driving the actual access form: a generated one-time code is typed in and verified through the real `verifyOtp` call; only the outbound `/auth/v1/otp` **send** is intercepted (email-free automation), never verification. |
-| Browser story | `PATH="$VITALLY_NODE_BIN:/Users/jinyuyang/.docker/bin:$PATH" "$VITALLY_NODE" --env-file=.env.test --test tests/browser.mjs` | 83/83, ~11–26 min (see the note below the table) | The full demonstration script (see [`docs/demo-script.md`](demo-script.md)) end to end, twice, roles swapped between Chrome and Firefox, plus the regression list below. The main story signs in as the database fixture's role-named staff accounts, each once, in a staff window of its own (the Site Coordinator Avery Lin, the Preparer Taylor Brooks and the Reviewer Jamie Ellis), and switches windows instead of personas; its cases come from the seed module (`tools/admin/seed-cases.mjs`), run on the story's own workspace with a temporary run file. No step signs in as the presenter: each presenter step was replaced one for one by a step that uses the role accounts or the seed, and one phase checks that a presenter who signs in sees only the plain "This account is no longer used" screen. Its throwaway workspace is on version 2, the only intake version: staff read the answers, the contact card before and after a claim, record materials, edit the best time, work the document checklist and open the draft 13614-C; the office takes in a walk-in on the version-2 Add a case; one phase walks every sub-step of the redesigned intake, marks document cards, reviews, opens the draft 13614-C and submits; one phase checks the staff sidebar's peek and pin (peek without pushing the page, stay, a realtime redraw during a peek, close after leaving, pin, no re-peek after a collapse, keyboard, a dialog opened from a peek, and touch); one phase signs two real staff accounts in through the form, in separate windows (Riley Park, who prepares and reviews, and Jordan Lee, who reviews): the board updates live, Riley fills the shaded section in the editor and its field is as tall as its cell, Riley cannot review a case Riley prepared, and a persona left in storage is ignored. An extra admin account, Quinn Harper, made in the contact log step, serves the in-window account switch; and one phase works in Chinese in its own `zh-CN` browser context (the first visit is 简体 from the browser's language, the version-2 intake by Fill and the rail, submit, the progress page and its history in Chinese, one switch to 繁體 that fetches the Traditional map for the first time, a reload that keeps it, and back to English). Every other context is pinned to `en-US`. Optional to re-run before every rehearsal, but recommended before a presentation. |
+| Browser story | `PATH="$VITALLY_NODE_BIN:/Users/jinyuyang/.docker/bin:$PATH" "$VITALLY_NODE" --env-file=.env.test --test tests/browser.mjs` | 83/83, ~11–26 min (see the note below the table) | The full demonstration script (see [`docs/demo-script.md`](demo-script.md)) end to end, twice, roles swapped between Chrome and Firefox, plus the regression list below. The main story signs in as the database fixture's role-named staff accounts, each once, in a staff window of its own (the Site Coordinator Avery Lin, the Preparer Taylor Brooks and the Reviewer Jamie Ellis), and switches windows instead of personas; its cases come from the seed module (`tools/admin/seed-cases.mjs`), run on the story's own workspace with a temporary run file. No step signs in as the presenter: each presenter step was replaced one for one by a step that uses the role accounts or the seed, and one phase checks that a presenter who signs in sees only the plain "This account has no access" screen. Its throwaway workspace is on version 2, the only intake version: staff read the answers, the contact card before and after a claim, record materials, edit the best time, work the document checklist and open the draft 13614-C; the office takes in a walk-in on the version-2 Add a case; one phase walks every sub-step of the redesigned intake, marks document cards, reviews, opens the draft 13614-C and submits; one phase checks the staff sidebar's peek and pin (peek without pushing the page, stay, a realtime redraw during a peek, close after leaving, pin, no re-peek after a collapse, keyboard, a dialog opened from a peek, and touch); one phase signs two real staff accounts in through the form, in separate windows (Riley Park, who prepares and reviews, and Jordan Lee, who reviews): the board updates live, Riley fills the shaded section in the editor and its field is as tall as its cell, Riley cannot review a case Riley prepared, and a persona left in storage is ignored. An extra admin account, Quinn Harper, made in the contact log step, serves the in-window account switch; and one phase works in Chinese in its own `zh-CN` browser context (the first visit is 简体 from the browser's language, the version-2 intake by Fill and the rail, submit, the progress page and its history in Chinese, one switch to 繁體 that fetches the Traditional map for the first time, a reload that keeps it, and back to English). Every other context is pinned to `en-US`. Optional to re-run before every rehearsal, but recommended before a presentation. |
 The story passed 83/83 in one run on 2026-11-06 (about 26 minutes; the Chrome-client order about 14.1 minutes and the Firefox-client order about 12.2, against what was then a 15-minute limit for each, so the Chrome-client order was close to it; the limit is now 20 minutes, see #126), after the main story moved to the role-named staff accounts and the seed (#132), with migration 039 applied, run from a worktree on D:. The run before it failed once in the Firefox-client order on a hover check that passed in the runs before and after. Before that it passed 77/77 in one run on 2026-10-24 (about 25.6 minutes; an earlier run that day took about 20.7), on change `add-preparer-13614c-fields`, with migration 038 applied, run from a worktree on D: (not under OneDrive). History: it passed 63/63 in one run on 2026-10-20, on change `replace-simulated-screening-checks`, with migration 034 applied, run from a worktree on D: (not under OneDrive). Before that it passed 63/63 in one run on 2026-10-19, on change `add-preparer-and-reviewer-questionnaires`, with migration 033 applied, run from a worktree on D: (not under OneDrive); a worktree outside OneDrive works, while one under OneDrive fails it. Before that it passed 63/63 in one run on 2026-10-19, on change `add-screening-and-efiling-stages`, with migration 032 applied, run from the main checkout. Before that it passed 61/61 in one run on 2026-10-18, on change `add-contact-log`. Before that it passed 57/57 in one run on 2026-10-16 (about 16.6 minutes), on change `add-form-14446-consent`. Before that
 it passed 57/57 in one run on 2026-10-16 (about 14 minutes), on change `add-widowed-spouse-rules`. Before that
 it passed 57/57 in one run on 2026-10-15 (about 12.5 minutes), on change
