@@ -86,6 +86,23 @@ export const RPC_SIGNATURES = Object.freeze([
       p_entry: { ...context.contactEntry, note: "Corrected." },
     }),
   }),
+  // The volunteer Roster (OpenSpec change add-volunteer-roster-records): an
+  // admin adds a volunteer with no sign-in.
+  Object.freeze({
+    name: "vitally_save_volunteer",
+    signature: "vitally_save_volunteer(uuid,uuid,bigint,jsonb)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["actionId", "personId", "revision"]),
+    args: () => ({
+      p_action_id: crypto.randomUUID(),
+      p_volunteer_id: null,
+      p_expected_revision: null,
+      p_volunteer: {
+        name: "Sample Volunteer", email: `v-${crypto.randomUUID()}@example.org`, phone: null,
+        works: "on_site", languages: ["english"], otherLanguage: null, roles: ["greeter"], certificates: [],
+      },
+    }),
+  }),
 ]);
 
 // The private roster functions (OpenSpec change add-staff-identity, design D6).

@@ -393,7 +393,7 @@ check failed. Check, in this order:
 
 ## 4. Migrations
 
-Forty-three migrations (001 to 043), applied in order. 020, the version-2 switch-over, was added after 021 and 022: a stack that already has them applies it last, and a new one applies it in number order. Both give the same result. Re-running the migrator on an already-migrated stack is safe,
+Forty-four migrations (001 to 044), applied in order. 020, the version-2 switch-over, was added after 021 and 022: a stack that already has them applies it last, and a new one applies it in number order. Both give the same result. Re-running the migrator on an already-migrated stack is safe,
 but not because the files themselves are re-runnable — `001` and `002` create their tables with a
 plain `create table`, which fails the second time. What makes it safe is the ledger
 `tools/admin/migrate.mjs` keeps: `vitally_private.schema_migrations`, one row per file with a
@@ -445,6 +445,7 @@ already applied, so **the migrations are run only through the migrator, never by
 | `041_resolve_go_over_during_hold.sql` | Hand-written: resolving a go-over task while the case is on a Hold from Ready to exit also switches the signing plan to the reviewer's method (#171) |
 | `042_let_follow_up_holders_work_any_follow_up.sql` | Hand-written: anyone holding `followup` works any open office follow-up, whoever it is assigned to, and `followup` requires `admin` (#172) |
 | `043_remove_presenter_access.sql` | Hand-written: the `presenter` access type, the person parameter of the six RPCs and the demonstration people (Alex, Morgan, Sam) are removed. It refuses with `VT008` if a presenter account is referenced ([below](#migration-failed-vt008)). |
+| `044_volunteer_roster_records.sql` | Hand-written: the admin-only Roster records (`volunteer_profiles`, `roster_entries`, `certificates`; not published to Realtime), the `vitally_policy` schema with its one admin check, `vitally_save_volunteer`, and `add_staff_member` linking a matching no-sign-in volunteer. A volunteer with no sign-in is readable only by admins. Existing staff are backfilled with no roles |
 
 Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
 never edit an applied one. The build writes one only when the catalogue's hash differs from the

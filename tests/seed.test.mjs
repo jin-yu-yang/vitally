@@ -6,6 +6,7 @@ import {
   parseSeedArgs,
   formatSeedResult,
 } from "../tools/admin/seed-cases.mjs";
+import { SEED_VOLUNTEERS } from "../tools/admin/seed-values.mjs";
 import { runSeed } from "../tools/admin/seed.mjs";
 
 const code = (expected) => (error) => error.code === expected;
@@ -61,6 +62,42 @@ test("the result line names counts and no address", () => {
   const line = formatSeedResult({ casesRemoved: 11, casesCreated: 11 });
   assert.equal(line, "Seeded 11 cases (removed 11 from the previous run).");
   assert.ok(!line.includes("@"));
+});
+
+test("the result line counts the volunteers when the seed added them", () => {
+  const line = formatSeedResult({ casesRemoved: 11, casesCreated: 11, volunteersCreated: 8 });
+  assert.ok(line.includes("8 volunteers"));
+  assert.ok(!line.includes("@"));
+  assert.equal(
+    formatSeedResult({ casesRemoved: 11, casesCreated: 11 }),
+    "Seeded 11 cases (removed 11 from the previous run).",
+  );
+});
+
+test("the seed volunteers cover every roster value and use example addresses", () => {
+  assert.equal(SEED_VOLUNTEERS.length, 8);
+  const seen = (key) => new Set(SEED_VOLUNTEERS.flatMap((v) => [].concat(v[key])));
+  assert.deepEqual(
+    [...seen("works")].sort(),
+    ["on_site", "on_site_and_remote", "remote"],
+  );
+  assert.deepEqual(
+    [...seen("languages")].sort(),
+    ["cantonese", "english", "mandarin", "other"],
+  );
+  assert.deepEqual(
+    [...seen("roles")].sort(),
+    ["admin", "greeter", "intaker", "preparer", "reviewer"],
+  );
+  assert.deepEqual(
+    [...seen("certificates")].sort(),
+    ["advanced", "basic", "itqr", "sc", "vsc"],
+  );
+  for (const v of SEED_VOLUNTEERS) {
+    assert.ok(v.email.endsWith("@example.org"));
+    assert.equal(v.languages.includes("other"), Boolean(v.otherLanguage));
+  }
+  assert.equal(SEED_VOLUNTEERS.filter((v) => v.phone === null).length, 2);
 });
 
 test("the flag is checked before any file read or seeding", async () => {

@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import {
   parseRoster,
   rosterNotes,
+  rosterLinkNotes,
   parseRosterArgs,
   applyRoster,
 } from "../tools/admin/roster.mjs";
@@ -220,7 +221,36 @@ test("missing accounts are created confirmed, and the workspace gets their ids",
     staff: 1,
     created: 1,
     confirmed: 1,
+    linked: [],
   });
+});
+
+test("applyRoster reports the links initialize returns", async () => {
+  const linked = [{ personKey: "riley", nameDiffers: true }];
+  const { admin } = fakeAdmin([]);
+  const result = await applyRoster(parseRoster(valid()), {
+    admin,
+    initialize: async () => ({ linked }),
+  });
+  assert.deepEqual(result.linked, linked);
+  const none = await applyRoster(parseRoster(valid()), {
+    admin: fakeAdmin([]).admin,
+    initialize: async () => undefined,
+  });
+  assert.deepEqual(none.linked, []);
+});
+
+test("link notes name the key, say when the names differ, and hold no address", () => {
+  const differs = rosterLinkNotes({ linked: [{ personKey: "riley", nameDiffers: true }] });
+  assert.equal(differs.length, 1);
+  assert.match(differs[0], /riley/);
+  assert.match(differs[0], /name on the Roster was kept and differs from the file/);
+  const same = rosterLinkNotes({ linked: [{ personKey: "riley", nameDiffers: false }] });
+  assert.equal(same.length, 1);
+  assert.match(same[0], /riley/);
+  assert.doesNotMatch(same[0], /differ/);
+  for (const line of [...differs, ...same]) assert.equal(line.includes("@"), false);
+  assert.deepEqual(rosterLinkNotes({ linked: [] }), []);
 });
 
 test("every page of existing accounts is read before anything is created", async () => {

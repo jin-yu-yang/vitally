@@ -117,10 +117,15 @@ const valueOptions = (cases, key, anyLabel, labelOf) => [
     .map((value) => [value, value]),
 ];
 
+// A volunteer added on the Roster has no capabilities and could never have
+// prepared or reviewed a case, so they are not offered. A person read without
+// the field at all is kept.
 const personOptions = (people) => [
   ["all", "Anyone"],
   ["unassigned", "Unassigned"],
-  ...people.map((person) => [person.id, person.name ?? person.id]),
+  ...people
+    .filter((p) => !Array.isArray(p?.capabilities) || p.capabilities.length > 0)
+    .map((person) => [person.id, person.name ?? person.id]),
 ];
 
 const TAB_LABELS = Object.fromEntries(POOL_TABS);

@@ -363,3 +363,20 @@ test("the Closed reason filter shows on the Closed tab only, with the staff name
   assert.match(row("duplicate"), /Closed · Duplicate/);
   assert.doesNotMatch(row(null), /Closed ·/);
 });
+
+test("the Prepared by and Reviewed by filters skip a person with no capabilities", () => {
+  // A volunteer added on the Roster has no sign-in and no capabilities; a
+  // person read without the field (an older double) is still offered.
+  const people = [
+    { id: "p-alex", name: "Alex", capabilities: ["prepare"] },
+    { id: "p-ren", name: "Ren", capabilities: [] },
+    { id: "p-sam", name: "Sam" },
+  ];
+  const html = renderCasePool(CASES, people, { filters: {}, now: NOW });
+  for (const key of ["poolPreparer", "poolReviewer"]) {
+    const select = html.match(new RegExp(`<select id="field-${key}"[\\s\\S]*?</select>`))[0];
+    assert.match(select, /<option value="p-alex">Alex<\/option>/);
+    assert.match(select, /<option value="p-sam">Sam<\/option>/);
+    assert.doesNotMatch(select, /p-ren|Ren/);
+  }
+});

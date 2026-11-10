@@ -3395,6 +3395,103 @@ textarea::placeholder {
   color: var(--vt-error);
 }
 
+/* Volunteers: the Roster */
+/* The page reuses .board-table and the drawer .office-drawer; these are only
+   what they lack. The chips are neutral on purpose: the records grant nothing,
+   so no colour may read as cleared or missing. */
+.volunteer-roster {
+  padding: 20px 22px;
+  border-color: var(--vt-line);
+  border-radius: var(--vt-radius);
+}
+.volunteer-roster h2 {
+  font-size: 17px;
+  letter-spacing: 0;
+  margin-bottom: 14px;
+}
+.volunteer-roster .board-foot {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--vt-muted);
+}
+.volunteer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 0 0 14px;
+}
+.volunteer-toolbar .pool-filter {
+  flex: 0 1 220px;
+  min-width: 0;
+  margin: 0;
+}
+.volunteer-toolbar .pool-filter > span {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--vt-muted);
+}
+.volunteer-toolbar #volunteer-search {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.volunteer-roster .volunteer-row th {
+  font-weight: 600;
+}
+.volunteer-roster .volunteer-contact {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--vt-muted);
+}
+.volunteer-roster .board-table td,
+.volunteer-roster .board-table tbody th {
+  white-space: normal;
+}
+.volunteer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+.volunteer-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid var(--vt-line);
+  border-radius: 999px;
+  background: var(--vt-background);
+  color: var(--vt-ink);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.remote-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: var(--vt-primary-soft);
+  color: var(--vt-primary-hover);
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+#volunteer-form .check-group {
+  margin: 4px 0 18px;
+}
+/* `.field` sets `display: block`, which beats the browser's own [hidden]. */
+#volunteer-form .field[hidden] {
+  display: none;
+}
+.office-drawer .drawer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 18px;
+}
+/* end Volunteers */
+
 /* ---- Add a case ---- */
 /* Only Add a case emits the pill, so the class is its own scope. */
 .fiction-pill {

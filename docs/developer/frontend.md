@@ -38,8 +38,9 @@ The front end **predicts** what a person may do so it can show the right buttons
 ```mermaid
 flowchart TD
   app["app.mjs<br/>bootstrap + DOM events"] --> controller["controller.mjs<br/>all state"]
-  app --> views["views.mjs, client-views.mjs,<br/>staff-views.mjs, admin-views.mjs,<br/>office-views.mjs, pool-views.mjs"]
+  app --> views["views.mjs, client-views.mjs,<br/>staff-views.mjs, admin-views.mjs,<br/>office-views.mjs, pool-views.mjs,<br/>volunteer-views.mjs"]
   app --> caseActions["case-actions.mjs<br/>payload builders"]
+  views --> roster["volunteer-roster.mjs<br/>Roster lists, search, form checks"]
   views --> intakeForm["intake-form.mjs<br/>version-2 renderer, draft rules"]
   intakeForm --> catalogue["intake-catalogue.mjs<br/>catalogue rules"]
   controller --> catalogue
@@ -115,7 +116,7 @@ sign-in (`sendCode`, `verifyCode`, `editAuthEmail`, `editAuthCode`, `restartSign
 **`staffWindow()`** is everything a staff screen does (its reads, its eligibility rules and its
 actions), true only for a `staff` account (`isStaffWindow` in [`src/contracts.mjs`](../../src/contracts.mjs)
 says the same for the views). The person acting is always the account's own `principal.personId`; a
-client sends none. None of the six RPCs takes a person, so the browser never claims an identity; the
+client sends none. None of the seven RPCs takes the acting person, so the browser never claims an identity (`vitally_save_volunteer` takes a volunteer's person id, but as the record to change, not as who is acting); the
 database resolves it ([Database: who is acting](database.md#who-is-acting)). An account with any
 other access (a former presenter) gets the "This account has no access" screen and nothing is
 loaded for it.
@@ -140,7 +141,7 @@ Three rules the controller keeps:
 | Signed out | Email and code form ([`client-views.mjs`](../../src/client-views.mjs) `accessScreen`); "cannot reach the server" and "no access" screens ([`views.mjs`](../../src/views.mjs)) |
 | Applicant | `applications` (list and lookup by Application ID), `reference` (new ID to keep), `intake` (the sub-step form, built by `src/intake-views.mjs`), `progress` (status, client number, requests, send document) |
 | Staff window, volunteer account | `staff`: the work board; `staff-case`: the case page with its tabs ([`staff-views.mjs`](../../src/staff-views.mjs)) |
-| Staff window, `admin` account | `staff`: the Follow-ups queue ([`office-views.mjs`](../../src/office-views.mjs)); `office-cases`: the case pool ([`pool-views.mjs`](../../src/pool-views.mjs)); `office-add-case`: Add a case for a walk-in client ([`office-views.mjs`](../../src/office-views.mjs)); `staff-case`: the office's case page ([`admin-views.mjs`](../../src/admin-views.mjs)) |
+| Staff window, `admin` account | `staff`: the Follow-ups queue ([`office-views.mjs`](../../src/office-views.mjs)); `office-cases`: the case pool ([`pool-views.mjs`](../../src/pool-views.mjs)); `office-add-case`: Add a case for a walk-in client ([`office-views.mjs`](../../src/office-views.mjs)); `staff-case`: the office's case page ([`admin-views.mjs`](../../src/admin-views.mjs)); `office-volunteers`: the Volunteers Roster and its Add / Edit drawer ([`volunteer-views.mjs`](../../src/volunteer-views.mjs), rules in [`volunteer-roster.mjs`](../../src/volunteer-roster.mjs)) |
 | Staff account | The staff screens: the sidebar and the case page header say "Signed in as <name>", and the person is the account's own (`staffScreen` in `views.mjs` picks the office screens when that person has `admin`, and the volunteer work board otherwise). Always English |
 
 **Fill tools.** They follow the demo-tools switch. Three controls exist: the staff "Auto-fill fictional data" button, the client intake's fiction toolbar and the office's Add a case "Fill fictional details" pill. With the switch on, an "Auto-fill fictional data" button appears at the top of each questionnaire, the review-contact form and the filing dialogs (Mark ready to e-file, Mark e-filed, Record filing result, Return to signing). [`src/demo-fill.mjs`](../../src/demo-fill.mjs) fills the form with fictional values that the form's own payload builder accepts. It never overwrites typed text or a defaulted choice, and it sends nothing: the form's own button still submits. `demoFillButton(enabled)` renders nothing when the switch (`state.demoTools`) is off, and the `demo-fill` handler in `app.mjs` checks `demoToolsOn` again. The switch is on only when `/public-config.json` sends `demoTools: true` (`server.mjs` does so only with `VITALLY_DEMO_TOOLS=1` and a loopback `SUPABASE_URL`) and the config's `supabaseUrl` is loopback. When on, these controls show to whoever is on that screen; when off, to no one
@@ -275,7 +276,9 @@ when that may happen:
    with its direction (`describeFocus` in `ui.mjs`, `restoreField` in `app.mjs`). If only its
    start came back, text typed over a selection right after a redraw would go in front of the old
    value instead of replacing it (#120, "Otherwindow CityPhiladelphia"). A step change scrolls to
-   the top and focuses `#main`. A redraw during IME composition waits for `compositionend`.
+   the top and focuses `#main`. A redraw during IME composition waits for `compositionend`, on
+   every page, not only this form (`src/redraw-hold.mjs`, which also holds a redraw during a
+   press, #186).
 
 Before a save or a step change, `sweepV2Form` reads the whole form into the draft once more (for
 values that arrived without an `input` event, such as autofill); it is skipped while a redraw is

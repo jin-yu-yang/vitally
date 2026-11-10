@@ -80,8 +80,11 @@ export function parseSeedArgs(argv) {
   return { rosterPath: argv[1] };
 }
 
-export function formatSeedResult({ casesRemoved, casesCreated }) {
-  return `Seeded ${casesCreated} cases (removed ${casesRemoved} from the previous run).`;
+export function formatSeedResult({ casesRemoved, casesCreated, volunteersCreated }) {
+  const line = `Seeded ${casesCreated} cases (removed ${casesRemoved} from the previous run)`;
+  return volunteersCreated == null
+    ? `${line}.`
+    : `${line} and ${volunteersCreated} volunteers on the Roster.`;
 }
 
 const ROLE_KEYS = ["site_coordinator", "preparer", "reviewer"];
@@ -384,6 +387,31 @@ export async function seedCases(
   };
 }
 
+// Adds the rehearsal volunteers to the Roster. A re-run first removes the
+// earlier ones (a person with no sign-in and one of these addresses; the
+// foreign keys remove their profile, roster entry and certificates), so
+// the count stays at eight. Only `seedWorkspace` calls this: the browser story
+// calls `seedCases` directly and must not gain Roster rows.
+export async function seedVolunteers(client, { workspaceId, actorUserId }) {
+  await client.query(
+    `delete from public.people p
+      where p.workspace_id = $1 and p.user_id is null
+        and exists (select 1 from public.volunteer_profiles v
+                     where v.person_id = p.id and v.workspace_id = p.workspace_id
+                       and v.email = any($2::text[]))`,
+    [workspaceId, SEED_VALUES.SEED_VOLUNTEERS.map((v) => v.email)],
+  );
+  for (const volunteer of SEED_VALUES.SEED_VOLUNTEERS) {
+    await callRpc(client, actorUserId, "vitally_save_volunteer", {
+      p_action_id: randomUUID(),
+      p_volunteer_id: null,
+      p_expected_revision: null,
+      p_volunteer: volunteer,
+    });
+  }
+  return SEED_VALUES.SEED_VOLUNTEERS.length;
+}
+
 // What `seed.mjs` runs: the local-only guard, then one seed on its own
 // connection.
 export async function seedWorkspace({
@@ -402,7 +430,11 @@ export async function seedWorkspace({
     const { casesRemoved, casesCreated } = await seedCases(client, targets, {
       runDir,
     });
-    return { casesRemoved, casesCreated };
+    const volunteersCreated = await seedVolunteers(client, {
+      workspaceId,
+      actorUserId: targets.siteCoordinator.userId,
+    });
+    return { casesRemoved, casesCreated, volunteersCreated };
   } finally {
     await client.end();
   }

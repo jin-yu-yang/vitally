@@ -89,6 +89,8 @@ src/
   admin-views.mjs          The office's case page; admin eligibility rules.
   office-views.mjs         The office's Follow-ups queue and Add a case.
   pool-views.mjs           The office's case pool (every case, by phase).
+  volunteer-views.mjs      The admin-only Volunteers Roster page and its Add / Edit drawer.
+  volunteer-roster.mjs     The Roster's pure logic: roles, certificates, search, form reading, validation.
   ui.mjs                   HTML helpers, escaping, labels, icons, focus preservation.
   sample-data.mjs          Fictional form filling for demos (version 2).
   styles.css               All styles.

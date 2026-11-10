@@ -1652,3 +1652,82 @@ test("closeUnsigned calls vitally_close_unsigned", async () => {
     args: { p_action_id: "action-9", p_cases: cases, p_confirmed: true },
   });
 });
+
+// The Roster (migration 044): admin-only tables, read through the store.
+const ROSTER_ROWS = {
+  workspaces: [{ id: "workspace-1", current_season: 2026 }],
+  people: [{ id: "person-ana", name: "Ana Example", user_id: null }],
+  volunteer_profiles: [
+    {
+      workspace_id: "workspace-1",
+      person_id: "person-ana",
+      email: "ana@example.com",
+      phone: "555-0100",
+      works: "remote",
+      languages: ["english"],
+      other_language: null,
+      revision: 3,
+      updated_at: "2026-11-01T00:00:00Z",
+    },
+  ],
+  roster_entries: [
+    { workspace_id: "workspace-1", person_id: "person-ana", season: 2026, roles: ["greeter"] },
+    { workspace_id: "workspace-1", person_id: "person-old", season: 2025, roles: ["admin"] },
+  ],
+  certificates: [
+    { workspace_id: "workspace-1", person_id: "person-ana", season: 2026, certificate: "vsc", status: "confirmed" },
+    { workspace_id: "workspace-1", person_id: "person-ana", season: 2025, certificate: "sc", status: "confirmed" },
+  ],
+};
+
+test("listVolunteers reads the current season and returns combined volunteers", async () => {
+  const client = fakeClient({ access: "staff", rows: ROSTER_ROWS });
+  const list = await createStore(client).listVolunteers();
+  assert.equal(list.length, 1);
+  assert.equal(list[0].name, "Ana Example");
+  assert.equal(list[0].email, "ana@example.com");
+  const tables = client.reads.map((read) => read.table);
+  for (const name of ["workspaces", "volunteer_profiles", "roster_entries", "certificates", "people"])
+    assert.ok(tables.includes(name), name);
+  for (const name of ["roster_entries", "certificates"])
+    assert.deepEqual(client.reads.find((read) => read.table === name).filters, [["season", 2026]], name);
+  assert.equal(client.reads.find((read) => read.table === "people").columns, "id,name,user_id");
+});
+
+test("listVolunteers is staff-only and maps a failed read", async () => {
+  await assert.rejects(() => createStore(fakeClient({ access: "applicant", rows: ROSTER_ROWS })).listVolunteers());
+  await assert.rejects(
+    () => createStore(fakeClient({ access: "staff", readError: { code: "VT001" } })).listVolunteers(),
+    { code: "FORBIDDEN" },
+  );
+});
+
+test("saveVolunteer sends the RPC parameters, nulls for an Add", async () => {
+  const client = fakeClient({ access: "staff" });
+  const store = createStore(client);
+  const volunteer = { name: "Ana Example", email: "ana@example.com" };
+  const request = { volunteer };
+  await store.saveVolunteer(request);
+  assert.ok(request.actionId);
+  assert.deepEqual(client.rpcCalls[0], {
+    name: "vitally_save_volunteer",
+    args: {
+      p_action_id: request.actionId,
+      p_volunteer_id: null,
+      p_expected_revision: null,
+      p_volunteer: volunteer,
+    },
+  });
+  await store.saveVolunteer({ actionId: "a-1", volunteerId: "person-ana", expectedRevision: 3, volunteer });
+  assert.deepEqual(client.rpcCalls[1].args, {
+    p_action_id: "a-1",
+    p_volunteer_id: "person-ana",
+    p_expected_revision: 3,
+    p_volunteer: volunteer,
+  });
+});
+
+test("the Roster tables are not in the subscribed staff tables", () => {
+  for (const name of ["volunteer_profiles", "roster_entries", "certificates"])
+    assert.ok(!SUBSCRIBED_TABLES.staff.includes(name), name);
+});

@@ -24,7 +24,7 @@ it. Run everything described here against the local stack from [`docs/setup.md`]
 
 ## Migrations
 
-The schema is forty-three plain SQL files (001 to 043) in [`supabase/migrations/`](../../supabase/migrations/), applied
+The schema is forty-four plain SQL files (001 to 044) in [`supabase/migrations/`](../../supabase/migrations/), applied
 in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 
 | File | Adds |
@@ -72,6 +72,7 @@ in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 | `041_resolve_go_over_during_hold.sql` | Hand-written: `act_resolve_followup` copied from 033; resolving a `go_over_return` task while the case is `on_hold` with `hold_origin = 'review_approved'` also switches `signing_plan` to the reviewer's method, as at Ready to exit (#171) |
 | `042_let_follow_up_holders_work_any_follow_up.sql` | Hand-written: `lock_open_followup` no longer checks the assignee, so anyone holding `followup` works any open office follow-up (a contact linked to a missing or other-case task is still `FORBIDDEN`, and a resolve naming one stays `VALIDATION`); `add_staff_member`, copied from 038, refuses `followup` without `admin`; the check `people_followup_needs_admin` (#172) |
 | `043_remove_presenter_access.sql` | Hand-written: the `presenter` access type, the person parameter (`p_person_id`) of the six RPCs and the demonstration people (Alex, Morgan, Sam) are removed. It refuses with `VT008` if a presenter account is referenced ([setup](../setup.md#migration-failed-vt008)); deletes the presenter receipts, memberships and accounts and the demonstration people nothing references; re-adds the access check as `applicant` and `staff`; changes the 22 policies to `m.access = 'staff'` and renames the 16 `presenter_*` policies to `staff_*`; replaces `acting_person`, the six RPCs and `initialize_workspace`; and rewrites `check_operation_authority`, `contact_person`, `lock_case`, `lock_assistance_item`, `act_close_case` and `add_staff_member` |
+| `044_volunteer_roster_records.sql` | Hand-written: the admin-only records behind Volunteers > Roster. The new schema `vitally_policy` holds only `is_workspace_admin(workspace)`, a `security definer` check that answers for the caller alone, used by row policies that must read `people` without recursing into its own policy (it is not an API: PostgREST exposes only `public`); the tables `volunteer_profiles`, `roster_entries` and `certificates` (read by admins only, written only by `vitally_save_volunteer`, not published to Realtime); `staff_people` now hides a person with no sign-in and no capabilities from everyone but an admin; `add_staff_member` links a matching volunteer with no sign-in by email; existing staff get a profile and an empty roster entry, with no roles inferred. Roles and certificates grant nothing: `people.capabilities` is untouched |
 **Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
 never edit an applied one.** The build writes a file only when the hash differs from the newest
 catalogue migration's. The hash covers the catalogue and `LOADER_VERSION` in
@@ -117,7 +118,8 @@ do not copy them from older files:
 | Function | Current definition |
 | --- | --- |
 | `vitally_private.check_payload`, `check_preparer_fields`, `act_save_preparer_fields` | `039_preparer_shaded_fields.sql` |
-| `vitally_private.acting_person`, `add_staff_member`, `lock_case`, `lock_assistance_item`, `contact_person`, `check_operation_authority`, `act_close_case`, `initialize_workspace`, and the six RPCs `public.vitally_apply_action`, `vitally_assistance_action`, `vitally_close_unsigned`, `vitally_create_case`, `vitally_log_contact`, `vitally_edit_contact` | `043_remove_presenter_access.sql` |
+| `vitally_private.add_staff_member`, `public.vitally_save_volunteer`, `vitally_policy.is_workspace_admin` | `044_volunteer_roster_records.sql` |
+| `vitally_private.acting_person`, `lock_case`, `lock_assistance_item`, `contact_person`, `check_operation_authority`, `act_close_case`, `initialize_workspace`, and the six RPCs `public.vitally_apply_action`, `vitally_assistance_action`, `vitally_close_unsigned`, `vitally_create_case`, `vitally_log_contact`, `vitally_edit_contact` | `043_remove_presenter_access.sql` |
 | `vitally_private.check_staff_links`, `set_default_followup` | `038_staff_identity.sql` |
 | `vitally_private.filing_notes_append_only`, `reserve_receipt` | `040_remove_sample_case_tools.sql` |
 | `vitally_private.check_authority`, `receive_document`, `act_verify_document` | `036_hold_and_closing.sql` |
@@ -197,6 +199,9 @@ erDiagram
 | `documents` | A received document (metadata only) | `source` is `client` (no person) or `staff_recorded` (a person); `filename` only, **no file storage** |
 | `admin_followups` | An office task to contact a client: about a document request, or (033) to go over the return with the client | `purpose` (`request_documents`, `go_over_return` or (036) `withdrawal_notice`, the contact log's keys; a `withdrawal_notice` has no request, and tells the office to stop the preparer's or reviewer's work); `request_id` is set for `request_documents` and null for the other two; `status`: `open`, `resolved`, `cancelled`; at most one open task per request; resolution outcome `reached` or `no_further_contact` |
 | `contact_attempts` | Old call attempts on a follow-up | Empty since 031 moved its rows into `contact_log`; kept until a later cleanup. Nothing reads or writes it |
+| `volunteer_profiles` | A volunteer's email, phone and availability (044) | Primary key `(workspace_id, person_id)`; `email` (stored trimmed and lower-case, unique per workspace), `phone`, `works` (`on_site`, `remote`, `on_site_and_remote`), `languages` (`english`, `mandarin`, `cantonese`, `other`), `other_language` (set exactly when `other` is chosen), `revision` (a stale Edit gets `CONFLICT`). Admin-only select; written only by `vitally_save_volunteer`; not published |
+| `roster_entries` | A volunteer's roles for a season (044) | Primary key `(workspace_id, person_id, season)`; `roles` from `greeter`, `intaker`, `preparer`, `reviewer`, `admin`; `added_by_person_id`. Roles grant nothing. Admin-only select; not published |
+| `certificates` | The certificates an admin has confirmed for a roster entry (044) | One row per certificate per entry, from `vsc`, `itqr`, `sc`, `basic`, `advanced`; `status` (only `confirmed` is written), `confirmed_at`, `confirmed_by_person_id`. Unticking deletes the row. Admin-only select; not published |
 | `contact_log` | The current version of each logged contact | One row per entry on any case: `direction`, `contacted_at` (an instant), `with_whom` (+ `other_name`), `method`, `purpose`, `outcome`, `note`, `followup_id` (null unless logged from a task), `logged_by_*`, `logged_at`, its own `revision`, `edited_at`. The outcome must fit the method. Staff-only; written only by the two contact functions; published to Realtime |
 | `contact_log_versions` | Every version of every entry | Primary key `(contact_id, version)`; version 1 is written with the entry, each edit appends the next. Never updated or deleted by a function, so history cannot be rewritten. Staff-only; published to Realtime |
 | `reviews` | One review attempt of one preparation version | `status`: `active`, `corrections_requested`, `approved`, `superseded`; one active per case; `findings`, `resolution`, `client_contact_*` |
@@ -248,7 +253,8 @@ claimable cases) is a later change; see the [roadmap](production-roadmap.md#1-st
 | `contact_attempts` | Nothing | On visible cases (empty) |
 | `preparer_questionnaires`, `reviewer_questionnaires` | Nothing | On visible cases |
 | `assistance_items` | Nothing | All unlinked items, and items on visible cases |
-| `people` | Nothing | Everyone in the workspace |
+| `people` | Nothing | Everyone in the workspace, except a volunteer with no sign-in and no capabilities, whom only an admin reads (044) |
+| `volunteer_profiles`, `roster_entries`, `certificates` | Nothing | Admins only (044); not published to Realtime |
 | `memberships` | Own active membership | Own active membership |
 | `workspaces` | Own workspace | Own workspace |
 | `action_receipts` | Nothing (no policy, no grant) | Nothing |
@@ -685,7 +691,7 @@ adds twelve: `cases`, `document_requests`, `documents`, `client_events`, `worksp
 `preparation_participants`, `admin_followups`, `contact_attempts`, `case_events`,
 `assistance_items`, `reviews`. `011` adds `case_contacts`, `013` adds `case_materials` and `017` adds `case_document_cards`.
 `031` adds `contact_log` and `contact_log_versions` and removes `contact_attempts`; `033` adds the two questionnaire tables and `039` adds `preparer_shaded_fields`.
-`action_receipts` is not published. An applicant's window watches seven of them (`CLIENT_TABLES`),
+`044` adds nothing: `volunteer_profiles`, `roster_entries` and `certificates` are not published, because Realtime sends whole rows and the records are admin-only; the Roster loads on opening and after each save. `action_receipts` is not published. An applicant's window watches seven of them (`CLIENT_TABLES`),
 a staff window's all nineteen (`STAFF_TABLES`).
 
 Realtime applies each subscriber's RLS, so the same visibility rules hold for events. Deletes are

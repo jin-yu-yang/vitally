@@ -29,6 +29,7 @@ import {
   closeUnsignedDialogBody,
 } from "./office-views.mjs";
 import { renderCasePool } from "./pool-views.mjs";
+import { renderRoster, volunteerDrawerBody } from "./volunteer-views.mjs";
 
 // The shared shell: the frame every screen sits in, the dialogs, the two
 // screens that belong to nobody in particular (setup needed, no access), and
@@ -90,8 +91,8 @@ export function connectionNotice(state) {
   }<span>${esc(t(reconnecting ? "frame.reconnecting" : "frame.offline", {}, viewLang(state)))}</span></div>`;
 }
 
-// The office's two drawers: the modal frame placed at the right edge.
-export const DRAWERS = Object.freeze(["log-call", "resolve-help"]);
+// The office's drawers: the modal frame placed at the right edge.
+export const DRAWERS = Object.freeze(["log-call", "resolve-help", "volunteer"]);
 
 function problemBanner(state) {
   if (!state.error || state.saveState === "failed") return "";
@@ -194,14 +195,21 @@ export function staffSidebar(state, person, office) {
   const accountRow = `<small>Signed in as</small> <strong>${esc(person?.name ?? state.principal?.personName ?? "")}</strong>`;
   const onBoard = state?.screen === "staff";
   const onPool = state?.screen === "office-cases";
+  const onRoster = state?.screen === "office-volunteers";
   const label = office ? "Follow-ups" : "Work board";
+  // All cases, then the Roster (admin only, change add-volunteer-roster-records).
   const pool = office
-    ? button(
+    ? `${button(
         `${icon("folder")} All cases`,
         "open-cases",
         `nav-link${onPool ? " current" : ""}`,
         onPool ? 'aria-current="page"' : "",
-      )
+      )}${button(
+        `${icon("user")} Volunteers`,
+        "open-volunteers",
+        `nav-link${onRoster ? " current" : ""}`,
+        onRoster ? 'aria-current="page"' : "",
+      )}`
     : "";
   return `<div class="sidebar-brand"><img src="src/pcdc-logo.png" alt="PCDC" width="36" height="36"><span class="sidebar-wordmark">ViTally<span class="brand-dot">.</span></span></div><nav class="sidebar-nav" aria-label="Main navigation">${button(
     `${icon(office ? "people" : "board")} ${label}`,
@@ -217,7 +225,7 @@ export function staffSidebar(state, person, office) {
 
 // The records are decorated here — once, with the roster this screen already
 // holds — so the renderers never see a bare id.
-const OFFICE_SCREENS = ["office-cases", "office-add-case"];
+const OFFICE_SCREENS = ["office-cases", "office-add-case", "office-volunteers"];
 
 // The Follow-ups queue reads the cases and the help requests; it is ready only
 // when both are (a list that was never given counts as loaded).
@@ -290,6 +298,18 @@ export function staffScreen(state) {
         "Enter a walk-in client's answers yourself. The case has no client account: the office owns it.",
         "Back to Follow-ups",
         addCasePage(state, person, people),
+      );
+    if (screen === "office-volunteers")
+      return frame(
+        "OFFICE · VOLUNTEERS",
+        "Volunteers",
+        "Roles and certificates are recorded here. They don't change what anyone can do in ViTally yet.",
+        "",
+        renderRoster(state.volunteers ?? [], {
+          list: state.lists?.volunteers ?? "ready",
+          filters: state.volunteerFilters ?? {},
+        }),
+        button(`${icon("plus")} Add a volunteer`, "open-add-volunteer", "primary"),
       );
     const cases = (state.cases ?? []).map((record) =>
       decorateStaffCase(record, people),
@@ -483,7 +503,19 @@ export function dialog(state) {
     const people = state.people ?? [];
     const person = people.find((entry) => entry.id === state.principal?.personId) ?? null;
     const ui = { busy: state.busy, error: state.error, retryable: state.retryable, now: Date.now() };
-    if (state.dialog === "log-call") {
+    // Before log-call: the last branch below assumes resolve-help.
+    if (state.dialog === "volunteer") {
+      const volunteerId = state.dialogContext?.volunteerId ?? null;
+      const volunteer = volunteerId
+        ? ((state.volunteers ?? []).find((entry) => entry?.id === volunteerId) ?? null)
+        : null;
+      title = volunteerId ? (volunteer?.name ?? "Edit a volunteer") : "Add a volunteer";
+      body = volunteerDrawerBody({
+        volunteer,
+        isNew: !volunteerId,
+        ui: { ...ui, formError: state.volunteerFormError ?? null },
+      });
+    } else if (state.dialog === "log-call") {
       title = "Log contact";
       body = logCallDrawerBody({
         record: decorateStaffCase(state.savedCase, people),
@@ -504,6 +536,11 @@ export function dialog(state) {
     body = `<div class="print-card"><strong>${say("print.org")}</strong><span>${say("id.application_caps")}</span><b>${esc(state.savedCase?.reference)}</b>${state.savedCase?.clientNumber != null ? `<span>${say("id.client_number_caps")}</span><b>${esc(formatClientNumber(state.savedCase.clientNumber))}</b>` : ""}<p>${say("print.return")}</p></div><p class="field-note">${say("print.note")}</p>${button(`${icon("print")} ${say("print.button")}`, "print-now", "primary full")}`;
   }
   const drawer = DRAWERS.includes(state.dialog);
-  const overline = drawer ? "OFFICE FOLLOW-UP" : t("dialog.overline", {}, lang);
+  const overline =
+    state.dialog === "volunteer"
+      ? "OFFICE · VOLUNTEERS"
+      : drawer
+        ? "OFFICE FOLLOW-UP"
+        : t("dialog.overline", {}, lang);
   return `<div class="modal-backdrop"><section class="modal${drawer ? " office-drawer" : ""}" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1"><button class="close-btn" data-action="close-dialog" aria-label="${say("dialog.close")}">${icon("close")}</button><span class="overline">${esc(overline)}</span><h2 id="modal-title">${esc(title)}</h2>${dialogError(state, lang)}${body}</section></div>`;
 }

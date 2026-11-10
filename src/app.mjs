@@ -58,12 +58,14 @@ import * as views from "./views.mjs";
 import * as client from "./client-views.mjs";
 import { POOL_FILTER_KEYS } from "./pool-views.mjs";
 import { createSidebarPeek, peekZone, toggleLabel } from "./sidebar-peek.mjs";
+import { createRedrawHold } from "./redraw-hold.mjs";
 import { STORAGE_KEY, createLanguageRequests, isLang, loadHantWithin, viewLang } from "./language.mjs";
 import { createHantLoader, hantReady } from "./hant.mjs";
 import { t, SENTENCES } from "./client-text.mjs";
 import { createToastTimer } from "./toast.mjs";
 import { contactEntryFromForm, contactSummary, contactSummaries } from "./contact-log.mjs";
 import { decorateStaffCase, outcomeGroup, staffEligibility } from "./staff-views.mjs";
+import { volunteerFromForm } from "./volunteer-roster.mjs";
 
 // Bootstrap and DOM wiring, and nothing else. No state lives here (the
 // controller owns it), no HTML is written here (the view modules own it), and
@@ -169,12 +171,13 @@ if (!config) {
   let heldInDialog = null;
   let quiet = false;
   let sampleSeed = 0;
-  // The redraw hold. While a pointer is down anywhere on the page, a requested
-  // render waits: replacing the page between mousedown and mouseup would
-  // swallow the click (#186: a realtime redraw on a staff page did). On the
-  // version-2 form an IME composition holds a render too (spec §2.4 rules 1
-  // and 4).
-  let pointerHeld = false, composing = false, heldRender = null; // heldRender: the `focus` argument of the held call
+  // The redraw hold (redraw-hold.mjs). While a pointer is down, or an IME
+  // composition is in progress, anywhere on the page, a requested render
+  // waits: replacing the page between mousedown and mouseup would swallow the
+  // click (#186: a realtime redraw on a staff page did), and replacing it
+  // mid-composition would lose the half-typed text (spec §2.4 rules 1 and 4
+  // for the version-2 form; every staff page too, for a name typed in Chinese).
+  const redrawHold = createRedrawHold({ flush: () => flushHeld() });
   let holdTimer = null;
   // In-place DOM updates waiting for the press to end (afterPress).
   let heldUpdates = [];
@@ -264,16 +267,13 @@ if (!config) {
     // gone, so it closes without asking, and #app is usable again.
     if (shadedEditor && editorGone(controller.getState(), shadedEditorCase)) shadedEditor.close();
     if (quiet) return;
-    // On every page a render waits for the press to end, and on the
-    // version-2 form for the composition too; `flushHeld` draws it then,
-    // unless another render drew first. The press's own click (and a submit
-    // button's submit) comes in the same task as pointerup, which ends the
-    // hold, so the click's own render is never held.
-    if (pointerHeld || (v2OnPage() && composing)) {
-      heldRender = heldRender || focus;
-      return;
-    }
-    heldRender = null; // a real render: any held request is now satisfied (spec §2.4 rule 1)
+    // On every page a render waits for the press and the composition to end;
+    // `flushHeld` draws it then, unless another render drew first. The
+    // press's own click (and a submit button's submit) comes in the same task
+    // as pointerup, which ends the hold, so the click's own render is never
+    // held.
+    if (redrawHold.request(focus)) return;
+    redrawHold.drawn(); // a real render: any held request is now satisfied (spec §2.4 rule 1)
     const state = controller.getState();
     // A case's place is its sub-step (resolved as the page resolves it), so
     // scroll and focus restore compare sub-steps. Add a case is one place: an
@@ -308,6 +308,7 @@ if (!config) {
     restoreFormDrafts();
     syncContactForms();
     syncCloseUnsigned();
+    syncVolunteerOther();
     showDraftLink();
     markPressed(state);
     tickCooldown(state);
@@ -371,23 +372,21 @@ if (!config) {
     drawnConnection = state.connection;
   }
 
-  // ---- the redraw hold: a press on every page (#186), the version-2 form's
-  // IME composition (spec §2.4) ---------------------------------------------
+  // ---- the redraw hold: a press (#186) and an IME composition, on every
+  // page (spec §2.4 for the version-2 form) ----------------------------------
 
   function v2OnPage() {
     return Boolean(root.querySelector(V2_FORMS));
   }
 
   root.addEventListener("pointerdown", () => {
-    pointerHeld = true;
+    redrawHold.press();
     clearTimeout(holdTimer);
     holdTimer = setTimeout(release, 2000); // safety: a pointerup that never arrives
   }, true);
   function release() {
-    if (!pointerHeld) return;
-    pointerHeld = false;
     clearTimeout(holdTimer);
-    setTimeout(flushHeld, 0); // after the click
+    redrawHold.release(); // flushes a task later: after the click
   }
   window.addEventListener("pointerup", release, true);
   window.addEventListener("pointercancel", release, true);
@@ -411,20 +410,26 @@ if (!config) {
     peek.focus(peekZone(event.target) === "sidebar" && keyboardFocus(event.target)));
   root.addEventListener("focusout", (event) => {
     if (peekZone(event.relatedTarget) !== "sidebar") peek.focus(false);
+    // A composition cannot go on in a field that lost the keyboard; browsers
+    // end it with compositionend, and this is the safety if one doesn't, so a
+    // staff page never stops redrawing.
+    redrawHold.compositionEnd();
   });
-  root.addEventListener("compositionstart", () => { composing = true; });
-  root.addEventListener("compositionend", () => { composing = false; setTimeout(flushHeld, 0); });
+  root.addEventListener("compositionstart", () => redrawHold.compositionStart());
+  // One flush, a task later: after the composition's last input.
+  root.addEventListener("compositionend", () => redrawHold.compositionEnd());
   function flushHeld() {
-    // The same test as render's hold: a composition in a staff text box does
-    // not keep a press's held render waiting.
-    if (pointerHeld || (v2OnPage() && composing)) return;
-    if (heldRender !== null) render(heldRender); // render() sets heldRender = null
+    // The same test as render's hold: whichever of a press and a composition
+    // ends first, the other keeps the held render waiting.
+    if (redrawHold.holding()) return;
+    const held = redrawHold.pending();
+    if (held !== null) render(held); // render() clears it
     for (const fn of heldUpdates.splice(0)) fn(); // each looks its node up by id; a gone node is a no-op
   }
   // A DOM update caused by `change` can move the layout (a note gaining text
   // pushes Continue down), so it waits for any press in progress, like a render.
   function afterPress(fn) {
-    if (pointerHeld || composing) heldUpdates.push(fn);
+    if (redrawHold.holding()) heldUpdates.push(fn);
     else setTimeout(fn, 0);
   }
 
@@ -444,6 +449,23 @@ if (!config) {
     if (!form) return;
     for (const field of form.querySelectorAll("input[type=checkbox][id], input[type=radio][id]"))
       formDrafts.delete(field.id);
+  }
+
+  // The volunteer drawer is one form for every volunteer, so its typed text
+  // goes with its ticks: a name typed for one would otherwise appear in the
+  // next one's drawer. Every field's draft, whether the form is drawn or not.
+  function forgetVolunteerDrafts() {
+    clearFormDrafts(root.querySelector("#volunteer-form"));
+    for (const id of [...formDrafts.keys()])
+      if (id.startsWith("volunteer-") && id !== "volunteer-search") formDrafts.delete(id);
+  }
+
+  // The Other language box shows its field only while Other is ticked: at
+  // once on a tick, and after a redraw that put an unsent tick back.
+  function syncVolunteerOther() {
+    const box = root.querySelector("#volunteer-language-other");
+    const field = root.querySelector("#volunteer-other-language");
+    if (box && field) field.hidden = !box.checked;
   }
 
   // One input event's draft for a field, or null: the field is back to what
@@ -885,7 +907,7 @@ if (!config) {
     // during the press) and the boxes still show the old values: sweeping them
     // would write those back over the office's edit. Every keystroke is
     // already in the draft through `input`; the sweep only catches autofill.
-    if (heldRender !== null) return;
+    if (redrawHold.pending() !== null) return;
     quiet = true;
     try {
       controller.editAnswers(readForm(form));
@@ -989,11 +1011,17 @@ if (!config) {
   // row has gone, to the fallback. A drawer's row can go while it is open
   // (another window resolved the task), so a drawer always has one: the queue.
   function closeDialog(fallbackFocusSelector) {
+    const dialog = controller.getState().dialog;
+    // The volunteer drawer opens from the Roster, which has no queue.
     const fallback =
       fallbackFocusSelector ??
-      (views.DRAWERS.includes(controller.getState().dialog)
-        ? "#office-queue-title"
-        : null);
+      (dialog === "volunteer"
+        ? "#main"
+        : views.DRAWERS.includes(dialog)
+          ? "#office-queue-title"
+          : null);
+    // The volunteer drawer's typed text goes with it (forgetVolunteerDrafts).
+    if (dialog === "volunteer") forgetVolunteerDrafts();
     // A dialog's form closes with it; ticks left unsent go too.
     for (const form of root.querySelectorAll(".modal form")) clearFormTicks(form);
     controller.closeDialog();
@@ -1318,6 +1346,14 @@ if (!config) {
     clearFormDrafts(form);
     closeDialog("#office-queue-title");
     notify("success", "The unsigned cases were closed as Dismissed.", by);
+  }
+
+  // The volunteer drawer. The controller checks the values and says what is
+  // wrong in the drawer (false, nothing sent); a refusal stays in the drawer
+  // too, so it closes only on a save that landed.
+  async function submitVolunteer(form, by) {
+    const saved = await controller.saveVolunteer(volunteerFromForm(new FormData(form)));
+    if (saved) closeDialog("#main");
   }
 
   async function submitContact(form, by) {
@@ -1785,6 +1821,12 @@ if (!config) {
       formDrafts.clear();
       controller.navigate("office-cases");
     },
+    // navigate() reads nothing; the Roster's list is read on arrival.
+    "open-volunteers": () => {
+      formDrafts.clear();
+      controller.navigate("office-volunteers");
+      void controller.loadVolunteers();
+    },
     // Pressed again while on the page: a fresh draft, which is what it asks for.
     "open-add-case": async () => {
       formDrafts.clear();
@@ -1835,6 +1877,21 @@ if (!config) {
         if (leaveAddCaseFirst("open-cases", target)) break;
         EXITS["open-cases"]();
         break;
+      case "open-volunteers":
+        if (leaveAddCaseFirst("open-volunteers", target)) break;
+        EXITS["open-volunteers"]();
+        break;
+      case "open-add-volunteer":
+      case "open-edit-volunteer": {
+        // A fresh drawer: no earlier refusal, no earlier sentence about a
+        // field, and nothing typed for another volunteer.
+        const id = target.dataset.volunteerId || null;
+        controller.dismissError();
+        controller.clearVolunteerFormError();
+        forgetVolunteerDrafts();
+        openDialog("volunteer", id ? { volunteerId: id } : null, describeFocus(target));
+        break;
+      }
       case "demo-fill":
         // Fills the form with fictional answers; nothing is sent until the
         // form's own submit button is pressed (demo-fill.mjs). A demo tool:
@@ -2324,6 +2381,19 @@ if (!config) {
       // is.
       else if (!field.matches("[data-action], #field-confirmed"))
         for (const [id, draft] of checkDrafts(field)) keepDraft(id, draft);
+    } else if (field.name === "volunteerSearch") {
+      // The Roster filters as it is typed; the redraw replaces the box, so
+      // the keyboard and the caret go back into it. Mid-composition the
+      // redraw is held and the box is the same one: touching its selection
+      // then would end the composition.
+      const start = field.selectionStart;
+      const end = field.selectionEnd;
+      controller.setVolunteerFilter("search", field.value);
+      const box = root.querySelector("#volunteer-search");
+      if (box && box !== field) {
+        box.focus();
+        if (typeof start === "number" && typeof end === "number") box.setSelectionRange(start, end);
+      }
     } else if (field.name === "lookup") controller.setLookup(field.value);
     else if (field.name === "boardSearch") controller.setBoardSearchDraft(field.value);
     // Kept in state so a re-render re-renders them rather than blanking them.
@@ -2341,6 +2411,15 @@ if (!config) {
     if (field.matches?.("select[data-board-filter]")) {
       controller.setBoardFilter(field.dataset.boardFilter, field.value);
       root.querySelector(`#${field.id}`)?.focus();
+      return;
+    }
+    if (field.matches?.("select[data-volunteer-filter]")) {
+      controller.setVolunteerFilter(field.dataset.volunteerFilter, field.value);
+      root.querySelector(`#${field.id}`)?.focus();
+      return;
+    }
+    if (field.closest?.("#volunteer-form") && field.name === "language" && field.value === "other") {
+      syncVolunteerOther();
       return;
     }
     if (field.id === "field-confirmed") {
@@ -2386,7 +2465,10 @@ if (!config) {
       }
       return;
     }
-    if (!form.reportValidity()) return;
+    // The volunteer drawer skips `reportValidity`, which ignores `novalidate`:
+    // a half-typed `type="email"` would get the browser's bubble instead of
+    // the drawer's own sentence (volunteerProblem).
+    if (form.id !== "volunteer-form" && !form.reportValidity()) return;
     const values = new FormData(form);
     try {
       // A staff form carries its action on its own submit button and names its
@@ -2401,6 +2483,8 @@ if (!config) {
       );
       if (form.matches(".contact-form")) {
         await submitContact(form, by);
+      } else if (form.id === "volunteer-form") {
+        await submitVolunteer(form, by);
       } else if (caseControl) {
         await runCaseAction(caseControl, form, by);
       } else if (assistControl) {

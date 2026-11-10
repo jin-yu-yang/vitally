@@ -34,6 +34,7 @@ import { cardsFor } from "./document-cards.mjs";
 import { createShadedSave } from "./shaded-editor.mjs";
 import { createWindowState } from "./window-state.mjs";
 import { isLang, readLanguage, writeLanguage } from "./language.mjs";
+import { volunteerProblem } from "./volunteer-roster.mjs";
 
 // The one place browser state lives. It owns what is loaded, what is being
 // edited, and which action envelope is in flight; it renders nothing and knows
@@ -64,7 +65,13 @@ const CLIENT_SCREENS = Object.freeze([
   "intake",
   "progress",
 ]);
-const STAFF_SCREENS = Object.freeze(["staff", "staff-case", "office-cases", "office-add-case"]);
+const STAFF_SCREENS = Object.freeze([
+  "staff",
+  "staff-case",
+  "office-cases",
+  "office-add-case",
+  "office-volunteers",
+]);
 
 // An action whose answer never arrived may or may not have been applied. Those
 // are the only failures worth retrying with the same envelope; a refusal is
@@ -96,6 +103,14 @@ const ASSISTANCE_CONFLICT_MESSAGE =
 const STAFF_CONTACT_GONE_MESSAGE = "This contact is no longer on screen.";
 const STAFF_CONTACT_CONFLICT_MESSAGE =
   "Someone else changed this contact. The newest version is shown — check it and try again.";
+// The Roster's drawer (change add-volunteer-roster-records): its list is read
+// again, but the drawer keeps what was typed, so the admin reopens it to see
+// the newer values. Staff-only, so named STAFF_ like the other staff
+// sentences (no client ever reads them, and they have no 简体).
+const STAFF_VOLUNTEER_CONFLICT_MESSAGE =
+  "Someone else changed this volunteer. Close this and open it again to see their changes.";
+export const VOLUNTEER_CONFLICT_MESSAGE = STAFF_VOLUNTEER_CONFLICT_MESSAGE;
+const STAFF_VOLUNTEER_GONE_MESSAGE = "This volunteer could not be opened. Close this and try again.";
 const EDIT_CONFLICT_MESSAGE =
   "Someone else changed this application while you were editing. Choose which answers to keep.";
 
@@ -282,8 +297,14 @@ export function createController({
     cases: [],
     // Whether each list has been read (design D6): a first load that failed
     // must never look like an empty list.
-    lists: { cases: "loading", assistance: "loading" },
+    lists: { cases: "loading", assistance: "loading", volunteers: "loading" },
     people: [],
+    // The Roster (admin only): read when its screen opens and after each
+    // save, never live. Its filters and the drawer's own sentence are
+    // window-local and never persisted.
+    volunteers: [],
+    volunteerFilters: { search: "", role: "all" },
+    volunteerFormError: null,
     // The caller's own workspace row, read only for a staff window: the
     // office's defaults.
     workspace: null,
@@ -367,6 +388,9 @@ export function createController({
   // The envelope of the last action whose outcome is unknown. Kept as the very
   // object that was sent, because retrying a copy would be a second action.
   let pendingAction = null;
+  // The Roster save whose outcome is unknown, likewise the very request sent
+  // (`saveVolunteer`). Window memory only: a reload starts without it.
+  let pendingVolunteerSave = null;
   // The screening start for the open case, if one is due or held:
   // `{ action, inFlight, gaveUp }` (`startScreeningIfDue`).
   let screeningStart = null;
@@ -928,10 +952,50 @@ export function createController({
       state.people = await store.listPeople();
       await loadAssistance();
       await loadWorkspace();
+      // The Roster is read only where it is shown (a restored window on it).
+      if (state.screen === "office-volunteers") await readVolunteers();
     } else {
       state.lists.assistance = "ready";
     }
     dataLoaded = true;
+  }
+
+  // The Roster's list (design D9). Only an admin's window asks: the policies
+  // would answer anyone else with no rows, and asking is already a mistake. A
+  // first read that fails marks the list failed, so it never looks empty; one
+  // that loaded once keeps what it shows. It throws, for loadData.
+  async function readVolunteers() {
+    if (!actingAdmin()) return;
+    try {
+      state.volunteers = await store.listVolunteers();
+      state.lists.volunteers = "ready";
+      noteConnected();
+    } catch (error) {
+      if (state.lists.volunteers !== "ready") state.lists.volunteers = "failed";
+      throw error;
+    }
+  }
+
+  // Opening the Roster: read its list, and say a failure with its own Try
+  // again. Never rejects, so the screen's navigation can fire and forget it.
+  async function loadVolunteers() {
+    try {
+      await readVolunteers();
+    } catch (error) {
+      noteLocalFailure(error, loadVolunteers);
+      return;
+    }
+    show();
+  }
+
+  function setVolunteerFilter(key, value) {
+    if (key !== "search" && key !== "role") return;
+    state.volunteerFilters = { ...state.volunteerFilters, [key]: String(value ?? "") };
+    show();
+  }
+
+  function clearVolunteerFormError() {
+    state.volunteerFormError = null;
   }
 
   // A list that never loaded and whose read failed says so; one that loaded
@@ -1186,9 +1250,13 @@ export function createController({
     state.session = "none";
     state.principal = null;
     state.cases = [];
-    state.lists = { cases: "loading", assistance: "loading" };
+    state.lists = { cases: "loading", assistance: "loading", volunteers: "loading" };
     dataLoaded = false;
     state.people = [];
+    state.volunteers = [];
+    state.volunteerFilters = { search: "", role: "all" };
+    state.volunteerFormError = null;
+    pendingVolunteerSave = null;
     state.assistance = [];
     state.workspace = null;
     state.openPanels = [];
@@ -2628,6 +2696,78 @@ export function createController({
     );
   }
 
+  // The Roster drawer's save: Add when the drawer was opened for nobody, Edit
+  // for the volunteer it names, at the revision this window read. A problem the
+  // window can see (a missing role, a listed email) is said beside the form and
+  // nothing is sent. A refusal is shown in the drawer and thrown, shaped like
+  // `runContactWrite`, and any failure re-reads the list. A landed save whose
+  // re-read fails is a stale list, never a failed save.
+  //
+  // A save whose answer never came (UNKNOWN_OUTCOME) may have landed, so, as
+  // `dispatch` does, it is kept: Save pressed again for the same volunteer with
+  // the same values sends that very request, and its stored receipt answers
+  // instead of a second save (which an Add's own email would refuse). It skips
+  // the window's checks, which the re-read list may now fail on the save's own
+  // result. Changed values are a new save, with a new action id.
+  async function saveVolunteer(values) {
+    if (state.busy) return false;
+    const volunteerId = state.dialogContext?.volunteerId ?? null;
+    let request =
+      pendingVolunteerSave &&
+      pendingVolunteerSave.volunteerId === volunteerId &&
+      JSON.stringify(pendingVolunteerSave.volunteer) === JSON.stringify(values)
+        ? pendingVolunteerSave
+        : null;
+    pendingVolunteerSave = null;
+    if (!request) {
+      const current = volunteerId
+        ? (state.volunteers.find((entry) => entry?.id === volunteerId) ?? null)
+        : null;
+      if (volunteerId && !current)
+        throw refuse("NOT_FOUND", STAFF_VOLUNTEER_GONE_MESSAGE);
+      const problem = volunteerProblem(values, state.volunteers, volunteerId);
+      if (problem) {
+        state.volunteerFormError = problem;
+        show();
+        return false;
+      }
+      request = {
+        actionId: newActionId(),
+        volunteerId,
+        expectedRevision: current ? Number(current.revision) : null,
+        volunteer: values,
+      };
+    }
+    state.volunteerFormError = null;
+    state.busy = true;
+    state.error = null;
+    show();
+    try {
+      await store.saveVolunteer(request);
+    } catch (error) {
+      state.busy = false;
+      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingVolunteerSave = request;
+      noteFailure(
+        error,
+        error?.code === "CONFLICT" ? { message: VOLUNTEER_CONFLICT_MESSAGE } : undefined,
+      );
+      // What the save did, or what changed under it: the list as it is now.
+      await readVolunteers().catch(() => {});
+      show();
+      throw error;
+    }
+    state.busy = false;
+    noteConnected();
+    try {
+      await readVolunteers();
+      state.error = null;
+    } catch (error) {
+      noteFailure(error);
+    }
+    show();
+    return true;
+  }
+
   // Season end: the ticked cases and the revisions the dialog showed. The
   // database moves all of them or none. A refusal is shown inside the dialog,
   // which stays open; a CONFLICT also re-reads the list, so the dialog reopens
@@ -2729,6 +2869,8 @@ export function createController({
       lists: { ...state.lists },
       people: [...state.people],
       assistance: [...state.assistance],
+      volunteers: state.volunteers.map((entry) => ({ ...entry })),
+      volunteerFilters: { ...state.volunteerFilters },
       draftAnswers: { ...state.draftAnswers },
       revealed: [...state.revealed],
       openAddSubsteps: [...state.openAddSubsteps],
@@ -2761,6 +2903,10 @@ export function createController({
     saveOfficeDraft,
     runAssistanceAction,
     logContact,
+    loadVolunteers,
+    setVolunteerFilter,
+    saveVolunteer,
+    clearVolunteerFormError,
     closeUnsigned,
     editContact,
     setBoardFilter,

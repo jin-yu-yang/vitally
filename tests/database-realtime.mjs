@@ -997,6 +997,68 @@ test("Realtime carries one applicant's rows to that applicant only", async (t) =
   }
 });
 
+// OpenSpec change add-volunteer-roster-records (design D3): the row policy on
+// `people` decides what each staff channel receives, so a volunteer with no
+// sign-in is streamed to admins only.
+test("a volunteer with no sign-in reaches admins only", async () => {
+  const f = await createDatabaseFixture();
+  let adminWatch = null;
+  let staffWatch = null;
+  try {
+    const bindings = [{ event: "INSERT", table: "people" }];
+    adminWatch = watchTable(f.siteCoordinator, bindings, "admin");
+    staffWatch = watchTable(f.preparer, bindings, "staff");
+    await withDeadline(adminWatch.subscribed, "the admin channel never subscribed");
+    await withDeadline(staffWatch.subscribed, "the staff channel never subscribed");
+    // A person every staff member may read, each under a fresh key.
+    const probe = async () => {
+      const key = `probe_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+      const added = await f.enrich({
+        addPeople: [{ key, name: "Realtime probe", capabilities: ["assist"] }],
+      });
+      return { id: added[key] };
+    };
+    const byId = (change) => (row) => row.id === change.id;
+    await controlUntilSeen(staffWatch, probe, byId, "the staff warm-up");
+    // The positive control: the admin's channel receives the volunteer.
+    const { produced } = await controlUntilSeen(
+      adminWatch,
+      async () => {
+        const { data, error } = await f.siteCoordinator.rpc("vitally_save_volunteer", {
+          p_action_id: crypto.randomUUID(),
+          p_volunteer_id: null,
+          p_expected_revision: null,
+          p_volunteer: {
+            name: "Casey Morrow",
+            email: `v-${crypto.randomUUID()}@example.org`,
+            phone: null,
+            works: "on_site",
+            languages: ["english"],
+            otherLanguage: null,
+            roles: ["greeter"],
+            certificates: [],
+          },
+        });
+        assert.equal(error, null);
+        return { id: data.personId };
+      },
+      byId,
+      "the volunteer on the admin's channel",
+    );
+    // A later fence on the staff channel: everything committed before it has
+    // been offered to that channel.
+    const fence = await probe();
+    await staffWatch.waitFor(byId(fence), "the fence");
+    assertHealthy(adminWatch, staffWatch);
+    const ids = new Set(staffWatch.rows().map((row) => row.id));
+    for (const { id } of produced) assert.equal(ids.has(id), false, "the staff channel got the volunteer");
+  } finally {
+    adminWatch?.stop();
+    staffWatch?.stop();
+    await f.close();
+  }
+});
+
 // A client subscribed to its own case sees the stage and the result columns
 // move, and never a reject code or a fix note: the filing tables are not in the
 // publication, and the history lines name neither.

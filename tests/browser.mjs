@@ -8419,6 +8419,46 @@ const PRESSABLE =
 
 const mainHeading = (page) => page.evaluate(() => document.querySelector("#main h1")?.textContent.trim() ?? null);
 
+// An unchanged-value update of the workspace: every staff window re-reads
+// everything it holds and redraws.
+const touchWorkspace = (fixture) =>
+  fixture.database.sql(
+    "update public.workspaces set default_followup_person_id=default_followup_person_id where id=$1",
+    [fixture.database.workspaceId],
+  );
+
+// First with nothing pressed or composed, until it has rebuilt the page: the
+// window's realtime channel is joined and a workspace change redraws it. A
+// change made before the channel is joined is never delivered, and on a fresh
+// stack the first join can take a while, so the update is made again every
+// PRESS_REDRAW_RETRY_MS until one redraws the page, within a bound.
+async function warmUpLiveRedraw(t, page, fixture, label) {
+  const warmedUp = Date.now();
+  let warmUpdates = 0;
+  await page.evaluate(() => document.querySelector("#main")?.setAttribute("data-rebuild-marker", "1"));
+  for (;;) {
+    await touchWorkspace(fixture);
+    warmUpdates += 1;
+    const rebuilt = await page
+      .waitForFunction(
+        () => Boolean(document.querySelector("#main")) && !document.querySelector("#main[data-rebuild-marker]"),
+        undefined,
+        { timeout: PRESS_REDRAW_RETRY_MS, polling: 100 },
+      )
+      .then(() => true, (error) => {
+        if (error?.name === "TimeoutError") return false;
+        throw error;
+      });
+    if (rebuilt) break;
+    if (Date.now() - warmedUp >= PRESS_CHANNEL_MS)
+      throw new Error(
+        `${warmUpdates} no-change updates of the workspace in ${PRESS_CHANNEL_MS}ms never redrew the page ` +
+          `(is the window's realtime channel joined?). The screen read: ${await mainHeading(page)}`,
+      );
+  }
+  t.diagnostic(`${label} warm-up: ${warmUpdates} update(s), ${Date.now() - warmedUp}ms`);
+}
+
 async function runPressHold(t, engineName) {
   const fixture = await createBrowserFixture();
   let win = null;
@@ -8435,42 +8475,7 @@ async function runPressHold(t, engineName) {
     });
     await waitForText(page, OFFICE_BOARD_HEADING, RENDER_MS);
     await waitForQuiet(page);
-    // An unchanged-value update of the workspace: every staff window re-reads
-    // everything it holds and redraws.
-    const touchWorkspace = () =>
-      fixture.database.sql(
-        "update public.workspaces set default_followup_person_id=default_followup_person_id where id=$1",
-        [fixture.database.workspaceId],
-      );
-    // First with nothing pressed, until it has rebuilt the page: the window's
-    // realtime channel is joined and a workspace change redraws it. A change
-    // made before the channel is joined is never delivered, and on a fresh
-    // stack the first join can take a while, so the update is made again
-    // every PRESS_REDRAW_RETRY_MS until one redraws the page, within a bound.
-    const warmedUp = Date.now();
-    let warmUpdates = 0;
-    await page.evaluate(() => document.querySelector("#main")?.setAttribute("data-rebuild-marker", "1"));
-    for (;;) {
-      await touchWorkspace();
-      warmUpdates += 1;
-      const rebuilt = await page
-        .waitForFunction(
-          () => Boolean(document.querySelector("#main")) && !document.querySelector("#main[data-rebuild-marker]"),
-          undefined,
-          { timeout: PRESS_REDRAW_RETRY_MS, polling: 100 },
-        )
-        .then(() => true, (error) => {
-          if (error?.name === "TimeoutError") return false;
-          throw error;
-        });
-      if (rebuilt) break;
-      if (Date.now() - warmedUp >= PRESS_CHANNEL_MS)
-        throw new Error(
-          `${warmUpdates} no-change updates of the workspace in ${PRESS_CHANNEL_MS}ms never redrew the page ` +
-            `(is the window's realtime channel joined?). The screen read: ${await mainHeading(page)}`,
-        );
-    }
-    t.diagnostic(`press-hold ${engineName} warm-up: ${warmUpdates} update(s), ${Date.now() - warmedUp}ms`);
+    await warmUpLiveRedraw(t, page, fixture, `press-hold ${engineName}`);
 
     // Mark `#main`, press and hold the control, and cause a redraw. Returns
     // once the redraw has been asked for (the re-read is answered and the
@@ -8502,7 +8507,7 @@ async function runPressHold(t, engineName) {
           (response) => new URL(response.url()).pathname === "/rest/v1/workspaces",
           { timeout: ARRIVAL_MS },
         );
-        await touchWorkspace();
+        await touchWorkspace(fixture);
         // The proof that the redraw was asked for: this window read the
         // workspace again after the update, and everything it read with it
         // has been answered (the redraw is requested at the end of that chain).
@@ -8611,6 +8616,135 @@ for (const [engineName, label] of [
     (t) => runPressHold(t, engineName),
   );
 
+// ---------------------------------------------------------------------------
+// An IME composition while a redraw arrives (review of #187)
+// ---------------------------------------------------------------------------
+
+// A redraw replaces every field, so one that lands mid-composition loses the
+// half-typed text of a pinyin or Cantonese input method. The app holds a
+// redraw during a composition on every page, and draws it once at
+// compositionend. This composes on the Roster, as an admin typing a Chinese
+// name: in the drawer's name field while a realtime redraw arrives, and in the
+// search box, whose own input redraws the list.
+//
+// Chrome only. Its DevTools protocol drives a real composition
+// (`Input.imeSetComposition`, then `Input.insertText` to commit), with the
+// browser's own compositionstart, input and compositionend. Playwright has no
+// way to drive an IME in Firefox, and dispatching composition events from
+// the page would test only the listeners, not the browser's composition, so
+// there is no Firefox variant.
+async function runImeHold(t) {
+  const fixture = await createBrowserFixture();
+  let win = null;
+  try {
+    const engine = await fixture.launch("chrome");
+    win = await openWindow(engine);
+    const { page } = win;
+    await loginTestUser({ page, actor: fixture.actor("siteCoordinator"), fixture, heading: OFFICE_BOARD_HEADING });
+    await clickAction(page, "open-volunteers");
+    await page.locator("tr.volunteer-row").first().waitFor({ timeout: ARRIVAL_MS });
+    const listed = await page.locator("tr.volunteer-row").count();
+    await waitForQuiet(page);
+    await warmUpLiveRedraw(t, page, fixture, "ime-hold chrome");
+    const cdp = await page.context().newCDPSession(page);
+    const fieldNow = (selector) =>
+      page.evaluate((wanted) => {
+        const field = document.querySelector(wanted);
+        return {
+          marked: field?.dataset.imeMarker === "1",
+          value: field?.value ?? null,
+          focused: Boolean(field) && document.activeElement === field,
+        };
+      }, selector);
+    const mark = (selector) =>
+      page.evaluate((wanted) => { document.querySelector(wanted).dataset.imeMarker = "1"; }, selector);
+
+    // 1. The drawer's name field. "Lin " is typed, then "chen" is composing
+    //    when a live redraw is asked for: the field is not replaced, and the
+    //    composition is still there. Committing 陈 ends it, and the held
+    //    redraw then draws once, with the name and the keyboard kept.
+    await clickAction(page, "open-add-volunteer");
+    const name = page.locator("#volunteer-name");
+    await name.waitFor({ timeout: RENDER_MS });
+    await waitForQuiet(page);
+    await name.click({ timeout: CLICK_MS });
+    await page.keyboard.type("Lin ");
+    await mark("#volunteer-name");
+    await cdp.send("Input.imeSetComposition", { text: "chen", selectionStart: 4, selectionEnd: 4 });
+    const reread = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/rest/v1/workspaces",
+      { timeout: ARRIVAL_MS },
+    );
+    await touchWorkspace(fixture);
+    // The proof that the redraw was asked for: the window read the workspace
+    // again, and everything read with it has been answered.
+    assert.equal((await reread).ok(), true, "the workspace re-read failed");
+    await waitForQuiet(page, { quiet: 200 });
+    assert.deepEqual(
+      await fieldNow("#volunteer-name"),
+      { marked: true, value: "Lin chen", focused: true },
+      "a live redraw replaced the name field mid-composition",
+    );
+    await cdp.send("Input.insertText", { text: "陈" });
+    await waitFor(
+      page,
+      "the redraw held during the composition to run after compositionend",
+      () => Boolean(document.querySelector("#volunteer-name")) && document.querySelector("#volunteer-name").dataset.imeMarker !== "1",
+      undefined,
+      RENDER_MS,
+    );
+    assert.deepEqual(
+      await fieldNow("#volunteer-name"),
+      { marked: false, value: "Lin 陈", focused: true },
+      "the composed name or the keyboard was lost when the held redraw ran",
+    );
+    await clickAction(page, "close-dialog");
+    await waitFor(page, "the volunteer drawer to close", () => !document.querySelector("#volunteer-form"), undefined, RENDER_MS);
+
+    // 2. The search box: each input filters and redraws the list. While
+    //    "wang" is composing, that redraw is held and the box is the same
+    //    one; committing 王 draws the filtered list once, with 王 in the box
+    //    and the keyboard in it.
+    const search = page.locator("#volunteer-search");
+    await waitForQuiet(page);
+    await search.click({ timeout: CLICK_MS });
+    await mark("#volunteer-search");
+    await cdp.send("Input.imeSetComposition", { text: "wang", selectionStart: 4, selectionEnd: 4 });
+    await waitForQuiet(page, { quiet: 200 });
+    assert.deepEqual(
+      await fieldNow("#volunteer-search"),
+      { marked: true, value: "wang", focused: true },
+      "the search's own redraw replaced the box mid-composition",
+    );
+    assert.equal(await page.locator("tr.volunteer-row").count(), listed, "the list was filtered mid-composition");
+    await cdp.send("Input.insertText", { text: "王" });
+    await waitFor(
+      page,
+      "the search for 王 to redraw the list once the composition ended",
+      () =>
+        document.querySelector("#volunteer-search")?.dataset.imeMarker !== "1" &&
+        document.querySelectorAll("tr.volunteer-row").length === 0,
+      undefined,
+      RENDER_MS,
+    );
+    assert.deepEqual(
+      await fieldNow("#volunteer-search"),
+      { marked: false, value: "王", focused: true },
+      "the composed search or the keyboard was lost when the held redraw ran",
+    );
+
+    assertConsoleQuiet(win, { name: "chrome admin window" });
+  } finally {
+    await fixture.close();
+  }
+}
+
+test(
+  "Chrome: an IME composition on a staff page keeps its text when a redraw arrives, and the redraw runs after (review of #187)",
+  { timeout: PRESS_HOLD_TIMEOUT_MS },
+  (t) => runImeHold(t),
+);
+
 test(
   "Chrome client and Firefox staff run the whole demonstration story",
   { timeout: PERMUTATION_TIMEOUT_MS },
@@ -8621,4 +8755,320 @@ test(
   "Firefox client and Chrome staff run the whole demonstration story",
   { timeout: PERMUTATION_TIMEOUT_MS },
   (t) => runPermutation(t, { client: "firefox", staff: "chrome" }),
+);
+
+// The Roster (change add-volunteer-roster-records) has its own test, outside
+// the story and its time limit: it adds no phase to either order. Chrome
+// only, on a fixture of its own, as the Site Coordinator (the admin) and,
+// for the check that nobody else is offered it, the Preparer. Fictional
+// people and example.org addresses only. It runs after both orders, so a
+// story leg starts the same way it does on main.
+test(
+  "An admin adds, finds and edits a volunteer on the Roster",
+  { timeout: 300_000 },
+  async () => {
+    const fixture = await createBrowserFixture();
+    const NAME = "Rowan Ellery";
+    const EDITED_NAME = "Rowan Ellery-Park";
+    const EMAIL = "rowan.ellery@example.org";
+    const PHONE = "(215) 555-0177";
+    const OTHER_LANGUAGE = "Tagalog";
+    const rowOf = (page, name) =>
+      page.locator("tr.volunteer-row").filter({
+        has: page.locator(".volunteer-name", { hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&")}$`) }),
+      });
+    const rowNames = (page) =>
+      page.evaluate(() => [...document.querySelectorAll("tr.volunteer-row .volunteer-name")].map((n) => n.textContent.trim()));
+    const drawerOpen = (page, title) =>
+      waitFor(
+        page,
+        `the volunteer drawer titled ${JSON.stringify(title)}`,
+        (wanted) =>
+          Boolean(document.querySelector("#volunteer-form")) &&
+          (document.querySelector(".modal")?.innerText ?? "").includes(wanted),
+        title,
+        RENDER_MS,
+      );
+    const drawerClosed = (page) =>
+      waitFor(page, "the volunteer drawer to close", () => !document.querySelector("#volunteer-form"), undefined, ARRIVAL_MS);
+    // What the drawer holds now: its text, which boxes are ticked, and whether
+    // the Other language field is really shown (Playwright's visibility, so a
+    // stylesheet that beat `hidden` would be caught).
+    const drawerValues = async (page) => ({
+      ...(await page.evaluate(() => {
+        const form = document.querySelector("#volunteer-form");
+        return {
+          name: form.querySelector("#volunteer-name").value,
+          phone: form.querySelector("#volunteer-phone").value,
+          otherLanguage: form.querySelector("#volunteer-other-language-input").value,
+          ticked: [...form.querySelectorAll('input[type="checkbox"]:checked')].map((box) => box.id),
+        };
+      })),
+      otherShown: await page.locator("#volunteer-other-language").isVisible(),
+    });
+    try {
+      const engine = await fixture.launch("chrome");
+      const admin = await engine.newPage({ viewport: DESKTOP });
+      const page = admin.page;
+      await guardToast(page);
+
+      // 1. The admin opens the Roster: the workspace's staff are on it, with
+      //    nothing recorded for them yet.
+      await loginTestUser({ page, actor: fixture.actor("siteCoordinator"), fixture, heading: OFFICE_BOARD_HEADING });
+      assert.equal(await readSignedInAs(page), ROLE_NAMES.siteCoordinator);
+      await clickAction(page, "open-volunteers");
+      await waitFor(
+        page,
+        "the Roster to list the staff",
+        (name) =>
+          [...document.querySelectorAll("tr.volunteer-row .volunteer-name")].some((n) => n.textContent.trim() === name),
+        ROLE_NAMES.siteCoordinator,
+        ARRIVAL_MS,
+      );
+      await waitForText(page, "Roles and certificates are recorded here. They don't change what anyone can do in ViTally yet.");
+      for (const name of Object.values(ROLE_NAMES)) {
+        const row = rowOf(page, name);
+        assert.equal(await row.count(), 1, `${name} is not on the Roster once`);
+        assert.match(await row.innerText(), /No roles recorded/, `${name} shows roles before anyone recorded them`);
+      }
+      const staffCount = (await rowNames(page)).length;
+
+      // 2. Add a volunteer. The Other language field shows only while Other
+      //    is ticked. Then a live change redraws the page under the open
+      //    drawer, and what was typed and ticked is still there.
+      await clickAction(page, "open-add-volunteer");
+      await drawerOpen(page, "Add a volunteer");
+      assert.equal(await page.locator("#volunteer-other-language").isVisible(), false, "Other language shows before Other is ticked");
+      await page.locator("#volunteer-language-other").check();
+      await page.locator("#volunteer-other-language").waitFor({ state: "visible", timeout: RENDER_MS });
+      await page.locator("#volunteer-language-other").uncheck();
+      await page.locator("#volunteer-other-language").waitFor({ state: "hidden", timeout: RENDER_MS });
+      await page.locator("#volunteer-name").fill(NAME);
+      await page.locator("#volunteer-language-english").check();
+      await page.locator("#volunteer-language-other").check();
+      await page.locator("#volunteer-other-language-input").fill(OTHER_LANGUAGE);
+      await page.locator("#volunteer-role-preparer").check();
+      const typed = await drawerValues(page);
+      // A `people` change is not one the window redraws for (handleChange
+      // re-reads only for cases, workspaces and assistance items), so the
+      // change is a no-op update of the workspace row, which every staff
+      // window re-reads and redraws for. The redraw is proved, not assumed:
+      // the name field is marked, and the wait is for that mark to be gone
+      // (a new field). The update is repeated, inside one ARRIVAL_MS bound,
+      // in case the realtime channel was not yet joined when it was sent.
+      await page.evaluate(() => {
+        document.querySelector("#volunteer-name").dataset.beforeRedraw = "1";
+      });
+      const redrawBy = Date.now() + ARRIVAL_MS;
+      let redrawn = false;
+      while (!redrawn && Date.now() < redrawBy) {
+        await fixture.database.sql(
+          "update public.workspaces set default_followup_person_id=default_followup_person_id where id=$1",
+          [fixture.database.workspaceId],
+        );
+        redrawn = await page
+          .waitForFunction(() => !document.querySelector("#volunteer-name")?.dataset.beforeRedraw, undefined, {
+            timeout: 2_000,
+            polling: 100,
+          })
+          .then(() => true, () => false);
+      }
+      assert.ok(redrawn, `no live redraw reached the open drawer within ${ARRIVAL_MS}ms`);
+      await waitForQuiet(page);
+      assert.deepEqual(await drawerValues(page), typed, "the redraw lost what was typed or ticked in the drawer");
+      assert.equal(typed.otherShown, true);
+
+      // 3. Finish the form and save: the drawer closes and the row appears.
+      await page.locator("#volunteer-email").fill(EMAIL);
+      await page.locator("#volunteer-phone").fill(PHONE);
+      await page.locator("#volunteer-certificate-vsc").check();
+      await page.locator('#volunteer-form button[type="submit"]').click({ timeout: CLICK_MS });
+      await drawerClosed(page);
+      await rowOf(page, NAME).waitFor({ timeout: ARRIVAL_MS });
+      const added = await rowOf(page, NAME).innerText();
+      for (const fact of [EMAIL, PHONE, "Preparer", "VSC", `English, ${OTHER_LANGUAGE}`])
+        assert.ok(added.includes(fact), `the new row does not show ${fact}: ${added}`);
+      assert.equal((await rowNames(page)).length, staffCount + 1);
+      const volunteerId = await rowOf(page, NAME).locator('[data-action="open-edit-volunteer"]').getAttribute("data-volunteer-id");
+      assert.ok(volunteerId);
+
+      // Text typed for one volunteer and closed without saving goes with the
+      // drawer: Add, and that volunteer's Edit again, open clean.
+      const avery = rowOf(page, ROLE_NAMES.siteCoordinator).locator('[data-action="open-edit-volunteer"]');
+      await waitForQuiet(page);
+      await avery.click({ timeout: CLICK_MS });
+      await drawerOpen(page, ROLE_NAMES.siteCoordinator);
+      await page.locator("#volunteer-name").fill("Leftover Name");
+      await page.locator("#volunteer-phone").fill("(215) 555-0199");
+      await page.locator("#volunteer-role-greeter").check();
+      await page.locator("#volunteer-language-other").check();
+      await page.locator("#volunteer-other-language-input").fill("Leftover language");
+      await clickAction(page, "close-dialog");
+      await drawerClosed(page);
+      await clickAction(page, "open-add-volunteer");
+      await drawerOpen(page, "Add a volunteer");
+      assert.deepEqual(
+        await drawerValues(page),
+        { name: "", phone: "", otherLanguage: "", ticked: [], otherShown: false },
+        "Add opened with text or ticks left from another volunteer's closed drawer",
+      );
+      await clickAction(page, "close-dialog");
+      await drawerClosed(page);
+      await waitForQuiet(page);
+      await avery.click({ timeout: CLICK_MS });
+      await drawerOpen(page, ROLE_NAMES.siteCoordinator);
+      assert.deepEqual(
+        await drawerValues(page),
+        { name: ROLE_NAMES.siteCoordinator, phone: "", otherLanguage: "", ticked: [], otherShown: false },
+        "Edit opened again with the text or ticks typed before Cancel",
+      );
+      await clickAction(page, "close-dialog");
+      await drawerClosed(page);
+
+      // 4. Search by part of the phone: only that row, and every keystroke's
+      //    redraw keeps the keyboard in the box, with the caret where it was
+      //    (a key typed at the start leaves the caret after it, not at the end).
+      const search = page.locator("#volunteer-search");
+      await waitForQuiet(page);
+      await search.click({ timeout: CLICK_MS });
+      await page.keyboard.type("55-0177");
+      await page.keyboard.press("Home");
+      await page.keyboard.type("5");
+      await waitFor(
+        page,
+        "the search to show only the new volunteer",
+        (name) => {
+          const names = [...document.querySelectorAll("tr.volunteer-row .volunteer-name")].map((n) => n.textContent.trim());
+          return names.length === 1 && names[0] === name;
+        },
+        NAME,
+        RENDER_MS,
+      );
+      assert.deepEqual(
+        await page.evaluate(() => {
+          const box = document.activeElement;
+          return { id: box?.id, value: box?.value, start: box?.selectionStart, end: box?.selectionEnd };
+        }),
+        { id: "volunteer-search", value: "555-0177", start: 1, end: 1 },
+        "the search box lost the keyboard or its caret",
+      );
+      await waitForText(page, `1 of ${staffCount + 1} volunteers`, RENDER_MS);
+      await search.fill("");
+      await waitFor(
+        page,
+        "the cleared search to show everyone",
+        (count) => document.querySelectorAll("tr.volunteer-row").length === count,
+        staffCount + 1,
+        RENDER_MS,
+      );
+      await page.locator("#volunteer-role-filter").selectOption("reviewer");
+      await waitForTextGone(page, NAME, RENDER_MS);
+      assert.equal(await rowOf(page, NAME).count(), 0);
+      await page.locator("#volunteer-role-filter").selectOption("all");
+      await rowOf(page, NAME).waitFor({ timeout: RENDER_MS });
+
+      // 5. Edit the new volunteer's name and save: the table shows it, and
+      //    the keyboard is back on that row's Edit button.
+      const editButton = `[data-action="open-edit-volunteer"][data-volunteer-id="${volunteerId}"]`;
+      await waitForQuiet(page);
+      await page.locator(editButton).click({ timeout: CLICK_MS });
+      await drawerOpen(page, NAME);
+      await page.locator("#volunteer-name").fill(EDITED_NAME);
+      await page.locator('#volunteer-form button[type="submit"]').click({ timeout: CLICK_MS });
+      await drawerClosed(page);
+      await rowOf(page, EDITED_NAME).waitFor({ timeout: ARRIVAL_MS });
+      assert.equal(await rowOf(page, NAME).count(), 0, "the old name is still on the Roster");
+      await waitFor(
+        page,
+        "the keyboard to be back on the edited row's Edit button",
+        (selector) => document.activeElement?.matches?.(selector) === true,
+        editButton,
+        RENDER_MS,
+      );
+      assert.equal(await page.locator(editButton).getAttribute("aria-label"), `Edit ${EDITED_NAME}`);
+
+      // 6. A save whose answer is lost (review of #187): the database runs
+      //    the save, but its reply never reaches the window. Save pressed
+      //    again sends the same request, the stored receipt answers, and the
+      //    drawer closes on one volunteer and one receipt, not a refusal of
+      //    the volunteer's own email.
+      const LOST_NAME = "Quinn Marlowe";
+      const LOST_EMAIL = "quinn.marlowe@example.org";
+      const saveReceipts = async () =>
+        (
+          await fixture.database.sql(
+            "select action_id::text as id from public.action_receipts where workspace_id=$1 and operation='SAVE_VOLUNTEER'",
+            [fixture.database.workspaceId],
+          )
+        ).rows.map((row) => row.id);
+      const receiptsBefore = new Set(await saveReceipts());
+      await waitForQuiet(page);
+      await clickAction(page, "open-add-volunteer");
+      await drawerOpen(page, "Add a volunteer");
+      await page.locator("#volunteer-name").fill(LOST_NAME);
+      await page.locator("#volunteer-email").fill(LOST_EMAIL);
+      await page.locator("#volunteer-role-greeter").check();
+      const sentSaves = [];
+      let landedStatus = null;
+      await page.route("**/rest/v1/rpc/vitally_save_volunteer", async (route) => {
+        sentSaves.push(route.request().postDataJSON());
+        if (sentSaves.length > 1) return route.continue();
+        const landed = await route.fetch(); // the database runs the save…
+        landedStatus = landed.status();
+        await route.abort("failed"); // …and its answer never arrives
+      });
+      const consoleBefore = admin.errors.length;
+      const submit = page.locator('#volunteer-form button[type="submit"]');
+      await submit.click({ timeout: CLICK_MS });
+      await waitFor(
+        page,
+        "the drawer to say the lost save did not go through",
+        () => Boolean(document.querySelector("#volunteer-form #drawer-error")),
+        undefined,
+        ARRIVAL_MS,
+      );
+      assert.equal(landedStatus, 200, "the first save did not land in the database");
+      // The list behind the drawer was read again, and shows what the save did.
+      await rowOf(page, LOST_NAME).waitFor({ state: "attached", timeout: ARRIVAL_MS });
+      await waitForQuiet(page);
+      await submit.click({ timeout: CLICK_MS });
+      await drawerClosed(page);
+      await page.unroute("**/rest/v1/rpc/vitally_save_volunteer");
+      assert.equal(sentSaves.length, 2);
+      assert.equal(sentSaves[1].p_action_id, sentSaves[0].p_action_id, "Save again sent a new action");
+      assert.equal(await rowOf(page, LOST_NAME).count(), 1, "the volunteer is not on the Roster once");
+      assert.equal(
+        (
+          await fixture.database.sql(
+            "select 1 from public.volunteer_profiles where workspace_id=$1 and email=$2",
+            [fixture.database.workspaceId, LOST_EMAIL],
+          )
+        ).rows.length,
+        1,
+        "one volunteer",
+      );
+      assert.deepEqual(
+        (await saveReceipts()).filter((id) => !receiptsBefore.has(id)),
+        [sentSaves[0].p_action_id],
+        "one receipt, for that save",
+      );
+      // The aborted reply is logged by the engine; nothing else may be.
+      const lostLines = admin.errors.splice(consoleBefore);
+      assert.ok(
+        lostLines.every((line) => /Failed to load resource|net::ERR_FAILED|Failed to fetch/i.test(line)),
+        `unexplained console errors around the lost save: ${JSON.stringify(lostLines.map(redactAddresses))}`,
+      );
+      assertConsoleQuiet(admin, { name: "the admin's Roster window" });
+
+      // 7. Somebody without admin is not offered the Roster.
+      const preparer = await engine.newPage({ viewport: DESKTOP });
+      await guardToast(preparer.page);
+      await loginTestUser({ page: preparer.page, actor: fixture.actor("preparer"), fixture, heading: WORK_BOARD_HEADING });
+      assert.equal(await readSignedInAs(preparer.page), ROLE_NAMES.preparer);
+      assert.equal(await preparer.page.locator('[data-action="open-volunteers"]').count(), 0, "the Preparer is offered the Roster");
+      assertConsoleQuiet(preparer, { name: "the Preparer's window" });
+    } finally {
+      await fixture.close();
+    }
+  },
 );

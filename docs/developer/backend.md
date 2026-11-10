@@ -165,7 +165,7 @@ The roster is a JSON file (a `.vitally-roster*.json` file, ignored by version co
 
 For each staff entry the command creates the Auth account as it does for any address, then, inside
 `initializeWorkspace`'s one serializable transaction, calls `add_staff_member` (and
-`set_default_followup` once, when given). Staff are always **new** people. Re-running the same roster is safe; different values for an existing key or account are
+`set_default_followup` once, when given). Since 044, if a volunteer with no sign-in on the Roster has the same email as the account (compared lower-case), the command links that person instead of adding a new one: it sets the key, capabilities and sign-in from the file, keeps the Roster's name, and reports each link by key (`preparer was linked to a volunteer already on the Roster.`, with a second sentence when the Roster's name was kept and differs from the file's). It never prints an address. Linking trusts an email an admin typed, so check the report. Otherwise staff are **new** people, who also get an empty Roster entry. Re-running the same roster is safe; different values for an existing key or account are
 refused, and changing a staff member's capabilities is not supported. Memberships, people and the
 default are atomic, but the Auth account is created first, outside the transaction: a failed run can
 leave a confirmed account with no membership, and a re-run completes it. The command never prints an

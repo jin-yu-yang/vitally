@@ -342,7 +342,7 @@ test("the drawer is the modal frame at the edge, and each dialog names its place
 });
 
 test("the drawer list is exported once, for the renderer and app.mjs's focus fallback alike", () => {
-  assert.deepEqual([...DRAWERS], ["log-call", "resolve-help"]);
+  assert.deepEqual([...DRAWERS], ["log-call", "resolve-help", "volunteer"]);
   assert.ok(Object.isFrozen(DRAWERS));
   const app = readFileSync(fileURLToPath(new URL("../src/app.mjs", import.meta.url)), "utf8");
   assert.doesNotMatch(app, /\["log-call",\s*"resolve-help"\]/);
@@ -1193,19 +1193,23 @@ test("app.mjs says back online only after a real loss (design D7)", () => {
   assert.match(app, /let drawnConnection = "unknown";/);
 });
 
-test("a press holds a render on every page; an IME composition only on the version-2 form (#186)", () => {
+test("a press and an IME composition hold a render on every page (#186, review of #187)", () => {
   const app = appSource();
+  assert.match(app, /import \{ createRedrawHold \} from "\.\/redraw-hold\.mjs";/);
   const renderBody = app.slice(app.indexOf("function render(focus = false) {"), app.indexOf("function v2OnPage("));
-  // The press half no longer asks whether the version-2 form is on the page:
-  // a realtime redraw under a staff button swallowed its click.
-  assert.match(renderBody, /if \(pointerHeld \|\| \(v2OnPage\(\) && composing\)\) \{\s*heldRender = heldRender \|\| focus;\s*return;\s*\}/);
-  assert.doesNotMatch(renderBody, /v2OnPage\(\) && \(pointerHeld/);
-  // The flush asks the same, and runs a task after the pointer comes up, so
-  // the press's own click is handled before the held render replaces it.
+  // Neither half asks whether the version-2 form is on the page: a realtime
+  // redraw under a staff button swallowed its click, and one under a staff
+  // field mid-composition lost the half-typed text.
+  assert.match(renderBody, /if \(redrawHold\.request\(focus\)\) return;\s*(\/\/[^\n]*\n\s*)?redrawHold\.drawn\(\);/);
+  assert.doesNotMatch(app, /v2OnPage\(\) && composing|pointerHeld|heldRender/);
+  // The flush asks the same; the hold schedules it a task after the pointer
+  // comes up or the composition ends (redraw-hold.test.mjs).
   const flush = app.slice(app.indexOf("function flushHeld() {"), app.indexOf("function afterPress("));
-  assert.match(flush, /if \(pointerHeld \|\| \(v2OnPage\(\) && composing\)\) return;/);
-  assert.match(app, /pointerHeld = false;\s*clearTimeout\(holdTimer\);\s*setTimeout\(flushHeld, 0\);/);
+  assert.match(flush, /if \(redrawHold\.holding\(\)\) return;/);
   assert.match(app, /window\.addEventListener\("pointerup", release, true\);/);
+  assert.match(app, /root\.addEventListener\("pointerdown", \(\) => \{\s*redrawHold\.press\(\);/);
+  assert.match(app, /root\.addEventListener\("compositionstart", \(\) => redrawHold\.compositionStart\(\)\);/);
+  assert.match(app, /root\.addEventListener\("compositionend", \(\) => redrawHold\.compositionEnd\(\)\);/);
 });
 
 test("the page behind an open dialog is inert, on every render, and never when it closes", () => {
@@ -1400,4 +1404,86 @@ test("a staff account's screens name it and act as no one", () => {
   const add = { ...base, screen: "office-add-case", workspace: { defaultIntakeVersion: 2 }, officeDraft: true, draftAnswers: {} };
   assert.match(staffScreen({ ...add, demoTools: true }), /data-action="fill-assisted-intake"/);
   assert.doesNotMatch(staffScreen({ ...add, demoTools: false }), /fill-assisted-intake/);
+});
+
+// Change add-volunteer-roster-records (Task 5): the Roster's wiring. app.mjs has
+// no DOM harness, so the wiring is pinned here and the browser test proves it.
+test("an Edit button on the Roster is found again by its volunteer", () => {
+  const edit = { id: "", name: "", dataset: { action: "open-edit-volunteer", volunteerId: "vol-2" }, tagName: "BUTTON" };
+  const selectors = focusSelectors(describeFocus(edit));
+  assert.ok(
+    selectors.some((s) => s.includes('data-action="open-edit-volunteer"') && s.includes('data-volunteer-id="vol-2"')),
+    selectors.join(" | "),
+  );
+});
+
+test("app.mjs opens the Roster and loads it, behind the Add a case guard", () => {
+  const app = appSource();
+  const exits = app.slice(app.indexOf("const EXITS = Object.freeze({"), app.indexOf("function leaveAddCaseFirst("));
+  assert.match(
+    exits,
+    /"open-volunteers": \(\) => \{\s*formDrafts\.clear\(\);\s*controller\.navigate\("office-volunteers"\);\s*void controller\.loadVolunteers\(\);\s*\}/,
+  );
+  assert.match(
+    app,
+    /case "open-volunteers":\s*if \(leaveAddCaseFirst\("open-volunteers", target\)\) break;\s*EXITS\["open-volunteers"\]\(\);/,
+  );
+});
+
+test("app.mjs opens the volunteer drawer clean, for Add and for Edit", () => {
+  const app = appSource();
+  const open = app.slice(app.indexOf('case "open-add-volunteer":'), app.indexOf('case "open-add-volunteer":') + 900);
+  assert.match(open, /case "open-edit-volunteer":/);
+  assert.match(open, /controller\.dismissError\(\);/);
+  assert.match(open, /controller\.clearVolunteerFormError\(\);/);
+  assert.match(open, /forgetVolunteerDrafts\(\);/);
+  assert.match(open, /openDialog\("volunteer", id \? \{ volunteerId: id \} : null, describeFocus\(target\)\)/);
+});
+
+test("app.mjs wires the Roster's search, role filter and Other language", () => {
+  const app = appSource();
+  assert.match(app, /field\.name === "volunteerSearch"/);
+  assert.match(app, /controller\.setVolunteerFilter\("search", field\.value\)/);
+  assert.match(app, /#volunteer-search/);
+  assert.match(app, /setSelectionRange\(/);
+  assert.match(app, /select\[data-volunteer-filter\]/);
+  assert.match(app, /controller\.setVolunteerFilter\(field\.dataset\.volunteerFilter, field\.value\)/);
+  // The Other box shows or hides its field at once, and after every redraw
+  // that put a tick back.
+  const sync = app.slice(app.indexOf("function syncVolunteerOther("), app.indexOf("function syncVolunteerOther(") + 500);
+  assert.match(sync, /#volunteer-language-other/);
+  assert.match(sync, /\.hidden = !/);
+  const render = app.slice(app.indexOf("function render("), app.indexOf("function restoreFormDrafts("));
+  assert.match(render, /restoreFormDrafts\(\);[\s\S]*syncVolunteerOther\(\);/);
+});
+
+test("app.mjs saves the volunteer drawer and closes it only on success", () => {
+  const app = appSource();
+  assert.match(app, /form\.id === "volunteer-form"\) \{\s*(?:\/\/[^\n]*\n\s*)*await submitVolunteer\(form, by\);/);
+  const submit = app.slice(app.indexOf("async function submitVolunteer("), app.indexOf("async function submitVolunteer(") + 600);
+  assert.match(submit, /volunteerFromForm\(new FormData\(form\)\)/);
+  assert.match(submit, /await controller\.saveVolunteer\(/);
+  assert.match(submit, /if \(saved\) closeDialog\("#main"\)/);
+});
+
+test("closing the volunteer drawer forgets every field typed in it, and falls back to #main", () => {
+  const app = appSource();
+  const close = app.slice(app.indexOf("function closeDialog("), app.indexOf("function fictional("));
+  assert.match(close, /=== "volunteer"\s*\?\s*"#main"/);
+  assert.match(close, /forgetVolunteerDrafts\(\);/);
+  const forget = app.slice(app.indexOf("function forgetVolunteerDrafts("), app.indexOf("function forgetVolunteerDrafts(") + 600);
+  assert.match(forget, /clearFormDrafts\(root\.querySelector\("#volunteer-form"\)\)/);
+});
+
+test("the Roster's styles: a hidden Other language field is really hidden, on tokens only", () => {
+  const css = stylesheet();
+  assert.match(css, /#volunteer-form \.field\[hidden\]\s*\{\s*display:\s*none;?\s*\}/);
+  const start = css.indexOf("/* Volunteers: the Roster */");
+  const end = css.indexOf("/* end Volunteers */");
+  assert.ok(start >= 0 && end > start, "the Roster block is marked");
+  const block = css.slice(start, end);
+  const hexes = (block.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []).filter((hex) => hex.toLowerCase() !== "#fff");
+  assert.deepEqual(hexes, []);
+  assert.doesNotMatch(block, /border-(left|right)\s*:/, "no vertical lines in the table");
+  assert.doesNotMatch(block, /(?<![-\w])width:\s*\d+px/, "no fixed widths");
 });
