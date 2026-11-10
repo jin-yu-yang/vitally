@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createDatabaseFixture, applyArgs, rejected } from "./support/database-fixture.mjs";
+import { openDatabase } from "../tools/admin/database.mjs";
+import { SEED_VOLUNTEERS } from "../tools/admin/seed-values.mjs";
+import { seedVolunteers } from "../tools/admin/seed-cases.mjs";
 import { findRosterLink } from "../tools/admin/workspace-setup.mjs";
 
 // OpenSpec change add-volunteer-roster-records (design D2-D6): the admin-only
@@ -486,6 +489,31 @@ test("volunteer roster records against real Supabase", async (t) => {
       assert.equal(await findRosterLink(f.sql, f.workspaceId, account.userId), null);
       const stranger = await f.provision();
       assert.equal(await findRosterLink(f.sql, f.workspaceId, stranger.userId), null);
+    });
+
+    await t.test("seedVolunteers twice leaves exactly the rehearsal volunteers", async () => {
+      const emails = SEED_VOLUNTEERS.map((v) => v.email);
+      const staffQuery =
+        "select id,name,capabilities,user_id from public.people where workspace_id=$1 and user_id is not null order by id";
+      const staffBefore = await f.sql(staffQuery, [f.workspaceId]);
+      const db = await openDatabase({ kind: "test" });
+      try {
+        const args = { workspaceId: f.workspaceId, actorUserId: f.siteCoordinatorUserId };
+        assert.equal(await seedVolunteers(db, args), 8);
+        assert.equal(await seedVolunteers(db, args), 8);
+      } finally {
+        await db.end();
+      }
+      assert.equal(
+        await count(
+          f,
+          "select count(*) n from public.people p join public.volunteer_profiles v on v.person_id=p.id where p.workspace_id=$1 and v.email=any($2)",
+          [f.workspaceId, emails],
+        ),
+        8,
+      );
+      const staffAfter = await f.sql(staffQuery, [f.workspaceId]);
+      assert.deepEqual(staffAfter.rows, staffBefore.rows);
     });
   } finally {
     await f.close();
