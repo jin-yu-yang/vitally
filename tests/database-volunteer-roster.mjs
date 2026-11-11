@@ -660,6 +660,74 @@ test("volunteer roster records against real Supabase", async (t) => {
       assert.equal(await clearedOf(f, member.personId), false);
     });
 
+    // Design D7: only what the save takes away counts. A person whose ceiling
+    // lets them be the default follow-up person while their only role is
+    // Preparer lacks `followup` already, and stays saveable.
+    await t.test("open work: a capability already lacking doesn't block an unrelated save", async () => {
+      const member = await f.staff({
+        key: "fay_lacking_followup",
+        name: "Fay Ormond",
+        capabilities: ["prepare", "admin", "followup"],
+        cleared: false,
+      });
+      await f.clearStaff(member.personId, ["prepare"]);
+      assert.deepEqual(await rolesOf(f, member.personId), ["preparer"]);
+      await f.sql("update public.workspaces set default_followup_person_id=$2 where id=$1", [
+        f.workspaceId,
+        member.personId,
+      ]);
+      try {
+        const work = (
+          await f.sql("select needs,label from vitally_private.open_work($1,$2)", [f.workspaceId, member.personId])
+        ).rows;
+        assert.deepEqual(work, [{ needs: "followup", label: "default follow-up person" }]);
+        const certificates = ["vsc", "itqr", "basic"];
+        await save(
+          admin,
+          await editOf(f, member.personId, { name: "Fay Ormond", phone: "412-555-0177", roles: ["preparer"], certificates }),
+        );
+        assert.equal((await profileOf(f, member.personId)).phone, "412-555-0177");
+        await save(
+          admin,
+          await editOf(f, member.personId, { name: "Fay Ormond", roles: ["preparer"], certificates: [...certificates, "sc"] }),
+        );
+        assert.deepEqual(
+          (await certificatesOf(f, member.personId)).map((row) => row.certificate),
+          ["basic", "itqr", "sc", "vsc"],
+        );
+        assert.deepEqual(await rolesOf(f, member.personId), ["preparer"]);
+      } finally {
+        await f.sql("update public.workspaces set default_followup_person_id=$2 where id=$1", [
+          f.workspaceId,
+          f.siteCoordinatorId,
+        ]);
+      }
+    });
+
+    await t.test("open work: an already uncleared person who holds work can be saved", async () => {
+      const prep = await f.staff({ key: "ugo_uncleared_work", name: "Ugo Barrett", capabilities: ["prepare"] });
+      const caseId = await f.readyCase();
+      await f.act(prep.client, caseId, "CLAIM_PREPARATION", {});
+      await f.sql(
+        `update public.roster_entries r set roles='{}' from public.workspaces w
+          where w.id=r.workspace_id and r.season=w.current_season and r.workspace_id=$1 and r.person_id=$2`,
+        [f.workspaceId, prep.personId],
+      );
+      assert.equal(await clearedOf(f, prep.personId), false);
+      await save(
+        admin,
+        await editOf(f, prep.personId, {
+          name: "Ugo Barrett",
+          phone: "412-555-0178",
+          roles: [],
+          certificates: ["vsc", "itqr", "basic"],
+        }),
+      );
+      assert.equal((await profileOf(f, prep.personId)).phone, "412-555-0178");
+      assert.deepEqual(await rolesOf(f, prep.personId), []);
+      assert.equal(await clearedOf(f, prep.personId), false);
+    });
+
     await t.test("open work: each kind, with the capability it needs", async () => {
       const openWork = async (personId) =>
         (
