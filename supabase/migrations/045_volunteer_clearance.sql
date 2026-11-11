@@ -919,13 +919,15 @@ revoke all on function public.vitally_save_volunteer(uuid,uuid,bigint,jsonb) fro
 grant execute on function public.vitally_save_volunteer(uuid,uuid,bigint,jsonb) to authenticated;
 
 -- ---------------------------------------------------------------------------
--- Part 4: the caller's own clearance (design D10). Answers only for a staff
+-- Part 4: the caller's own clearance (design D10). Not `stable`: require_membership
+-- takes a row lock, which PostgREST refuses in a stable function's read-only
+-- transaction. Answers only for a staff
 -- caller; no email, phone or other profile data. `isAdmin` is the ceiling
 -- (people.capabilities), so an uncleared admin still reaches the Roster. A
 -- role item lists what the role lacks, in the labels of missing_certificates
 -- ("Basic or Advanced" for a Preparer or Reviewer with neither).
 create function public.vitally_my_clearance()
-returns jsonb language plpgsql stable security definer set search_path='' as $$
+returns jsonb language plpgsql security definer set search_path='' as $$
 declare v_member public.memberships;
  v_person public.people;
  v_entry public.roster_entries;

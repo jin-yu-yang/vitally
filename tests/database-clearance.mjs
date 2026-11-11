@@ -956,11 +956,15 @@ test("assignees must be cleared against real Supabase", async (t) => {
       const requested = await f.readyCase();
       await f.act(f.preparer, requested, "CLAIM_PREPARATION", {});
       await f.act(f.preparer, requested, "REQUEST_DOCUMENT", f.sampleRequest);
+      const { id: requestId } = await one(f, "select id from public.document_requests where case_id=$1", [requested]);
       const withdrawn = await f.readyCase();
       await f.act(f.preparer, withdrawn, "CLAIM_PREPARATION", {});
       await setCurrentRoles(f, coordinatorId, []);
       try {
-        await f.act(f.preparer, requested, "ESCALATE_CONTACT", { reason: "No response to the document request." });
+        await f.act(f.preparer, requested, "ESCALATE_CONTACT", {
+          requestId,
+          reason: "No response to the document request.",
+        });
         const followups = (
           await f.sql("select status,assignee_person_id from public.admin_followups where case_id=$1", [requested])
         ).rows;
