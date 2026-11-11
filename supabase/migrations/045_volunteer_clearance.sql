@@ -975,3 +975,17 @@ end;
 $$;
 revoke all on function public.vitally_my_clearance() from public,anon,authenticated,service_role;
 grant execute on function public.vitally_my_clearance() to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Part 5: assigning work only to a cleared person (design D13). No caller
+-- yet: the Reassign change calls it before it assigns work to someone else.
+-- Assignments to the default follow-up person stay unrefused.
+create function vitally_private.require_cleared_assignee(p_workspace_id uuid,p_person_id uuid)
+returns void language plpgsql stable security definer set search_path='' as $$
+begin
+ if not vitally_private.cleared(p_workspace_id,p_person_id) then
+  raise sqlstate 'VT006' using message='INELIGIBLE';
+ end if;
+end;
+$$;
+revoke all on function vitally_private.require_cleared_assignee(uuid,uuid) from public,anon,authenticated,service_role;
