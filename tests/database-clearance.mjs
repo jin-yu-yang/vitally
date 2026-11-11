@@ -785,3 +785,199 @@ test("the action gate against real Supabase", async (t) => {
     await f.close();
   }
 });
+
+test("vitally_my_clearance against real Supabase", async (t) => {
+  const f = await createDatabaseFixture();
+  try {
+    const myClearance = async (client) => {
+      const { data, error } = await client.rpc("vitally_my_clearance");
+      assert.equal(error, null, `vitally_my_clearance: ${error?.code} ${error?.message}`);
+      return data;
+    };
+
+    await t.test("an uncleared staff member sees their Form 13615 missing", async () => {
+      const member = await f.staff({
+        key: "una_my_clearance",
+        name: "Una Pryce",
+        capabilities: ["prepare"],
+        cleared: false,
+      });
+      assert.deepEqual(await myClearance(member.client), {
+        cleared: false,
+        missing: [{ kind: "form13615" }],
+        capabilities: [],
+        isAdmin: false,
+        siteCoordinatorName: "Avery Lin",
+      });
+    });
+
+    await t.test("a cleared preparer sees nothing missing", async () => {
+      assert.deepEqual(await myClearance(f.preparer), {
+        cleared: true,
+        missing: [],
+        capabilities: ["prepare"],
+        isAdmin: false,
+        siteCoordinatorName: "Avery Lin",
+      });
+    });
+
+    await t.test("the answer has exactly five keys", async () => {
+      const result = await myClearance(f.preparer);
+      assert.deepEqual(Object.keys(result).sort(), [
+        "capabilities",
+        "cleared",
+        "isAdmin",
+        "missing",
+        "siteCoordinatorName",
+      ]);
+    });
+
+    await t.test("a new volunteer without a photo ID check is not cleared", async () => {
+      const member = await f.staff({ key: "nia_new", name: "Nia Tolliver", capabilities: ["prepare"] });
+      const setNew = (checked) =>
+        f.sql(
+          `update public.roster_entries r set is_new=true,photo_id_checked_at=case when $3::boolean then now() end
+            from public.workspaces w
+            where w.id=r.workspace_id and r.season=w.current_season and r.workspace_id=$1 and r.person_id=$2`,
+          [f.workspaceId, member.personId, checked],
+        );
+      await setNew(false);
+      const unchecked = await myClearance(member.client);
+      assert.equal(unchecked.cleared, false);
+      assert.deepEqual(unchecked.missing, [{ kind: "photoId" }]);
+      assert.deepEqual(unchecked.capabilities, []);
+      await setNew(true);
+      const checked = await myClearance(member.client);
+      assert.equal(checked.cleared, true);
+      assert.deepEqual(checked.missing, []);
+      assert.deepEqual(checked.capabilities, ["prepare"]);
+    });
+
+    await t.test("an uncleared admin still reports the admin ceiling", async () => {
+      const lead = await f.staff({
+        key: "ada_my_clearance",
+        name: "Ada Brandt",
+        capabilities: ["admin", "followup"],
+        cleared: false,
+      });
+      const result = await myClearance(lead.client);
+      assert.equal(result.cleared, false);
+      assert.equal(result.isAdmin, true);
+      assert.deepEqual(result.capabilities, []);
+    });
+
+    await t.test("a role whose certificates are gone lists what it lacks", async () => {
+      const member = await f.staff({ key: "rex_my_clearance", name: "Rex Dunmore", capabilities: ["prepare"] });
+      // The role check would refuse this state, so it is switched off while the
+      // certificates are removed; the function must still describe it.
+      await f.sql("alter table public.certificates disable trigger certificates_role_certificates");
+      try {
+        await f.sql(
+          "delete from public.certificates where workspace_id=$1 and person_id=$2 and certificate in ('itqr','basic','advanced')",
+          [f.workspaceId, member.personId],
+        );
+        const result = await myClearance(member.client);
+        assert.deepEqual(result.missing, [
+          { kind: "role", role: "preparer", certificates: ["IT&QR", "Basic or Advanced"] },
+        ]);
+      } finally {
+        await f.sql("alter table public.certificates enable trigger certificates_role_certificates");
+      }
+    });
+
+    await t.test("a client is refused with FORBIDDEN", async () => {
+      const { data, error } = await f.applicantA.rpc("vitally_my_clearance");
+      assert.equal(data, null);
+      assert.equal(error?.code, "VT001");
+      assert.equal(error?.message, "FORBIDDEN");
+    });
+  } finally {
+    await f.close();
+  }
+});
+
+// Task 5b: assigning work only to a cleared person (design D13).
+test("assignees must be cleared against real Supabase", async (t) => {
+  const f = await createDatabaseFixture();
+  try {
+    await t.test("require_cleared_assignee", async () => {
+      const uncleared = await f.staff({
+        key: "ugo_assignee",
+        name: "Ugo Maren",
+        capabilities: ["followup"],
+        cleared: false,
+      });
+      const cleared = await f.staff({ key: "cleo_assignee", name: "Cleo Vance", capabilities: ["followup"] });
+      await assert.rejects(
+        () => f.sql("select vitally_private.require_cleared_assignee($1,$2)", [f.workspaceId, uncleared.personId]),
+        (error) => error.cause?.code === "VT006" && error.cause?.message === "INELIGIBLE",
+      );
+      await f.sql("select vitally_private.require_cleared_assignee($1,$2)", [f.workspaceId, cleared.personId]);
+      const { rows } = await f.sql(
+        `select has_function_privilege('anon',p.oid,'EXECUTE') anon,
+                has_function_privilege('authenticated',p.oid,'EXECUTE') browser,
+                has_function_privilege('service_role',p.oid,'EXECUTE') service
+           from pg_proc p where p.proname='require_cleared_assignee' and p.pronamespace='vitally_private'::regnamespace`,
+      );
+      assert.deepEqual(rows, [{ anon: false, browser: false, service: false }]);
+    });
+
+    await t.test("today's assigning functions", async () => {
+      const { rows } = await f.sql(
+        `select p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname in ('vitally_private','public') and p.prokind='f'
+            and p.prosrc ~* $1
+          order by p.proname`,
+        [
+          "(set|,)\\s*(assignee_person_id|preparer_id|reviewer_id|default_followup_person_id)\\s*=|insert into public\\.(admin_followups|assistance_items|reviews|preparation_participants)",
+        ],
+      );
+      assert.deepEqual(
+        rows.map((row) => row.proname),
+        [
+          "act_approve_review",
+          "act_assistance_claim",
+          "act_claim_preparation",
+          "act_claim_review",
+          "act_close_case",
+          "act_escalate_contact",
+          "act_request_corrections",
+          "act_withdraw",
+          "hand_to_review",
+          "set_default_followup",
+        ],
+        "a new assigning function must call vitally_private.require_cleared_assignee or be classified as system-assigned (design D13)",
+      );
+    });
+
+    await t.test("an uncleared default follow-up person still receives work", async () => {
+      const coordinatorId = f.roleAccounts.siteCoordinator.personId;
+      await setCurrentRoles(f, coordinatorId, []);
+      try {
+        const requested = await f.readyCase();
+        await f.act(f.preparer, requested, "CLAIM_PREPARATION", {});
+        await f.act(f.preparer, requested, "REQUEST_DOCUMENT", f.sampleRequest);
+        await f.act(f.preparer, requested, "ESCALATE_CONTACT", { reason: "No response to the document request." });
+        const followups = (
+          await f.sql("select status,assignee_person_id from public.admin_followups where case_id=$1", [requested])
+        ).rows;
+        assert.deepEqual(followups, [{ status: "open", assignee_person_id: coordinatorId }]);
+
+        const withdrawn = await f.readyCase();
+        await f.act(f.preparer, withdrawn, "CLAIM_PREPARATION", {});
+        await f.act(f.applicantA, withdrawn, "WITHDRAW", { confirmed: true });
+        const notice = (
+          await f.sql(
+            "select assignee_person_id from public.admin_followups where case_id=$1 and purpose='withdrawal_notice'",
+            [withdrawn],
+          )
+        ).rows;
+        assert.deepEqual(notice, [{ assignee_person_id: coordinatorId }]);
+      } finally {
+        await f.clearStaff(coordinatorId, ["admin", "followup", "assist", "receive_documents"]);
+      }
+    });
+  } finally {
+    await f.close();
+  }
+});

@@ -103,6 +103,14 @@ export const RPC_SIGNATURES = Object.freeze([
       },
     }),
   }),
+  // A staff member's own clearance (OpenSpec change add-volunteer-clearance).
+  Object.freeze({
+    name: "vitally_my_clearance",
+    signature: "vitally_my_clearance()",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["capabilities", "cleared", "isAdmin", "missing", "siteCoordinatorName"]),
+    args: () => ({}),
+  }),
 ]);
 
 // The private roster functions (OpenSpec change add-staff-identity, design D6).
