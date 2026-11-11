@@ -168,6 +168,7 @@ test("volunteer clearance against real Supabase", async (t) => {
         key: "cora_helpers",
         name: "Cora Nilsen",
         capabilities: ["prepare", "review"],
+        cleared: false,
       });
       const answers = async () =>
         one(

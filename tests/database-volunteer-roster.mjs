@@ -458,7 +458,7 @@ test("volunteer roster records against real Supabase", async (t) => {
     });
 
     await t.test("a new staff member gets records", async () => {
-      const member = await f.staff({ key: "nia_new", name: "Nia Cole", capabilities: ["review"] });
+      const member = await f.staff({ key: "nia_new", name: "Nia Cole", capabilities: ["review"], cleared: false });
       const profile = await profileOf(f, member.personId);
       assert.equal(profile.email, member.email);
       assert.equal(profile.works, "on_site");
