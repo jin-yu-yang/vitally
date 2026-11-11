@@ -25,11 +25,11 @@
 
 ## 4. The action gate and effective capabilities
 
-- [ ] 4.1 Write failing tests:
+- [x] 4.1 Write failing tests:
   - each of the six case RPCs refuses an uncleared staff member with VT009 before any lookup (unknown id, replay);
   - clients are not checked;
   - the effective-capability cases (role narrower or wider than the ceiling, an assisted case, self-review still VT005).
-- [ ] 4.2 Add `vitally_private.require_cleared`. Make `acting_person` return effective capabilities. Switch `check_operation_authority` and `vitally_create_case` to them. Call `require_cleared` first in the six case RPCs. Leave the checks of other people's capabilities on the ceiling.
+- [x] 4.2 Add `vitally_private.require_cleared`. Make `acting_person` return effective capabilities. Switch `check_operation_authority` and `vitally_create_case` to them. Call `require_cleared` first in the six case RPCs. Leave the checks of other people's capabilities on the ceiling.
 - [ ] 4.3 Add `vitally_my_clearance()` with its grants and tests (not cleared, cleared, client refused, no profile data). Update the public RPC catalog test and `tests/support/rpc-signatures.mjs` to list eight RPCs.
 - [ ] 4.4 Add `vitally_private.require_cleared_assignee`, refusing an uncleared person with INELIGIBLE, and test it directly. Add the catalog test that pins today's assigning functions. Test that an uncleared default follow-up person still receives escalations and a client's withdrawal notice.
 
