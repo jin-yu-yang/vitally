@@ -86,6 +86,54 @@ test("volunteer clearance against real Supabase", async (t) => {
       return id;
     };
 
+    await t.test("fixture staff are cleared with matching effective capabilities", async () => {
+      const effective = async (personId) =>
+        one(
+          f,
+          "select vitally_private.effective_capabilities($1,$2) as effective,vitally_private.cleared($1,$2) as cleared",
+          [f.workspaceId, personId],
+        );
+      for (const [role, { personId }] of Object.entries(f.roleAccounts)) {
+        const { capabilities } = await one(
+          f,
+          "select capabilities from public.people where workspace_id=$1 and id=$2",
+          [f.workspaceId, personId],
+        );
+        const answer = await effective(personId);
+        assert.deepEqual([...answer.effective].sort(), [...capabilities].sort(), role);
+        assert.equal(answer.cleared, true, role);
+      }
+      const uncleared = await f.staff({
+        key: "una_uncleared",
+        name: "Una Hartley",
+        capabilities: ["prepare"],
+        cleared: false,
+      });
+      assert.equal((await effective(uncleared.personId)).cleared, false);
+    });
+
+    await t.test("last season only does not clear", async () => {
+      const member = await f.staff({
+        key: "lars_last_season",
+        name: "Lars Ostrom",
+        capabilities: ["prepare"],
+        cleared: false,
+      });
+      await inTransaction(f, async () => {
+        await f.sql(
+          "insert into public.roster_entries(workspace_id,person_id,season,roles) values($1,$2,$3,'{preparer}')",
+          [f.workspaceId, member.personId, season - 1],
+        );
+        await confirm(member.personId, ["vsc", "itqr", "basic"], { forSeason: season - 1 });
+        const answer = await one(
+          f,
+          "select vitally_private.effective_capabilities($1,$2) as effective,vitally_private.cleared($1,$2) as cleared",
+          [f.workspaceId, member.personId],
+        );
+        assert.deepEqual(answer, { effective: [], cleared: false });
+      });
+    });
+
     await t.test("role helpers", async () => {
       const value = async (text, values) => (await one(f, `select ${text} as v`, values)).v;
       assert.deepEqual(
@@ -157,7 +205,7 @@ test("volunteer clearance against real Supabase", async (t) => {
 
     await t.test("the role trigger", async (t) => {
       await t.test("a role without its certificates is refused", async () => {
-        const member = await f.staff({ key: "tae_preparer", name: "Tae Lindqvist", capabilities: ["prepare"] });
+        const member = await f.staff({ key: "tae_preparer", name: "Tae Lindqvist", capabilities: ["prepare"], cleared: false });
         await inTransaction(f, async () => {
           await setRoles(member.personId, ["preparer"]);
           await confirm(member.personId, ["vsc"]);
@@ -171,7 +219,7 @@ test("volunteer clearance against real Supabase", async (t) => {
       });
 
       await t.test("roles first, then the certificates, commits", async () => {
-        const member = await f.staff({ key: "rue_in_order", name: "Rue Okafor", capabilities: ["prepare"] });
+        const member = await f.staff({ key: "rue_in_order", name: "Rue Okafor", capabilities: ["prepare"], cleared: false });
         await f.sql("begin");
         try {
           await setRoles(member.personId, ["preparer"]);
@@ -185,7 +233,7 @@ test("volunteer clearance against real Supabase", async (t) => {
       });
 
       await t.test("deleting a needed certificate is refused at commit", async () => {
-        const member = await f.staff({ key: "ines_intaker", name: "Ines Varga", capabilities: ["assist"] });
+        const member = await f.staff({ key: "ines_intaker", name: "Ines Varga", capabilities: ["assist"], cleared: false });
         await f.sql("begin");
         await setRoles(member.personId, ["intaker"]);
         await confirm(member.personId, ["vsc", "itqr"]);
@@ -207,7 +255,7 @@ test("volunteer clearance against real Supabase", async (t) => {
       });
 
       await t.test("an uploaded certificate does not count", async () => {
-        const member = await f.staff({ key: "uma_uploaded", name: "Uma Castell", capabilities: [] });
+        const member = await f.staff({ key: "uma_uploaded", name: "Uma Castell", capabilities: [], cleared: false });
         await inTransaction(f, async () => {
           await confirm(member.personId, ["vsc"], { status: "uploaded" });
           await setRoles(member.personId, ["greeter"]);
@@ -216,7 +264,7 @@ test("volunteer clearance against real Supabase", async (t) => {
       });
 
       await t.test("another season's certificates do not count", async () => {
-        const member = await f.staff({ key: "lev_last_season", name: "Lev Achebe", capabilities: [] });
+        const member = await f.staff({ key: "lev_last_season", name: "Lev Achebe", capabilities: [], cleared: false });
         await inTransaction(f, async () => {
           await f.sql(
             "insert into public.roster_entries(workspace_id,person_id,season) values($1,$2,$3)",
@@ -233,7 +281,7 @@ test("volunteer clearance against real Supabase", async (t) => {
       // on that lock. Once A commits, B's check reads Greeter and refuses.
       // Without the lock B's check would not wait; the test asserts the wait.
       await t.test("a role added and its certificate deleted concurrently: one commits", async () => {
-        const member = await f.staff({ key: "kit_concurrent", name: "Kit Arden", capabilities: [] });
+        const member = await f.staff({ key: "kit_concurrent", name: "Kit Arden", capabilities: [], cleared: false });
         await confirm(member.personId, ["vsc"]); // autocommit: VSC, no roles
         const other = await openDatabase({ kind: "test" });
         try {
@@ -315,7 +363,7 @@ test("volunteer clearance against real Supabase", async (t) => {
     });
 
     await t.test("045 §1 refuses when a signed-in person would lose a role", async () => {
-      const member = await f.staff({ key: "sol_signed_in", name: "Sol Brandt", capabilities: ["prepare"] });
+      const member = await f.staff({ key: "sol_signed_in", name: "Sol Brandt", capabilities: ["prepare"], cleared: false });
       await inTransaction(f, async () => {
         await setRoles(member.personId, ["preparer"]);
         await confirm(member.personId, ["vsc"]);
@@ -332,7 +380,7 @@ test("volunteer clearance against real Supabase", async (t) => {
       );
       assert.equal(n, 0);
       // A new entry takes the defaults.
-      const member = await f.staff({ key: "dee_defaults", name: "Dee Marlowe", capabilities: ["prepare"] });
+      const member = await f.staff({ key: "dee_defaults", name: "Dee Marlowe", capabilities: ["prepare"], cleared: false });
       const { is_new, photo_id_checked_at } = await one(
         f,
         "select is_new,photo_id_checked_at from public.roster_entries where workspace_id=$1 and person_id=$2 and season=$3",
