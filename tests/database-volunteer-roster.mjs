@@ -31,7 +31,7 @@ const volunteer = (extra = {}) => ({
   languages: ["english"],
   otherLanguage: null,
   roles: ["greeter"],
-  certificates: [],
+  certificates: ["vsc"],
   ...extra,
 });
 const addArgs = (entry = volunteer(), actionId = randomUUID()) => ({
@@ -235,7 +235,7 @@ test("volunteer roster records against real Supabase", async (t) => {
         languages: ["mandarin", "other"],
         otherLanguage: " Hakka ",
         roles: ["preparer", "reviewer"],
-        certificates: ["vsc", "basic"],
+        certificates: ["vsc", "itqr", "basic"],
       });
       const result = await save(admin, addArgs(entry));
       assert.deepEqual(Object.keys(result).sort(), ["actionId", "personId", "revision"]);
@@ -261,7 +261,7 @@ test("volunteer roster records against real Supabase", async (t) => {
       const { current_season } = await one(f, "select current_season from public.workspaces where id=$1", [f.workspaceId]);
       assert.equal(roster.season, current_season);
       const certificates = await certificatesOf(f, result.personId);
-      assert.deepEqual(certificates.map((row) => row.certificate), ["basic", "vsc"]);
+      assert.deepEqual(certificates.map((row) => row.certificate), ["basic", "itqr", "vsc"]);
       for (const row of certificates) {
         assert.equal(row.status, "confirmed");
         assert.ok(row.confirmed_at);
@@ -300,7 +300,7 @@ test("volunteer roster records against real Supabase", async (t) => {
         editArgs(
           personId,
           1,
-          volunteer({ name: "Casey Lund", email, phone: "412-555-0199", works: "on_site_and_remote", roles: ["intaker"] }),
+          volunteer({ name: "Casey Lund", email, phone: "412-555-0199", works: "on_site_and_remote", roles: ["intaker"], certificates: ["vsc", "itqr"] }),
         ),
       );
       assert.equal(result.revision, 2);
@@ -420,14 +420,15 @@ test("volunteer roster records against real Supabase", async (t) => {
       assert.equal((await one(f, "select reviewer_id from public.cases where id=$1", [caseId])).reviewer_id, null);
     });
 
-    await t.test("removing every certificate leaves preparation claimable", async () => {
+    await t.test("unticking certificates leaves preparation claimable", async () => {
       const member = await f.staff({ key: "ira_untick", name: "Ira Kohl", capabilities: ["prepare"] });
       const { email } = member;
       let revision = await revisionOf(f, member.personId);
       await save(admin, editArgs(member.personId, revision, volunteer({ email, certificates: ALL_CERTIFICATES })));
       revision += 1;
-      await save(admin, editArgs(member.personId, revision, volunteer({ email, certificates: [] })));
-      assert.deepEqual(await certificatesOf(f, member.personId), []);
+      // Greeter needs VSC (045), so VSC is the one certificate left.
+      await save(admin, editArgs(member.personId, revision, volunteer({ email, certificates: ["vsc"] })));
+      assert.deepEqual((await certificatesOf(f, member.personId)).map((row) => row.certificate), ["vsc"]);
       const caseId = await f.readyCase();
       await f.act(member.client, caseId, "CLAIM_PREPARATION", {});
     });
@@ -436,7 +437,7 @@ test("volunteer roster records against real Supabase", async (t) => {
       const account = await f.provision();
       const { personId } = await save(
         admin,
-        addArgs(volunteer({ name: "Riley Park", email: account.email.toUpperCase(), roles: ["preparer"], certificates: ["vsc"] })),
+        addArgs(volunteer({ name: "Riley Park", email: account.email.toUpperCase(), roles: ["preparer"], certificates: ["vsc", "itqr", "basic"] })),
       );
       await addStaffMember(f, account.userId, "riley_link", "R. Park", ["prepare"]);
       const { rows } = await f.sql("select * from public.people where workspace_id=$1 and user_id=$2", [
@@ -449,7 +450,7 @@ test("volunteer roster records against real Supabase", async (t) => {
       assert.deepEqual(rows[0].capabilities, ["prepare"]);
       assert.equal(rows[0].name, "Riley Park");
       assert.deepEqual((await entryOf(f, personId)).roles, ["preparer"]);
-      assert.deepEqual((await certificatesOf(f, personId)).map((row) => row.certificate), ["vsc"]);
+      assert.deepEqual((await certificatesOf(f, personId)).map((row) => row.certificate), ["basic", "itqr", "vsc"]);
       assert.equal(await revisionOf(f, personId), 2);
       assert.deepEqual(await f.readMembership(account.userId), [
         { workspace_id: f.workspaceId, user_id: account.userId, access: "staff", active: true },

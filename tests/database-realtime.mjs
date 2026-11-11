@@ -1036,7 +1036,7 @@ test("a volunteer with no sign-in reaches admins only", async () => {
             languages: ["english"],
             otherLanguage: null,
             roles: ["greeter"],
-            certificates: [],
+            certificates: ["vsc"],
           },
         });
         assert.equal(error, null);

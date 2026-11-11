@@ -8881,7 +8881,10 @@ test(
       // 3. Finish the form and save: the drawer closes and the row appears.
       await page.locator("#volunteer-email").fill(EMAIL);
       await page.locator("#volunteer-phone").fill(PHONE);
+      // Preparer needs VSC, IT&QR and Basic or Advanced (migration 045).
       await page.locator("#volunteer-certificate-vsc").check();
+      await page.locator("#volunteer-certificate-itqr").check();
+      await page.locator("#volunteer-certificate-basic").check();
       await page.locator('#volunteer-form button[type="submit"]').click({ timeout: CLICK_MS });
       await drawerClosed(page);
       await rowOf(page, NAME).waitFor({ timeout: ARRIVAL_MS });
@@ -9008,6 +9011,7 @@ test(
       await page.locator("#volunteer-name").fill(LOST_NAME);
       await page.locator("#volunteer-email").fill(LOST_EMAIL);
       await page.locator("#volunteer-role-greeter").check();
+      await page.locator("#volunteer-certificate-vsc").check(); // Greeter needs VSC (045)
       const sentSaves = [];
       let landedStatus = null;
       await page.route("**/rest/v1/rpc/vitally_save_volunteer", async (route) => {

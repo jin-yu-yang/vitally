@@ -150,7 +150,7 @@ export const SEED_VOLUNTEERS = Object.freeze([
     languages: ["cantonese", "mandarin"],
     otherLanguage: null,
     roles: ["preparer"],
-    certificates: ["vsc"],
+    certificates: ["vsc", "itqr", "basic"],
   }),
   Object.freeze({
     name: "Samir Haddad",
@@ -170,6 +170,6 @@ export const SEED_VOLUNTEERS = Object.freeze([
     languages: ["cantonese", "english"],
     otherLanguage: null,
     roles: ["intaker", "greeter"],
-    certificates: [],
+    certificates: ["vsc", "itqr"],
   }),
 ]);
