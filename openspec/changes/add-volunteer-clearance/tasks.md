@@ -35,9 +35,9 @@
 
 ## 5. The Roster save
 
-- [ ] 5.1 Write failing tests for `vitally_save_volunteer`: no roles allowed; a role without its certificates refused with the missing certificates named; unticking a certificate removes its roles; `isNew` and `photoIdChecked` stored and kept; an uncleared admin saves their own Admin role and becomes cleared.
-- [ ] 5.2 Write failing tests for the open-work rule: each kind of open work with the capability it needs, the default follow-up person, leaving someone uncleared, and allowed saves (drop Greeter; untick Advanced while Basic covers).
-- [ ] 5.3 Implement the save changes and the open-work rule in migration 045.
+- [x] 5.1 Write failing tests for `vitally_save_volunteer`: no roles allowed; a role without its certificates refused with the missing certificates named; unticking a certificate removes its roles; `isNew` and `photoIdChecked` stored and kept; an uncleared admin saves their own Admin role and becomes cleared.
+- [x] 5.2 Write failing tests for the open-work rule: each kind of open work with the capability it needs, the default follow-up person, leaving someone uncleared, and allowed saves (drop Greeter; untick Advanced while Basic covers).
+- [x] 5.3 Implement the save changes and the open-work rule in migration 045.
 
 ## 6. The app
 
