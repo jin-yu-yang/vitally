@@ -845,7 +845,9 @@ test("vitally_my_clearance against real Supabase", async (t) => {
       const unchecked = await myClearance(member.client);
       assert.equal(unchecked.cleared, false);
       assert.deepEqual(unchecked.missing, [{ kind: "photoId" }]);
-      assert.deepEqual(unchecked.capabilities, []);
+      // The capabilities are the roles' (effective_capabilities); the read gate
+      // and the action gate, not this list, hold an uncleared person back.
+      assert.deepEqual(unchecked.capabilities, ["prepare"]);
       await setNew(true);
       const checked = await myClearance(member.client);
       assert.equal(checked.cleared, true);
