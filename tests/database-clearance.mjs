@@ -870,20 +870,28 @@ test("vitally_my_clearance against real Supabase", async (t) => {
 
     await t.test("a role whose certificates are gone lists what it lacks", async () => {
       const member = await f.staff({ key: "rex_my_clearance", name: "Rex Dunmore", capabilities: ["prepare"] });
-      // The role check would refuse this state, so it is switched off while the
-      // certificates are removed; the function must still describe it.
-      await f.sql("alter table public.certificates disable trigger certificates_role_certificates");
+      // The role check would refuse this state. `session_replication_role =
+      // replica` skips ordinary triggers for this one transaction on this one
+      // connection, so no DDL runs and no other test file ever sees a change.
+      await f.sql("begin");
       try {
+        await f.sql("set local session_replication_role = replica");
         await f.sql(
           "delete from public.certificates where workspace_id=$1 and person_id=$2 and certificate in ('itqr','basic','advanced')",
           [f.workspaceId, member.personId],
         );
+        await f.sql("commit");
+      } catch (error) {
+        await f.sql("rollback").catch(() => {});
+        throw error;
+      }
+      try {
         const result = await myClearance(member.client);
         assert.deepEqual(result.missing, [
           { kind: "role", role: "preparer", certificates: ["IT&QR", "Basic or Advanced"] },
         ]);
       } finally {
-        await f.sql("alter table public.certificates enable trigger certificates_role_certificates");
+        await f.clearStaff(member.personId, ["prepare"]);
       }
     });
 
