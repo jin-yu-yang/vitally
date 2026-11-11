@@ -1,7 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createDatabaseFixture, rejected, SAMPLE_CONTACT } from "./support/database-fixture.mjs";
+import { randomUUID } from "node:crypto";
+import {
+  createDatabaseFixture,
+  rejected,
+  SAMPLE_CONTACT,
+  PREPARER,
+  applyArgs,
+  assistanceArgs,
+  contactArgs,
+  editContactArgs,
+} from "./support/database-fixture.mjs";
 import { openDatabase } from "../tools/admin/database.mjs";
 
 // OpenSpec change add-volunteer-clearance (design D1-D2), migration 045: a
@@ -586,6 +596,190 @@ test("the read gate against real Supabase", async (t) => {
       const shown = JSON.stringify(plan);
       assert.ok(initPlans.some((node) => subtree(node).includes(CALL)), `an InitPlan calls the helper: ${shown}`);
       assert.deepEqual(outside, [], `no node outside an InitPlan calls the helper: ${shown}`);
+    });
+  } finally {
+    await f.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The action gate (design D4): the six case RPCs refuse an uncleared staff
+// member with NOT_CLEARED (VT009) before any lookup or receipt, and a staff
+// caller acts with their effective capabilities. VT009 is not mapped yet
+// (src/contracts.mjs), so the raw SQLSTATE and message are checked.
+
+const ALL_CAPABILITIES = Object.freeze(["prepare", "review", "admin", "followup", "assist", "receive_documents"]);
+const notCleared = (error) => error?.code === "VT009" && error?.message === "NOT_CLEARED";
+const setCurrentRoles = (f, personId, roles) =>
+  f.sql(
+    `update public.roster_entries r set roles=$3::text[] from public.workspaces w
+      where w.id=r.workspace_id and r.season=w.current_season and r.workspace_id=$1 and r.person_id=$2`,
+    [f.workspaceId, personId, roles],
+  );
+
+test("the action gate against real Supabase", async (t) => {
+  const f = await createDatabaseFixture();
+  try {
+    const revisionOf = async (caseId) =>
+      Number((await one(f, "select revision from public.cases where id=$1", [caseId])).revision);
+    const refusedNotCleared = async (client, fn, args) => {
+      const { error } = await client.rpc(fn, args);
+      assert.ok(notCleared(error), `${fn}: ${error?.code} ${error?.message}`);
+      assert.equal(await f.receiptsFor(args.p_action_id), 0, `${fn} stored a receipt`);
+    };
+
+    await t.test("each case RPC refuses an uncleared staff member", async () => {
+      const member = await f.staff({
+        key: "nell_uncleared",
+        name: "Nell Ashby",
+        capabilities: [...ALL_CAPABILITIES],
+        cleared: false,
+      });
+      // Real targets that the member's ceiling would otherwise reach.
+      const ready = await f.readyCase();
+      const { itemId } = await f.seedAssistance();
+      const approved = await f.approvedCase();
+      const prepared = await f.preparedCase();
+      const { contactId } = await f.logContact(f.preparer, prepared, SAMPLE_CONTACT());
+      const calls = [
+        [
+          "vitally_apply_action",
+          applyArgs({ caseId: ready, revision: await revisionOf(ready), type: "CLAIM_PREPARATION" }),
+        ],
+        ["vitally_assistance_action", assistanceArgs({ itemId, revision: 1, type: "CLAIM" })],
+        [
+          "vitally_close_unsigned",
+          {
+            p_action_id: randomUUID(),
+            p_cases: [{ caseId: approved, revision: await revisionOf(approved) }],
+            p_confirmed: true,
+          },
+        ],
+        ["vitally_create_case", { p_action_id: randomUUID(), p_mode: "assisted", p_answers: {} }],
+        ["vitally_log_contact", contactArgs({ caseId: prepared, entry: SAMPLE_CONTACT() })],
+        ["vitally_edit_contact", editContactArgs({ contactId, revision: 1, entry: SAMPLE_CONTACT() })],
+      ];
+      const before = await f.stateSnapshot();
+      for (const [fn, args] of calls) await refusedNotCleared(member.client, fn, args);
+      assert.deepEqual(await f.stateSnapshot(), before, "nothing changes");
+    });
+
+    await t.test("unknown id gets NOT_CLEARED", async () => {
+      const member = await f.staff({
+        key: "uri_unknown",
+        name: "Uri Castane",
+        capabilities: ["prepare"],
+        cleared: false,
+      });
+      await refusedNotCleared(
+        member.client,
+        "vitally_apply_action",
+        applyArgs({ caseId: randomUUID(), revision: 1, type: "CLAIM_PREPARATION" }),
+      );
+    });
+
+    await t.test("a replay after losing clearance", async () => {
+      const member = await f.staff({ key: "pia_replay", name: "Pia Lindgren", capabilities: ["prepare"] });
+      const caseId = await f.readyCase();
+      const args = applyArgs({ caseId, revision: await revisionOf(caseId), type: "CLAIM_PREPARATION" });
+      const claimed = await member.client.rpc("vitally_apply_action", args);
+      assert.equal(claimed.error, null, "the cleared claim");
+      try {
+        await setCurrentRoles(f, member.personId, []);
+        const { error } = await member.client.rpc("vitally_apply_action", args);
+        assert.ok(notCleared(error), `replay: ${error?.code} ${error?.message}`);
+      } finally {
+        await f.clearStaff(member.personId, ["prepare"]);
+      }
+    });
+
+    await t.test("clients are not checked", async () => {
+      const { caseId } = await f.submittedClientCase();
+      assert.equal((await one(f, "select stage from public.cases where id=$1", [caseId])).stage, "received");
+    });
+
+    await t.test("effective capabilities", async (t) => {
+      // Each member's ceiling is wider than the roles f.clearStaff gives them.
+      const member = async (key, name, ceiling, roleCapabilities) => {
+        const made = await f.staff({ key, name, capabilities: ceiling, cleared: false });
+        await f.clearStaff(made.personId, roleCapabilities);
+        return made;
+      };
+
+      await t.test("a Preparer with review in the ceiling cannot claim a review", async () => {
+        const prep = await member("pax_preparer", "Pax Moreau", ["prepare", "review"], ["prepare"]);
+        const caseId = await f.preparedCase();
+        await assert.rejects(() => f.act(prep.client, caseId, "CLAIM_REVIEW", {}), rejected("INELIGIBLE"));
+      });
+
+      await t.test("a Reviewer with only review in the ceiling cannot claim preparation", async () => {
+        const reviewer = await member("rhea_reviewer", "Rhea Duval", ["review"], ["review"]);
+        const caseId = await f.readyCase();
+        await assert.rejects(
+          () => f.act(reviewer.client, caseId, "CLAIM_PREPARATION", {}),
+          rejected("INELIGIBLE"),
+        );
+      });
+
+      await t.test("an Intaker with admin in the ceiling cannot create an assisted case", async () => {
+        const intaker = await member("ida_intaker", "Ida Brandt", ["admin"], ["assist"]);
+        const actionId = randomUUID();
+        await assert.rejects(
+          () => f.createCase(intaker.client, actionId, { mode: "assisted" }),
+          rejected("FORBIDDEN"),
+        );
+        assert.equal(await f.receiptsFor(actionId), 0);
+      });
+
+      // Review Focus 1: losing the Preparer role mid-case. The person holds the
+      // case, so the role is set directly; as a Greeter they stay cleared.
+      await t.test("a Preparer made a Greeter mid-case cannot keep preparing", async () => {
+        const prep = await f.staff({ key: "gus_greeter", name: "Gus Halloran", capabilities: ["prepare"] });
+        const caseId = await f.readyCase();
+        await f.act(prep.client, caseId, "CLAIM_PREPARATION", {});
+        await setCurrentRoles(f, prep.personId, ["greeter"]);
+        await assert.rejects(
+          () => f.act(prep.client, caseId, "REQUEST_DOCUMENT", f.sampleRequest),
+          rejected("INELIGIBLE"),
+        );
+        const { n } = await one(f, "select count(*)::int n from public.document_requests where case_id=$1", [caseId]);
+        assert.equal(n, 0);
+      });
+    });
+
+    await t.test("self-review still holds for a Reviewer", async () => {
+      const reviewer = await f.staff({ key: "sky_reviewer", name: "Sky Okonjo", capabilities: ["prepare", "review"] });
+      const caseId = await f.readyCase();
+      await f.act(reviewer.client, caseId, "CLAIM_PREPARATION", {});
+      await f.act(reviewer.client, caseId, "SUBMIT_REVIEW", { questionnaire: PREPARER });
+      await assert.rejects(() => f.act(reviewer.client, caseId, "CLAIM_REVIEW", {}), rejected("SELF_REVIEW"));
+    });
+
+    // The Roster stays on the ceiling: an uncleared admin still saves.
+    await t.test("an uncleared admin can save a volunteer", async () => {
+      const lead = await f.staff({
+        key: "ada_uncleared_admin",
+        name: "Ada Whitcombe",
+        capabilities: ["admin", "followup"],
+        cleared: false,
+      });
+      const { data, error } = await lead.client.rpc("vitally_save_volunteer", {
+        p_action_id: randomUUID(),
+        p_volunteer_id: null,
+        p_expected_revision: null,
+        p_volunteer: {
+          name: "Bea Lowell",
+          email: `v-${randomUUID()}@example.org`,
+          phone: null,
+          works: "on_site",
+          languages: ["english"],
+          otherLanguage: null,
+          roles: ["greeter"],
+          certificates: ["vsc"],
+        },
+      });
+      assert.equal(error, null, `vitally_save_volunteer: ${error?.code}`);
+      assert.equal(data.revision, 1);
     });
   } finally {
     await f.close();
