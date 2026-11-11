@@ -715,8 +715,18 @@ test("volunteer roster records against real Supabase", async (t) => {
           coordinatorWork.some((row) => row.needs === "followup" && row.label === label),
           `${label}: ${JSON.stringify(coordinatorWork)}`,
         );
-      // Someone with no work has none.
+      // Someone with no work has none, and no client role can call it.
       assert.deepEqual(await openWork(randomUUID()), []);
+      for (const role of ["anon", "authenticated", "service_role"])
+        assert.equal(
+          (
+            await one(f, "select has_function_privilege($1,'vitally_private.open_work(uuid,uuid)'::regprocedure,'execute') as ok", [
+              role,
+            ])
+          ).ok,
+          false,
+          role,
+        );
     });
 
     await t.test("the roster links a matching volunteer", async () => {

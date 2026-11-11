@@ -991,3 +991,227 @@ begin
 end;
 $$;
 revoke all on function vitally_private.require_cleared_assignee(uuid,uuid) from public,anon,authenticated,service_role;
+
+-- ---------------------------------------------------------------------------
+-- Part 6: the Roster save (design D7-D9). A role needs its certificates, the
+-- save records whether the volunteer is new and when their photo ID was
+-- checked, roles may be empty, and a save cannot take away what the person's
+-- open work needs.
+
+-- The person's open work in a workspace, each row with the capability it
+-- needs and a label for the drawer: preparing or reviewing a case that isn't
+-- closed, an open follow-up assigned to them, being the default follow-up
+-- person, and a claimed help request.
+create function vitally_private.open_work(p_workspace_id uuid,p_person_id uuid)
+returns table(needs text,label text) language sql stable security definer set search_path='' as $$
+ select w.needs,w.label from (
+  select 1 as ord,c.client_number as n,'prepare' as needs,'preparing client '||coalesce(c.client_number::text,c.reference) as label
+   from public.cases c where c.workspace_id=p_workspace_id and c.preparer_id=p_person_id and c.stage<>'closed'
+  union all
+  select 2,c.client_number,'review','reviewing client '||coalesce(c.client_number::text,c.reference)
+   from public.cases c where c.workspace_id=p_workspace_id and c.reviewer_id=p_person_id and c.stage<>'closed'
+  union all
+  select 3,c.client_number,'followup','follow-up for client '||coalesce(c.client_number::text,c.reference)
+   from public.admin_followups t join public.cases c on c.workspace_id=t.workspace_id and c.id=t.case_id
+   where t.workspace_id=p_workspace_id and t.assignee_person_id=p_person_id and t.status='open'
+  union all
+  select 4,null,'followup','default follow-up person'
+   from public.workspaces ws where ws.id=p_workspace_id and ws.default_followup_person_id=p_person_id
+  union all
+  select 5,null,'assist','a help request'
+   from public.assistance_items a where a.workspace_id=p_workspace_id and a.assignee_person_id=p_person_id and a.status='assigned'
+ ) w order by w.ord,w.n nulls last,w.label collate "C";
+$$;
+revoke all on function vitally_private.open_work(uuid,uuid) from public,anon,authenticated,service_role;
+
+-- vitally_save_volunteer, from Part 3's definition (the admin check stays on
+-- the ceiling), with:
+--   - the payload's required booleans isNew and photoIdChecked; roles may be
+--     empty;
+--   - each requested role checked against the ticked certificates: a role held
+--     before this save that lost a needed certificate in it is dropped, and any
+--     other role that lacks one is refused, VT007 ROLE_NEEDS with the role and
+--     the missing certificates in the labels of missing_certificates;
+--   - the photo ID check keeping its time while it stays ticked;
+--   - the open-work rule: VT004 OPEN_WORK, with a JSON array of the work's
+--     labels as the detail, when the person would lose a capability their open
+--     work needs, or be uncleared while holding any. It runs after validation
+--     and before any write, so a refusal changes nothing.
+create or replace function public.vitally_save_volunteer(p_action_id uuid,p_volunteer_id uuid,p_expected_revision bigint,p_volunteer jsonb)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_receipt public.action_receipts;
+ v_profile public.volunteer_profiles;
+ v_entry public.roster_entries;
+ v_digest text;
+ v_key text;
+ v_target_user uuid;
+ v_target_id uuid=p_volunteer_id;
+ v_season smallint;
+ v_revision bigint=1;
+ v_name text;
+ v_email text;
+ v_phone text;
+ v_works text;
+ v_other text;
+ v_languages text[];
+ v_requested text[];
+ v_roles text[]='{}';
+ v_role text;
+ v_missing text[];
+ v_certificates text[];
+ v_is_new boolean;
+ v_photo_checked_at timestamptz;
+ v_ceiling text[]='{}';
+ v_capabilities text[];
+ v_cleared boolean;
+ v_open_work jsonb;
+ v_result jsonb;
+begin
+ v_member=vitally_private.require_membership();
+ v_person=vitally_private.acting_person(v_member);
+ -- The Roster stays on the ceiling, people.capabilities, through the policy
+ -- helper; the acting person's capabilities are the effective ones.
+ if v_member.access<>'staff' or v_person.id is null or not vitally_policy.is_workspace_admin(v_member.workspace_id) then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ if p_action_id is null or p_volunteer is null or jsonb_typeof(p_volunteer)<>'object'
+  or (p_volunteer_id is null)<>(p_expected_revision is null) then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ -- The lock add_staff_member takes: an Edit and a roster link cannot deadlock,
+ -- or link on an address that has just changed.
+ perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_member.workspace_id::text,0));
+ v_digest=encode(extensions.digest(jsonb_build_object('operation','SAVE_VOLUNTEER','volunteerId',p_volunteer_id,
+  'expectedRevision',p_expected_revision,'personId',v_person.id,'volunteer',p_volunteer)::text,'sha256'),'hex');
+ v_receipt=vitally_private.reserve_receipt(v_member,p_action_id,'SAVE_VOLUNTEER',v_digest,v_person.id);
+ if v_receipt.receipt is not null then
+  return v_receipt.receipt;
+ end if;
+ if p_volunteer_id is not null then
+  select * into v_profile from public.volunteer_profiles
+   where workspace_id=v_member.workspace_id and person_id=p_volunteer_id for update;
+  if not found then
+   raise sqlstate 'VT002' using message='NOT_FOUND';
+  end if;
+  if v_profile.revision<>p_expected_revision then
+   raise sqlstate 'VT003' using message='CONFLICT';
+  end if;
+  v_revision=v_profile.revision+1;
+ end if;
+
+ -- The payload: exactly these keys, each of its type.
+ if array(select k from jsonb_object_keys(p_volunteer) k order by k collate "C")
+   <>array['certificates','email','isNew','languages','name','otherLanguage','phone','photoIdChecked','roles','works']::text[]
+  or jsonb_typeof(p_volunteer->'name')<>'string' or jsonb_typeof(p_volunteer->'email')<>'string'
+  or jsonb_typeof(p_volunteer->'works')<>'string'
+  or jsonb_typeof(p_volunteer->'phone') not in ('string','null')
+  or jsonb_typeof(p_volunteer->'otherLanguage') not in ('string','null')
+  or jsonb_typeof(p_volunteer->'isNew')<>'boolean'
+  or jsonb_typeof(p_volunteer->'photoIdChecked')<>'boolean' then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ foreach v_key in array array['languages','roles','certificates'] loop
+  if jsonb_typeof(p_volunteer->v_key)<>'array'
+   or exists(select 1 from jsonb_array_elements(p_volunteer->v_key) e where jsonb_typeof(e)<>'string') then
+   raise sqlstate 'VT007' using message='VALIDATION';
+  end if;
+ end loop;
+ v_name=btrim(p_volunteer->>'name');
+ v_email=lower(btrim(p_volunteer->>'email'));
+ v_phone=nullif(btrim(p_volunteer->>'phone'),'');
+ v_works=p_volunteer->>'works';
+ v_other=nullif(btrim(p_volunteer->>'otherLanguage'),'');
+ v_languages=array(select jsonb_array_elements_text(p_volunteer->'languages'));
+ v_requested=array(select jsonb_array_elements_text(p_volunteer->'roles'));
+ v_certificates=array(select jsonb_array_elements_text(p_volunteer->'certificates'));
+ v_is_new=(p_volunteer->'isNew')::boolean;
+ if length(v_name) not between 1 and 80
+  or length(v_email)>254 or v_email !~ '^[^[:space:]@]+@[^[:space:]@.]+(\.[^[:space:]@.]+)+$'
+  or length(v_phone)>30
+  or v_works not in ('on_site','remote','on_site_and_remote')
+  or not (v_languages <@ array['english','mandarin','cantonese','other']::text[])
+  or cardinality(v_languages)<>(select count(distinct c) from unnest(v_languages) c)
+  or length(v_other)>40
+  or (v_other is not null)<>('other'=any(v_languages))
+  or not (v_requested <@ array['greeter','intaker','preparer','reviewer','admin']::text[])
+  or cardinality(v_requested)<>(select count(distinct c) from unnest(v_requested) c)
+  or not (v_certificates <@ array['vsc','itqr','sc','basic','advanced']::text[])
+  or cardinality(v_certificates)<>(select count(distinct c) from unnest(v_certificates) c) then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ if exists(select 1 from public.volunteer_profiles
+  where workspace_id=v_member.workspace_id and email=v_email and person_id is distinct from p_volunteer_id) then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ select current_season into v_season from public.workspaces where id=v_member.workspace_id;
+ if p_volunteer_id is not null then
+  select user_id,capabilities into v_target_user,v_ceiling from public.people where id=p_volunteer_id;
+  -- A sign-in's address belongs to its account.
+  if v_target_user is not null and v_email<>v_profile.email then
+   raise sqlstate 'VT007' using message='VALIDATION';
+  end if;
+  select * into v_entry from public.roster_entries
+   where workspace_id=v_member.workspace_id and person_id=p_volunteer_id and season=v_season for update;
+ end if;
+
+ -- Each requested role against the ticked certificates. A role the entry
+ -- already holds had its certificates (role_certificates_check), so one that
+ -- lacks one now lost it in this save, and is dropped with it.
+ foreach v_role in array v_requested loop
+  v_missing=vitally_private.missing_certificates(v_role,v_certificates);
+  if cardinality(v_missing)=0 then
+   v_roles=v_roles||v_role;
+  elsif not (v_role=any(coalesce(v_entry.roles,'{}'::text[]))) then
+   raise sqlstate 'VT007' using message='ROLE_NEEDS',detail=v_role||': '||array_to_string(v_missing,', ');
+  end if;
+ end loop;
+ -- A photo ID check that stays ticked keeps its time.
+ if (p_volunteer->'photoIdChecked')::boolean then
+  v_photo_checked_at=coalesce(v_entry.photo_id_checked_at,now());
+ end if;
+
+ -- The open-work rule, on the would-be roles within the person's ceiling.
+ if p_volunteer_id is not null then
+  v_capabilities=array(select c from unnest(vitally_private.role_capabilities(v_roles)) c where c=any(v_ceiling));
+  v_cleared=cardinality(v_roles)>0 and (not v_is_new or v_photo_checked_at is not null);
+  select jsonb_agg(w.label) into v_open_work from vitally_private.open_work(v_member.workspace_id,p_volunteer_id) w
+   where not v_cleared or not (w.needs=any(v_capabilities));
+  if v_open_work is not null then
+   raise sqlstate 'VT004' using message='OPEN_WORK',detail=v_open_work::text;
+  end if;
+ end if;
+
+ begin
+  if p_volunteer_id is null then
+   insert into public.people(workspace_id,person_key,name,capabilities)
+    values(v_member.workspace_id,'v_'||substr(replace(gen_random_uuid()::text,'-',''),1,12),v_name,'{}')
+    returning id into v_target_id;
+   insert into public.volunteer_profiles(workspace_id,person_id,email,phone,works,languages,other_language)
+    values(v_member.workspace_id,v_target_id,v_email,v_phone,v_works,v_languages,v_other);
+  else
+   update public.people set name=v_name where id=p_volunteer_id;
+   update public.volunteer_profiles set email=v_email,phone=v_phone,works=v_works,languages=v_languages,
+     other_language=v_other,revision=v_revision,updated_at=now()
+    where workspace_id=v_member.workspace_id and person_id=p_volunteer_id;
+  end if;
+  insert into public.roster_entries(workspace_id,person_id,season,roles,added_by_person_id,is_new,photo_id_checked_at)
+   values(v_member.workspace_id,v_target_id,v_season,v_roles,v_person.id,v_is_new,v_photo_checked_at)
+   on conflict(workspace_id,person_id,season) do update
+    set roles=excluded.roles,is_new=excluded.is_new,photo_id_checked_at=excluded.photo_id_checked_at;
+  delete from public.certificates where workspace_id=v_member.workspace_id and person_id=v_target_id
+   and season=v_season and certificate<>all(v_certificates);
+  insert into public.certificates(workspace_id,person_id,season,certificate,status,confirmed_at,confirmed_by_person_id)
+   select v_member.workspace_id,v_target_id,v_season,c,'confirmed',now(),v_person.id from unnest(v_certificates) c
+   on conflict do nothing;
+ exception when unique_violation then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end;
+ v_result=jsonb_build_object('actionId',p_action_id,'personId',v_target_id,'revision',v_revision);
+ update public.action_receipts set target_id=v_target_id,receipt=v_result where id=v_receipt.id;
+ return v_result;
+end;
+$$;
+revoke all on function public.vitally_save_volunteer(uuid,uuid,bigint,jsonb) from public,anon,authenticated,service_role;
+grant execute on function public.vitally_save_volunteer(uuid,uuid,bigint,jsonb) to authenticated;
