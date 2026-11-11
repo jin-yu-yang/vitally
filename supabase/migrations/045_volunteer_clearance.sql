@@ -917,3 +917,61 @@ end;
 $$;
 revoke all on function public.vitally_save_volunteer(uuid,uuid,bigint,jsonb) from public,anon,authenticated,service_role;
 grant execute on function public.vitally_save_volunteer(uuid,uuid,bigint,jsonb) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Part 4: the caller's own clearance (design D10). Answers only for a staff
+-- caller; no email, phone or other profile data. `isAdmin` is the ceiling
+-- (people.capabilities), so an uncleared admin still reaches the Roster. A
+-- role item lists what the role lacks, in the labels of missing_certificates
+-- ("Basic or Advanced" for a Preparer or Reviewer with neither).
+create function public.vitally_my_clearance()
+returns jsonb language plpgsql stable security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_entry public.roster_entries;
+ v_held text[];
+ v_missing jsonb='[]'::jsonb;
+ v_role text;
+ v_lacks text[];
+ v_coordinator text;
+begin
+ v_member=vitally_private.require_membership();
+ if v_member.access<>'staff' then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ select * into v_person from public.people
+  where workspace_id=v_member.workspace_id and user_id=v_member.user_id;
+ if v_person.id is null then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ select r.* into v_entry from public.roster_entries r
+  join public.workspaces w on w.id=r.workspace_id and w.current_season=r.season
+  where r.workspace_id=v_person.workspace_id and r.person_id=v_person.id;
+ if v_entry.person_id is null or cardinality(v_entry.roles)=0 then
+  v_missing=v_missing||jsonb_build_array(jsonb_build_object('kind','form13615'));
+ end if;
+ if v_entry.person_id is not null and v_entry.is_new and v_entry.photo_id_checked_at is null then
+  v_missing=v_missing||jsonb_build_array(jsonb_build_object('kind','photoId'));
+ end if;
+ if v_entry.person_id is not null then
+  v_held=vitally_private.confirmed_certificates(v_entry.workspace_id,v_entry.person_id,v_entry.season);
+  foreach v_role in array v_entry.roles loop
+   v_lacks=vitally_private.missing_certificates(v_role,v_held);
+   if cardinality(v_lacks)>0 then
+    v_missing=v_missing||jsonb_build_array(jsonb_build_object('kind','role','role',v_role,'certificates',to_jsonb(v_lacks)));
+   end if;
+  end loop;
+ end if;
+ select d.name into v_coordinator from public.workspaces w
+  join public.people d on d.workspace_id=w.id and d.id=w.default_followup_person_id
+  where w.id=v_person.workspace_id;
+ return jsonb_build_object(
+  'cleared',vitally_private.cleared(v_person.workspace_id,v_person.id),
+  'missing',v_missing,
+  'capabilities',to_jsonb(vitally_private.effective_capabilities(v_person.workspace_id,v_person.id)),
+  'isAdmin','admin'=any(v_person.capabilities),
+  'siteCoordinatorName',to_jsonb(v_coordinator));
+end;
+$$;
+revoke all on function public.vitally_my_clearance() from public,anon,authenticated,service_role;
+grant execute on function public.vitally_my_clearance() to authenticated;
