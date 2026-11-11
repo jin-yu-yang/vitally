@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createDatabaseFixture, rejected } from "./support/database-fixture.mjs";
+import { createDatabaseFixture, rejected, SAMPLE_CONTACT } from "./support/database-fixture.mjs";
 import { openDatabase } from "../tools/admin/database.mjs";
 
 // OpenSpec change add-volunteer-clearance (design D1-D2), migration 045: a
@@ -388,6 +388,204 @@ test("volunteer clearance against real Supabase", async (t) => {
         [f.workspaceId, member.personId, season],
       );
       assert.deepEqual({ is_new, photo_id_checked_at }, { is_new: false, photo_id_checked_at: null });
+    });
+  } finally {
+    await f.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The read gate (design D3): the 21 case-data policies read only for a cleared
+// staff member, through the no-argument InitPlan helper
+// `vitally_policy.cleared_workspace_id()`. `people` is not gated.
+
+const CASE_TABLES = Object.freeze([
+  "admin_followups",
+  "assistance_items",
+  "case_contacts",
+  "case_document_cards",
+  "case_events",
+  "case_materials",
+  "cases",
+  "client_events",
+  "contact_attempts",
+  "contact_log",
+  "contact_log_versions",
+  "document_requests",
+  "documents",
+  "filing_attempts",
+  "filing_notes",
+  "filing_returns",
+  "preparation_participants",
+  "preparer_questionnaires",
+  "preparer_shaded_fields",
+  "reviewer_questionnaires",
+  "reviews",
+]);
+
+// What a staff member reads of one table, by the policies' own rule and over
+// the privileged connection: the workspace's rows, less those of a private
+// client draft. An assistance item with no case is staff work too.
+const PRIVATE_DRAFT = "c.origin='client' and c.stage='draft'";
+const staffCountSql = (table) =>
+  table === "cases"
+    ? `select count(*)::int n from public.cases c where c.workspace_id=$1 and not (${PRIVATE_DRAFT})`
+    : table === "assistance_items"
+      ? `select count(*)::int n from public.assistance_items t where t.workspace_id=$1
+          and (t.case_id is null or exists(select 1 from public.cases c
+           where c.workspace_id=t.workspace_id and c.id=t.case_id and not (${PRIVATE_DRAFT})))`
+      : `select count(*)::int n from public.${table} t join public.cases c on c.workspace_id=t.workspace_id and c.id=t.case_id
+          where t.workspace_id=$1 and not (${PRIVATE_DRAFT})`;
+
+// The tables the setup below must fill, so that an empty read is the gate's
+// doing and not an empty table's.
+const FILLED = Object.freeze([
+  "admin_followups",
+  "assistance_items",
+  "case_events",
+  "cases",
+  "client_events",
+  "contact_log",
+  "contact_log_versions",
+  "document_requests",
+  "filing_attempts",
+  "preparation_participants",
+  "preparer_questionnaires",
+  "reviewer_questionnaires",
+  "reviews",
+]);
+
+test("the read gate against real Supabase", async (t) => {
+  const f = await createDatabaseFixture();
+  try {
+    const readAll = async (client, table) => {
+      const { data, error } = await client.from(table).select("*");
+      assert.equal(error, null, `${table} read`);
+      return data;
+    };
+    const staffCount = async (table) => (await one(f, staffCountSql(table), [f.workspaceId])).n;
+
+    // Case data in as many tables as the public actions reach: a private draft
+    // staff must never read, an assisted case with a document request, a logged
+    // and edited contact, an assistance request, an approved case with the
+    // office's go-over follow-up, and a filed case with a rejected return.
+    await f.draftCase(f.applicantA);
+    const assisted = await f.assistedCase();
+    const { contactId } = await f.logContact(f.preparer, assisted, SAMPLE_CONTACT());
+    await f.editContact(f.preparer, contactId, { ...SAMPLE_CONTACT(), note: "Fictional corrected note." });
+    await f.seedAssistance();
+    await f.approvedCase({ wentOver: false });
+    const filed = await f.approvedCase();
+    const act = (type, payload) => f.act(f.siteCoordinator, filed, type, payload);
+    await act("MARK_READY_TO_EFILE", { confirmed: true });
+    await act("MARK_EFILED", { confirmed: true, methods: { federal: "efile", state: "efile" } });
+    const { d: day } = await one(f, "select (now() at time zone 'America/New_York')::date::text d");
+    await act("RECORD_FILING_RESULT", {
+      confirmed: true,
+      results: {
+        federal: { result: "accepted", date: day },
+        state: { result: "rejected", date: day, code: "IND-031-04" },
+      },
+      fixNote: "Fictional note: correct the dependent's SSN.",
+    });
+    // A client case with a document request, for the client's own reads.
+    const clientCase = await f.readyCase();
+    await f.act(f.preparer, clientCase, "CLAIM_PREPARATION", {});
+    await f.act(f.preparer, clientCase, "REQUEST_DOCUMENT", f.sampleRequest);
+    for (const table of FILLED) assert.ok((await staffCount(table)) > 0, `the setup fills ${table}`);
+
+    await t.test("an uncleared staff member reads no case data", async () => {
+      const member = await f.staff({
+        key: "ulla_uncleared",
+        name: "Ulla Brenner",
+        capabilities: ["prepare"],
+        cleared: false,
+      });
+      for (const table of CASE_TABLES)
+        assert.deepEqual(await readAll(member.client, table), [], table);
+      // `people` is not gated: their own row and the default follow-up person.
+      const ids = (await readAll(member.client, "people")).map((row) => row.id);
+      const { default_followup_person_id: followup } = await one(
+        f,
+        "select default_followup_person_id from public.workspaces where id=$1",
+        [f.workspaceId],
+      );
+      assert.ok(ids.includes(member.personId), "their own row");
+      assert.ok(ids.includes(followup), "the default follow-up person");
+    });
+
+    await t.test("a cleared staff member reads as before", async () => {
+      for (const table of CASE_TABLES)
+        assert.equal((await readAll(f.preparer, table)).length, await staffCount(table), table);
+    });
+
+    await t.test("clients are unchanged", async () => {
+      const own = async () => {
+        const out = {};
+        for (const table of ["cases", "documents", "document_requests"])
+          out[table] = (await readAll(f.applicantA, table)).map((row) => row.id).sort();
+        return out;
+      };
+      const before = await own();
+      assert.ok(before.cases.length > 0, "the client reads their cases");
+      assert.ok(before.document_requests.length > 0, "the client reads their requests");
+      // A cleared staff member loses their roles, and so their clearance.
+      const member = await f.staff({ key: "cleo_cleared", name: "Cleo Varga", capabilities: ["prepare"] });
+      assert.ok((await readAll(member.client, "cases")).length > 0, "cleared, the member reads cases");
+      await f.sql(
+        `update public.roster_entries r set roles='{}' from public.workspaces w
+          where w.id=r.workspace_id and r.season=w.current_season and r.workspace_id=$1 and r.person_id=$2`,
+        [f.workspaceId, member.personId],
+      );
+      assert.deepEqual(await readAll(member.client, "cases"), [], "uncleared, the member reads none");
+      assert.deepEqual(await own(), before);
+    });
+
+    await t.test("every case-data policy is gated", async () => {
+      const { rows } = await f.sql(
+        `select tablename,policyname,qual from pg_policies
+          where schemaname='public' and qual like '%access = ''staff''%' and tablename<>'people'
+          order by tablename`,
+      );
+      assert.equal(rows.length, 21);
+      assert.deepEqual(rows.map((row) => row.tablename), [...CASE_TABLES]);
+      for (const row of rows)
+        assert.ok(row.qual.includes("cleared_workspace_id"), `${row.tablename}.${row.policyname}`);
+      const people = await f.sql("select qual from pg_policies where schemaname='public' and tablename='people'");
+      for (const row of people.rows) assert.equal(row.qual.includes("cleared_workspace_id"), false, "people");
+    });
+
+    await t.test("the helper runs once per statement", async () => {
+      const plan = await inTransaction(f, async () => {
+        await f.sql("select set_config('request.jwt.claims',$1,true)", [
+          JSON.stringify({ sub: f.preparerUserId, role: "authenticated" }),
+        ]);
+        await f.sql("set local role authenticated");
+        const { rows } = await f.sql("explain (format json, verbose) select * from public.cases");
+        const value = rows[0]["QUERY PLAN"];
+        return (typeof value === "string" ? JSON.parse(value) : value)[0].Plan;
+      });
+      const CALL = "cleared_workspace_id(";
+      // A node's own text: every field but its children.
+      const text = (node) =>
+        Object.entries(node)
+          .filter(([key]) => key !== "Plans")
+          .map(([, value]) => (Array.isArray(value) ? value.join(" ") : String(value)))
+          .join(" ");
+      const subtree = (node) => [text(node), ...(node.Plans ?? []).map(subtree)].join(" ");
+      const initPlans = [];
+      const outside = [];
+      const visit = (node, inInitPlan) => {
+        const isInitPlan = String(node["Subplan Name"] ?? "").startsWith("InitPlan");
+        if (isInitPlan) initPlans.push(node);
+        const within = inInitPlan || isInitPlan;
+        if (!within && text(node).includes(CALL)) outside.push(node["Node Type"]);
+        for (const child of node.Plans ?? []) visit(child, within);
+      };
+      visit(plan, false);
+      const shown = JSON.stringify(plan);
+      assert.ok(initPlans.some((node) => subtree(node).includes(CALL)), `an InitPlan calls the helper: ${shown}`);
+      assert.deepEqual(outside, [], `no node outside an InitPlan calls the helper: ${shown}`);
     });
   } finally {
     await f.close();

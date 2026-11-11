@@ -243,7 +243,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
     });
 
-    await t.test("vitally_policy holds exactly the admin check, with exactly its grants", async () => {
+    await t.test("vitally_policy holds exactly the admin check and the clearance check, with exactly their grants", async () => {
       const { rows } = await sql(
         `select p.oid, p.oid::regprocedure::text as signature, p.prosecdef, p.provolatile, p.proconfig,
                 p.proargnames, p.pronargs
@@ -252,32 +252,36 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
       assert.deepEqual(
         rows.map((row) => row.signature.replace(/^vitally_policy\./, "")),
-        ["is_workspace_admin(uuid)"],
+        ["cleared_workspace_id()", "is_workspace_admin(uuid)"],
       );
-      const [helper] = rows;
-      assert.equal(helper.prosecdef, true);
-      assert.equal(helper.provolatile, "s");
-      assert.deepEqual(helper.proconfig, ['search_path=""']);
-      assert.deepEqual(helper.proargnames, ["p_workspace_id"]);
-      assert.equal(helper.pronargs, 1);
-      for (const row of rows)
-        for (const name of row.proargnames ?? [])
-          assert.doesNotMatch(name, /user|account|member|person/i, row.signature);
-      const grants = await sql(
-        `select a.grantee, r.rolname, a.privilege_type
-           from pg_proc p cross join lateral aclexplode(p.proacl) a
-           left join pg_roles r on r.oid=a.grantee
-          where p.oid=$1 and a.grantee<>p.proowner`,
-        [helper.oid],
-      );
-      assert.deepEqual(
-        grants.rows.map(({ rolname, privilege_type }) => [rolname, privilege_type]),
-        [["authenticated", "EXECUTE"]],
-      );
-      assert.equal(grants.rows.some((row) => Number(row.grantee) === 0), false, "public");
-      for (const role of ["anon", "service_role"]) {
-        const access = await sql("select has_function_privilege($1, $2::oid, 'execute') as ok", [role, helper.oid]);
-        assert.equal(access.rows[0].ok, false, role);
+      const [cleared, admin] = rows;
+      assert.equal(cleared.proargnames, null);
+      assert.equal(cleared.pronargs, 0);
+      assert.deepEqual(admin.proargnames, ["p_workspace_id"]);
+      assert.equal(admin.pronargs, 1);
+      for (const helper of rows) {
+        assert.equal(helper.prosecdef, true, helper.signature);
+        assert.equal(helper.provolatile, "s", helper.signature);
+        assert.deepEqual(helper.proconfig, ['search_path=""'], helper.signature);
+        for (const name of helper.proargnames ?? [])
+          assert.doesNotMatch(name, /user|account|member|person/i, helper.signature);
+        const grants = await sql(
+          `select a.grantee, r.rolname, a.privilege_type
+             from pg_proc p cross join lateral aclexplode(p.proacl) a
+             left join pg_roles r on r.oid=a.grantee
+            where p.oid=$1 and a.grantee<>p.proowner`,
+          [helper.oid],
+        );
+        assert.deepEqual(
+          grants.rows.map(({ rolname, privilege_type }) => [rolname, privilege_type]),
+          [["authenticated", "EXECUTE"]],
+          helper.signature,
+        );
+        assert.equal(grants.rows.some((row) => Number(row.grantee) === 0), false, `public ${helper.signature}`);
+        for (const role of ["anon", "service_role"]) {
+          const access = await sql("select has_function_privilege($1, $2::oid, 'execute') as ok", [role, helper.oid]);
+          assert.equal(access.rows[0].ok, false, `${role} ${helper.signature}`);
+        }
       }
       const schema = await sql(
         `select r.rolname, a.privilege_type

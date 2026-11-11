@@ -89,19 +89,22 @@ const addStaffMember = (f, userId, key, name, capabilities) =>
   );
 // The helper's answer for one signed-in caller, in the role and with the JWT
 // claims a real session has. The transaction is rolled back.
-async function adminAnswer(f, userId, workspaceId) {
+async function callerAnswer(f, userId, text, values) {
   await f.sql("begin");
   try {
     await f.sql("select set_config('request.jwt.claims',$1,true)", [
       JSON.stringify({ sub: userId, role: "authenticated" }),
     ]);
     await f.sql("set local role authenticated");
-    return (await one(f, "select vitally_policy.is_workspace_admin($1) as answer", [workspaceId]))
-      .answer;
+    return (await one(f, `select ${text} as answer`, values)).answer;
   } finally {
     await f.sql("rollback");
   }
 }
+const adminAnswer = (f, userId, workspaceId) =>
+  callerAnswer(f, userId, "vitally_policy.is_workspace_admin($1)", [workspaceId]);
+// 045: the clearance helper takes no argument and answers for the caller.
+const clearedAnswer = (f, userId) => callerAnswer(f, userId, "vitally_policy.cleared_workspace_id()", []);
 const readable = async (client, table) => {
   const { data, error } = await client.from(table).select("*");
   assert.equal(error, null, `${table} read`);
@@ -172,6 +175,20 @@ test("volunteer roster records against real Supabase", async (t) => {
       assert.equal(await adminAnswer(f, prep.userId, f.workspaceId), false);
       assert.equal(await adminAnswer(f, f.applicantAUserId, f.workspaceId), false);
       assert.equal(await adminAnswer(f, f.siteCoordinatorUserId, f.foreignWorkspaceId), false);
+    });
+
+    await t.test("an uncleared admin is still an admin", async () => {
+      const lead = await f.staff({
+        key: "una_uncleared_admin",
+        name: "Una Ferris",
+        capabilities: ["admin", "followup"],
+        cleared: false,
+      });
+      assert.equal(await adminAnswer(f, lead.userId, f.workspaceId), true);
+      assert.equal(await clearedAnswer(f, lead.userId), null);
+      // The positive control: a cleared admin's answer is their workspace.
+      assert.equal(await clearedAnswer(f, f.siteCoordinatorUserId), f.workspaceId);
+      assert.equal(await clearedAnswer(f, f.applicantAUserId), null);
     });
 
     await t.test("table privileges are select-only", async () => {
