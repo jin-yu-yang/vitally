@@ -776,6 +776,8 @@ test("the action gate against real Supabase", async (t) => {
           otherLanguage: null,
           roles: ["greeter"],
           certificates: ["vsc"],
+          isNew: false,
+          photoIdChecked: false,
         },
       });
       assert.equal(error, null, `vitally_save_volunteer: ${error?.code}`);
