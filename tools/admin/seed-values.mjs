@@ -101,6 +101,8 @@ export const SEED_VOLUNTEERS = Object.freeze([
     otherLanguage: null,
     roles: ["preparer"],
     certificates: ["vsc", "itqr", "basic"],
+    isNew: false,
+    photoIdChecked: false,
   }),
   Object.freeze({
     name: "Tomas Abara",
@@ -111,6 +113,8 @@ export const SEED_VOLUNTEERS = Object.freeze([
     otherLanguage: "Spanish",
     roles: ["reviewer"],
     certificates: ["vsc", "itqr", "advanced"],
+    isNew: false,
+    photoIdChecked: false,
   }),
   Object.freeze({
     name: "Wen Tao Liu",
@@ -121,6 +125,8 @@ export const SEED_VOLUNTEERS = Object.freeze([
     otherLanguage: null,
     roles: ["preparer", "reviewer"],
     certificates: ["vsc", "itqr", "basic", "advanced"],
+    isNew: false,
+    photoIdChecked: false,
   }),
   Object.freeze({
     name: "Priya Venkat",
@@ -131,6 +137,8 @@ export const SEED_VOLUNTEERS = Object.freeze([
     otherLanguage: null,
     roles: ["intaker"],
     certificates: ["vsc", "itqr"],
+    isNew: false,
+    photoIdChecked: false,
   }),
   Object.freeze({
     name: "Jordan Reyes",
@@ -141,6 +149,8 @@ export const SEED_VOLUNTEERS = Object.freeze([
     otherLanguage: null,
     roles: ["greeter"],
     certificates: ["vsc"],
+    isNew: false,
+    photoIdChecked: false,
   }),
   Object.freeze({
     name: "Hana Moretti",
@@ -151,6 +161,8 @@ export const SEED_VOLUNTEERS = Object.freeze([
     otherLanguage: null,
     roles: ["preparer"],
     certificates: ["vsc", "itqr", "basic"],
+    isNew: false,
+    photoIdChecked: false,
   }),
   Object.freeze({
     name: "Samir Haddad",
@@ -161,6 +173,8 @@ export const SEED_VOLUNTEERS = Object.freeze([
     otherLanguage: "Arabic",
     roles: ["admin"],
     certificates: ["vsc", "itqr", "sc"],
+    isNew: false,
+    photoIdChecked: false,
   }),
   Object.freeze({
     name: "Lucy Fong",
@@ -171,5 +185,7 @@ export const SEED_VOLUNTEERS = Object.freeze([
     otherLanguage: null,
     roles: ["intaker", "greeter"],
     certificates: ["vsc", "itqr"],
+    isNew: false,
+    photoIdChecked: false,
   }),
 ]);
