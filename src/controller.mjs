@@ -1,3 +1,4 @@
+import { withOwnCapabilities } from "./clearance.mjs";
 import {
   CASE_ACTIONS,
   ASSISTANCE_ACTIONS,
@@ -949,7 +950,7 @@ export function createController({
   async function loadData() {
     await loadList();
     if (staffWindow()) {
-      state.people = await store.listPeople();
+      state.people = withOwnCapabilities(await store.listPeople(), state.principal);
       await loadAssistance();
       await loadWorkspace();
       // The Roster is read only where it is shown (a restored window on it).

@@ -385,7 +385,13 @@ export function createStore(client) {
     return request.actionId;
   };
 
+  // What the signed-in staff member is cleared for this season; an applicant
+  // is refused (FORBIDDEN).
+  const getClearance = () => call("vitally_my_clearance");
+
   return {
+    getClearance,
+
     async getPrincipal() {
       let identity;
       try {
@@ -412,6 +418,9 @@ export function createStore(client) {
         person =
           (await read(client.from("people").select("*").eq("user_id", user.id)))[0] ??
           null;
+      // A staff member also carries what they are cleared for this season;
+      // an applicant has no clearance, and the function refuses them.
+      const clearance = row.access === "staff" ? await getClearance() : null;
       return {
         userId: user.id,
         workspaceId: row.workspace_id,
@@ -419,6 +428,7 @@ export function createStore(client) {
         email: user.email ?? null,
         personId: person?.id ?? null,
         personName: person?.name ?? null,
+        ...(clearance ? { clearance } : {}),
       };
     },
 

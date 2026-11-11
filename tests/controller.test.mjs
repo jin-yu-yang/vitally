@@ -6804,3 +6804,25 @@ test("signing out forgets the Roster", async () => {
   assert.equal(state.volunteerFormError, null);
 });
 
+
+test("a staff member's own people entry carries their effective capabilities, not the roster's", async () => {
+  const store = fakeStore({
+    principal: {
+      userId: "user-9",
+      workspaceId: "w1",
+      access: "staff",
+      personId: "person-sam",
+      clearance: { cleared: true, missing: [], capabilities: ["prepare"], isAdmin: false, siteCoordinatorName: null },
+    },
+    people: [
+      { id: "person-sam", capabilities: ["prepare", "review"] },
+      { id: "person-lee", capabilities: ["prepare", "review"] },
+    ],
+  });
+  const { controller } = build({ store });
+  await controller.start();
+  const byId = Object.fromEntries(controller.getState().people.map((person) => [person.id, person]));
+  assert.deepEqual(byId["person-sam"].capabilities, ["prepare"]);
+  assert.deepEqual(byId["person-lee"].capabilities, ["prepare", "review"]);
+  controller.stop();
+});

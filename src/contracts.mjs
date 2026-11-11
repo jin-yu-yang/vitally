@@ -104,6 +104,7 @@ export const ERROR_CODES = Object.freeze([
   "SELF_REVIEW",
   "INELIGIBLE",
   "VALIDATION",
+  "NOT_CLEARED",
   "OFFLINE",
   "SERVER_ERROR",
 ]);
@@ -116,6 +117,7 @@ export const SQLSTATE_ERROR_CODES = Object.freeze({
   VT005: "SELF_REVIEW",
   VT006: "INELIGIBLE",
   VT007: "VALIDATION",
+  VT009: "NOT_CLEARED",
 });
 
 // True for a staff account only: the principal that gets the staff screens.
