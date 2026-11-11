@@ -1031,12 +1031,14 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
           rejected("INVALID_TRANSITION"),
         );
         // Readiness answers anyone who may act (042): a capable non-assignee
-        // is told the resolved task is not available.
+        // is told the resolved task is not available. The roster roles follow
+        // (045: a staff member acts with their roles' capabilities).
         await f.sql("update public.people set capabilities=$1 where id=$2", [
           ["admin", "followup", "review"],
           f.reviewerId,
         ]);
         try {
+          await f.clearStaff(f.reviewerId, ["admin", "followup", "review"]);
           await assert.rejects(
             () =>
               f.act(f.reviewer, caseId, "RESOLVE_FOLLOWUP", {
@@ -1056,6 +1058,7 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
             ["review"],
             f.reviewerId,
           ]);
+          await f.clearStaff(f.reviewerId, ["review"]);
         }
         assert.equal((await taskContacts(f, followupId)).length, 4);
       },

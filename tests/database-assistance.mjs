@@ -38,20 +38,26 @@ async function refuseAction(f, client, spec, code) {
   assert.equal(await f.receiptsFor(actionId), 0);
 }
 // Capability changes a test needs are always undone, whatever the body does.
+// The roster roles follow each change (045: a staff member acts with the
+// capabilities of their roles, within people.capabilities).
 async function withCapabilities(f, personId, change, body) {
-  const before = (
-    await f.sql("select capabilities from public.people where id=$1", [
-      personId,
-    ])
-  ).rows[0].capabilities;
+  const capabilitiesOf = async () =>
+    (
+      await f.sql("select capabilities from public.people where id=$1", [
+        personId,
+      ])
+    ).rows[0].capabilities;
+  const before = await capabilitiesOf();
   await f.sql(change, [personId]);
   try {
+    await f.clearStaff(personId, await capabilitiesOf());
     await body();
   } finally {
     await f.sql("update public.people set capabilities=$2 where id=$1", [
       personId,
       before,
     ]);
+    await f.clearStaff(personId, before);
   }
 }
 const caseCount = async (f) =>
