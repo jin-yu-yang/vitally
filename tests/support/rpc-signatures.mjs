@@ -99,7 +99,7 @@ export const RPC_SIGNATURES = Object.freeze([
       p_expected_revision: null,
       p_volunteer: {
         name: "Sample Volunteer", email: `v-${crypto.randomUUID()}@example.org`, phone: null,
-        works: "on_site", languages: ["english"], otherLanguage: null, roles: ["greeter"], certificates: [],
+        works: "on_site", languages: ["english"], otherLanguage: null, roles: ["greeter"], certificates: ["vsc"],
       },
     }),
   }),
