@@ -904,10 +904,10 @@ test("assignees must be cleared against real Supabase", async (t) => {
       const uncleared = await f.staff({
         key: "ugo_assignee",
         name: "Ugo Maren",
-        capabilities: ["followup"],
+        capabilities: ["admin", "followup"],
         cleared: false,
       });
-      const cleared = await f.staff({ key: "cleo_assignee", name: "Cleo Vance", capabilities: ["followup"] });
+      const cleared = await f.staff({ key: "cleo_assignee", name: "Cleo Vance", capabilities: ["admin", "followup"] });
       await assert.rejects(
         () => f.sql("select vitally_private.require_cleared_assignee($1,$2)", [f.workspaceId, uncleared.personId]),
         (error) => error.cause?.code === "VT006" && error.cause?.message === "INELIGIBLE",
@@ -952,19 +952,20 @@ test("assignees must be cleared against real Supabase", async (t) => {
 
     await t.test("an uncleared default follow-up person still receives work", async () => {
       const coordinatorId = f.roleAccounts.siteCoordinator.personId;
+      // The setup needs the coordinator, who reads nothing once uncleared.
+      const requested = await f.readyCase();
+      await f.act(f.preparer, requested, "CLAIM_PREPARATION", {});
+      await f.act(f.preparer, requested, "REQUEST_DOCUMENT", f.sampleRequest);
+      const withdrawn = await f.readyCase();
+      await f.act(f.preparer, withdrawn, "CLAIM_PREPARATION", {});
       await setCurrentRoles(f, coordinatorId, []);
       try {
-        const requested = await f.readyCase();
-        await f.act(f.preparer, requested, "CLAIM_PREPARATION", {});
-        await f.act(f.preparer, requested, "REQUEST_DOCUMENT", f.sampleRequest);
         await f.act(f.preparer, requested, "ESCALATE_CONTACT", { reason: "No response to the document request." });
         const followups = (
           await f.sql("select status,assignee_person_id from public.admin_followups where case_id=$1", [requested])
         ).rows;
         assert.deepEqual(followups, [{ status: "open", assignee_person_id: coordinatorId }]);
 
-        const withdrawn = await f.readyCase();
-        await f.act(f.preparer, withdrawn, "CLAIM_PREPARATION", {});
         await f.act(f.applicantA, withdrawn, "WITHDRAW", { confirmed: true });
         const notice = (
           await f.sql(

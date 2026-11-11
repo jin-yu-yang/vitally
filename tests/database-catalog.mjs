@@ -194,7 +194,8 @@ test("the catalog after the sample-case tools and presenter access are removed",
         "select p.proname, p.prosrc from pg_proc p where p.pronamespace='public'::regnamespace order by 1",
       );
       assert.equal(rows.length, RPCS.length);
-      for (const row of rows)
+      // vitally_my_clearance only reads: it takes no action id and stores no digest.
+      for (const row of rows.filter((entry) => entry.proname !== "vitally_my_clearance"))
         assert.match(row.prosrc, /'personId',\s*v_person\.id/, row.proname);
     });
 
