@@ -1219,6 +1219,10 @@ test("workflow records stay owner-visible, staff-only, and write-protected", asy
           visibleCases,
           "((cases.origin <> ",
         ).replaceAll("cases.", "c.");
+        // The staff branch's clearance check (045) names the policy's own
+        // table, so the rule is compared with that table's name in it.
+        const CLEARED = "c.workspace_id = ( SELECT vitally_policy.cleared_workspace_id()";
+        assert.ok(ownerRule.includes(CLEARED), "visible_cases gates its staff branch on clearance");
         for (const policy of policies) {
           assert.equal(policy.polcmd, "r", `${policy.name} must be read-only`);
           assert.deepEqual(policy.roles, ["authenticated"], policy.name);
@@ -1235,7 +1239,9 @@ test("workflow records stay owner-visible, staff-only, and write-protected", asy
           );
           const ownerReadable = CLIENT_VISIBLE_TABLES.includes(policy.name);
           assert.equal(
-            expression.includes(ownerRule),
+            expression.includes(
+              ownerRule.replace(CLEARED, `${policy.name}.workspace_id = ( SELECT vitally_policy.cleared_workspace_id()`),
+            ),
             ownerReadable,
             `${policy.name} must reuse the visible_cases owner rule only when client-visible`,
           );

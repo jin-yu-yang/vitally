@@ -261,6 +261,14 @@ test("the season bound and the household rows are the case's", async () => {
     // is that season, and a different workspace season must not move it.
     const season = Number((await f.sql("select season from public.cases where id=$1", [caseId])).rows[0].season);
     await f.sql("update public.workspaces set current_season=$2 where id=$1", [f.workspaceId, season + 1]);
+    // Clearance is for the current season (045), so the staff are cleared for
+    // the new one too.
+    for (const { personId } of Object.values(f.roleAccounts)) {
+      const { capabilities } = (
+        await f.sql("select capabilities from public.people where workspace_id=$1 and id=$2", [f.workspaceId, personId])
+      ).rows[0];
+      await f.clearStaff(personId, capabilities);
+    }
     await f.sql(
       `update public.cases set answers=jsonb_set(answers,'{hh}','[{"first_name":"Lin"},{"first_name":"Kai"}]'::jsonb) where id=$1`,
       [caseId],
