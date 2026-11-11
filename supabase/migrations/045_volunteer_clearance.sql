@@ -131,7 +131,7 @@ revoke all on function vitally_private.cleared(uuid,uuid) from public,anon,authe
 -- The role check (design D1). Deferred to commit, so one transaction may write
 -- roles and certificates in either order. It checks the entry of the changed
 -- row (OLD for a delete, and also OLD for an update that moves a certificate),
--- in any season.
+-- in any season. It locks that entry's row first (see below).
 
 create function vitally_private.role_certificates_check()
 returns trigger language plpgsql security definer set search_path='' as $$
@@ -148,8 +148,14 @@ begin
    select old.workspace_id,old.person_id,old.season where tg_op<>'INSERT'
   ) k(workspace_id,person_id,season)
  loop
+  -- The entry's row lock serialises concurrent checks of one entry: without
+  -- it, a role added in one transaction and a needed certificate deleted in
+  -- another could each pass a check that can't see the other, and both commit.
+  -- A transaction that waits here reads the other's committed roles, and its
+  -- next statement reads the other's committed certificates.
   select r.roles into v_roles from public.roster_entries r
-   where r.workspace_id=v_keys.workspace_id and r.person_id=v_keys.person_id and r.season=v_keys.season;
+   where r.workspace_id=v_keys.workspace_id and r.person_id=v_keys.person_id and r.season=v_keys.season
+   for update;
   continue when v_roles is null or cardinality(v_roles)=0;
   v_held=vitally_private.confirmed_certificates(v_keys.workspace_id,v_keys.person_id,v_keys.season);
   foreach v_role in array v_roles loop

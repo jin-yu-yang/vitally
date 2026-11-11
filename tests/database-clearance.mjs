@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createDatabaseFixture, rejected } from "./support/database-fixture.mjs";
+import { openDatabase } from "../tools/admin/database.mjs";
 
 // OpenSpec change add-volunteer-clearance (design D1-D2), migration 045: a
 // role exists only once its certificates are confirmed, the role helpers, the
@@ -225,6 +226,61 @@ test("volunteer clearance against real Supabase", async (t) => {
           await setRoles(member.personId, ["greeter"]);
           await assert.rejects(() => f.sql("set constraints all immediate"), roleNeeds("greeter: VSC"));
         });
+      });
+
+      // Two connections. A adds Greeter and holds the entry's row lock; B
+      // deletes the VSC that Greeter needs, and its commit-time check waits
+      // on that lock. Once A commits, B's check reads Greeter and refuses.
+      // Without the lock B's check would not wait; the test asserts the wait.
+      await t.test("a role added and its certificate deleted concurrently: one commits", async () => {
+        const member = await f.staff({ key: "kit_concurrent", name: "Kit Arden", capabilities: [] });
+        await confirm(member.personId, ["vsc"]); // autocommit: VSC, no roles
+        const other = await openDatabase({ kind: "test" });
+        try {
+          const { pid } = (await other.query("select pg_backend_pid() as pid")).rows[0];
+          await f.sql("begin");
+          let committedA = false;
+          try {
+            await setRoles(member.personId, ["greeter"]);
+            await other.query("begin");
+            await other.query(
+              "delete from public.certificates where workspace_id=$1 and person_id=$2 and certificate='vsc'",
+              [f.workspaceId, member.personId],
+            );
+            const commitB = other.query("commit").then(
+              () => null,
+              (error) => error,
+            );
+            let waiting = false;
+            for (let i = 0; i < 100 && !waiting; i += 1) {
+              waiting = (
+                await one(
+                  f,
+                  "select exists(select 1 from pg_stat_activity where pid=$1 and wait_event_type='Lock') as w",
+                  [pid],
+                )
+              ).w;
+              if (!waiting) await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+            assert.equal(waiting, true, "B's check waits on the entry's row lock");
+            await f.sql("commit");
+            committedA = true;
+            const errorB = await commitB;
+            assert.equal(errorB?.code, "VT007", "B is refused");
+            assert.equal(errorB?.message, "ROLE_NEEDS");
+            assert.equal(errorB?.detail, "greeter: VSC");
+          } finally {
+            if (!committedA) await f.sql("rollback");
+          }
+          assert.deepEqual(await rolesOf(member.personId), ["greeter"]);
+          assert.deepEqual(
+            (await certificatesOf(member.personId)).map((row) => [row.certificate, row.status]),
+            [["vsc", "confirmed"]],
+          );
+        } finally {
+          await other.query("rollback").catch(() => {});
+          await other.end();
+        }
       });
     });
 
