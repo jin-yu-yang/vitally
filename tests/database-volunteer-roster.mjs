@@ -437,15 +437,25 @@ test("volunteer roster records against real Supabase", async (t) => {
       assert.equal((await one(f, "select reviewer_id from public.cases where id=$1", [caseId])).reviewer_id, null);
     });
 
-    await t.test("unticking certificates leaves preparation claimable", async () => {
+    // 045: a staff member acts with their roles' capabilities, so the
+    // Preparer role stays, with the certificates it needs (VSC, IT&QR, Basic).
+    await t.test("unticking certificates the roles don't need leaves preparation claimable", async () => {
       const member = await f.staff({ key: "ira_untick", name: "Ira Kohl", capabilities: ["prepare"] });
       const { email } = member;
       let revision = await revisionOf(f, member.personId);
-      await save(admin, editArgs(member.personId, revision, volunteer({ email, certificates: ALL_CERTIFICATES })));
+      await save(
+        admin,
+        editArgs(member.personId, revision, volunteer({ email, roles: ["preparer"], certificates: ALL_CERTIFICATES })),
+      );
       revision += 1;
-      // Greeter needs VSC (045), so VSC is the one certificate left.
-      await save(admin, editArgs(member.personId, revision, volunteer({ email, certificates: ["vsc"] })));
-      assert.deepEqual((await certificatesOf(f, member.personId)).map((row) => row.certificate), ["vsc"]);
+      await save(
+        admin,
+        editArgs(member.personId, revision, volunteer({ email, roles: ["preparer"], certificates: ["vsc", "itqr", "basic"] })),
+      );
+      assert.deepEqual(
+        (await certificatesOf(f, member.personId)).map((row) => row.certificate),
+        ["basic", "itqr", "vsc"],
+      );
       const caseId = await f.readyCase();
       await f.act(member.client, caseId, "CLAIM_PREPARATION", {});
     });
