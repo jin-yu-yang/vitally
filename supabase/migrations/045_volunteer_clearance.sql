@@ -1034,9 +1034,9 @@ revoke all on function vitally_private.open_work(uuid,uuid) from public,anon,aut
 --     the missing certificates in the labels of missing_certificates;
 --   - the photo ID check keeping its time while it stays ticked;
 --   - the open-work rule: VT004 OPEN_WORK, with a JSON array of the work's
---     labels as the detail, when the person would lose a capability their open
---     work needs, or be uncleared while holding any. It runs after validation
---     and before any write, so a refusal changes nothing.
+--     labels as the detail, when the save takes away a capability their open
+--     work needs, or their clearance while they hold any. It runs after
+--     validation and before any write, so a refusal changes nothing.
 create or replace function public.vitally_save_volunteer(p_action_id uuid,p_volunteer_id uuid,p_expected_revision bigint,p_volunteer jsonb)
 returns jsonb language plpgsql security definer set search_path='' as $$
 declare v_member public.memberships;
@@ -1066,6 +1066,8 @@ declare v_member public.memberships;
  v_ceiling text[]='{}';
  v_capabilities text[];
  v_cleared boolean;
+ v_was_capable text[];
+ v_was_cleared boolean;
  v_open_work jsonb;
  v_result jsonb;
 begin
@@ -1172,12 +1174,20 @@ begin
   v_photo_checked_at=coalesce(v_entry.photo_id_checked_at,now());
  end if;
 
- -- The open-work rule, on the would-be roles within the person's ceiling.
+ -- The open-work rule (design D7): the person's effective capabilities and
+ -- clearance now, before any write, against the would-be roles within their
+ -- ceiling. Only what this save takes away counts: a capability the work
+ -- needs that they hold now and would lose, or clearance they hold now and
+ -- would lose while holding any work (then all of it is listed). A person
+ -- who already lacks either can still be saved.
  if p_volunteer_id is not null then
+  v_was_capable=vitally_private.effective_capabilities(v_member.workspace_id,p_volunteer_id);
+  v_was_cleared=vitally_private.cleared(v_member.workspace_id,p_volunteer_id);
   v_capabilities=array(select c from unnest(vitally_private.role_capabilities(v_roles)) c where c=any(v_ceiling));
   v_cleared=cardinality(v_roles)>0 and (not v_is_new or v_photo_checked_at is not null);
   select jsonb_agg(w.label) into v_open_work from vitally_private.open_work(v_member.workspace_id,p_volunteer_id) w
-   where not v_cleared or not (w.needs=any(v_capabilities));
+   where (v_was_cleared and not v_cleared)
+    or (w.needs=any(v_was_capable) and not (w.needs=any(v_capabilities)));
   if v_open_work is not null then
    raise sqlstate 'VT004' using message='OPEN_WORK',detail=v_open_work::text;
   end if;
