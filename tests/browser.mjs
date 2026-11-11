@@ -8812,8 +8812,9 @@ test(
       const page = admin.page;
       await guardToast(page);
 
-      // 1. The admin opens the Roster: the workspace's staff are on it, with
-      //    nothing recorded for them yet.
+      // 1. The admin opens the Roster: the workspace's staff are on it, each
+      //    with the role the fixture records for their capabilities (rolesFor
+      //    in tests/support/database-fixture.mjs, add-volunteer-clearance).
       await loginTestUser({ page, actor: fixture.actor("siteCoordinator"), fixture, heading: OFFICE_BOARD_HEADING });
       assert.equal(await readSignedInAs(page), ROLE_NAMES.siteCoordinator);
       await clickAction(page, "open-volunteers");
@@ -8826,10 +8827,17 @@ test(
         ARRIVAL_MS,
       );
       await waitForText(page, "Roles and certificates are recorded here. They don't change what anyone can do in ViTally yet.");
-      for (const name of Object.values(ROLE_NAMES)) {
+      for (const [name, role] of [
+        [ROLE_NAMES.siteCoordinator, "Admin"],
+        [ROLE_NAMES.preparer, "Preparer"],
+        [ROLE_NAMES.reviewer, "Reviewer"],
+        ["Rowan Price", "Intaker"],
+      ]) {
         const row = rowOf(page, name);
         assert.equal(await row.count(), 1, `${name} is not on the Roster once`);
-        assert.match(await row.innerText(), /No roles recorded/, `${name} shows roles before anyone recorded them`);
+        const text = await row.innerText();
+        assert.ok(text.includes(role), `${name} does not show the ${role} role the fixture records: ${text}`);
+        assert.doesNotMatch(text, /No roles recorded/, `${name} shows no roles`);
       }
       const staffCount = (await rowNames(page)).length;
 
@@ -8922,7 +8930,14 @@ test(
       await drawerOpen(page, ROLE_NAMES.siteCoordinator);
       assert.deepEqual(
         await drawerValues(page),
-        { name: ROLE_NAMES.siteCoordinator, phone: "", otherLanguage: "", ticked: [], otherShown: false },
+        {
+          name: ROLE_NAMES.siteCoordinator,
+          phone: "",
+          otherLanguage: "",
+          // The fixture's Admin role and the certificates it needs.
+          ticked: ["volunteer-role-admin", "volunteer-certificate-vsc", "volunteer-certificate-itqr"],
+          otherShown: false,
+        },
         "Edit opened again with the text or ticks typed before Cancel",
       );
       await clickAction(page, "close-dialog");
