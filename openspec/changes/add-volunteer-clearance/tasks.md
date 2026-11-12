@@ -43,7 +43,7 @@
 
 - [x] 6.1 Add VT009 `NOT_CLEARED` to `src/contracts.mjs`, with unit tests.
 - [x] 6.2 Load `vitally_my_clearance()` for a staff sign-in in the store. The signed-in person's own capabilities become the effective ones. The Volunteers link keeps the ceiling admin flag. Write controller and unit tests.
-- [ ] 6.3 Build the setup screen: "Finish your setup for this season", the missing items, "Ask <name>, your site coordinator", Check again, a re-check on window focus, and Volunteers for an uncleared admin. A `NOT_CLEARED` result from any action switches to it. Write view unit tests.
+- [x] 6.3 Build the setup screen: "Finish your setup for this season", the missing items, "Ask <name>, your site coordinator", Check again, a re-check on window focus, and Volunteers for an uncleared admin. A `NOT_CLEARED` result from any action switches to it. Write view unit tests.
 - [ ] 6.4 Update the Roster: the cleared or missing column and the new page sentence; "New volunteer" (ticked by default on Add) and "Photo ID checked" in the drawer; the role-needs-certificates message; the open-work alert. Write view unit tests.
 
 ## 7. Seed and docs
