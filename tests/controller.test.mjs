@@ -2740,7 +2740,13 @@ test("a visited id the catalogue doesn't know is kept but never sent, and never 
 
 test("staff never send visits, and their visits never make the draft dirty", async () => {
   const store = v2Store({ answers: { tp_first_name: "Mei" } });
-  const staffPrincipal = { userId: "user-9", workspaceId: "w1", access: "staff", personId: "person-admin" };
+  const staffPrincipal = {
+    userId: "user-9",
+    workspaceId: "w1",
+    access: "staff",
+    personId: "person-admin",
+    clearance: { cleared: true, missing: [], capabilities: ["admin"], isAdmin: true, siteCoordinatorName: null },
+  };
   store.getPrincipal = async () => staffPrincipal;
   store.listPeople = async () => [{ id: "person-admin", capabilities: ["admin"] }];
   const { controller } = build({ store });
@@ -7049,6 +7055,10 @@ test("an uncleared admin can open the Roster and is read no case", async () => {
   assert.match(roster, /<h1>Volunteers<\/h1>/);
   assert.match(roster, /class="volunteer-row"/);
   assert.doesNotMatch(roster, /data-action="open-cases"/);
+  assert.equal(store.calls.includes("listCases"), false);
+  // The way back from the Roster is the setup screen.
+  controller.navigate("staff");
+  assert.match(staffScreen(controller.getState()), /Finish your setup for this season/);
   assert.equal(store.calls.includes("listCases"), false);
   controller.stop();
 });

@@ -2302,6 +2302,11 @@ if (!config) {
       case "retry-connection":
         await controller.refresh();
         break;
+      // Finish your setup's Check again. The window's focus re-checks too,
+      // through the controller's own focus listener (refresh).
+      case "check-clearance":
+        await controller.checkClearance();
+        break;
       case "dismiss-error":
         controller.dismissError();
         break;

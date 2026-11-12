@@ -1,4 +1,4 @@
-import { withOwnCapabilities } from "./clearance.mjs";
+import { awaitingClearance, ceilingAdmin, withOwnCapabilities } from "./clearance.mjs";
 import {
   CASE_ACTIONS,
   ASSISTANCE_ACTIONS,
@@ -562,6 +562,12 @@ export function createController({
   function noteFailure(error, { message } = {}) {
     dropLocalRetry();
     state.errorCount += 1;
+    // Not cleared (any action, change add-volunteer-clearance): the setup
+    // screen says it, so there is no inline error.
+    if (error?.code === "NOT_CLEARED" && staffWindow()) {
+      loseClearance();
+      return;
+    }
     state.error = {
       code: error?.code ?? "SERVER_ERROR",
       message: message ?? error?.message ?? "Something went wrong.",
@@ -794,6 +800,11 @@ export function createController({
       if (state.session !== "none") await load();
       return;
     }
+    // Not cleared: the focus, `online` and retry re-read the clearance only.
+    if (awaitingClearance(state)) {
+      await checkClearance();
+      return;
+    }
     let failure = null;
     if (!dataLoaded) {
       // The first load never finished: read everything it reads.
@@ -962,11 +973,12 @@ export function createController({
   }
 
   // The Roster's list (design D9). Only an admin's window asks: the policies
-  // would answer anyone else with no rows, and asking is already a mistake. A
+  // would answer anyone else with no rows, and asking is already a mistake.
+  // It is the ceiling admin's (design D10), cleared or not. A
   // first read that fails marks the list failed, so it never looks empty; one
   // that loaded once keeps what it shows. It throws, for loadData.
   async function readVolunteers() {
-    if (!actingAdmin()) return;
+    if (!staffWindow() || !ceilingAdmin(state.principal)) return;
     try {
       state.volunteers = await store.listVolunteers();
       state.lists.volunteers = "ready";
@@ -1089,6 +1101,17 @@ export function createController({
     // A staff window lands on the work board and a client on their applications,
     // unless this window was already somewhere this principal may be.
     if (!screens().includes(state.screen)) state.screen = homeScreen();
+    state.error = null;
+    if (awaitingClearance(state)) {
+      await holdForClearance();
+      return;
+    }
+    await loadWork();
+  }
+
+  // The work a cleared staff window (or any client window) reads: its lists,
+  // the realtime channel and the open case.
+  async function loadWork() {
     try {
       await loadData();
       state.error = null;
@@ -1111,6 +1134,93 @@ export function createController({
     show();
     // A reload on a case page: the people are in.
     void startScreeningIfDue();
+  }
+
+  // ---- clearance (change add-volunteer-clearance, design D10) -------------
+  //
+  // An uncleared staff window shows the setup screen and holds no work: no
+  // case, no help request, no workspace row and no realtime channel. A
+  // ceiling admin's window keeps the Roster, which needs none of them.
+  function dropWork() {
+    unsubscribe();
+    clearSelection();
+    dataLoaded = false;
+    state.cases = [];
+    state.assistance = [];
+    state.lists = { ...state.lists, cases: "loading", assistance: "loading" };
+    state.dialog = null;
+    state.dialogContext = null;
+    if (!(ceilingAdmin(state.principal) && state.screen === "office-volunteers"))
+      state.screen = "staff";
+  }
+
+  async function holdForClearance() {
+    dropWork();
+    persistSession();
+    show();
+    if (state.screen === "office-volunteers") await loadVolunteers();
+  }
+
+  // An action refused NOT_CLEARED: the window is not cleared any more. It
+  // drops the work, shows the setup screen and asks again.
+  function loseClearance() {
+    state.principal = {
+      ...state.principal,
+      clearance: { ...(state.principal.clearance ?? {}), cleared: false },
+    };
+    dropWork();
+    state.error = null;
+    state.retryable = false;
+    persistSession();
+    void checkClearance();
+  }
+
+  // Re-reads `vitally_my_clearance` (Check again, focus). One request at a
+  // time: a call while one is out gets the same promise. Only `cleared` says
+  // cleared; an answer that is no clearance at all is a failure, with Try
+  // again. Never rejects.
+  let clearanceCheck = null;
+  function checkClearance() {
+    if (!clearanceCheck)
+      clearanceCheck = recheckClearance().finally(() => {
+        clearanceCheck = null;
+      });
+    return clearanceCheck;
+  }
+
+  async function recheckClearance() {
+    if (!staffWindow()) return;
+    const asked = state.principal.userId;
+    const same = () => staffWindow() && state.principal.userId === asked;
+    let answer;
+    try {
+      answer = await store.getClearance();
+      if (!answer || typeof answer !== "object" || Array.isArray(answer))
+        throw controllerError("SERVER_ERROR", "Something went wrong.");
+    } catch (error) {
+      if (same()) noteLocalFailure(error, checkClearance);
+      return;
+    }
+    if (!same()) return;
+    noteConnected();
+    const was = !awaitingClearance(state);
+    state.principal = { ...state.principal, clearance: answer };
+    // The person's own entry follows what they may do now.
+    state.people = withOwnCapabilities(state.people, state.principal);
+    // An earlier failed check's notice is answered.
+    if (localRetry === checkClearance) {
+      dropLocalRetry();
+      state.error = null;
+    }
+    const now = !awaitingClearance(state);
+    if (now && !was) {
+      if (state.screen !== "office-volunteers") state.screen = homeScreen();
+      await loadWork();
+      return;
+    }
+    if (!now && was) dropWork();
+    persistSession();
+    show();
   }
 
   async function start() {
@@ -2938,6 +3048,7 @@ export function createController({
     confirmShadedReview,
     cancelShadedReview,
     retryLast,
+    checkClearance,
     navigate,
     togglePanel,
     setLookup,

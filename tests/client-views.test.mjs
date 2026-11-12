@@ -28,6 +28,7 @@ import { intakeFormV2, docCard, submittedV2 } from "../src/intake-views.mjs";
 import { icon } from "../src/ui.mjs";
 import { t, sentence } from "../src/client-text.mjs";
 import { CONSENT_14446 } from "./support/consent-14446.mjs";
+import { cleared } from "./support/clearance.mjs";
 
 // Views are pure functions of a controller snapshot, so these tests operate on
 // the HTML string itself. No DOM library, and nothing here may reach a store.
@@ -531,7 +532,7 @@ test("a staff account gets the board and one case workspace, with no persona sel
   ];
   const staffState = (overrides = {}) =>
     baseState({
-      principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "person-1" },
+      principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "person-1", clearance: cleared() },
       screen: "staff",
       cases,
       people: [
@@ -578,7 +579,7 @@ test("a staff account gets the board and one case workspace, with no persona sel
 
 test("the staff workspace announces a failure once, beside the work", () => {
   const state = baseState({
-    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "person-1" },
+    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "person-1", clearance: cleared() },
     screen: "staff-case",
     error: {
       code: "CONFLICT",
@@ -628,7 +629,7 @@ test("an error shows inside the open dialog, and the banner steps aside", () => 
 
 test("a dialog on the case page holds the only copy of the error", () => {
   const state = baseState({
-    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "person-1" },
+    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "person-1", clearance: cleared() },
     screen: "staff-case",
     dialog: "close-case",
     error: { code: "SERVER_ERROR", message: "x" },

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { renderRoster, volunteerDrawerBody } from "../src/volunteer-views.mjs";
 import { staffScreen, dialog } from "../src/views.mjs";
+import { cleared } from "./support/clearance.mjs";
 
 // Fictional people only.
 const ADMIN_PERSON = { id: "p-sam", name: "Sam Rivera", capabilities: ["admin", "followup"] };
@@ -23,7 +24,7 @@ const volunteer = (overrides = {}) => ({
 });
 
 const baseState = (overrides = {}) => ({
-  principal: { userId: "u1", workspaceId: "w1", access: "staff", personId: "p-sam" },
+  principal: { userId: "u1", workspaceId: "w1", access: "staff", personId: "p-sam", clearance: cleared({ isAdmin: true }) },
   people: [ADMIN_PERSON, PREPARER_PERSON],
   cases: [],
   assistance: [],
@@ -55,7 +56,7 @@ test("an admin's sidebar has the Volunteers link after All cases; a preparer's h
     "Volunteers comes after All cases",
   );
   const preparer = staffScreen(
-    baseState({ screen: "staff", principal: { userId: "u2", workspaceId: "w1", access: "staff", personId: "p-alex" } }),
+    baseState({ screen: "staff", principal: { userId: "u2", workspaceId: "w1", access: "staff", personId: "p-alex", clearance: cleared() } }),
   );
   assert.doesNotMatch(preparer, /data-action="open-volunteers"/);
 });
@@ -67,7 +68,7 @@ test("the Volunteers link is current on the Roster", () => {
 
 test("a non-admin left on the Roster gets the work board", () => {
   const html = staffScreen(
-    baseState({ principal: { userId: "u2", workspaceId: "w1", access: "staff", personId: "p-alex" } }),
+    baseState({ principal: { userId: "u2", workspaceId: "w1", access: "staff", personId: "p-alex", clearance: cleared() } }),
   );
   assert.match(html, /Work board<\/h2>/);
   assert.doesNotMatch(html, /OFFICE · VOLUNTEERS|Mira Patel|open-add-volunteer/);

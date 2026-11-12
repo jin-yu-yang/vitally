@@ -24,3 +24,8 @@ export const missingLines = (clearance) =>
     if (item.kind === "photoId") return "Have your photo ID checked.";
     return `${capitalise(item.role)} needs ${item.certificates.join(" and ")}.`;
   });
+
+// Whether a window waits on the setup screen: a staff window whose clearance
+// does not say cleared. A missing or unread clearance is never a clearance.
+export const awaitingClearance = (state) =>
+  state?.principal?.access === "staff" && state.principal.clearance?.cleared !== true;

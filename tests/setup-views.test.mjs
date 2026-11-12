@@ -94,17 +94,20 @@ test("an uncleared staff member left on a case or an office screen still sees th
   }
 });
 
-test("an uncleared ceiling admin gets only the Volunteers link, and the Roster opens", () => {
+test("an uncleared ceiling admin gets the Volunteers link and the way back to setup, and the Roster opens", () => {
   const setup = staffScreen(staffState({ isAdmin: true }));
   assert.match(setup, /Finish your setup for this season/);
   assert.match(setup, /data-action="open-volunteers"/);
-  assert.doesNotMatch(setup, /data-action="open-board"/);
+  // The setup screen is the home link: no work board, no Follow-ups.
+  assert.match(setup, /data-action="open-board"[^>]*aria-current="page"><svg[^]*?<\/svg> Finish your setup<\/button>/);
+  assert.doesNotMatch(setup, /Work board|Follow-ups/);
   assert.doesNotMatch(setup, /data-action="open-cases"/);
   const roster = staffScreen(staffState({ isAdmin: true }, { screen: "office-volunteers" }));
   assert.doesNotMatch(roster, /Finish your setup for this season/);
   assert.match(roster, /<h1>Volunteers<\/h1>/);
   assert.match(roster, /data-action="open-add-volunteer"/);
   assert.match(roster, /data-action="open-volunteers"[^>]*aria-current="page"/);
+  assert.match(roster, /data-action="open-board" ><svg[^]*?<\/svg> Finish your setup<\/button>/);
 });
 
 test("a cleared staff member gets the normal staff screens", () => {
