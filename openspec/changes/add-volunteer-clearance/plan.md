@@ -302,6 +302,25 @@ This task comes before the gates, so suites stay meaningful while the gates land
 - [ ] **Step 2: Run them, implement, run** `npm run db:migrate:test` and `npm run test:database` (expect green), then commit:
   `git commit -m "Roster save: roles need certificates, photo ID, open-work rule"`.
 
+### Task 6b: The save leaves uploaded certificates alone
+
+**Files:**
+- Modify: `supabase/migrations/045_volunteer_clearance.sql` (the last `vitally_save_volunteer`, Part 6)
+- Test: `tests/database-volunteer-roster.mjs`
+
+**Interfaces:**
+- **Produces:** the save's certificate write.
+  - It deletes only current-season `status='confirmed'` rows not in the payload.
+  - For each sent certificate, it inserts a confirmed row, or updates an existing `uploaded` row to `confirmed` with `confirmed_by_person_id` the caller and `confirmed_at` now. An existing `confirmed` row keeps its `confirmed_at` and `confirmed_by_person_id`.
+  - The ROLE_NEEDS pre-check counts a sent certificate as confirmed.
+
+- [ ] **Step 1: Write the failing tests.**
+  - `test("an uploaded certificate survives a save that doesn't send it")`: insert an `uploaded` VSC row for a volunteer, save the volunteer without VSC, and find the row still there, still `uploaded`, unchanged.
+  - `test("ticking an uploaded certificate confirms it")`: with an `uploaded` VSC row, save with VSC and Greeter. The row is `confirmed` by the admin, and the volunteer has Greeter.
+  - Keep "A certificate stays ticked" and "A certificate is unticked" passing.
+- [ ] **Step 2: Run, implement, run again.** Expected: FAIL, then green. While 045 is still changing, verify the database through CI.
+- [ ] **Step 3: Commit** `git commit -m "Roster save: leave uploaded certificates alone, and confirm one when ticked"`.
+
 ### Task 7: The app error code and clearance in the store
 
 **Files:**

@@ -54,7 +54,8 @@ Saving SHALL create a person with no sign-in and no capabilities, their profile,
 
 ### Requirement: An admin can edit a volunteer
 Edit SHALL open the same drawer filled in with the volunteer's values, and saving SHALL replace them.
-- A certificate that stays ticked SHALL keep its original confirmation date and confirmer. A certificate that is unticked SHALL be deleted, together with every role that needs it, in the same save.
+- A certificate that stays ticked SHALL keep its original confirmation date and confirmer. A confirmed certificate that is unticked SHALL be deleted, together with every role that needs it, in the same save.
+- The save SHALL change only the certificates the drawer manages. It SHALL NOT delete or change an `uploaded` certificate that it is not sent. Ticking a certificate whose row is `uploaded` SHALL confirm it, by that admin, now, and roles that need it MAY be granted in the same save.
 - A photo ID check that stays ticked SHALL keep its original time.
 - The email of a volunteer who has a sign-in SHALL be read-only in the drawer, and SHALL be refused by the database if changed.
 - A save based on values someone else has since changed SHALL be refused with a conflict, and the drawer SHALL say so.
@@ -70,6 +71,14 @@ Edit SHALL open the same drawer filled in with the volunteer's values, and savin
 #### Scenario: A certificate is unticked
 - **WHEN** an admin unticks Basic for a volunteer whose only qualifying certificate for Preparer is Basic, and saves
 - **THEN** the Basic row no longer exists and the volunteer no longer has Preparer
+
+#### Scenario: An uploaded certificate survives a save
+- **WHEN** a volunteer has an `uploaded` VSC row and an admin saves an edit that doesn't send VSC
+- **THEN** the VSC row still exists, still `uploaded` and otherwise unchanged
+
+#### Scenario: Ticking an uploaded certificate confirms it
+- **WHEN** a volunteer has an `uploaded` VSC row and an admin ticks VSC and Greeter and saves
+- **THEN** the VSC row is `confirmed` by that admin now, and the volunteer has Greeter
 
 #### Scenario: Recording the photo ID check
 - **WHEN** an admin ticks "Photo ID checked" for a new volunteer with a role and saves

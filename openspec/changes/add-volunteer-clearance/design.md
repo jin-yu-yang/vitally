@@ -182,6 +182,11 @@ The agreed design and the user's rulings are in `brainstorm.md`.
 - **Why:** user ruling, Nov 11. No staff action assigns work to someone else today, so the rule is set up now for #139 to inherit.
 - **Alternative:** writing the rule in #139 only. A new path could then skip it.
 
+### D14: The save manages only confirmed certificates
+- **Choice:** `vitally_save_volunteer` deletes only current-season `confirmed` certificates that the payload omits. A sent certificate whose row is `uploaded` is updated to `confirmed`, with the saving admin and now. Every other row is left alone.
+- **Why:** the drawer shows only confirmed certificates, so an omitted `uploaded` row was never unticked. Deleting it would lose data silently. Ticking it is the admin confirming it (user decision, 2026-11-12).
+- **Alternative:** leave a ticked `uploaded` row unchanged and refuse dependent roles with `ROLE_NEEDS`. Rejected: the drawer would refuse a box the admin just ticked.
+
 ## Risks / Trade-offs
 
 - [Risk] Editing 21 policies by hand could miss one, or change a client branch. → Mitigation:
