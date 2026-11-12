@@ -20,6 +20,10 @@ const volunteer = (overrides = {}) => ({
   certificates: ["vsc"],
   revision: 3,
   hasSignIn: false,
+  isNew: false,
+  photoIdChecked: false,
+  cleared: true,
+  missing: [],
   ...overrides,
 });
 
@@ -74,14 +78,12 @@ test("a non-admin left on the Roster gets the work board", () => {
   assert.doesNotMatch(html, /OFFICE · VOLUNTEERS|Mira Patel|open-add-volunteer/);
 });
 
-test("the Roster page says roles grant nothing, and shows no season", () => {
+test("the Roster page says volunteers work on cases once cleared, and shows no season", () => {
   const html = staffScreen(baseState());
   assert.match(html, />OFFICE · VOLUNTEERS</);
   assert.match(html, /<h1>Volunteers<\/h1>/);
-  assert.match(
-    html,
-    /Roles and certificates are recorded here\. They don&#39;t change what anyone can do in ViTally yet\./,
-  );
+  assert.match(html, /Volunteers work on cases only once they are cleared\./);
+  assert.doesNotMatch(html, /recorded here|change what anyone can do/);
   assert.match(html, /class="btn primary" data-action="open-add-volunteer"[^>]*>(?:<svg[\s\S]*?<\/svg>)? Add a volunteer<\/button>/);
   assert.doesNotMatch(html, /season|2025|2026/i);
 });
@@ -93,7 +95,7 @@ test("the table has the spec's columns and a count", () => {
   });
   assert.match(html, /class="board-table people-table"/);
   const headers = [...html.matchAll(/<th scope="col">([^<]*)<\/th>/g)].map((m) => m[1]);
-  assert.deepEqual(headers, ["Volunteer", "Roles", "Certificates", "Languages", "Edit"]);
+  assert.deepEqual(headers, ["Volunteer", "Roles", "Certificates", "Languages", "Cleared", "Edit"]);
   assert.match(html, /2 of 2 volunteers/);
   assert.match(html, /data-action="open-edit-volunteer" data-volunteer-id="v-1"/);
 });
@@ -128,7 +130,53 @@ test("a row shows the Remote badge, the roles, the certificates and the language
   assert.match(d, /Mandarin/);
   assert.match(d, /Tagalog/);
   assert.match(d, /mira@example\.test · 215-555-0101/);
-  assert.doesNotMatch(html, /missing|inactive/i);
+  assert.doesNotMatch(html, /inactive/i);
+});
+
+test("a row shows Cleared, or the one thing it waits for", () => {
+  const html = renderRoster(
+    [
+      volunteer({ id: "a", name: "A One" }),
+      volunteer({ id: "b", name: "B Two", roles: [], cleared: false, missing: ["form13615"] }),
+      volunteer({ id: "c", name: "C Three", isNew: true, cleared: false, missing: ["photoId"] }),
+    ],
+    { list: "ready", filters: {} },
+  );
+  const [a, b, c] = rowsOf(html);
+  assert.match(a, /Cleared/);
+  assert.doesNotMatch(a, /Not cleared|Form 13615|Photo ID/);
+  assert.match(b, /Not cleared/);
+  assert.match(b, /Form 13615 missing/);
+  assert.match(c, /Not cleared/);
+  assert.match(c, /Photo ID check missing/);
+  assert.doesNotMatch(c, /Form 13615/);
+});
+
+test("Add opens with New volunteer ticked and Photo ID checked not", () => {
+  const html = volunteerDrawerBody({ volunteer: null, isNew: true, ui: {} });
+  assert.match(html, /<input type="checkbox" name="isNew"[^>]* checked[^>]*><span>New volunteer<\/span>/);
+  const photo = html.match(/<input type="checkbox" name="photoIdChecked"[^>]*>/)[0];
+  assert.doesNotMatch(photo, /checked/);
+  assert.match(html, /<span>Photo ID checked<\/span>/);
+});
+
+test("Edit shows the volunteer's own New and Photo ID checked values", () => {
+  const plain = volunteerDrawerBody({ volunteer: volunteer(), isNew: false, ui: {} });
+  assert.doesNotMatch(plain.match(/<input type="checkbox" name="isNew"[^>]*>/)[0], /checked/);
+  assert.doesNotMatch(plain.match(/<input type="checkbox" name="photoIdChecked"[^>]*>/)[0], /checked/);
+  const both = volunteerDrawerBody({ volunteer: volunteer({ isNew: true, photoIdChecked: true }), isNew: false, ui: {} });
+  assert.match(both.match(/<input type="checkbox" name="isNew"[^>]*>/)[0], /checked/);
+  assert.match(both.match(/<input type="checkbox" name="photoIdChecked"[^>]*>/)[0], /checked/);
+});
+
+test("a role's tick carries what it needs, so the drawer can untick it", () => {
+  const html = volunteerDrawerBody({ volunteer: null, isNew: true, ui: {} });
+  const preparer = html.match(/<input type="checkbox" name="role" value="preparer"[^>]*>/)[0];
+  assert.match(preparer, /data-needs-all="vsc itqr"/);
+  assert.match(preparer, /data-needs-one-of="basic advanced"/);
+  const greeter = html.match(/<input type="checkbox" name="role" value="greeter"[^>]*>/)[0];
+  assert.match(greeter, /data-needs-all="vsc"/);
+  assert.doesNotMatch(greeter, /data-needs-one-of/);
 });
 
 test("a name or phone with markup is shown as text in the table and in the drawer", () => {

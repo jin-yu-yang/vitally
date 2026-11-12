@@ -6461,7 +6461,9 @@ const VOLUNTEER_PAYLOAD = Object.freeze({
   languages: ["english"],
   otherLanguage: null,
   roles: ["preparer", "reviewer"],
-  certificates: ["vsc"],
+  certificates: ["vsc", "itqr", "basic"],
+  isNew: false,
+  photoIdChecked: false,
 });
 
 // The admin store, with the Roster's two calls. `volunteers` is what the next
@@ -6587,9 +6589,9 @@ test("a volunteer with a problem is not sent, and the drawer says why", async ()
   controller.navigate("office-volunteers");
   await controller.loadVolunteers();
   controller.openDialog("volunteer", null);
-  const saved = await controller.saveVolunteer({ ...VOLUNTEER_PAYLOAD, email: "other@example.test", roles: [] });
+  const saved = await controller.saveVolunteer({ ...VOLUNTEER_PAYLOAD, email: "other@example.test", roles: ["intaker"], certificates: ["vsc"] });
   assert.equal(saved, false);
-  assert.equal(controller.getState().volunteerFormError, "Choose at least one role.");
+  assert.equal(controller.getState().volunteerFormError, "Intaker needs IT&QR.");
   assert.equal(store.calls.includes("saveVolunteer"), false);
   // A duplicate of a listed email, in another case.
   assert.equal(await controller.saveVolunteer({ ...VOLUNTEER_PAYLOAD, email: "MIRA@example.test" }), false);
@@ -6685,6 +6687,81 @@ test("any other refusal is shown in the drawer and rethrown, and the list is rea
   // A refusal is a known outcome: pressing Save again is a new save.
   assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
   assert.equal(store.writes.at(-1).actionId, "action-2");
+  controller.stop();
+});
+
+test("a refusal for a role's certificates is said in the form, not as a banner", async () => {
+  const store = rosterStore();
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", { volunteerId: "v-1" });
+  store.failSave = Object.assign(new Error("Please check the information and try again."), {
+    code: "VALIDATION",
+    cause: { code: "VT007", message: "ROLE_NEEDS", details: "preparer: IT&QR, Basic or Advanced" },
+  });
+  assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), false);
+  const state = controller.getState();
+  assert.equal(state.volunteerFormError, "Preparer needs IT&QR and Basic or Advanced.");
+  assert.equal(state.error, null);
+  assert.equal(state.busy, false);
+  controller.stop();
+});
+
+test("an OPEN_WORK refusal lists the work in the form, keeps the drawer, and reads the list again", async () => {
+  const store = rosterStore();
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", { volunteerId: "v-1" });
+  store.failSave = Object.assign(new Error("This step is not available right now."), {
+    code: "INVALID_TRANSITION",
+    cause: { code: "VT004", message: "OPEN_WORK", details: '["preparing client 1042","default follow-up person"]' },
+  });
+  const reads = volunteerReads(store);
+  assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), false);
+  const state = controller.getState();
+  assert.equal(
+    state.volunteerFormError,
+    "Mira Patel still has open work: preparing client 1042, default follow-up person. Finish it or hand it over first.",
+  );
+  assert.equal(state.error, null);
+  assert.equal(state.dialog, "volunteer");
+  assert.equal(volunteerReads(store), reads + 1);
+  controller.stop();
+});
+
+test("an OPEN_WORK refusal whose details can't be read falls back to the safe message", async () => {
+  const store = rosterStore();
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", { volunteerId: "v-1" });
+  store.failSave = Object.assign(new Error("This step is not available right now."), {
+    code: "INVALID_TRANSITION",
+    cause: { code: "VT004", message: "OPEN_WORK", details: "SELECT secret FROM x" },
+  });
+  await assert.rejects(() => controller.saveVolunteer(VOLUNTEER_PAYLOAD), (error) => error.code === "INVALID_TRANSITION");
+  const state = controller.getState();
+  assert.equal(state.error.message, "This step is not available right now.");
+  assert.equal(state.volunteerFormError, null);
+  controller.stop();
+});
+
+test("a role held before the drawer opened that lost its certificate is dropped, not refused", async () => {
+  const store = rosterStore();
+  const { controller } = build({ store, newActionId: () => "action-1" });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", { volunteerId: "v-1" });
+  // v-1 held preparer; the form still sends it, with the certificates gone.
+  const payload = { ...VOLUNTEER_PAYLOAD, roles: ["preparer"], certificates: ["vsc"] };
+  assert.equal(await controller.saveVolunteer(payload), true);
+  assert.deepEqual(store.writes.at(-1).volunteer.roles, []);
   controller.stop();
 });
 
