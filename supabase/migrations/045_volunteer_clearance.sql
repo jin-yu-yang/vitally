@@ -1036,7 +1036,9 @@ revoke all on function vitally_private.open_work(uuid,uuid) from public,anon,aut
 --   - the open-work rule: VT004 OPEN_WORK, with a JSON array of the work's
 --     labels as the detail, when the save takes away a capability their open
 --     work needs, or their clearance while they hold any. It runs after
---     validation and before any write, so a refusal changes nothing.
+--     validation and before any write, so a refusal changes nothing;
+--   - the certificate write: an uploaded certificate stays unless it is ticked,
+--     and ticking one confirms it (design D14).
 create or replace function public.vitally_save_volunteer(p_action_id uuid,p_volunteer_id uuid,p_expected_revision bigint,p_volunteer jsonb)
 returns jsonb language plpgsql security definer set search_path='' as $$
 declare v_member public.memberships;
@@ -1210,11 +1212,17 @@ begin
    values(v_member.workspace_id,v_target_id,v_season,v_roles,v_person.id,v_is_new,v_photo_checked_at)
    on conflict(workspace_id,person_id,season) do update
     set roles=excluded.roles,is_new=excluded.is_new,photo_id_checked_at=excluded.photo_id_checked_at;
+  -- Only a confirmed certificate an admin has unticked is deleted: an uploaded
+  -- one is the volunteer's own and stays (design D14). A sent certificate is
+  -- inserted confirmed, or confirms an uploaded row; a confirmed row that stays
+  -- ticked keeps its time and confirmer.
   delete from public.certificates where workspace_id=v_member.workspace_id and person_id=v_target_id
-   and season=v_season and certificate<>all(v_certificates);
+   and season=v_season and status='confirmed' and certificate<>all(v_certificates);
   insert into public.certificates(workspace_id,person_id,season,certificate,status,confirmed_at,confirmed_by_person_id)
    select v_member.workspace_id,v_target_id,v_season,c,'confirmed',now(),v_person.id from unnest(v_certificates) c
-   on conflict do nothing;
+   on conflict(workspace_id,person_id,season,certificate) do update
+    set status='confirmed',confirmed_at=excluded.confirmed_at,confirmed_by_person_id=excluded.confirmed_by_person_id
+    where public.certificates.status='uploaded';
  exception when unique_violation then
   raise sqlstate 'VT007' using message='VALIDATION';
  end;
