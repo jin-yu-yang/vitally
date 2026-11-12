@@ -370,6 +370,67 @@ test("volunteer roster records against real Supabase", async (t) => {
       assert.deepEqual(await certificatesOf(f, personId), [original]);
     });
 
+    // 045 (design D14): an uploaded certificate is the volunteer's own upload
+    // awaiting an admin. A save leaves it alone unless it is ticked.
+    const addWithUploadedVsc = async (label) => {
+      const email = `${label}-${randomUUID()}@example.org`;
+      const { personId } = await save(admin, addArgs(volunteer({ email, roles: [], certificates: [] })));
+      await f.sql(
+        "insert into public.certificates(workspace_id,person_id,season,certificate,status) select workspace_id,person_id,season,'vsc','uploaded' from public.roster_entries where person_id=$1",
+        [personId],
+      );
+      return { personId, email };
+    };
+
+    await t.test("an uploaded certificate survives a save that doesn't send it", async () => {
+      const { personId, email } = await addWithUploadedVsc("upl-keep");
+      const before = await certificatesOf(f, personId);
+      assert.equal(before.length, 1);
+      assert.equal(before[0].status, "uploaded");
+      await save(admin, editArgs(personId, 1, volunteer({ email, name: "Casey Renamed", roles: [], certificates: [] })));
+      assert.deepEqual(await certificatesOf(f, personId), before);
+    });
+
+    await t.test("ticking an uploaded certificate confirms it", async () => {
+      const { personId, email } = await addWithUploadedVsc("upl-confirm");
+      await save(admin, editArgs(personId, 1, volunteer({ email, roles: ["greeter"], certificates: ["vsc"] })));
+      const [row] = await certificatesOf(f, personId);
+      assert.equal(row.certificate, "vsc");
+      assert.equal(row.status, "confirmed");
+      assert.equal(row.confirmed_by_person_id, f.siteCoordinatorId);
+      assert.ok(row.confirmed_at, "confirmed_at is set");
+      const age = await count(
+        f,
+        "select extract(epoch from now()-confirmed_at)::int as n from public.certificates where person_id=$1",
+        [personId],
+      );
+      assert.ok(age >= 0 && age < 300, `confirmed just now (${age}s)`);
+      assert.deepEqual(await rolesOf(f, personId), ["greeter"]);
+    });
+
+    await t.test("a confirmed certificate that stays ticked keeps its confirmer and date", async () => {
+      const email = `keep-conf-${randomUUID()}@example.org`;
+      const { personId } = await save(admin, addArgs(volunteer({ email, certificates: ["vsc"] })));
+      const before = await certificatesOf(f, personId);
+      await save(admin, editArgs(personId, 1, volunteer({ email, name: "Casey Again", certificates: ["vsc"] })));
+      assert.deepEqual(await certificatesOf(f, personId), before);
+      assert.equal(before[0].confirmed_by_person_id, f.siteCoordinatorId);
+    });
+
+    await t.test("unticking a confirmed certificate deletes it, an uploaded one beside it stays", async () => {
+      const email = `del-conf-${randomUUID()}@example.org`;
+      const { personId } = await save(admin, addArgs(volunteer({ email, roles: [], certificates: ["vsc", "basic"] })));
+      await f.sql(
+        "insert into public.certificates(workspace_id,person_id,season,certificate,status) select workspace_id,person_id,season,'itqr','uploaded' from public.roster_entries where person_id=$1",
+        [personId],
+      );
+      await save(admin, editArgs(personId, 1, volunteer({ email, roles: [], certificates: ["vsc"] })));
+      assert.deepEqual(
+        (await certificatesOf(f, personId)).map((row) => [row.certificate, row.status]),
+        [["itqr", "uploaded"], ["vsc", "confirmed"]],
+      );
+    });
+
     await t.test("a stale revision is a conflict", async () => {
       const email = `stale-${randomUUID()}@example.org`;
       const { personId } = await save(admin, addArgs(volunteer({ email })));
