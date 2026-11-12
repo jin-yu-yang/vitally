@@ -241,9 +241,11 @@ its root. The stack must already be running ([Start and stop](#start-and-stop)).
 7. **Start the app and sign in** each window ([Sign in](#signing-in-locally), one browser profile
    per account), then check, in the site coordinator's window:
    - Follow-ups says **8 open**, one row of each kind;
-   - **Volunteers** lists the eight fictional volunteers (Maya Lindgren to Lucy Fong), plus a "No
-     roles recorded" row for each staff account: **12 of 12 volunteers** when the four role
-     accounts are the only staff.
+   - **Volunteers** lists the eight fictional volunteers (Maya Lindgren to Lucy Fong), plus a row
+     for each staff account. After `seed:local` the four role accounts show their roles and
+     **Cleared** (Admin, Preparer, Reviewer, Intaker), and Lucy Fong shows "No roles recorded" and
+     Not cleared: **12 of 12 volunteers** when the four role accounts are the only staff. Any
+     older staff account shows "No roles recorded" and Not cleared.
 
 The seed resets the cases, so after a rehearsal run steps 5 and 7 again before the real thing.
 

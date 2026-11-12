@@ -387,6 +387,70 @@ export async function seedCases(
   };
 }
 
+const sameSet = (a, b) =>
+  a.length === b.length && a.every((x) => b.includes(x));
+
+// Gives each role account in the workspace its current-season role and
+// confirmed certificates (ROLE_ACCOUNT_CLEARANCE), through the same
+// `vitally_save_volunteer` the Roster uses, acting as the Site Coordinator.
+// An account that already has exactly these roles, these confirmed
+// certificates and `isNew: false` is left alone, so a second run changes no
+// revision. Everything else about the account (name, phone, languages, the
+// photo ID check) is sent as it was read. A key with no staff account in the
+// workspace is skipped. This runs before anything acts as a role account:
+// the case RPCs refuse staff who are not cleared.
+export async function clearRoleAccounts(client, { workspaceId, actorUserId }) {
+  let saved = 0;
+  for (const [key, want] of Object.entries(SEED_VALUES.ROLE_ACCOUNT_CLEARANCE)) {
+    const { rows: people } = await client.query(
+      `select p.id, p.name, v.email, v.phone, v.works, v.languages,
+              v.other_language, v.revision,
+              e.roles as entry_roles, e.is_new,
+              e.photo_id_checked_at is not null as photo_id_checked,
+              array(select c.certificate from public.certificates c
+                     where c.workspace_id = p.workspace_id and c.person_id = p.id
+                       and c.season = w.current_season and c.status = 'confirmed') as confirmed
+         from public.people p
+         join public.workspaces w on w.id = p.workspace_id
+         join public.volunteer_profiles v
+           on v.workspace_id = p.workspace_id and v.person_id = p.id
+         left join public.roster_entries e
+           on e.workspace_id = p.workspace_id and e.person_id = p.id
+          and e.season = w.current_season
+        where p.workspace_id = $1 and p.person_key = $2 and p.user_id is not null`,
+      [workspaceId, key],
+    );
+    const person = people[0];
+    if (!person) continue;
+    if (
+      person.entry_roles &&
+      person.is_new === false &&
+      sameSet(person.entry_roles, want.roles) &&
+      sameSet(person.confirmed, want.certificates)
+    )
+      continue;
+    await callRpc(client, actorUserId, "vitally_save_volunteer", {
+      p_action_id: randomUUID(),
+      p_volunteer_id: person.id,
+      p_expected_revision: person.revision,
+      p_volunteer: {
+        name: person.name,
+        email: person.email,
+        phone: person.phone,
+        works: person.works,
+        languages: person.languages,
+        otherLanguage: person.other_language,
+        roles: want.roles,
+        certificates: want.certificates,
+        isNew: want.isNew,
+        photoIdChecked: person.photo_id_checked,
+      },
+    });
+    saved += 1;
+  }
+  return saved;
+}
+
 // Adds the rehearsal volunteers to the Roster. A re-run first removes the
 // earlier ones (a person with no sign-in and one of these addresses; the
 // foreign keys remove their profile, roster entry and certificates), so
@@ -426,6 +490,11 @@ export async function seedWorkspace({
     const targets = await resolveSeedTargets(client, {
       workspaceId,
       clientAEmail,
+    });
+    // First, so the case seed's role accounts are cleared when they act.
+    await clearRoleAccounts(client, {
+      workspaceId,
+      actorUserId: targets.siteCoordinator.userId,
     });
     const { casesRemoved, casesCreated } = await seedCases(client, targets, {
       runDir,
