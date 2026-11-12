@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   ROLES, CERTIFICATES, WORKS, LANGUAGES,
   combineVolunteers, filterVolunteers, volunteerFromForm, volunteerProblem,
-  ROLE_NEEDS, missingFor, withoutLostRoles, roleNeedsMessage, openWorkMessage
+  ROLE_NEEDS, missingFor, withoutLostRoles, roleNeedsMessage, openWorkMessage, rolesToUntick
 } from "../src/volunteer-roster.mjs";
 
 const people = [
@@ -189,4 +189,40 @@ test("the server's refusals read as the drawer's sentences", () => {
   assert.equal(openWorkMessage("Mira Patel", '{"a":1}'), null);
   assert.equal(openWorkMessage("Mira Patel", '[1,"x"]'), null);
   assert.equal(openWorkMessage("Mira Patel", undefined), null);
+});
+
+// rolesToUntick(checkedRoles, checkedCertificates AFTER the change, changedCertificate)
+test("ticking a certificate unticks no role, even one still missing certificates", () => {
+  assert.deepEqual(rolesToUntick(["preparer"], ["vsc"], "vsc"), []);
+  assert.deepEqual(rolesToUntick(["greeter", "preparer"], ["vsc", "itqr"], "itqr"), []);
+});
+
+test("unticking Advanced while Basic stays unticks nothing", () => {
+  assert.deepEqual(rolesToUntick(["preparer", "reviewer"], ["vsc", "itqr", "basic"], "advanced"), []);
+});
+
+test("unticking IT&QR unticks Preparer", () => {
+  assert.deepEqual(rolesToUntick(["preparer"], ["vsc", "basic"], "itqr"), ["preparer"]);
+  assert.deepEqual(rolesToUntick(["greeter", "preparer"], ["vsc", "basic"], "itqr"), ["preparer"]);
+});
+
+test("unticking VSC unticks every ticked role", () => {
+  assert.deepEqual(
+    rolesToUntick(["greeter", "intaker", "preparer", "reviewer", "admin"], ["itqr", "basic"], "vsc"),
+    ["greeter", "intaker", "preparer", "reviewer", "admin"]
+  );
+});
+
+test("unticking a certificate no ticked role needs unticks nothing", () => {
+  assert.deepEqual(rolesToUntick(["greeter"], ["vsc", "itqr"], "itqr"), []);
+  assert.deepEqual(rolesToUntick(["preparer"], ["vsc", "itqr", "basic"], "sc"), []);
+});
+
+test("unticking Basic unticks Preparer only when Advanced is not ticked", () => {
+  assert.deepEqual(rolesToUntick(["preparer"], ["vsc", "itqr"], "basic"), ["preparer"]);
+  assert.deepEqual(rolesToUntick(["preparer"], ["vsc", "itqr", "advanced"], "basic"), []);
+});
+
+test("a role that was already missing certificates is left to the save's message", () => {
+  assert.deepEqual(rolesToUntick(["preparer"], ["vsc"], "sc"), []);
 });

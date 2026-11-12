@@ -3,7 +3,7 @@
 // row says whether the volunteer is cleared (change add-volunteer-clearance).
 import { esc, button, icon, loadingLine, unloadedLine, emptyLine } from "./ui.mjs";
 import { drawerError } from "./office-views.mjs";
-import { ROLES, CERTIFICATES, WORKS, LANGUAGES, ROLE_NEEDS, filterVolunteers } from "./volunteer-roster.mjs";
+import { ROLES, CERTIFICATES, WORKS, LANGUAGES, filterVolunteers } from "./volunteer-roster.mjs";
 
 const when = (condition, html) => (condition ? html : "");
 const labelOf = (list, value) => list.find((entry) => entry.value === value)?.label ?? value;
@@ -88,14 +88,6 @@ export function renderRoster(volunteers, { list = "ready", filters = {} } = {}) 
   return `${open}${toolbar(chosen)}${body}<p class="board-foot" role="status">${shown.length} of ${all.length} volunteers</p></section>`;
 }
 
-// The role ticks carry what each role needs, so the drawer can untick a role
-// whose certificate is unticked (app.mjs); ROLE_NEEDS is the one source.
-const needsAttributes = (name, value) => {
-  const needs = name === "role" ? ROLE_NEEDS[value] : null;
-  if (!needs) return "";
-  return ` data-needs-all="${esc(needs.all.join(" "))}"${needs.oneOf.length ? ` data-needs-one-of="${esc(needs.oneOf.join(" "))}"` : ""}`;
-};
-
 const ticks = (name, list, chosen, { full = false } = {}) =>
   list
     .map((entry) => {
@@ -103,7 +95,7 @@ const ticks = (name, list, chosen, { full = false } = {}) =>
       const text = full && entry.full !== entry.label ? `${entry.label} · ${entry.full}` : entry.label;
       return `<label class="checkbox-row small" for="${id}"><input type="checkbox" name="${name}" value="${esc(
         entry.value,
-      )}"${chosen.includes(entry.value) ? " checked" : ""}${needsAttributes(name, entry.value)} id="${id}"><span>${esc(text)}</span></label>`;
+      )}"${chosen.includes(entry.value) ? " checked" : ""} id="${id}"><span>${esc(text)}</span></label>`;
     })
     .join("");
 

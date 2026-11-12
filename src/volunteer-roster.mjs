@@ -187,3 +187,16 @@ export function openWorkMessage(name, details) {
   if (!Array.isArray(list) || !list.length || !list.every((label) => typeof label === "string")) return null;
   return `${name} still has open work: ${list.join(", ")}. Finish it or hand it over first.`;
 }
+
+// The ticked roles to untick after one certificate box changed. Only an
+// untick can lose a role: those that had everything with the certificate and
+// lack something without it. A role that was already short is left alone (the
+// save names what it needs). `checkedCertificates` is the set after the change.
+export function rolesToUntick(checkedRoles, checkedCertificates, changedCertificate) {
+  const after = checkedCertificates ?? [];
+  if (after.includes(changedCertificate)) return [];
+  const before = [...after, changedCertificate];
+  return (checkedRoles ?? []).filter(
+    (role) => missingFor(role, before).length === 0 && missingFor(role, after).length > 0
+  );
+}

@@ -169,16 +169,6 @@ test("Edit shows the volunteer's own New and Photo ID checked values", () => {
   assert.match(both.match(/<input type="checkbox" name="photoIdChecked"[^>]*>/)[0], /checked/);
 });
 
-test("a role's tick carries what it needs, so the drawer can untick it", () => {
-  const html = volunteerDrawerBody({ volunteer: null, isNew: true, ui: {} });
-  const preparer = html.match(/<input type="checkbox" name="role" value="preparer"[^>]*>/)[0];
-  assert.match(preparer, /data-needs-all="vsc itqr"/);
-  assert.match(preparer, /data-needs-one-of="basic advanced"/);
-  const greeter = html.match(/<input type="checkbox" name="role" value="greeter"[^>]*>/)[0];
-  assert.match(greeter, /data-needs-all="vsc"/);
-  assert.doesNotMatch(greeter, /data-needs-one-of/);
-});
-
 test("a name or phone with markup is shown as text in the table and in the drawer", () => {
   const odd = volunteer({ name: "<b>O'Hara & Co</b>", phone: '"555" <i>' });
   const table = renderRoster([odd], { list: "ready", filters: {} });

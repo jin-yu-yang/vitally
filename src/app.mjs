@@ -65,7 +65,7 @@ import { t, SENTENCES } from "./client-text.mjs";
 import { createToastTimer } from "./toast.mjs";
 import { contactEntryFromForm, contactSummary, contactSummaries } from "./contact-log.mjs";
 import { decorateStaffCase, outcomeGroup, staffEligibility } from "./staff-views.mjs";
-import { volunteerFromForm } from "./volunteer-roster.mjs";
+import { volunteerFromForm, rolesToUntick } from "./volunteer-roster.mjs";
 
 // Bootstrap and DOM wiring, and nothing else. No state lives here (the
 // controller owns it), no HTML is written here (the view modules own it), and
@@ -468,16 +468,14 @@ if (!config) {
     if (box && field) field.hidden = !box.checked;
   }
 
-  // Unticking a certificate unticks the roles that need it, in the form (the
-  // save would drop them anyway). Each role tick carries its needs.
-  function syncVolunteerRoles(form) {
-    const have = new Set(
-      [...form.querySelectorAll('input[name="certificate"]:checked')].map((box) => box.value),
-    );
-    for (const box of form.querySelectorAll('input[name="role"]:checked')) {
-      const all = (box.dataset.needsAll ?? "").split(" ").filter(Boolean);
-      const oneOf = (box.dataset.needsOneOf ?? "").split(" ").filter(Boolean);
-      if (all.every((c) => have.has(c)) && (!oneOf.length || oneOf.some((c) => have.has(c)))) continue;
+  // Unticking a certificate unticks the roles that lose what they need, in the
+  // form (rolesToUntick decides; the save would drop them anyway).
+  function syncVolunteerRoles(form, changed) {
+    const roles = [...form.querySelectorAll('input[name="role"]:checked')];
+    const certificates = [...form.querySelectorAll('input[name="certificate"]:checked')].map((box) => box.value);
+    const drop = rolesToUntick(roles.map((box) => box.value), certificates, changed);
+    for (const box of roles) {
+      if (!drop.includes(box.value)) continue;
       box.checked = false;
       for (const [id, draft] of checkDrafts(box)) keepDraft(id, draft);
     }
@@ -2439,7 +2437,7 @@ if (!config) {
       return;
     }
     if (field.closest?.("#volunteer-form") && field.name === "certificate") {
-      syncVolunteerRoles(field.form);
+      syncVolunteerRoles(field.form, field.value);
       return;
     }
     if (field.closest?.("#volunteer-form") && field.name === "language" && field.value === "other") {
