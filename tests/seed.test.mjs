@@ -6,7 +6,7 @@ import {
   parseSeedArgs,
   formatSeedResult,
 } from "../tools/admin/seed-cases.mjs";
-import { SEED_VOLUNTEERS } from "../tools/admin/seed-values.mjs";
+import { ROLE_ACCOUNT_CLEARANCE, SEED_VOLUNTEERS } from "../tools/admin/seed-values.mjs";
 import { runSeed } from "../tools/admin/seed.mjs";
 
 const code = (expected) => (error) => error.code === expected;
@@ -98,6 +98,37 @@ test("the seed volunteers cover every roster value and use example addresses", (
     assert.equal(v.languages.includes("other"), Boolean(v.otherLanguage));
   }
   assert.equal(SEED_VOLUNTEERS.filter((v) => v.phone === null).length, 2);
+});
+
+test("every seed volunteer's roles are backed by their certificates", () => {
+  const needs = {
+    greeter: ["vsc"],
+    intaker: ["vsc", "itqr"],
+    admin: ["vsc", "itqr"],
+    preparer: ["vsc", "itqr", "basic"],
+    reviewer: ["vsc", "itqr", "advanced"],
+  };
+  for (const v of SEED_VOLUNTEERS) {
+    assert.equal(typeof v.isNew, "boolean", v.name);
+    assert.equal(typeof v.photoIdChecked, "boolean", v.name);
+    for (const role of v.roles)
+      for (const c of needs[role])
+        assert.ok(v.certificates.includes(c), `${v.name}: ${role} needs ${c}`);
+  }
+  const waiting = SEED_VOLUNTEERS.filter((v) => v.roles.length === 0);
+  assert.equal(waiting.length, 1);
+  assert.deepEqual(waiting[0].certificates, []);
+  assert.ok(SEED_VOLUNTEERS.some((v) => v.isNew && v.photoIdChecked));
+  assert.ok(SEED_VOLUNTEERS.some((v) => v.isNew && !v.photoIdChecked));
+});
+
+test("the role accounts' clearance is fixed and backed", () => {
+  const rc = ROLE_ACCOUNT_CLEARANCE;
+  assert.deepEqual(Object.keys(rc).sort(), ["intaker", "preparer", "reviewer", "site_coordinator"]);
+  assert.deepEqual(rc.site_coordinator, { roles: ["admin"], certificates: ["vsc", "itqr"], isNew: false });
+  assert.deepEqual(rc.preparer, { roles: ["preparer"], certificates: ["vsc", "itqr", "basic"], isNew: false });
+  assert.deepEqual(rc.reviewer, { roles: ["reviewer"], certificates: ["vsc", "itqr", "advanced"], isNew: false });
+  assert.deepEqual(rc.intaker, { roles: ["intaker"], certificates: ["vsc", "itqr"], isNew: false });
 });
 
 test("the flag is checked before any file read or seeding", async () => {
