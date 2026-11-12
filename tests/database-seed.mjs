@@ -440,6 +440,103 @@ test("seed command against real Supabase", async (t) => {
       },
     );
 
+    await t.test(
+      "clearing a role account keeps the extra roles and certificates it already has",
+      async () => {
+        const runDir = await tempRunDir();
+        const ids = {
+          site_coordinator: f.siteCoordinatorId,
+          reviewer: f.reviewerId,
+          intaker: f.intakerId,
+        };
+        const state = async () =>
+          Object.fromEntries(
+            (
+              await f.sql(
+                `select p.person_key, v.revision, e.roles, e.is_new,
+                        vitally_private.cleared(p.workspace_id, p.id) as cleared,
+                        array(select c.certificate from public.certificates c
+                               where c.person_id=p.id and c.season=e.season and c.status='confirmed'
+                               order by 1) as certificates
+                   from public.people p
+                   join public.volunteer_profiles v on v.person_id=p.id
+                   join public.workspaces w on w.id=p.workspace_id
+                   join public.roster_entries e on e.person_id=p.id and e.season=w.current_season
+                  where p.workspace_id=$1 and p.id=any($2::uuid[])`,
+                [f.workspaceId, Object.values(ids)],
+              )
+            ).rows.map((r) => [r.person_key, r]),
+          );
+        const extraCertificate = (personId, certificate) =>
+          f.sql(
+            `insert into public.certificates(workspace_id,person_id,season,certificate,status,confirmed_at,confirmed_by_person_id)
+              select $1::uuid,$2::uuid,w.current_season,$3,'confirmed',now(),$2::uuid
+                from public.workspaces w where w.id=$1::uuid
+              on conflict (workspace_id,person_id,season,certificate) do nothing`,
+            [f.workspaceId, personId, certificate],
+          );
+        try {
+          // Site Coordinator: an extra certificate and an extra role it backs
+          // (already cleared, so nothing needs saving). Reviewer: an extra
+          // certificate. Intaker: no role yet and an extra certificate, so the
+          // save does run and must add to what it has.
+          await extraCertificate(ids.site_coordinator, "sc");
+          await f.sql(
+            `update public.roster_entries e set roles=array['admin','intaker']
+               from public.workspaces w
+              where w.id=e.workspace_id and e.season=w.current_season
+                and e.workspace_id=$1 and e.person_id=$2`,
+            [f.workspaceId, ids.site_coordinator],
+          );
+          await extraCertificate(ids.reviewer, "basic");
+          await extraCertificate(ids.intaker, "sc");
+          await f.sql(
+            `update public.roster_entries e set roles='{}'
+               from public.workspaces w
+              where w.id=e.workspace_id and e.season=w.current_season
+                and e.workspace_id=$1 and e.person_id=$2`,
+            [f.workspaceId, ids.intaker],
+          );
+          const args = {
+            workspaceId: f.workspaceId,
+            clientAEmail: f.applicantAEmail,
+            runDir,
+          };
+          await seedWorkspace(args);
+          const first = await state();
+          const has = (row, list) => list.every((x) => row.certificates.includes(x));
+          assert.deepEqual(first.site_coordinator.roles, ["admin", "intaker"]);
+          assert.ok(has(first.site_coordinator, ["vsc", "itqr", "sc"]));
+          assert.deepEqual(first.reviewer.roles, ["reviewer"]);
+          assert.ok(has(first.reviewer, ["vsc", "itqr", "advanced", "basic"]));
+          assert.deepEqual(first.intaker.roles, ["intaker"]);
+          assert.ok(has(first.intaker, ["vsc", "itqr", "sc"]));
+          for (const row of Object.values(first)) {
+            assert.equal(row.cleared, true, row.person_key);
+            assert.equal(row.is_new, false, row.person_key);
+          }
+          await seedWorkspace(args);
+          const second = await state();
+          for (const key of Object.keys(first))
+            assert.equal(second[key].revision, first[key].revision, key);
+        } finally {
+          await rm(runDir, { recursive: true, force: true });
+          for (const [key, personId] of Object.entries(ids)) {
+            const { rows } = await f.sql(
+              "select capabilities from public.people where id=$1",
+              [personId],
+            );
+            await f.clearStaff(personId, rows[0].capabilities);
+            await f.sql(
+              `delete from public.certificates where workspace_id=$1 and person_id=$2
+                and certificate = any($3::text[])`,
+              [f.workspaceId, personId, key === "reviewer" ? ["basic"] : ["sc"]],
+            );
+          }
+        }
+      },
+    );
+
     await t.test("the receipts name the acting people", async () => {
       const runDir = await tempRunDir();
       try {
