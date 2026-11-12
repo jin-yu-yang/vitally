@@ -387,15 +387,17 @@ export async function seedCases(
   };
 }
 
-const sameSet = (a, b) =>
-  a.length === b.length && a.every((x) => b.includes(x));
+const includesAll = (have, want) => want.every((x) => have.includes(x));
+const union = (a, b) => [...new Set([...a, ...b])];
 
 // Gives each role account in the workspace its current-season role and
 // confirmed certificates (ROLE_ACCOUNT_CLEARANCE), through the same
 // `vitally_save_volunteer` the Roster uses, acting as the Site Coordinator.
-// An account that already has exactly these roles, these confirmed
-// certificates and `isNew: false` is left alone, so a second run changes no
-// revision. Everything else about the account (name, phone, languages, the
+// An account that already has at least these roles and these confirmed
+// certificates, and `isNew: false`, is left alone, so a second run changes no
+// revision. Otherwise the save adds the missing roles and certificates to what
+// the account has: nothing it already holds is removed (the existing roles are
+// already backed by its confirmed certificates). Everything else about the account (name, phone, languages, the
 // photo ID check) is sent as it was read. A key with no staff account in the
 // workspace is skipped. This runs before anything acts as a role account:
 // the case RPCs refuse staff who are not cleared.
@@ -425,8 +427,8 @@ export async function clearRoleAccounts(client, { workspaceId, actorUserId }) {
     if (
       person.entry_roles &&
       person.is_new === false &&
-      sameSet(person.entry_roles, want.roles) &&
-      sameSet(person.confirmed, want.certificates)
+      includesAll(person.entry_roles, want.roles) &&
+      includesAll(person.confirmed, want.certificates)
     )
       continue;
     await callRpc(client, actorUserId, "vitally_save_volunteer", {
@@ -440,8 +442,8 @@ export async function clearRoleAccounts(client, { workspaceId, actorUserId }) {
         works: person.works,
         languages: person.languages,
         otherLanguage: person.other_language,
-        roles: want.roles,
-        certificates: want.certificates,
+        roles: union(person.entry_roles ?? [], want.roles),
+        certificates: union(person.confirmed, want.certificates),
         isNew: want.isNew,
         photoIdChecked: person.photo_id_checked,
       },
