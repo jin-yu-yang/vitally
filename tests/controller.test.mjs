@@ -58,8 +58,19 @@ function fakeStore({
     defaultFollowupPersonId: "person-sam",
     defaultIntakeVersion: 2,
   },
+  clearance,
 } = {}) {
   const records = new Map(cases.map((entry) => [entry.id, entry]));
+  // A staff principal is cleared by default, for what their roster entry
+  // says they may do; `clearance` (or the principal's own) says otherwise.
+  // `store.nextClearance` is what the next re-check answers: a value, an
+  // Error to reject with, or a function returning either (or a promise).
+  const ownClearance = () => {
+    const own = people.find((person) => person?.id === principal?.personId);
+    const capabilities = [...(own?.capabilities ?? [])];
+    return { cleared: true, missing: [], capabilities, isAdmin: capabilities.includes("admin"), siteCoordinatorName: null };
+  };
+  const firstClearance = () => clearance ?? principal?.clearance ?? ownClearance();
   const items = new Map(assistance.map((entry) => [entry.id, entry]));
   const store = {
     workspace,
@@ -73,7 +84,16 @@ function fakeStore({
     async getPrincipal() {
       store.calls.push("getPrincipal");
       if (principal instanceof Error) throw principal;
+      if (principal?.access === "staff") return { ...principal, clearance: firstClearance() };
       return principal;
+    },
+    nextClearance: undefined,
+    async getClearance() {
+      store.calls.push("getClearance");
+      const next = store.nextClearance === undefined ? firstClearance() : store.nextClearance;
+      const answer = typeof next === "function" ? await next() : next;
+      if (answer instanceof Error) throw answer;
+      return answer;
     },
     async listPeople() {
       store.calls.push("listPeople");
@@ -6824,5 +6844,235 @@ test("a staff member's own people entry carries their effective capabilities, no
   const byId = Object.fromEntries(controller.getState().people.map((person) => [person.id, person]));
   assert.deepEqual(byId["person-sam"].capabilities, ["prepare"]);
   assert.deepEqual(byId["person-lee"].capabilities, ["prepare", "review"]);
+  controller.stop();
+});
+
+// ---------------------------------------------------------------------------
+// The setup screen (change add-volunteer-clearance, Task 8)
+// ---------------------------------------------------------------------------
+
+const UNCLEARED = Object.freeze({
+  cleared: false,
+  missing: [{ kind: "form13615" }],
+  capabilities: [],
+  isAdmin: false,
+  siteCoordinatorName: "Jordan Avery",
+});
+const RILEY_CLEARED = Object.freeze({
+  cleared: true,
+  missing: [],
+  capabilities: ["prepare", "admin", "followup"],
+  isAdmin: true,
+  siteCoordinatorName: null,
+});
+const clearanceCalls = (store) => store.calls.filter((entry) => entry === "getClearance").length;
+const SETUP_CASE = Object.freeze({ id: "case-a", reference: "VT-AAAA-BBBB", stage: "preparing", revision: 1, answers: {} });
+
+test("an uncleared staff member signs in to the setup screen, and nothing of the work is read", async () => {
+  const store = staffStore({ clearance: { ...UNCLEARED }, cases: [{ ...SETUP_CASE }] });
+  const { controller, events } = build({ store });
+  await controller.start();
+  // The window's own focus re-read reads nothing of the work either.
+  await events.emit("focus");
+  const state = controller.getState();
+  assert.equal(state.principal.clearance.cleared, false);
+  const html = staffScreen(state);
+  assert.match(html, /Finish your setup for this season/);
+  assert.match(html, /Ask Jordan Avery, your site coordinator\./);
+  assert.doesNotMatch(html, /Work board/);
+  for (const call of ["listCases", "listPeople", "listAssistance", "getWorkspace"])
+    assert.equal(store.calls.includes(call), false, call);
+  assert.equal(store.subscriptions, 0, "no realtime channel while uncleared");
+  assert.deepEqual(state.cases, []);
+  assert.equal(state.error, null);
+  assert.equal(state.retryable, false);
+  controller.stop();
+});
+
+test("checkClearance asks once while a check is in flight, and again once it has settled", async () => {
+  const store = staffStore({ clearance: { ...UNCLEARED } });
+  const { controller } = build({ store });
+  await controller.start();
+  const before = clearanceCalls(store);
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  store.nextClearance = () => gate;
+  const first = controller.checkClearance();
+  const second = controller.checkClearance();
+  assert.equal(first, second, "the second call gets the pending check");
+  await Promise.resolve();
+  release({ ...UNCLEARED });
+  await Promise.all([first, second]);
+  assert.equal(clearanceCalls(store) - before, 1);
+  store.nextClearance = { ...UNCLEARED };
+  await controller.checkClearance();
+  assert.equal(clearanceCalls(store) - before, 2);
+  controller.stop();
+});
+
+test("a check that finds the person cleared runs the normal staff load", async () => {
+  const store = staffStore({ clearance: { ...UNCLEARED }, cases: [{ ...SETUP_CASE }] });
+  const { controller } = build({ store });
+  await controller.start();
+  store.nextClearance = { ...RILEY_CLEARED };
+  await controller.checkClearance();
+  for (const call of ["listCases", "listPeople", "listAssistance", "getWorkspace"])
+    assert.ok(store.calls.includes(call), call);
+  assert.equal(store.subscriptions, 1);
+  const state = controller.getState();
+  assert.equal(state.principal.clearance.cleared, true);
+  assert.equal(state.cases.length, 1);
+  const html = staffScreen(state);
+  assert.doesNotMatch(html, /Finish your setup/);
+  assert.match(html, /Follow-ups/);
+  controller.stop();
+});
+
+test("a refreshed clearance with narrower capabilities narrows the person's own entry", async () => {
+  const store = staffStore();
+  const { controller } = build({ store });
+  await controller.start();
+  const caseReads = store.calls.filter((entry) => entry === "listCases").length;
+  store.nextClearance = { ...RILEY_CLEARED, capabilities: ["prepare"] };
+  await controller.checkClearance();
+  const byId = Object.fromEntries(controller.getState().people.map((person) => [person.id, person]));
+  assert.deepEqual(byId["person-riley"].capabilities, ["prepare"]);
+  assert.deepEqual(byId["person-sam"].capabilities, ["admin", "followup"]);
+  assert.equal(store.calls.filter((entry) => entry === "listCases").length, caseReads, "still cleared: no reload");
+  controller.stop();
+});
+
+test("a check that fails, or answers nothing, is a failure with Try again, never a clearance", async () => {
+  const store = staffStore({ clearance: { ...UNCLEARED } });
+  const { controller } = build({ store });
+  await controller.start();
+  store.nextClearance = null;
+  await controller.checkClearance();
+  let state = controller.getState();
+  assert.equal(state.principal.clearance.cleared, false);
+  assert.equal(state.error.code, "SERVER_ERROR");
+  assert.equal(state.retryable, true);
+  store.nextClearance = Object.assign(new Error("offline"), { code: "OFFLINE" });
+  await controller.checkClearance();
+  assert.equal(controller.getState().error.code, "OFFLINE");
+  assert.equal(store.calls.includes("listCases"), false);
+  // The failed check left nothing pending: the next one asks, and lands.
+  store.nextClearance = { ...RILEY_CLEARED };
+  await controller.checkClearance();
+  state = controller.getState();
+  assert.equal(state.principal.clearance.cleared, true);
+  assert.equal(state.error, null);
+  controller.stop();
+});
+
+test("an action refused NOT_CLEARED switches the window to the setup screen, with no inline error", async () => {
+  const store = staffStore({
+    cases: [{ ...SETUP_CASE }],
+    assistance: [{ id: "item-1", title: "Help with the forms", status: "open", revision: 1, assigneeId: null }],
+  });
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.selectCase("case-a");
+  const before = clearanceCalls(store);
+  const errorsBefore = controller.getState().errorCount;
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  store.nextClearance = () => gate;
+  store.failNext = Object.assign(new Error("Finish your setup for this season first."), { code: "NOT_CLEARED" });
+  await assert.rejects(controller.runAssistanceAction("CLAIM", "item-1"), (error) => error.code === "NOT_CLEARED");
+  // The refusal is recorded (app.mjs's safety net adds nothing), and the
+  // window is on the setup screen before the re-read answers.
+  assert.equal(controller.getState().errorCount, errorsBefore + 1);
+  assert.equal(controller.getState().principal.clearance.cleared, false);
+  assert.match(staffScreen(controller.getState()), /Finish your setup for this season/);
+  // The re-read it started is the pending check.
+  const pending = controller.checkClearance();
+  release({ ...UNCLEARED });
+  await pending;
+  const state = controller.getState();
+  assert.equal(clearanceCalls(store) - before, 1);
+  assert.equal(state.principal.clearance.cleared, false);
+  assert.equal(state.error, null);
+  assert.equal(state.dialog, null);
+  assert.deepEqual(state.cases, []);
+  assert.deepEqual(state.assistance, []);
+  assert.equal(state.savedCase, null);
+  assert.equal(state.screen, "staff");
+  assert.equal(store.released, 1, "the realtime channel is closed");
+  const html = staffScreen(state);
+  assert.match(html, /Finish your setup for this season/);
+  assert.doesNotMatch(html, /Finish your setup for this season first\./);
+  controller.stop();
+});
+
+test("a ceiling admin whose only role is Intaker gets Volunteers, and none of the office admin's screens", async () => {
+  const store = rosterStore({
+    people: [{ id: "person-sam", name: "Sam", capabilities: ["admin", "followup", "assist", "receive_documents"] }],
+    clearance: { cleared: true, missing: [], capabilities: ["assist", "receive_documents"], isAdmin: true, siteCoordinatorName: null },
+    cases: [{ ...SETUP_CASE }],
+  });
+  const { controller } = build({ store });
+  await controller.start();
+  const board = staffScreen(controller.getState());
+  assert.match(board, /data-action="open-volunteers"/);
+  assert.doesNotMatch(board, /data-action="open-cases"/);
+  assert.doesNotMatch(board, /Follow-ups/);
+  assert.match(board, /Work board/);
+  controller.navigate("office-cases");
+  assert.doesNotMatch(staffScreen(controller.getState()), /Case pool/);
+  await controller.selectCase("case-a");
+  const onCase = staffScreen(controller.getState());
+  assert.doesNotMatch(onCase, /OFFICE WORKSPACE/);
+  assert.match(onCase, /VOLUNTEER WORKSPACE/);
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  assert.equal(volunteerReads(store), 1);
+  assert.match(staffScreen(controller.getState()), /<h1>Volunteers<\/h1>/);
+  controller.stop();
+});
+
+test("an uncleared admin can open the Roster and is read no case", async () => {
+  const store = rosterStore({ clearance: { ...UNCLEARED, isAdmin: true }, cases: [{ ...SETUP_CASE }] });
+  const { controller } = build({ store });
+  await controller.start();
+  const setup = staffScreen(controller.getState());
+  assert.match(setup, /Finish your setup for this season/);
+  assert.match(setup, /data-action="open-volunteers"/);
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  assert.equal(volunteerReads(store), 1);
+  const roster = staffScreen(controller.getState());
+  assert.match(roster, /<h1>Volunteers<\/h1>/);
+  assert.match(roster, /class="volunteer-row"/);
+  assert.doesNotMatch(roster, /data-action="open-cases"/);
+  assert.equal(store.calls.includes("listCases"), false);
+  controller.stop();
+});
+
+test("the window's focus re-checks the clearance only while the setup screen shows", async () => {
+  const store = staffStore({ clearance: { ...UNCLEARED }, cases: [{ ...SETUP_CASE }] });
+  const { controller, events } = build({ store });
+  await controller.start();
+  assert.equal(events.count("focus"), 1, "one focus listener");
+  const before = clearanceCalls(store);
+  // Cleared while the window was in the background: focus opens the work.
+  store.nextClearance = { ...RILEY_CLEARED };
+  await events.emit("focus");
+  assert.equal(clearanceCalls(store) - before, 1);
+  let state = controller.getState();
+  assert.equal(state.principal.clearance.cleared, true);
+  assert.equal(state.cases.length, 1);
+  assert.doesNotMatch(staffScreen(state), /Finish your setup/);
+  // A cleared window's focus re-reads the work as before, not the clearance.
+  const caseReads = store.calls.filter((entry) => entry === "listCases").length;
+  await events.emit("focus");
+  assert.equal(clearanceCalls(store) - before, 1);
+  assert.equal(store.calls.filter((entry) => entry === "listCases").length, caseReads + 1);
+  state = controller.getState();
+  assert.equal(state.error, null);
   controller.stop();
 });
