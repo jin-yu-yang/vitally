@@ -49,14 +49,14 @@
 
 ## 7. Seed and docs
 
-- [ ] 7.1 Update `tools/admin/seed-values.mjs` and `seed-cases.mjs`:
+- [x] 7.1 Update `tools/admin/seed-values.mjs` and `seed-cases.mjs`:
   - clear the four role accounts first, through `vitally_save_volunteer` as the Site Coordinator account;
   - back every volunteer's roles with certificates (Hana Moretti gets IT&QR and Basic);
   - make Lucy Fong the volunteer with no roles;
   - one new volunteer with photo ID checked and one without.
   - Update the seed's tests.
 - [ ] 7.2 Run the migration and `seed:local` on a stack that has `main`'s migrations and an earlier seed run. Check that the role accounts are cleared and the Roster reads as specified.
-- [ ] 7.3 Update `docs/demo-script.md` (Roster section and table) and the `docs/setup.md` checklist step that describes the Roster.
+- [x] 7.3 Update `docs/demo-script.md` (Roster section and table) and the `docs/setup.md` checklist step that describes the Roster.
 
 ## 8. Browser checks and verification
 
