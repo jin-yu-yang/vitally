@@ -35,7 +35,7 @@ import { cardsFor } from "./document-cards.mjs";
 import { createShadedSave } from "./shaded-editor.mjs";
 import { createWindowState } from "./window-state.mjs";
 import { isLang, readLanguage, writeLanguage } from "./language.mjs";
-import { volunteerProblem } from "./volunteer-roster.mjs";
+import { volunteerProblem, withoutLostRoles, roleNeedsMessage, openWorkMessage } from "./volunteer-roster.mjs";
 
 // The one place browser state lives. It owns what is loaded, what is being
 // edited, and which action envelope is in flight; it renders nothing and knows
@@ -2823,11 +2823,13 @@ export function createController({
   async function saveVolunteer(values) {
     if (state.busy) return false;
     const volunteerId = state.dialogContext?.volunteerId ?? null;
+    // `values` is what the form held; the request may send fewer roles, so the
+    // kept save is matched on the form's values.
     let request =
       pendingVolunteerSave &&
-      pendingVolunteerSave.volunteerId === volunteerId &&
-      JSON.stringify(pendingVolunteerSave.volunteer) === JSON.stringify(values)
-        ? pendingVolunteerSave
+      pendingVolunteerSave.request.volunteerId === volunteerId &&
+      JSON.stringify(pendingVolunteerSave.values) === JSON.stringify(values)
+        ? pendingVolunteerSave.request
         : null;
     pendingVolunteerSave = null;
     if (!request) {
@@ -2846,7 +2848,9 @@ export function createController({
         actionId: newActionId(),
         volunteerId,
         expectedRevision: current ? Number(current.revision) : null,
-        volunteer: values,
+        // The roles held before that lost a certificate are left out, as the
+        // server drops them.
+        volunteer: withoutLostRoles(values, state.volunteers, volunteerId),
       };
     }
     state.volunteerFormError = null;
@@ -2857,7 +2861,23 @@ export function createController({
       await store.saveVolunteer(request);
     } catch (error) {
       state.busy = false;
-      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingVolunteerSave = request;
+      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingVolunteerSave = { request, values };
+      // The two refusals the form can say itself (the window's own checks can
+      // disagree with the server's, for example on a stale form): in the form,
+      // not as a banner. Anything unreadable stays the safe generic message.
+      const cause = error?.cause;
+      const sentence =
+        error?.code === "VALIDATION" && cause?.message === "ROLE_NEEDS"
+          ? roleNeedsMessage(cause.details)
+          : error?.code === "INVALID_TRANSITION" && cause?.message === "OPEN_WORK"
+            ? openWorkMessage(request.volunteer.name || "This volunteer", cause.details)
+            : null;
+      if (sentence) {
+        state.volunteerFormError = sentence;
+        await readVolunteers().catch(() => {});
+        show();
+        return false;
+      }
       noteFailure(
         error,
         error?.code === "CONFLICT" ? { message: VOLUNTEER_CONFLICT_MESSAGE } : undefined,

@@ -261,7 +261,7 @@ const rosterPage = (state) =>
   frame(
     "OFFICE · VOLUNTEERS",
     "Volunteers",
-    "Roles and certificates are recorded here. They don't change what anyone can do in ViTally yet.",
+    "Volunteers work on cases only once they are cleared.",
     "",
     renderRoster(state.volunteers ?? [], {
       list: state.lists?.volunteers ?? "ready",

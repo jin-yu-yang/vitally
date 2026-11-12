@@ -271,8 +271,8 @@ test("the Edit drawer is filled in, and a sign-in email is read-only", () => {
 });
 
 test("the drawer's form error and its busy state", () => {
-  const html = volunteerDrawerBody({ volunteer: null, isNew: true, ui: { formError: "Choose at least one role.", busy: true } });
-  assert.match(html, /role="alert" id="volunteer-form-error"[^>]*>[\s\S]*Choose at least one role\./);
+  const html = volunteerDrawerBody({ volunteer: null, isNew: true, ui: { formError: "Preparer needs IT&QR and Basic or Advanced.", busy: true } });
+  assert.match(html, /role="alert" id="volunteer-form-error"[^>]*>[\s\S]*Preparer needs IT&amp;QR and Basic or Advanced./);
   assert.match(html, /<button type="submit"[^>]*disabled/);
 });
 

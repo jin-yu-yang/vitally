@@ -468,6 +468,21 @@ if (!config) {
     if (box && field) field.hidden = !box.checked;
   }
 
+  // Unticking a certificate unticks the roles that need it, in the form (the
+  // save would drop them anyway). Each role tick carries its needs.
+  function syncVolunteerRoles(form) {
+    const have = new Set(
+      [...form.querySelectorAll('input[name="certificate"]:checked')].map((box) => box.value),
+    );
+    for (const box of form.querySelectorAll('input[name="role"]:checked')) {
+      const all = (box.dataset.needsAll ?? "").split(" ").filter(Boolean);
+      const oneOf = (box.dataset.needsOneOf ?? "").split(" ").filter(Boolean);
+      if (all.every((c) => have.has(c)) && (!oneOf.length || oneOf.some((c) => have.has(c)))) continue;
+      box.checked = false;
+      for (const [id, draft] of checkDrafts(box)) keepDraft(id, draft);
+    }
+  }
+
   // One input event's draft for a field, or null: the field is back to what
   // it was drawn with, and keeps none.
   function keepDraft(id, draft) {
@@ -2421,6 +2436,10 @@ if (!config) {
     if (field.matches?.("select[data-volunteer-filter]")) {
       controller.setVolunteerFilter(field.dataset.volunteerFilter, field.value);
       root.querySelector(`#${field.id}`)?.focus();
+      return;
+    }
+    if (field.closest?.("#volunteer-form") && field.name === "certificate") {
+      syncVolunteerRoles(field.form);
       return;
     }
     if (field.closest?.("#volunteer-form") && field.name === "language" && field.value === "other") {

@@ -1,10 +1,9 @@
 // The admin-only Roster (change add-volunteer-roster-records, design D9): the
-// Volunteers page and its Add / Edit drawer. Staff screens stay English. The
-// records grant nothing, so nothing here marks a role inactive or a
-// certificate missing.
+// Volunteers page and its Add / Edit drawer. Staff screens stay English. Each
+// row says whether the volunteer is cleared (change add-volunteer-clearance).
 import { esc, button, icon, loadingLine, unloadedLine, emptyLine } from "./ui.mjs";
 import { drawerError } from "./office-views.mjs";
-import { ROLES, CERTIFICATES, WORKS, LANGUAGES, filterVolunteers } from "./volunteer-roster.mjs";
+import { ROLES, CERTIFICATES, WORKS, LANGUAGES, ROLE_NEEDS, filterVolunteers } from "./volunteer-roster.mjs";
 
 const when = (condition, html) => (condition ? html : "");
 const labelOf = (list, value) => list.find((entry) => entry.value === value)?.label ?? value;
@@ -27,6 +26,15 @@ const languagesText = (volunteer) => {
   return names.length ? names.join(", ") : "—";
 };
 
+const MISSING_TEXT = Object.freeze({ form13615: "Form 13615 missing", photoId: "Photo ID check missing" });
+
+const clearedCell = (volunteer) =>
+  volunteer.cleared === true
+    ? `<span class="volunteer-cleared">Cleared</span>`
+    : `<span class="volunteer-not-cleared">Not cleared</span> <span class="muted">${esc(
+        (volunteer.missing ?? []).map((item) => MISSING_TEXT[item] ?? item).join(", "),
+      )}</span>`;
+
 function volunteerRow(volunteer) {
   const contact = [volunteer.email, volunteer.phone].filter(Boolean).join(" · ");
   return `<tr class="volunteer-row"><th scope="row"><span class="volunteer-name">${esc(volunteer.name)}</span>${when(
@@ -38,7 +46,7 @@ function volunteerRow(volunteer) {
     "No roles recorded",
   )}</td><td>${chips(volunteer.certificates, CERTIFICATES, "None recorded")}</td><td>${esc(
     languagesText(volunteer),
-  )}</td><td>${button(
+  )}</td><td>${clearedCell(volunteer)}</td><td>${button(
     "Edit",
     "open-edit-volunteer",
     "secondary",
@@ -73,12 +81,20 @@ export function renderRoster(volunteers, { list = "ready", filters = {} } = {}) 
   const chosen = { search: filters.search ?? "", role: filters.role || "all" };
   const shown = filterVolunteers(all, chosen);
   const body = shown.length
-    ? `<div class="board-table-wrap"><table class="board-table people-table"><thead><tr><th scope="col">Volunteer</th><th scope="col">Roles</th><th scope="col">Certificates</th><th scope="col">Languages</th><th scope="col">Edit</th></tr></thead><tbody>${shown
+    ? `<div class="board-table-wrap"><table class="board-table people-table"><thead><tr><th scope="col">Volunteer</th><th scope="col">Roles</th><th scope="col">Certificates</th><th scope="col">Languages</th><th scope="col">Cleared</th><th scope="col">Edit</th></tr></thead><tbody>${shown
         .map(volunteerRow)
         .join("")}</tbody></table></div>`
     : emptyLine(all.length ? "Nobody matches." : "No volunteers yet.");
   return `${open}${toolbar(chosen)}${body}<p class="board-foot" role="status">${shown.length} of ${all.length} volunteers</p></section>`;
 }
+
+// The role ticks carry what each role needs, so the drawer can untick a role
+// whose certificate is unticked (app.mjs); ROLE_NEEDS is the one source.
+const needsAttributes = (name, value) => {
+  const needs = name === "role" ? ROLE_NEEDS[value] : null;
+  if (!needs) return "";
+  return ` data-needs-all="${esc(needs.all.join(" "))}"${needs.oneOf.length ? ` data-needs-one-of="${esc(needs.oneOf.join(" "))}"` : ""}`;
+};
 
 const ticks = (name, list, chosen, { full = false } = {}) =>
   list
@@ -87,9 +103,14 @@ const ticks = (name, list, chosen, { full = false } = {}) =>
       const text = full && entry.full !== entry.label ? `${entry.label} · ${entry.full}` : entry.label;
       return `<label class="checkbox-row small" for="${id}"><input type="checkbox" name="${name}" value="${esc(
         entry.value,
-      )}"${chosen.includes(entry.value) ? " checked" : ""} id="${id}"><span>${esc(text)}</span></label>`;
+      )}"${chosen.includes(entry.value) ? " checked" : ""}${needsAttributes(name, entry.value)} id="${id}"><span>${esc(text)}</span></label>`;
     })
     .join("");
+
+const tickRow = (name, text, on) =>
+  `<label class="checkbox-row small" for="volunteer-${name}"><input type="checkbox" name="${name}" id="volunteer-${name}"${
+    on ? " checked" : ""
+  }><span>${esc(text)}</span></label>`;
 
 /**
  * The Add / Edit drawer's body. Add has no volunteer; an Edit whose volunteer
@@ -142,7 +163,11 @@ export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {} }
     CERTIFICATES,
     v.certificates ?? [],
     { full: true },
-  )}</fieldset>`;
+  )}</fieldset><fieldset class="check-group"><legend>Clearance</legend>${tickRow(
+    "isNew",
+    "New volunteer",
+    isNew ? true : v.isNew === true,
+  )}${tickRow("photoIdChecked", "Photo ID checked", v.photoIdChecked === true)}</fieldset>`;
   const formError = ui?.formError
     ? `<p class="notice error" role="alert" id="volunteer-form-error">${icon("help")}<span>${esc(ui.formError)}</span></p>`
     : "";
