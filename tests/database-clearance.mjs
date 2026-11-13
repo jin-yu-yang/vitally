@@ -383,13 +383,36 @@ test("volunteer clearance against real Supabase", async (t) => {
       assert.deepEqual(await rolesOf(member.personId), []);
     });
 
-    await t.test("existing entries are not new", async () => {
-      const { n } = await one(
+    // Converted from a scan of other workspaces' rows (which the rehearsal seed legitimately fills with new
+    // volunteers): 045's backfill is now covered by the column defaults and an entry written the pre-045 way.
+    await t.test("entries written without isNew are not new", async () => {
+      const cols = (
+        await f.sql(
+          "select column_name,is_nullable,column_default from information_schema.columns where table_schema='public' and table_name='roster_entries' and column_name in ('is_new','photo_id_checked_at')",
+        )
+      ).rows;
+      const col = (name) => cols.find((c) => c.column_name === name);
+      assert.equal(col("is_new")?.is_nullable, "NO");
+      assert.equal(col("is_new")?.column_default, "false");
+      assert.equal(col("photo_id_checked_at")?.is_nullable, "YES");
+      assert.equal(col("photo_id_checked_at")?.column_default, null);
+      // An entry written the pre-045 way, without either new column (no roles, so no certificates are needed), takes the defaults.
+      const { id } = await one(
         f,
-        "select count(*)::int n from public.roster_entries where workspace_id<>$1 and (is_new or photo_id_checked_at is not null)",
+        "insert into public.people(workspace_id,person_key,name,capabilities) values($1,'pre045_entry','Pat Olden','{}') returning id",
         [f.workspaceId],
       );
-      assert.equal(n, 0);
+      await f.sql("insert into public.roster_entries(workspace_id,person_id,season,roles) values($1,$2,$3,'{}')", [
+        f.workspaceId,
+        id,
+        season,
+      ]);
+      const old = await one(
+        f,
+        "select is_new,photo_id_checked_at from public.roster_entries where workspace_id=$1 and person_id=$2 and season=$3",
+        [f.workspaceId, id, season],
+      );
+      assert.deepEqual({ is_new: old.is_new, photo_id_checked_at: old.photo_id_checked_at }, { is_new: false, photo_id_checked_at: null });
       // A new entry takes the defaults.
       const member = await f.staff({ key: "dee_defaults", name: "Dee Marlowe", capabilities: ["prepare"], cleared: false });
       const { is_new, photo_id_checked_at } = await one(
