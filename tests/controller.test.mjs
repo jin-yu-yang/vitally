@@ -7013,6 +7013,60 @@ test("a check that finds the person cleared runs the normal staff load", async (
   controller.stop();
 });
 
+test("becoming cleared moves the keyboard to the work, and a check that changes nothing does not", async () => {
+  const store = staffStore({ clearance: { ...UNCLEARED }, cases: [{ ...SETUP_CASE }] });
+  const { controller, renders } = build({ store });
+  await controller.start();
+  let mark = renders.focus.length;
+  store.nextClearance = { ...UNCLEARED };
+  await controller.checkClearance();
+  assert.ok(renders.focus.length > mark, "the still-uncleared check renders");
+  assert.deepEqual(renders.focus.slice(mark).filter(Boolean), [], "still uncleared: the keyboard stays");
+  mark = renders.focus.length;
+  store.nextClearance = { ...RILEY_CLEARED };
+  await controller.checkClearance();
+  assert.equal(controller.getState().principal.clearance.cleared, true);
+  assert.ok(renders.focus.slice(mark).includes(true), "cleared: the rebuilt page takes the keyboard");
+  controller.stop();
+});
+
+test("signing out forgets a pending clearance check, so the next user's Check again asks afresh", async () => {
+  const store = staffStore({ clearance: { ...UNCLEARED } });
+  const auth = { ...idleAuth(), verifyCode: async () => {} };
+  const { controller } = build({ store, auth });
+  await controller.start();
+  const before = clearanceCalls(store);
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  store.nextClearance = () => gate;
+  const first = controller.checkClearance();
+  await controller.signOut();
+  // Another staff member, also uncleared, signs in to the same window.
+  store.getPrincipal = async () => ({
+    ...STAFF_PRINCIPAL,
+    userId: "user-quinn",
+    personId: "person-quinn",
+    personName: "Quinn Harper",
+    clearance: { ...UNCLEARED },
+  });
+  await controller.verifyCode("123456");
+  assert.equal(controller.getState().principal.userId, "user-quinn");
+  store.nextClearance = { ...RILEY_CLEARED };
+  const second = controller.checkClearance();
+  assert.notEqual(second, first, "a fresh check, not the earlier user's");
+  await second;
+  assert.equal(clearanceCalls(store) - before, 2, "the press made a store call of its own");
+  assert.equal(controller.getState().principal.clearance.cleared, true);
+  // The earlier user's check settles late: it changes nothing for Quinn.
+  release({ ...UNCLEARED });
+  await first;
+  assert.equal(controller.getState().principal.userId, "user-quinn");
+  assert.equal(controller.getState().principal.clearance.cleared, true);
+  controller.stop();
+});
+
 test("a refreshed clearance with narrower capabilities narrows the person's own entry", async () => {
   const store = staffStore();
   const { controller } = build({ store });

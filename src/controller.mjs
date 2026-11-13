@@ -1110,8 +1110,9 @@ export function createController({
   }
 
   // The work a cleared staff window (or any client window) reads: its lists,
-  // the realtime channel and the open case.
-  async function loadWork() {
+  // the realtime channel and the open case. `focus` moves the keyboard to the
+  // rebuilt page, as navigation does (the window just became cleared).
+  async function loadWork({ focus = false } = {}) {
     try {
       await loadData();
       state.error = null;
@@ -1131,7 +1132,7 @@ export function createController({
     // lists' Try again is set last.
     noteUnloaded();
     persistSession();
-    show();
+    show(focus);
     // A reload on a case page: the people are in.
     void startScreeningIfDue();
   }
@@ -1179,12 +1180,16 @@ export function createController({
   // time: a call while one is out gets the same promise. Only `cleared` says
   // cleared; an answer that is no clearance at all is a failure, with Try
   // again. Never rejects.
+  // Signing out forgets the pending check (forgetUser), so a check that
+  // settles after that clears only itself.
   let clearanceCheck = null;
   function checkClearance() {
-    if (!clearanceCheck)
-      clearanceCheck = recheckClearance().finally(() => {
-        clearanceCheck = null;
+    if (!clearanceCheck) {
+      const check = recheckClearance().finally(() => {
+        if (clearanceCheck === check) clearanceCheck = null;
       });
+      clearanceCheck = check;
+    }
     return clearanceCheck;
   }
 
@@ -1215,7 +1220,8 @@ export function createController({
     const now = !awaitingClearance(state);
     if (now && !was) {
       if (state.screen !== "office-volunteers") state.screen = homeScreen();
-      await loadWork();
+      // The setup screen is replaced by the work: the keyboard goes to it.
+      await loadWork({ focus: true });
       return;
     }
     if (!now && was) dropWork();
@@ -1355,6 +1361,8 @@ export function createController({
   // Signing out drops every record this window holds, not just the session.
   function forgetUser() {
     dropLocalRetry();
+    // The next user's first Check again asks afresh.
+    clearanceCheck = null;
     if (state.principal) windowState.clear(state.principal.userId);
     unsubscribe();
     clearSelection();
