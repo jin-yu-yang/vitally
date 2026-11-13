@@ -745,6 +745,107 @@ test("the action gate against real Supabase", async (t) => {
         const { n } = await one(f, "select count(*)::int n from public.document_requests where case_id=$1", [caseId]);
         assert.equal(n, 0);
       });
+
+      // design.md, Risks: one test per RPC family where the ceiling holds the
+      // capability and the role does not. Each also shows the role that grants
+      // it succeeding, so the refusal is the role's and not something else.
+      const forbidden = (fn, error) =>
+        assert.ok(error?.code === "VT001" && error?.message === "FORBIDDEN", `${fn}: ${error?.code} ${error?.message}`);
+      const OFFICE_CEILING = ["admin", "assist", "receive_documents"];
+
+      await t.test("a Preparer with assist in the ceiling cannot claim an assistance request", async () => {
+        const prep = await member("abe_assist_preparer", "Abe Lindqvist", ["prepare", "assist"], ["prepare"]);
+        const intaker = await member("ama_assist_intaker", "Ama Quarshie", ["prepare", "assist"], ["assist"]);
+        const { itemId } = await f.seedAssistance();
+        const itemRow = () =>
+          one(f, "select status,revision,assignee_person_id from public.assistance_items where id=$1", [itemId]);
+        const before = await itemRow();
+        const args = assistanceArgs({ itemId, revision: 1, type: "CLAIM" });
+        const { error } = await prep.client.rpc("vitally_assistance_action", args);
+        forbidden("vitally_assistance_action", error);
+        assert.equal(await f.receiptsFor(args.p_action_id), 0, "no receipt");
+        assert.deepEqual(await itemRow(), before, "the item is unchanged");
+        const claimed = await intaker.client.rpc(
+          "vitally_assistance_action",
+          assistanceArgs({ itemId, revision: 1, type: "CLAIM" }),
+        );
+        assert.equal(claimed.error, null, `the Intaker's claim: ${claimed.error?.code}`);
+        assert.equal((await itemRow()).assignee_person_id, intaker.personId);
+      });
+
+      await t.test("an Intaker with admin in the ceiling cannot close unsigned cases", async () => {
+        const intaker = await member("ike_close_intaker", "Ike Barrowman", OFFICE_CEILING, ["assist"]);
+        const lead = await member("liv_close_admin", "Liv Castellano", OFFICE_CEILING, ["admin"]);
+        const caseId = await f.approvedCase();
+        const caseRow = () => one(f, "select stage,revision from public.cases where id=$1", [caseId]);
+        const before = await caseRow();
+        const args = {
+          p_action_id: randomUUID(),
+          p_cases: [{ caseId, revision: Number(before.revision) }],
+          p_confirmed: true,
+        };
+        const { error } = await intaker.client.rpc("vitally_close_unsigned", args);
+        forbidden("vitally_close_unsigned", error);
+        assert.equal(await f.receiptsFor(args.p_action_id), 0, "no receipt");
+        assert.deepEqual(await caseRow(), before, "the case is unchanged");
+        const closed = await lead.client.rpc("vitally_close_unsigned", { ...args, p_action_id: randomUUID() });
+        assert.equal(closed.error, null, `the Admin's close: ${closed.error?.code}`);
+        assert.equal((await caseRow()).stage, "closed");
+      });
+
+      await t.test("a Preparer with followup in the ceiling cannot log a contact on a follow-up", async () => {
+        const ceiling = ["prepare", "admin", "followup"];
+        const prep = await member("pim_followup_preparer", "Pim Okafor", ceiling, ["prepare"]);
+        const lead = await member("fay_followup_admin", "Fay Lindell", ceiling, ["admin", "followup"]);
+        // Approved with "no": the office's go-over follow-up is open.
+        const caseId = await f.approvedCase({ wentOver: false });
+        const { id: followupId } = await one(
+          f,
+          "select id from public.admin_followups where case_id=$1 and status='open'",
+          [caseId],
+        );
+        const entries = async () =>
+          (await one(f, "select count(*)::int n from public.contact_log where case_id=$1", [caseId])).n;
+        const before = await entries();
+        const args = contactArgs({ caseId, followupId, entry: SAMPLE_CONTACT() });
+        const { error } = await prep.client.rpc("vitally_log_contact", args);
+        forbidden("vitally_log_contact", error);
+        assert.equal(await f.receiptsFor(args.p_action_id), 0, "no receipt");
+        assert.equal(await entries(), before, "nothing is logged");
+        const logged = await lead.client.rpc(
+          "vitally_log_contact",
+          contactArgs({ caseId, followupId, entry: SAMPLE_CONTACT() }),
+        );
+        assert.equal(logged.error, null, `the Admin's contact: ${logged.error?.code}`);
+        assert.equal(await entries(), before + 1);
+      });
+
+      await t.test("an Intaker with admin in the ceiling cannot edit someone else's contact", async () => {
+        const intaker = await member("ivy_edit_intaker", "Ivy Marchetti", OFFICE_CEILING, ["assist"]);
+        const lead = await member("lex_edit_admin", "Lex Halvorsen", OFFICE_CEILING, ["admin"]);
+        const caseId = await f.preparedCase();
+        const { contactId } = await f.logContact(f.preparer, caseId, SAMPLE_CONTACT());
+        const entryRow = () =>
+          one(
+            f,
+            `select l.revision::int revision,l.note,(select count(*)::int from public.contact_log_versions v where v.contact_id=l.id) versions
+              from public.contact_log l where l.id=$1`,
+            [contactId],
+          );
+        const before = await entryRow();
+        const edited = { ...SAMPLE_CONTACT(), note: "A fictional correction." };
+        const args = editContactArgs({ contactId, revision: 1, entry: edited });
+        const { error } = await intaker.client.rpc("vitally_edit_contact", args);
+        forbidden("vitally_edit_contact", error);
+        assert.equal(await f.receiptsFor(args.p_action_id), 0, "no receipt");
+        assert.deepEqual(await entryRow(), before, "the entry is unchanged");
+        const byAdmin = await lead.client.rpc(
+          "vitally_edit_contact",
+          editContactArgs({ contactId, revision: 1, entry: edited }),
+        );
+        assert.equal(byAdmin.error, null, `the Admin's edit: ${byAdmin.error?.code}`);
+        assert.deepEqual(await entryRow(), { revision: 2, note: "A fictional correction.", versions: 2 });
+      });
     });
 
     await t.test("self-review still holds for a Reviewer", async () => {
