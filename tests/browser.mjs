@@ -8762,11 +8762,13 @@ test(
 // only, on a fixture of its own, as the Site Coordinator (the admin) and,
 // for the check that nobody else is offered it, the Preparer. Fictional
 // people and example.org addresses only. It runs after both orders, so a
-// story leg starts the same way it does on main.
+// story leg starts the same way it does on main. Its last step, an uncleared
+// admin clearing themselves (change add-volunteer-clearance), is a subtest of
+// its own, so its time is reported on its own line.
 test(
   "An admin adds, finds and edits a volunteer on the Roster",
   { timeout: 300_000 },
-  async () => {
+  async (t) => {
     const fixture = await createBrowserFixture();
     const NAME = "Rowan Ellery";
     const EDITED_NAME = "Rowan Ellery-Park";
@@ -8826,7 +8828,7 @@ test(
         ROLE_NAMES.siteCoordinator,
         ARRIVAL_MS,
       );
-      await waitForText(page, "Roles and certificates are recorded here. They don't change what anyone can do in ViTally yet.");
+      await waitForText(page, "Volunteers work on cases only once they are cleared.");
       for (const [name, role] of [
         [ROLE_NAMES.siteCoordinator, "Admin"],
         [ROLE_NAMES.preparer, "Preparer"],
@@ -8838,6 +8840,9 @@ test(
         const text = await row.innerText();
         assert.ok(text.includes(role), `${name} does not show the ${role} role the fixture records: ${text}`);
         assert.doesNotMatch(text, /No roles recorded/, `${name} shows no roles`);
+        // The fixture clears every role account (clearStaff: not new, with
+        // the certificates its roles need).
+        assert.ok(text.includes("Cleared") && !text.includes("Not cleared"), `${name} is not shown cleared: ${text}`);
       }
       const staffCount = (await rowNames(page)).length;
 
@@ -8899,6 +8904,13 @@ test(
       const added = await rowOf(page, NAME).innerText();
       for (const fact of [EMAIL, PHONE, "Preparer", "VSC", `English, ${OTHER_LANGUAGE}`])
         assert.ok(added.includes(fact), `the new row does not show ${fact}: ${added}`);
+      // Added as a new volunteer (Add ticks New volunteer) with no photo ID
+      // check: not cleared, and the row says what it waits for.
+      assert.equal(
+        (await rowOf(page, NAME).locator("td").nth(3).innerText()).trim(),
+        "Not cleared Photo ID check missing",
+        "the new volunteer's Cleared column",
+      );
       assert.equal((await rowNames(page)).length, staffCount + 1);
       const volunteerId = await rowOf(page, NAME).locator('[data-action="open-edit-volunteer"]').getAttribute("data-volunteer-id");
       assert.ok(volunteerId);
@@ -8920,7 +8932,8 @@ test(
       await drawerOpen(page, "Add a volunteer");
       assert.deepEqual(
         await drawerValues(page),
-        { name: "", phone: "", otherLanguage: "", ticked: [], otherShown: false },
+        // New volunteer is ticked on every Add (change add-volunteer-clearance).
+        { name: "", phone: "", otherLanguage: "", ticked: ["volunteer-isNew"], otherShown: false },
         "Add opened with text or ticks left from another volunteer's closed drawer",
       );
       await clickAction(page, "close-dialog");
@@ -8934,7 +8947,8 @@ test(
           name: ROLE_NAMES.siteCoordinator,
           phone: "",
           otherLanguage: "",
-          // The fixture's Admin role and the certificates it needs.
+          // The fixture's Admin role and the certificates it needs; not new,
+          // so neither New volunteer nor Photo ID checked (clearStaff).
           ticked: ["volunteer-role-admin", "volunteer-certificate-vsc", "volunteer-certificate-itqr"],
           otherShown: false,
         },
@@ -9086,6 +9100,109 @@ test(
       assert.equal(await readSignedInAs(preparer.page), ROLE_NAMES.preparer);
       assert.equal(await preparer.page.locator('[data-action="open-volunteers"]').count(), 0, "the Preparer is offered the Roster");
       assertConsoleQuiet(preparer, { name: "the Preparer's window" });
+
+      // 8. An uncleared admin (change add-volunteer-clearance): no roles yet,
+      //    so they sign in to Finish your setup, with the Volunteers link and
+      //    no work. On the Roster they record their own certificates and the
+      //    Admin role; Check again then opens the work board.
+      await t.test("an uncleared admin records their own Admin role, and Check again opens the work board", async () => {
+        const SETUP_HEADING = "Finish your setup for this season";
+        const SELF_NAME = "Morgan Hale";
+        const self = await fixture.database.staff({
+          key: "uncleared_admin",
+          name: SELF_NAME,
+          capabilities: ["admin", "followup"],
+          cleared: false,
+        });
+        // Where the keyboard is, by what the element is (never its text).
+        const focusNow = (p) =>
+          p.evaluate(() => {
+            const active = document.activeElement;
+            if (!active || active === document.body) return "body";
+            return [
+              active.tagName.toLowerCase(),
+              active.id && `#${active.id}`,
+              active.dataset?.action && `[data-action=${active.dataset.action}]`,
+            ]
+              .filter(Boolean)
+              .join("");
+          });
+        const focus = {};
+        const cleared = (p) => p.locator("td").nth(3);
+        const win = await engine.newPage({ viewport: DESKTOP });
+        const p = win.page;
+        await guardToast(p);
+        await loginTestUser({
+          page: p,
+          actor: { key: "uncleared_admin", email: self.email, userId: self.userId },
+          fixture,
+          heading: SETUP_HEADING,
+        });
+        focus.signedInToSetup = await focusNow(p);
+        await waitForText(p, "Upload your signed Form 13615.");
+        await waitForText(p, `Ask ${ROLE_NAMES.siteCoordinator}, your site coordinator.`);
+        assert.equal(await p.getByRole("heading", { name: OFFICE_BOARD_HEADING, exact: true }).count(), 0, "an uncleared admin sees the board");
+        assert.equal(await p.locator('[data-action="open-cases"]').count(), 0, "an uncleared admin is offered All cases");
+        assert.equal((await p.locator('.sidebar-nav [data-action="open-board"]').innerText()).trim(), "Finish your setup");
+
+        // Their own row: not cleared, waiting for the Form 13615 (no roles).
+        await clickAction(p, "open-volunteers");
+        await rowOf(p, SELF_NAME).waitFor({ timeout: ARRIVAL_MS });
+        assert.equal((await cleared(rowOf(p, SELF_NAME)).innerText()).trim(), "Not cleared Form 13615 missing");
+        await pressControl(p, rowOf(p, SELF_NAME).locator('[data-action="open-edit-volunteer"]'), {
+          selector: '[data-action="open-edit-volunteer"]',
+          what: "their own Edit button",
+        });
+        await drawerOpen(p, SELF_NAME);
+        await p.locator("#volunteer-certificate-vsc").check();
+        await p.locator("#volunteer-certificate-itqr").check();
+        await p.locator("#volunteer-role-admin").check();
+        // Unticking a certificate a ticked role needs unticks the role.
+        await p.locator("#volunteer-certificate-itqr").uncheck();
+        await waitFor(
+          p,
+          "Admin to be unticked with IT&QR",
+          () => document.querySelector("#volunteer-role-admin")?.checked === false,
+          undefined,
+          RENDER_MS,
+        );
+        await p.locator("#volunteer-certificate-itqr").check();
+        await p.locator("#volunteer-role-admin").check();
+        await p.locator('#volunteer-form button[type="submit"]').click({ timeout: CLICK_MS });
+        await drawerClosed(p);
+        await waitFor(
+          p,
+          "their own row to show Cleared",
+          (name) =>
+            [...document.querySelectorAll("tr.volunteer-row")].some(
+              (row) =>
+                row.querySelector(".volunteer-name")?.textContent.trim() === name &&
+                row.querySelectorAll("td")[3]?.textContent.trim() === "Cleared",
+            ),
+          SELF_NAME,
+          ARRIVAL_MS,
+        );
+
+        // Back to Finish your setup, then Check again: the work board.
+        await clickAction(p, "open-board");
+        await p.getByRole("heading", { name: SETUP_HEADING, exact: true }).waitFor({ timeout: RENDER_MS });
+        await clickAction(p, "check-clearance");
+        await p.getByRole("heading", { name: OFFICE_BOARD_HEADING, exact: true }).waitFor({ timeout: ARRIVAL_MS });
+        focus.checkAgainToBoard = await focusNow(p);
+        assert.equal(await p.getByRole("heading", { name: SETUP_HEADING, exact: true }).count(), 0);
+
+        // Add opens with New volunteer ticked, and Photo ID checked not.
+        await clickAction(p, "open-volunteers");
+        await rowOf(p, SELF_NAME).waitFor({ timeout: ARRIVAL_MS });
+        await clickAction(p, "open-add-volunteer");
+        await drawerOpen(p, "Add a volunteer");
+        assert.equal(await p.getByLabel("New volunteer", { exact: true }).isChecked(), true, "Add does not tick New volunteer");
+        assert.equal(await p.getByLabel("Photo ID checked", { exact: true }).isChecked(), false);
+        await clickAction(p, "close-dialog");
+        await drawerClosed(p);
+        t.diagnostic(`clearance-focus ${JSON.stringify(focus)}`);
+        assertConsoleQuiet(win, { name: "the uncleared admin's window" });
+      });
     } finally {
       await fixture.close();
     }

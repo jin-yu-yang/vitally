@@ -10,7 +10,7 @@ import {
   submitVerificationCode,
   APP_COOLDOWN_SECONDS,
 } from "./support/browser-fixture.mjs";
-import { redactAddresses } from "./support/story-pages.mjs";
+import { redactAddresses, WORK_BOARD_HEADING } from "./support/story-pages.mjs";
 import { NEUTRAL_SEND_MESSAGE } from "../src/auth.mjs";
 
 // Task 5A: the early two-engine Auth compatibility gate.
@@ -46,6 +46,12 @@ const SEND_INTERVAL_MS = 60_000;
 // margin, and never more than this. Limits are never lowered to pass a test.
 const REPEAT_WAIT_MS = 65_000;
 const REPEAT_WAIT_CEILING_MS = 75_000;
+
+// The setup screen an uncleared staff member signs in to (change
+// add-volunteer-clearance), and the site coordinator it names: the fixture's
+// default follow-up person.
+const SETUP_HEADING = "Finish your setup for this season";
+const SITE_COORDINATOR_NAME = "Avery Lin";
 
 // How long the countdown regression guard waits for two seconds to pass.
 const COUNTDOWN_TICK_TIMEOUT_MS = 10_000;
@@ -553,6 +559,75 @@ async function runEngineGate(t, engineName) {
           assert.equal(observed.unknownAddress.send, "otp_disabled");
         },
       );
+
+      // Clearance (change add-volunteer-clearance): a staff member with no
+      // roles signs in to the setup screen and no work board; a cleared one
+      // signs in to the work board. Each in a window of its own.
+      await t.test(
+        "an uncleared staff member signs in to the setup screen, with no work board",
+        async () => {
+          const uncleared = await fixture.database.staff({
+            key: "uncleared_preparer",
+            name: "Dana Whitfield",
+            capabilities: ["prepare"],
+            cleared: false,
+          });
+          const win = await engine.newPage();
+          try {
+            await loginTestUser({
+              page: win.page,
+              actor: { key: "uncleared_preparer", email: uncleared.email, userId: uncleared.userId },
+              fixture,
+              heading: SETUP_HEADING,
+            });
+            const main = win.page.locator("#main");
+            await main.getByText("Upload your signed Form 13615.", { exact: true }).waitFor();
+            await main
+              .getByText(`Ask ${SITE_COORDINATOR_NAME}, your site coordinator.`, { exact: true })
+              .waitFor();
+            assert.equal(
+              await win.page.getByRole("button", { name: "Check again", exact: true }).count(),
+              1,
+              "the setup screen has no Check again",
+            );
+            assert.equal(
+              await win.page.getByRole("heading", { name: WORK_BOARD_HEADING, exact: true }).count(),
+              0,
+              "an uncleared staff member sees the work board",
+            );
+            assert.equal(
+              await win.page.locator('[data-action="open-volunteers"]').count(),
+              0,
+              "a staff member without admin is offered the Roster",
+            );
+            assert.deepEqual(win.pageErrors, []);
+            assert.deepEqual(win.errors.map(redactAddresses), []);
+          } finally {
+            await win.context.close();
+          }
+        },
+      );
+
+      await t.test("a cleared staff member signs in to the work board", async () => {
+        const win = await engine.newPage();
+        try {
+          await loginTestUser({
+            page: win.page,
+            actor: fixture.actor("preparer"),
+            fixture,
+            heading: WORK_BOARD_HEADING,
+          });
+          assert.equal(
+            await win.page.getByRole("heading", { name: SETUP_HEADING, exact: true }).count(),
+            0,
+            "a cleared staff member sees the setup screen",
+          );
+          assert.deepEqual(win.pageErrors, []);
+          assert.deepEqual(win.errors.map(redactAddresses), []);
+        } finally {
+          await win.context.close();
+        }
+      });
 
       if (engineName === "chrome")
         await t.test(
