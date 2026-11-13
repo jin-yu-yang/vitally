@@ -339,8 +339,8 @@ hold `followup`.
 ### Roster clearance
 
 Since 045 a staff member reads and acts only when **cleared** for the workspace's current season.
-The full design is in [`openspec/changes/add-volunteer-clearance/design.md`](../../openspec/changes/add-volunteer-clearance/design.md)
-(after archive, under `openspec/changes/archive/`), and the behaviour in the canonical spec
+The full design is in [`openspec/changes/archive/2026-11-13-add-volunteer-clearance/design.md`](../../openspec/changes/archive/2026-11-13-add-volunteer-clearance/design.md),
+and the behaviour in the canonical spec
 [`openspec/specs/volunteer-clearance/spec.md`](../../openspec/specs/volunteer-clearance/spec.md).
 
 - **Roles need confirmed certificates.** Every role needs VSC; every role but Greeter needs IT&QR;
