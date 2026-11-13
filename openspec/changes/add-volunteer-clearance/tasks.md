@@ -55,11 +55,11 @@
   - make Lucy Fong the volunteer with no roles;
   - one new volunteer with photo ID checked and one without.
   - Update the seed's tests.
-- [ ] 7.2 Run the migration and `seed:local` on a stack that has `main`'s migrations and an earlier seed run. Check that the role accounts are cleared and the Roster reads as specified.
+- [x] 7.2 Run the migration and `seed:local` on a stack that has `main`'s migrations and an earlier seed run. Check that the role accounts are cleared and the Roster reads as specified.
 - [x] 7.3 Update `docs/demo-script.md` (Roster section and table) and the `docs/setup.md` checklist step that describes the Roster.
 
 ## 8. Browser checks and verification
 
 - [x] 8.1 Update `tests/auth-browser.mjs` for an uncleared staff sign-in, which lands on the setup screen, and a cleared one. Run `npm run test:auth-browser`.
 - [x] 8.2 Add a short browser story check: the setup screen for an uncleared account (fixture `cleared: false`), Check again after an admin clears them, and the Roster's new drawer fields. Run `npm run test:browser` and record the per-phase timings.
-- [ ] 8.3 Run `npm test`, `npm run db:migrate:test` with `npm run test:database`, `npm run test:auth-browser`, `npm run test:browser` and `npx openspec validate --all`. Record the results and the test counts before and after.
+- [x] 8.3 Run `npm test`, `npm run db:migrate:test` with `npm run test:database`, `npm run test:auth-browser`, `npm run test:browser` and `npx openspec validate --all`. Record the results and the test counts before and after.
