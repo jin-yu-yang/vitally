@@ -60,6 +60,6 @@
 
 ## 8. Browser checks and verification
 
-- [ ] 8.1 Update `tests/auth-browser.mjs` for an uncleared staff sign-in, which lands on the setup screen, and a cleared one. Run `npm run test:auth-browser`.
-- [ ] 8.2 Add a short browser story check: the setup screen for an uncleared account (fixture `cleared: false`), Check again after an admin clears them, and the Roster's new drawer fields. Run `npm run test:browser` and record the per-phase timings.
+- [x] 8.1 Update `tests/auth-browser.mjs` for an uncleared staff sign-in, which lands on the setup screen, and a cleared one. Run `npm run test:auth-browser`.
+- [x] 8.2 Add a short browser story check: the setup screen for an uncleared account (fixture `cleared: false`), Check again after an admin clears them, and the Roster's new drawer fields. Run `npm run test:browser` and record the per-phase timings.
 - [ ] 8.3 Run `npm test`, `npm run db:migrate:test` with `npm run test:database`, `npm run test:auth-browser`, `npm run test:browser` and `npx openspec validate --all`. Record the results and the test counts before and after.
