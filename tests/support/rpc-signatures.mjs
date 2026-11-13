@@ -99,9 +99,18 @@ export const RPC_SIGNATURES = Object.freeze([
       p_expected_revision: null,
       p_volunteer: {
         name: "Sample Volunteer", email: `v-${crypto.randomUUID()}@example.org`, phone: null,
-        works: "on_site", languages: ["english"], otherLanguage: null, roles: ["greeter"], certificates: [],
+        works: "on_site", languages: ["english"], otherLanguage: null, roles: ["greeter"], certificates: ["vsc"],
+        isNew: false, photoIdChecked: false,
       },
     }),
+  }),
+  // A staff member's own clearance (OpenSpec change add-volunteer-clearance).
+  Object.freeze({
+    name: "vitally_my_clearance",
+    signature: "vitally_my_clearance()",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["capabilities", "cleared", "isAdmin", "missing", "siteCoordinatorName"]),
+    args: () => ({}),
   }),
 ]);
 

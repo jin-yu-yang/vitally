@@ -65,7 +65,7 @@ import { t, SENTENCES } from "./client-text.mjs";
 import { createToastTimer } from "./toast.mjs";
 import { contactEntryFromForm, contactSummary, contactSummaries } from "./contact-log.mjs";
 import { decorateStaffCase, outcomeGroup, staffEligibility } from "./staff-views.mjs";
-import { volunteerFromForm } from "./volunteer-roster.mjs";
+import { volunteerFromForm, rolesToUntick } from "./volunteer-roster.mjs";
 
 // Bootstrap and DOM wiring, and nothing else. No state lives here (the
 // controller owns it), no HTML is written here (the view modules own it), and
@@ -466,6 +466,19 @@ if (!config) {
     const box = root.querySelector("#volunteer-language-other");
     const field = root.querySelector("#volunteer-other-language");
     if (box && field) field.hidden = !box.checked;
+  }
+
+  // Unticking a certificate unticks the roles that lose what they need, in the
+  // form (rolesToUntick decides; the save would drop them anyway).
+  function syncVolunteerRoles(form, changed) {
+    const roles = [...form.querySelectorAll('input[name="role"]:checked')];
+    const certificates = [...form.querySelectorAll('input[name="certificate"]:checked')].map((box) => box.value);
+    const drop = rolesToUntick(roles.map((box) => box.value), certificates, changed);
+    for (const box of roles) {
+      if (!drop.includes(box.value)) continue;
+      box.checked = false;
+      for (const [id, draft] of checkDrafts(box)) keepDraft(id, draft);
+    }
   }
 
   // One input event's draft for a field, or null: the field is back to what
@@ -2302,6 +2315,11 @@ if (!config) {
       case "retry-connection":
         await controller.refresh();
         break;
+      // Finish your setup's Check again. The window's focus re-checks too,
+      // through the controller's own focus listener (refresh).
+      case "check-clearance":
+        await controller.checkClearance();
+        break;
       case "dismiss-error":
         controller.dismissError();
         break;
@@ -2416,6 +2434,10 @@ if (!config) {
     if (field.matches?.("select[data-volunteer-filter]")) {
       controller.setVolunteerFilter(field.dataset.volunteerFilter, field.value);
       root.querySelector(`#${field.id}`)?.focus();
+      return;
+    }
+    if (field.closest?.("#volunteer-form") && field.name === "certificate") {
+      syncVolunteerRoles(field.form, field.value);
       return;
     }
     if (field.closest?.("#volunteer-form") && field.name === "language" && field.value === "other") {

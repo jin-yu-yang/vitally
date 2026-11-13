@@ -1036,7 +1036,9 @@ test("a volunteer with no sign-in reaches admins only", async () => {
             languages: ["english"],
             otherLanguage: null,
             roles: ["greeter"],
-            certificates: [],
+            certificates: ["vsc"],
+            isNew: false,
+            photoIdChecked: false,
           },
         });
         assert.equal(error, null);
@@ -1055,6 +1057,75 @@ test("a volunteer with no sign-in reaches admins only", async () => {
   } finally {
     adminWatch?.stop();
     staffWatch?.stop();
+    await f.close();
+  }
+});
+
+// OpenSpec change add-volunteer-clearance (design D3): Postgres Changes checks
+// the same gated case policies, so an uncleared staff member's channel carries
+// no case change while a cleared staff member's does. `people` is not gated,
+// so the uncleared channel's warm-up and fence are people rows.
+test("an uncleared subscriber gets no case change", async () => {
+  const f = await createDatabaseFixture();
+  let clearedWatch = null;
+  let unclearedWatch = null;
+  try {
+    const caseId = await preparedCase(f, f.applicantA);
+    const member = await f.staff({
+      key: "uri_uncleared",
+      name: "Uri Lindqvist",
+      capabilities: ["prepare"],
+      cleared: false,
+    });
+    clearedWatch = watchTable(f.preparer, [{ event: "UPDATE", table: "cases" }], "cleared");
+    unclearedWatch = watchTable(
+      member.client,
+      [
+        { event: "UPDATE", table: "cases" },
+        { event: "INSERT", table: "people" },
+      ],
+      "uncleared",
+    );
+    await withDeadline(clearedWatch.subscribed, "the cleared channel never subscribed");
+    await withDeadline(unclearedWatch.subscribed, "the uncleared channel never subscribed");
+    // A person every staff member may read, each under a fresh key.
+    const probe = async () => {
+      const key = `probe_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+      const added = await f.enrich({
+        addPeople: [{ key, name: "Realtime probe", capabilities: ["assist"] }],
+      });
+      return { id: added[key] };
+    };
+    const byId = (change) => (row) => row.id === change.id;
+    await controlUntilSeen(unclearedWatch, probe, byId, "the uncleared warm-up");
+    // The positive control: the cleared channel receives the case change.
+    const { produced } = await controlUntilSeen(
+      clearedWatch,
+      async () => {
+        const receipt = await f.act(f.preparer, caseId, "REQUEST_DOCUMENT", {
+          title: "Mileage record",
+          message: marker(),
+        });
+        return { id: caseId, revision: receipt.revision };
+      },
+      (change) => (row) => row.id === change.id && Number(row.revision) === change.revision,
+      "the case change on the cleared channel",
+    );
+    assert.ok(produced.length > 0);
+    // A later fence on the uncleared channel: everything committed before it
+    // has been offered to that channel.
+    const fence = await probe();
+    await unclearedWatch.waitFor(byId(fence), "the fence");
+    assertHealthy(clearedWatch, unclearedWatch);
+    assert.deepEqual(
+      unclearedWatch.payloads.filter((payload) => payload.table === "cases"),
+      [],
+      "the uncleared channel got a case change",
+    );
+    assert.equal(unclearedWatch.rows().some((row) => row.id === caseId), false);
+  } finally {
+    clearedWatch?.stop();
+    unclearedWatch?.stop();
     await f.close();
   }
 });

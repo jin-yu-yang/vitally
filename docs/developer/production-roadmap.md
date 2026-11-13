@@ -43,10 +43,11 @@ of the six RPCs and the demonstration people (Alex, Morgan, Sam) are gone. See
   and `lock_case` together (see
   [Database: who can see what](database.md#who-can-see-what)). Until then, no real client data.
 - **Roles and certifications.** Spec §8.1 lists volunteer roles (Site Coordinator, VITA Volunteer,
-  and others). Map them to the existing capabilities (`prepare`, `review`, `admin`, `followup`,
-  `receive_documents`, `assist`), and decide who may grant them. Today a roster entry sets a staff
-  member's capabilities once; changing them, or deactivating a staff member, is not built, and
-  there is no admin screen.
+  and others). Since 045 (volunteer clearance) the Roster's roles (044) map to the capabilities
+  (`vitally_private.role_capabilities`), each role needs its confirmed certificates, and a staff
+  member acts only when cleared, with their roles' capabilities within `people.capabilities`
+  ([Database: roster clearance](database.md#roster-clearance)). Still to do: the roster command sets
+  that ceiling once; changing it, or deactivating a staff member, is not built.
 - **One person, two workspaces** ([#104](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/104)).
   The screens are chosen by the acting person's capabilities (ruling R55): `admin` gets the office
   workspace, everyone else the preparation/review one. A staff account is one person and cannot

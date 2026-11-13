@@ -2348,6 +2348,19 @@ textarea::placeholder {
 .setup-panel code {
   font-size: 13px;
 }
+/* Finish your setup: an uncleared staff member's screen. */
+.setup-screen {
+  padding: 28px;
+  color: var(--vt-ink);
+}
+.setup-screen ul,
+.setup-screen p {
+  margin: 0 0 16px;
+  line-height: 1.75;
+}
+.setup-screen ul {
+  padding-left: 20px;
+}
 .review-panel {
   margin-bottom: 20px;
 }

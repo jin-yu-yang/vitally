@@ -86,10 +86,16 @@ test("safe copy never repeats database wording", () => {
       {},
     ].map((original) => createAppError(original).code),
   );
-  assert.equal(codes.size, 9);
+  assert.equal(codes.size, 10);
   for (const original of [{ code: "VT002" }, { code: "42501" }, {}]) {
     const mapped = createAppError(original);
     assert.ok(!mapped.message.includes(mapped.code));
     assert.ok(!/sqlstate|pg|postgres|vt00/i.test(mapped.message));
   }
+});
+
+test("VT009 becomes NOT_CLEARED with its safe message", () => {
+  const mapped = safe(createAppError({ code: "VT009", message: "internal" }));
+  assert.equal(mapped.code, "NOT_CLEARED");
+  assert.equal(mapped.message, "Finish your setup for this season first.");
 });

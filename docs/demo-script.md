@@ -54,7 +54,7 @@ confirmation dialogs.
 | Reminders and contacts | ViTally sends no email, letter or text. A reminder or a logged contact is a record only | — |
 | Filing results | The IRS's and Pennsylvania's answers are entered by hand by the office; nothing is sent to either | — |
 | The 13614-C shaded section | — | The preparer's answers are saved as data and filled into the IRS form by the same generator that makes the draft |
-| Roster roles and certificates | Recorded only: they don't change what anyone can do in ViTally yet | The Roster is real data, readable only by an admin |
+| Roster roles and certificates | Staff must be cleared (a role this season, its confirmed certificates and, if new, the photo ID check) before they can act | The Roster is real data, readable only by an admin |
 
 Say this plainly: **"The tax preparation, documents and filing answers you see are simulated. The
 sign-in, the accounts, the shared updates between these windows and the review rules are real."**
@@ -162,33 +162,37 @@ When there's no time for the whole case, use the seeded cases directly:
 Admins only. In the office window, choose **Volunteers** in the sidebar (a preparer or reviewer has
 no such link). The seed's eight fictional volunteers are there, with no sign-in:
 
-| Volunteer | Works | Languages | Roles | Certificates |
-| --- | --- | --- | --- | --- |
-| Maya Lindgren | On site | English | Preparer | VSC, IT&QR, Basic |
-| Tomas Abara | Remote | English, Spanish | Reviewer | VSC, IT&QR, Advanced |
-| Wen Tao Liu | On site | Mandarin, English | Preparer, Reviewer | VSC, IT&QR, Basic, Advanced |
-| Priya Venkat | On site and remote, no phone | English | Intaker | VSC, IT&QR |
-| Jordan Reyes | On site | English | Greeter | VSC |
-| Hana Moretti | Remote | Cantonese, Mandarin | Preparer | VSC |
-| Samir Haddad | On site, no phone | English, Arabic | Admin | VSC, IT&QR, SC |
-| Lucy Fong | On site and remote | Cantonese, English | Intaker, Greeter | None recorded |
+| Volunteer | Works | Languages | Roles | Certificates | Cleared |
+| --- | --- | --- | --- | --- | --- |
+| Maya Lindgren | On site | English | Preparer | VSC, IT&QR, Basic | Cleared |
+| Tomas Abara | Remote | English, Spanish | Reviewer | VSC, IT&QR, Advanced | Cleared |
+| Wen Tao Liu | On site | Mandarin, English | Preparer, Reviewer | VSC, IT&QR, Basic, Advanced | Cleared |
+| Priya Venkat | On site and remote, no phone | English | Intaker | VSC, IT&QR | Cleared (new, photo ID check recorded) |
+| Jordan Reyes | On site | English | Greeter | VSC | Not cleared: Photo ID check missing (new) |
+| Hana Moretti | Remote | Cantonese, Mandarin | Preparer | VSC, IT&QR, Basic | Cleared |
+| Samir Haddad | On site, no phone | English, Arabic | Admin | VSC, IT&QR, SC | Cleared |
+| Lucy Fong | On site and remote | Cantonese, English | No roles recorded | None recorded | Not cleared: Form 13615 missing |
 
-Each staff account also has a row, with "No roles recorded", so a stack whose only staff are the
-four role accounts shows **12 of 12 volunteers**. A stack that also has older accounts shows one
-more row for each of them.
+Each staff account also has a row. The seed clears the four role accounts first, so they show as
+**Cleared**: Sky Chen as Admin (VSC, IT&QR), Rowan Diaz as Preparer (VSC, IT&QR, Basic), Ari Novak
+as Reviewer (VSC, IT&QR, Advanced) and Kai Mensah as Intaker (VSC, IT&QR). That makes **12 of 12
+volunteers** on a stack whose only staff are the four role accounts. A stack that also has older
+accounts shows one more row for each of them, with "No roles recorded" and Not cleared.
 
 What to show:
 
 1. **Search.** Type `0143`: only Wen Tao Liu (search matches name, email and phone).
-2. **Role filter.** Clear the search and choose **Reviewer**: Tomas Abara and Wen Tao Liu.
+2. **Role filter.** Clear the search and choose **Reviewer**: Tomas Abara, Wen Tao Liu and the reviewer account, Ari Novak.
 3. **Add a volunteer.** The drawer asks for name, email, phone (optional), how they work,
    languages, roles and certificates. Saving adds a person with no sign-in and no access. Press
    **Cancel** unless you want the new row to stay: a re-seed removes only the eight seeded
    volunteers, never one added by hand.
-4. **Say what it is not yet.** The page says "Roles and certificates are recorded here. They don't
-   change what anyone can do in ViTally yet." Samir Haddad is recorded as Admin and has no sign-in,
-   so he can do nothing in ViTally. Lucy Fong has no certificates, and nothing on the row marks that
-   as missing.
+4. **Say how clearance works.** A person is **Cleared** when they have at least one role this
+   season, and, if they are new, their photo ID check is recorded. Each role needs its confirmed
+   certificates. Staff who are not cleared (no role yet, or a new volunteer without the photo ID
+   check) get no staff actions until an admin clears them. Lucy Fong has no roles, so she is waiting
+   for her Form 13615. Jordan Reyes is new and his photo ID check is missing. Samir Haddad is
+   recorded as Admin and has no sign-in, so he can do nothing in ViTally.
 
 ## What the browser test covers
 

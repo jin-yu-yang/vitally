@@ -169,6 +169,7 @@ test("shared case contracts expose readable references and frozen vocabularies",
     "SELF_REVIEW",
     "INELIGIBLE",
     "VALIDATION",
+    "NOT_CLEARED",
     "OFFLINE",
     "SERVER_ERROR",
   ]);
@@ -180,6 +181,7 @@ test("shared case contracts expose readable references and frozen vocabularies",
     VT005: "SELF_REVIEW",
     VT006: "INELIGIBLE",
     VT007: "VALIDATION",
+    VT009: "NOT_CLEARED",
   });
   assert.equal(Object.isFrozen(STAGES), true);
   assert.equal(Object.isFrozen(CASE_ACTIONS), true);

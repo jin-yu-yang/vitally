@@ -474,6 +474,7 @@ test("a staff principal carries the person linked to the signed-in account", asy
   const client = fakeClient({
     access: "staff",
     rows: { people: [{ ...STAFF_PERSON, id: "person-other", user_id: "user-9" }, STAFF_PERSON] },
+    rpc: async () => ({ data: { cleared: true, missing: [], capabilities: ["prepare"], isAdmin: false, siteCoordinatorName: null }, error: null }),
   });
   const principal = await createStore(client).getPrincipal();
   assert.equal(principal.access, "staff");
@@ -1730,4 +1731,20 @@ test("saveVolunteer sends the RPC parameters, nulls for an Add", async () => {
 test("the Roster tables are not in the subscribed staff tables", () => {
   for (const name of ["volunteer_profiles", "roster_entries", "certificates"])
     assert.ok(!SUBSCRIBED_TABLES.staff.includes(name), name);
+});
+
+test("a staff principal carries the clearance from vitally_my_clearance; an applicant has none", async () => {
+  const cleared = { cleared: true, missing: [], capabilities: ["prepare"], isAdmin: false, siteCoordinatorName: null };
+  const staff = fakeClient({ access: "staff", rows: { people: [STAFF_PERSON] }, rpc: async () => ({ data: cleared, error: null }) });
+  assert.deepEqual((await createStore(staff).getPrincipal()).clearance, cleared);
+  assert.deepEqual(staff.rpcCalls, [{ name: "vitally_my_clearance", args: undefined }]);
+  const applicant = fakeClient({ access: "applicant" });
+  const principal = await createStore(applicant).getPrincipal();
+  assert.equal(Object.hasOwn(principal, "clearance"), false);
+  assert.deepEqual(applicant.rpcCalls, []);
+});
+
+test("an error from vitally_my_clearance surfaces from getPrincipal", async () => {
+  const client = fakeClient({ access: "staff", rpc: async () => ({ data: null, error: { code: "VT001" } }) });
+  await assert.rejects(() => createStore(client).getPrincipal(), { code: "FORBIDDEN" });
 });

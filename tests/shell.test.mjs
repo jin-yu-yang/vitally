@@ -7,6 +7,7 @@ import { icon, ICON_NAMES, describeFocus, focusSelectors } from "../src/ui.mjs";
 import { TEXT, SENTENCES } from "../src/client-text.mjs";
 import { toggleLabel } from "../src/sidebar-peek.mjs";
 import { isStaffWindow } from "../src/contracts.mjs";
+import { cleared } from "./support/clearance.mjs";
 
 // Phase 0 of the redesign adds the frame without moving any screen into it,
 // so the one thing that must hold today is that a page without a sidebar is
@@ -660,7 +661,7 @@ test("the part 4b2 block follows 4b's: icon-and-word marks, the phone bar and th
 
 const ADD_SAM = { id: "p-sam", name: "Sam", capabilities: ["admin", "followup", "assist", "receive_documents"] };
 const addState = (over = {}) => ({
-  principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: ADD_SAM.id },
+  principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: ADD_SAM.id, clearance: cleared({ isAdmin: true }) },
   people: [ADD_SAM],
   screen: "office-add-case",
   cases: [],
@@ -1358,7 +1359,7 @@ test("the no-access screen uses the client frame and follows the language", () =
 
 test("a refusal shows in the error banner and the staff window stays usable", () => {
   const state = {
-    principal: { access: "staff", personName: "Sam" },
+    principal: { access: "staff", personName: "Sam", clearance: cleared() },
     connection: "online",
     screen: "staff",
     people: [],
@@ -1374,7 +1375,7 @@ test("a refusal shows in the error banner and the staff window stays usable", ()
 
 test("no staff screen offers a persona, a reset or a checkpoint", () => {
   const people = [{ id: "p-sam", name: "Sam", capabilities: ["prepare"] }];
-  const base = { principal: { access: "staff", personId: "p-sam", personName: "Sam" }, connection: "online", people, cases: [], assistance: [], demoTools: true };
+  const base = { principal: { access: "staff", personId: "p-sam", personName: "Sam", clearance: cleared() }, connection: "online", people, cases: [], assistance: [], demoTools: true };
   const board = staffScreen({ ...base, screen: "staff" });
   const casePage = staffScreen({
     ...base,
@@ -1388,7 +1389,7 @@ test("no staff screen offers a persona, a reset or a checkpoint", () => {
 
 test("a staff account's screens name it and act as no one", () => {
   const sam = { id: "p-sam", name: "Sam", capabilities: ["admin"] };
-  const base = { principal: { access: "staff", personId: "p-sam", personName: "Sam" }, connection: "online", people: [sam], cases: [], assistance: [] };
+  const base = { principal: { access: "staff", personId: "p-sam", personName: "Sam", clearance: cleared({ isAdmin: true }) }, connection: "online", people: [sam], cases: [], assistance: [] };
   const board = staffScreen({ ...base, screen: "staff" });
   assert.match(board.match(/<div class="account-row">[\s\S]*?<\/span><\/div>/)[0].replace(/<[^>]+>/g, " ").replace(/\s+/g, " "), /Signed in as Sam/);
   assert.doesNotMatch(board, /No persona chosen|Acting as/);

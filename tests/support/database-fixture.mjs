@@ -76,6 +76,28 @@ const ROLE_ACCOUNTS = Object.freeze([
   ["reviewer", "reviewer", "Jamie Ellis", ["review"]],
   ["intaker", "intaker", "Rowan Price", ["receive_documents", "assist"]],
 ]);
+// The roster roles a set of capabilities needs (OpenSpec change
+// add-volunteer-clearance): the distinct union, sorted. Empty capabilities
+// are a Greeter.
+export function rolesFor(capabilities) {
+  const has = (c) => capabilities.includes(c);
+  const roles = new Set();
+  if (has("admin") || has("followup")) roles.add("admin");
+  if (has("review")) roles.add("reviewer");
+  if (has("prepare") && !has("review")) roles.add("preparer");
+  if ((has("assist") || has("receive_documents")) && !has("admin")) roles.add("intaker");
+  if (capabilities.length === 0) roles.add("greeter");
+  return [...roles].sort();
+}
+// The certificates each role needs confirmed (the Preparer takes Basic, the
+// Reviewer Advanced; either satisfies "Basic or Advanced" for those two).
+export const CERTIFICATES_FOR = Object.freeze({
+  greeter: ["vsc"],
+  intaker: ["vsc", "itqr"],
+  admin: ["vsc", "itqr"],
+  preparer: ["vsc", "itqr", "basic"],
+  reviewer: ["vsc", "itqr", "advanced"],
+});
 // The person key every fixture workspace uses for its default follow-up person.
 const DEFAULT_FOLLOWUP_KEY = "site_coordinator";
 // One key for the advisory lock that keeps fixture workspace setup exclusive
@@ -441,6 +463,19 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
       addPeople,
       addCapabilities,
     });
+    // The new people and the people given a capability keep matching roles
+    // and confirmed certificates, so the clearance gates treat them as cleared.
+    const touched = new Set([
+      ...Object.values(people),
+      ...addCapabilities.map((addition) => addition.personId),
+    ]);
+    for (const personId of touched) {
+      const { rows } = await f.sql(
+        "select capabilities from public.people where workspace_id=$1 and id=$2",
+        [f.workspaceId, personId],
+      );
+      if (rows[0]) await f.clearStaff(personId, rows[0].capabilities);
+    }
     return people;
   };
   // Historical reassignment for the self-review regression only. No product
@@ -650,7 +685,43 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
   // file needs has a key of its own.
   // `workspaceId` names another workspace of this run (see f.initializeOwned).
   f.provision = provision;
-  f.staff = async ({ key, name, capabilities, workspaceId = f.workspaceId }) => {
+  // Gives a staff member the roles their capabilities need and confirmed
+  // certificates for them, on the workspace's current-season roster entry, in
+  // one transaction (the roles trigger is deferred to commit).
+  f.clearStaff = async (personId, capabilities, workspaceId = f.workspaceId) => {
+    const roles = rolesFor(capabilities);
+    const certificates = [...new Set(roles.flatMap((role) => CERTIFICATES_FOR[role]))];
+    await f.sql("begin");
+    try {
+      await f.sql(
+        `insert into public.roster_entries(workspace_id,person_id,season,roles,is_new)
+          select $1::uuid,$2::uuid,w.current_season,$3::text[],false
+            from public.workspaces w where w.id=$1::uuid
+          on conflict (workspace_id,person_id,season)
+          do update set roles=excluded.roles,is_new=false`,
+        [workspaceId, personId, roles],
+      );
+      await f.sql(
+        `insert into public.certificates(workspace_id,person_id,season,certificate,status,confirmed_at,confirmed_by_person_id)
+          select $1::uuid,$2::uuid,w.current_season,c,'confirmed',now(),$2::uuid
+            from public.workspaces w, unnest($3::text[]) c where w.id=$1::uuid
+          on conflict (workspace_id,person_id,season,certificate)
+          do update set status='confirmed',confirmed_at=now(),confirmed_by_person_id=excluded.confirmed_by_person_id`,
+        [workspaceId, personId, certificates],
+      );
+      await f.sql("commit");
+    } catch (error) {
+      await f.sql("rollback").catch(() => {});
+      throw error;
+    }
+  };
+  f.staff = async ({
+    key,
+    name,
+    capabilities,
+    workspaceId = f.workspaceId,
+    cleared = true,
+  }) => {
     const { client, userId, email } = await provision();
     await f.withSetupLock(() =>
       f.sql("select vitally_private.add_staff_member($1,$2,$3,$4,$5::text[])", [
@@ -665,6 +736,7 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
       "select id from public.people where workspace_id=$1 and person_key=$2",
       [workspaceId, key],
     );
+    if (cleared !== false) await f.clearStaff(rows[0].id, capabilities, workspaceId);
     return { client, userId, personId: rows[0].id, email };
   };
   try {
@@ -739,6 +811,9 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
           )
         ).rows.map((row) => [row.person_key, row]),
       );
+      for (const member of setup.staff)
+        if (people[member.personKey])
+          await f.clearStaff(people[member.personKey].id, member.capabilities, setup.workspaceId);
       const workspace = (
         await f.sql(
           "select default_followup_person_id from public.workspaces where id=$1",

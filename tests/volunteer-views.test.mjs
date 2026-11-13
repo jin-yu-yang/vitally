@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { renderRoster, volunteerDrawerBody } from "../src/volunteer-views.mjs";
 import { staffScreen, dialog } from "../src/views.mjs";
+import { cleared } from "./support/clearance.mjs";
 
 // Fictional people only.
 const ADMIN_PERSON = { id: "p-sam", name: "Sam Rivera", capabilities: ["admin", "followup"] };
@@ -19,11 +20,15 @@ const volunteer = (overrides = {}) => ({
   certificates: ["vsc"],
   revision: 3,
   hasSignIn: false,
+  isNew: false,
+  photoIdChecked: false,
+  cleared: true,
+  missing: [],
   ...overrides,
 });
 
 const baseState = (overrides = {}) => ({
-  principal: { userId: "u1", workspaceId: "w1", access: "staff", personId: "p-sam" },
+  principal: { userId: "u1", workspaceId: "w1", access: "staff", personId: "p-sam", clearance: cleared({ isAdmin: true }) },
   people: [ADMIN_PERSON, PREPARER_PERSON],
   cases: [],
   assistance: [],
@@ -55,7 +60,7 @@ test("an admin's sidebar has the Volunteers link after All cases; a preparer's h
     "Volunteers comes after All cases",
   );
   const preparer = staffScreen(
-    baseState({ screen: "staff", principal: { userId: "u2", workspaceId: "w1", access: "staff", personId: "p-alex" } }),
+    baseState({ screen: "staff", principal: { userId: "u2", workspaceId: "w1", access: "staff", personId: "p-alex", clearance: cleared() } }),
   );
   assert.doesNotMatch(preparer, /data-action="open-volunteers"/);
 });
@@ -67,20 +72,18 @@ test("the Volunteers link is current on the Roster", () => {
 
 test("a non-admin left on the Roster gets the work board", () => {
   const html = staffScreen(
-    baseState({ principal: { userId: "u2", workspaceId: "w1", access: "staff", personId: "p-alex" } }),
+    baseState({ principal: { userId: "u2", workspaceId: "w1", access: "staff", personId: "p-alex", clearance: cleared() } }),
   );
   assert.match(html, /Work board<\/h2>/);
   assert.doesNotMatch(html, /OFFICE · VOLUNTEERS|Mira Patel|open-add-volunteer/);
 });
 
-test("the Roster page says roles grant nothing, and shows no season", () => {
+test("the Roster page says volunteers work on cases once cleared, and shows no season", () => {
   const html = staffScreen(baseState());
   assert.match(html, />OFFICE · VOLUNTEERS</);
   assert.match(html, /<h1>Volunteers<\/h1>/);
-  assert.match(
-    html,
-    /Roles and certificates are recorded here\. They don&#39;t change what anyone can do in ViTally yet\./,
-  );
+  assert.match(html, /Volunteers work on cases only once they are cleared\./);
+  assert.doesNotMatch(html, /recorded here|change what anyone can do/);
   assert.match(html, /class="btn primary" data-action="open-add-volunteer"[^>]*>(?:<svg[\s\S]*?<\/svg>)? Add a volunteer<\/button>/);
   assert.doesNotMatch(html, /season|2025|2026/i);
 });
@@ -92,7 +95,7 @@ test("the table has the spec's columns and a count", () => {
   });
   assert.match(html, /class="board-table people-table"/);
   const headers = [...html.matchAll(/<th scope="col">([^<]*)<\/th>/g)].map((m) => m[1]);
-  assert.deepEqual(headers, ["Volunteer", "Roles", "Certificates", "Languages", "Edit"]);
+  assert.deepEqual(headers, ["Volunteer", "Roles", "Certificates", "Languages", "Cleared", "Edit"]);
   assert.match(html, /2 of 2 volunteers/);
   assert.match(html, /data-action="open-edit-volunteer" data-volunteer-id="v-1"/);
 });
@@ -127,7 +130,43 @@ test("a row shows the Remote badge, the roles, the certificates and the language
   assert.match(d, /Mandarin/);
   assert.match(d, /Tagalog/);
   assert.match(d, /mira@example\.test · 215-555-0101/);
-  assert.doesNotMatch(html, /missing|inactive/i);
+  assert.doesNotMatch(html, /inactive/i);
+});
+
+test("a row shows Cleared, or the one thing it waits for", () => {
+  const html = renderRoster(
+    [
+      volunteer({ id: "a", name: "A One" }),
+      volunteer({ id: "b", name: "B Two", roles: [], cleared: false, missing: ["form13615"] }),
+      volunteer({ id: "c", name: "C Three", isNew: true, cleared: false, missing: ["photoId"] }),
+    ],
+    { list: "ready", filters: {} },
+  );
+  const [a, b, c] = rowsOf(html);
+  assert.match(a, /Cleared/);
+  assert.doesNotMatch(a, /Not cleared|Form 13615|Photo ID/);
+  assert.match(b, /Not cleared/);
+  assert.match(b, /Form 13615 missing/);
+  assert.match(c, /Not cleared/);
+  assert.match(c, /Photo ID check missing/);
+  assert.doesNotMatch(c, /Form 13615/);
+});
+
+test("Add opens with New volunteer ticked and Photo ID checked not", () => {
+  const html = volunteerDrawerBody({ volunteer: null, isNew: true, ui: {} });
+  assert.match(html, /<input type="checkbox" name="isNew"[^>]* checked[^>]*><span>New volunteer<\/span>/);
+  const photo = html.match(/<input type="checkbox" name="photoIdChecked"[^>]*>/)[0];
+  assert.doesNotMatch(photo, /checked/);
+  assert.match(html, /<span>Photo ID checked<\/span>/);
+});
+
+test("Edit shows the volunteer's own New and Photo ID checked values", () => {
+  const plain = volunteerDrawerBody({ volunteer: volunteer(), isNew: false, ui: {} });
+  assert.doesNotMatch(plain.match(/<input type="checkbox" name="isNew"[^>]*>/)[0], /checked/);
+  assert.doesNotMatch(plain.match(/<input type="checkbox" name="photoIdChecked"[^>]*>/)[0], /checked/);
+  const both = volunteerDrawerBody({ volunteer: volunteer({ isNew: true, photoIdChecked: true }), isNew: false, ui: {} });
+  assert.match(both.match(/<input type="checkbox" name="isNew"[^>]*>/)[0], /checked/);
+  assert.match(both.match(/<input type="checkbox" name="photoIdChecked"[^>]*>/)[0], /checked/);
 });
 
 test("a name or phone with markup is shown as text in the table and in the drawer", () => {
@@ -222,8 +261,8 @@ test("the Edit drawer is filled in, and a sign-in email is read-only", () => {
 });
 
 test("the drawer's form error and its busy state", () => {
-  const html = volunteerDrawerBody({ volunteer: null, isNew: true, ui: { formError: "Choose at least one role.", busy: true } });
-  assert.match(html, /role="alert" id="volunteer-form-error"[^>]*>[\s\S]*Choose at least one role\./);
+  const html = volunteerDrawerBody({ volunteer: null, isNew: true, ui: { formError: "Preparer needs IT&QR and Basic or Advanced.", busy: true } });
+  assert.match(html, /role="alert" id="volunteer-form-error"[^>]*>[\s\S]*Preparer needs IT&amp;QR and Basic or Advanced./);
   assert.match(html, /<button type="submit"[^>]*disabled/);
 });
 

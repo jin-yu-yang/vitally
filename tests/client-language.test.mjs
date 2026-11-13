@@ -541,7 +541,10 @@ test("every errors.mjs, controller, auth and message-constant sentence is a SENT
   const wanted = new Set(["Something went wrong.", "Please try again."]);
   // errors.mjs: SAFE_MESSAGES
   const errors = /const SAFE_MESSAGES = Object\.freeze\(\{([\s\S]*?)\}\);/.exec(source("errors.mjs"))[1];
-  const safe = [...errors.matchAll(/:\s*("(?:[^"\\]|\\.)*")/g)].map((m) => literal(m[1]));
+  // NOT_CLEARED is said only to a staff member, whose screens stay English.
+  const safe = [...errors.matchAll(/(\w+):\s*("(?:[^"\\]|\\.)*")/g)]
+    .filter((m) => m[1] !== "NOT_CLEARED")
+    .map((m) => literal(m[2]));
   assert.equal(safe.length, 9);
   safe.forEach((s) => wanted.add(s));
   // controller.mjs: literal controllerError sentences, *_MESSAGE constants and the client conflict messages

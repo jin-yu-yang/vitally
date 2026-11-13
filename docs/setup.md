@@ -241,9 +241,13 @@ its root. The stack must already be running ([Start and stop](#start-and-stop)).
 7. **Start the app and sign in** each window ([Sign in](#signing-in-locally), one browser profile
    per account), then check, in the site coordinator's window:
    - Follow-ups says **8 open**, one row of each kind;
-   - **Volunteers** lists the eight fictional volunteers (Maya Lindgren to Lucy Fong), plus a "No
-     roles recorded" row for each staff account: **12 of 12 volunteers** when the four role
-     accounts are the only staff.
+   - **Volunteers** lists the eight fictional volunteers (Maya Lindgren to Lucy Fong), plus a row
+     for each staff account. After `seed:local` the four role accounts show their roles and
+     **Cleared** (Admin, Preparer, Reviewer, Intaker). Two seeded volunteers are Not cleared:
+     Lucy Fong shows "No roles recorded" (her Form 13615 is missing), and Jordan Reyes, who is new,
+     shows Greeter with "Photo ID check missing". The others are Cleared: **12 of 12 volunteers**
+     when the four role accounts are the only staff. Any
+     older staff account shows "No roles recorded" and Not cleared.
 
 The seed resets the cases, so after a rehearsal run steps 5 and 7 again before the real thing.
 
@@ -446,7 +450,7 @@ check failed. Check, in this order:
 
 ## 4. Migrations
 
-Forty-four migrations (001 to 044), applied in order. 020, the version-2 switch-over, was added after 021 and 022: a stack that already has them applies it last, and a new one applies it in number order. Both give the same result. Re-running the migrator on an already-migrated stack is safe,
+Forty-five migrations (001 to 045), applied in order. 020, the version-2 switch-over, was added after 021 and 022: a stack that already has them applies it last, and a new one applies it in number order. Both give the same result. Re-running the migrator on an already-migrated stack is safe,
 but not because the files themselves are re-runnable — `001` and `002` create their tables with a
 plain `create table`, which fails the second time. What makes it safe is the ledger
 `tools/admin/migrate.mjs` keeps: `vitally_private.schema_migrations`, one row per file with a
@@ -499,6 +503,7 @@ already applied, so **the migrations are run only through the migrator, never by
 | `042_let_follow_up_holders_work_any_follow_up.sql` | Hand-written: anyone holding `followup` works any open office follow-up, whoever it is assigned to, and `followup` requires `admin` (#172) |
 | `043_remove_presenter_access.sql` | Hand-written: the `presenter` access type, the person parameter of the six RPCs and the demonstration people (Alex, Morgan, Sam) are removed. It refuses with `VT008` if a presenter account is referenced ([below](#migration-failed-vt008)). |
 | `044_volunteer_roster_records.sql` | Hand-written: the admin-only Roster records (`volunteer_profiles`, `roster_entries`, `certificates`; not published to Realtime), the `vitally_policy` schema with its one admin check, `vitally_save_volunteer`, and `add_staff_member` linking a matching no-sign-in volunteer. A volunteer with no sign-in is readable only by admins. Existing staff are backfilled with no roles |
+| `045_volunteer_clearance.sql` | Hand-written: volunteer clearance. A current-season role needs its confirmed certificates (a deferred trigger refuses one that lacks them at commit), and a new volunteer needs a recorded photo ID check (`roster_entries.is_new`, `photo_id_checked_at`). Only a cleared staff member reads case data (the 21 staff policies) or acts (the six case RPCs refuse with `VT009 NOT_CLEARED`), and acts with the role capabilities that `people.capabilities` allows. Adds `vitally_my_clearance` and the Roster save's role and open-work checks. Unsupported roles of people with no sign-in are removed; it refuses with `VT008` if a person with a sign-in holds one ([below](#migration-failed-vt008)) |
 
 Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
 never edit an applied one. The build writes one only when the catalogue's hash differs from the
@@ -556,8 +561,13 @@ and the commands are in [`docs/developer/database.md`](developer/database.md#mig
 
 ### Migration failed (VT008)
 
-`Migration failed (VT008).` means migration 043 (it removes the presenter access type) refused to
-run, and **nothing was changed**. A presenter account is still referenced by a case, a case
+Two migrations refuse with `VT008`: 043 and 045 ([045's guard](#045s-guard) below). The migrator
+prints only the code; the full message starts with the migration's number.
+
+#### 043's guard
+
+From migration 043 (it removes the presenter access type), `Migration failed (VT008).` means it
+refused to run, and **nothing was changed**. A presenter account is still referenced by a case, a case
 event, a document, a contact attempt, a contact-log entry or version, a person, a case it
 created, or another membership, and deleting the account would lose or break that row. The
 migrator prints only the code; the full message ("043 refused: presenter accounts are referenced
@@ -581,6 +591,44 @@ select kind, n from (
 
 Decide with the project owner what to do with those rows (for example, move them to a staff
 person's account) and run the migrator again. Do not edit the migration file.
+
+#### 045's guard
+
+From migration 045 (volunteer clearance), `Migration failed (VT008).` means it refused to run,
+and **nothing was changed**. Its full message is "045 refused:
+people with a sign-in hold roles their certificates don't support (<count>)". It means that at
+least one person with a sign-in (`people.user_id` set) has a role on their current-season Roster
+entry that their confirmed certificates don't support. Every role needs VSC; every role except
+Greeter also needs IT&QR; Preparer and Reviewer also need Basic or Advanced. (045 removes such
+roles by itself from volunteers with no sign-in.) 045's helpers don't exist until it applies, so
+this read-only query writes the same needs out; it lists each such person and the roles their
+certificates don't support (no rows means 045 would not refuse):
+
+```sql
+select r.workspace_id, p.id as person_id, p.name, r.season, r.roles, h.held,
+  array(select u.role from unnest(r.roles) u(role)
+    where not ('vsc' = any(h.held)
+      and (u.role = 'greeter' or 'itqr' = any(h.held))
+      and (u.role not in ('preparer', 'reviewer') or 'basic' = any(h.held) or 'advanced' = any(h.held)))
+  ) as unsupported_roles
+from public.roster_entries r
+join public.workspaces w on w.id = r.workspace_id and w.current_season = r.season
+join public.people p on p.workspace_id = r.workspace_id and p.id = r.person_id
+cross join lateral (
+  select coalesce(array_agg(c.certificate), '{}'::text[]) as held from public.certificates c
+  where c.workspace_id = r.workspace_id and c.person_id = r.person_id and c.season = r.season
+    and c.status = 'confirmed'
+) h
+where p.user_id is not null
+  and exists (select 1 from unnest(r.roles) u(role)
+    where not ('vsc' = any(h.held)
+      and (u.role = 'greeter' or 'itqr' = any(h.held))
+      and (u.role not in ('preparer', 'reviewer') or 'basic' = any(h.held) or 'advanced' = any(h.held))));
+```
+
+For each person listed, either confirm the missing certificates or remove the unsupported roles on
+the Roster (decide which with the project owner), then run the migrator again. Do not edit the
+migration file.
 
 ## 5. Tests
 

@@ -10,6 +10,7 @@ const SAFE_MESSAGES = Object.freeze({
   SELF_REVIEW: "A different volunteer has to review this application.",
   INELIGIBLE: "This volunteer is not qualified for this step.",
   VALIDATION: "Please check the information and try again.",
+  NOT_CLEARED: "Finish your setup for this season first.",
   OFFLINE: "Network error. Please try again later.",
   SERVER_ERROR: "Something went wrong. Please try again.",
 });

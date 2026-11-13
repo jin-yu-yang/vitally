@@ -30,6 +30,8 @@ import {
 } from "./office-views.mjs";
 import { renderCasePool } from "./pool-views.mjs";
 import { renderRoster, volunteerDrawerBody } from "./volunteer-views.mjs";
+import { awaitingClearance, ceilingAdmin } from "./clearance.mjs";
+import { setupScreen } from "./setup-views.mjs";
 
 // The shared shell: the frame every screen sits in, the dialogs, the two
 // screens that belong to nobody in particular (setup needed, no access), and
@@ -189,8 +191,10 @@ const isAdmin = (person) =>
 
 // What the staff sidebar holds: the brand, the screens this account can go to,
 // and who is signed in. Screens that do not exist yet (Dashboard, Schedule,
-// Documents, Messages) are not shown.
-export function staffSidebar(state, person, office) {
+// Documents, Messages) are not shown. `office` is the effective admin (All
+// cases, Follow-ups); `volunteers` is the ceiling admin (the Roster), and
+// `board` is false on the setup screen, which has no work board.
+export function staffSidebar(state, person, office, { volunteers = office, board = true } = {}) {
   // A staff account is its own person: "Signed in as".
   const accountRow = `<small>Signed in as</small> <strong>${esc(person?.name ?? state.principal?.personName ?? "")}</strong>`;
   const onBoard = state?.screen === "staff";
@@ -198,25 +202,34 @@ export function staffSidebar(state, person, office) {
   const onRoster = state?.screen === "office-volunteers";
   const label = office ? "Follow-ups" : "Work board";
   // All cases, then the Roster (admin only, change add-volunteer-roster-records).
-  const pool = office
-    ? `${button(
+  const pool = office && board
+    ? button(
         `${icon("folder")} All cases`,
         "open-cases",
         `nav-link${onPool ? " current" : ""}`,
         onPool ? 'aria-current="page"' : "",
-      )}${button(
+      )
+    : "";
+  const roster = volunteers
+    ? button(
         `${icon("user")} Volunteers`,
         "open-volunteers",
         `nav-link${onRoster ? " current" : ""}`,
         onRoster ? 'aria-current="page"' : "",
-      )}`
+      )
     : "";
-  return `<div class="sidebar-brand"><img src="src/pcdc-logo.png" alt="PCDC" width="36" height="36"><span class="sidebar-wordmark">ViTally<span class="brand-dot">.</span></span></div><nav class="sidebar-nav" aria-label="Main navigation">${button(
-    `${icon(office ? "people" : "board")} ${label}`,
-    "open-board",
-    `nav-link${onBoard ? " current" : ""}`,
-    onBoard ? 'aria-current="page"' : "",
-  )}${pool}</nav><div class="sidebar-account"><div class="account-row">${icon("user")}<span>${accountRow}</span></div>${button(
+  // On the setup screen there is no board: a ceiling admin's way back from
+  // the Roster is the setup screen itself.
+  const home = board || volunteers
+    ? button(
+        board ? `${icon(office ? "people" : "board")} ${label}` : `${icon("shield")} Finish your setup`,
+        "open-board",
+        `nav-link${onBoard ? " current" : ""}`,
+        onBoard ? 'aria-current="page"' : "",
+      )
+    : "";
+  const links = `${home}${pool}${roster}`;
+  return `<div class="sidebar-brand"><img src="src/pcdc-logo.png" alt="PCDC" width="36" height="36"><span class="sidebar-wordmark">ViTally<span class="brand-dot">.</span></span></div>${when(links, `<nav class="sidebar-nav" aria-label="Main navigation">${links}</nav>`)}<div class="sidebar-account"><div class="account-row">${icon("user")}<span>${accountRow}</span></div>${button(
     `${icon("help")} Need help?`,
     "open-help",
     "text",
@@ -234,21 +247,58 @@ const combineLists = (...states) => {
   return all.includes("failed") ? "failed" : all.includes("loading") ? "loading" : "ready";
 };
 
+// A staff page: its overline, title and intro, an optional way back to the
+// board, the page's actions and its body.
+const frame = (overline, title, intro, backLabel, body, actions = "") =>
+  `<main id="main" class="narrow" tabindex="-1"><div class="page-intro"><span class="overline">${esc(overline)}</span><h1>${esc(title)}</h1><p>${esc(intro)}</p>${when(
+    backLabel,
+    button(`${icon("back")} ${backLabel}`, "open-board", "text"),
+  )}${when(actions, `<div class="page-actions">${actions}</div>`)}</div>${body}</main>`;
+
+// The Roster (change add-volunteer-roster-records): for a ceiling admin,
+// cleared or not.
+const rosterPage = (state) =>
+  frame(
+    "OFFICE · VOLUNTEERS",
+    "Volunteers",
+    "Volunteers work on cases only once they are cleared.",
+    "",
+    renderRoster(state.volunteers ?? [], {
+      list: state.lists?.volunteers ?? "ready",
+      filters: state.volunteerFilters ?? {},
+    }),
+    button(`${icon("plus")} Add a volunteer`, "open-add-volunteer", "primary"),
+  );
+
 export function staffScreen(state) {
   const people = state.people ?? [];
   const person =
     people.find((entry) => entry.id === state.principal?.personId) ?? null;
+  // The office screens follow the effective capabilities; the Roster follows
+  // the ceiling (design D10), so an admin can record their own roles.
   const office = isAdmin(person);
+  const volunteers = ceilingAdmin(state.principal);
+  const open = state.sidebarOpen !== false;
+  // Not cleared: the setup screen, and for a ceiling admin the Roster. No work.
+  if (awaitingClearance(state)) {
+    const onRoster = volunteers && state.screen === "office-volunteers";
+    return appShell({
+      sidebar: staffSidebar(
+        { ...state, screen: onRoster ? state.screen : "staff" },
+        person,
+        false,
+        { volunteers, board: false },
+      ),
+      body: onRoster ? rosterPage(state) : setupScreen(state),
+      open,
+    });
+  }
   // A volunteer whose window was left on an office screen gets the work board.
+  const allowed = (name) => office || (name === "office-volunteers" && volunteers);
   const screen =
-    !office && OFFICE_SCREENS.includes(state.screen) ? "staff" : state.screen;
+    OFFICE_SCREENS.includes(state.screen) && !allowed(state.screen) ? "staff" : state.screen;
   const main = (() => {
     const addCaseAction = button(`${icon("plus")} Add a case`, "open-add-case", "primary");
-    const frame = (overline, title, intro, backLabel, body, actions = "") =>
-      `<main id="main" class="narrow" tabindex="-1"><div class="page-intro"><span class="overline">${esc(overline)}</span><h1>${esc(title)}</h1><p>${esc(intro)}</p>${when(
-        backLabel,
-        button(`${icon("back")} ${backLabel}`, "open-board", "text"),
-      )}${when(actions, `<div class="page-actions">${actions}</div>`)}</div>${body}</main>`;
     if (screen === "staff-case" && state.savedCase) {
       const record = decorateStaffCase(state.savedCase, people);
       const ui = {
@@ -299,18 +349,7 @@ export function staffScreen(state) {
         "Back to Follow-ups",
         addCasePage(state, person, people),
       );
-    if (screen === "office-volunteers")
-      return frame(
-        "OFFICE · VOLUNTEERS",
-        "Volunteers",
-        "Roles and certificates are recorded here. They don't change what anyone can do in ViTally yet.",
-        "",
-        renderRoster(state.volunteers ?? [], {
-          list: state.lists?.volunteers ?? "ready",
-          filters: state.volunteerFilters ?? {},
-        }),
-        button(`${icon("plus")} Add a volunteer`, "open-add-volunteer", "primary"),
-      );
+    if (screen === "office-volunteers") return rosterPage(state);
     const cases = (state.cases ?? []).map((record) =>
       decorateStaffCase(record, people),
     );
@@ -363,9 +402,9 @@ export function staffScreen(state) {
         );
   })();
   return appShell({
-    sidebar: staffSidebar({ ...state, screen }, person, office),
+    sidebar: staffSidebar({ ...state, screen }, person, office, { volunteers }),
     body: main,
-    open: state.sidebarOpen !== false,
+    open,
   });
 }
 

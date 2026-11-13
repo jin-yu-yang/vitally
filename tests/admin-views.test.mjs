@@ -19,6 +19,7 @@ import { staffScreen, dialog } from "../src/views.mjs";
 import { payloadFor } from "../src/case-actions.mjs";
 import { describeStage } from "../src/domain.mjs";
 import { nowInput } from "../src/contact-log.mjs";
+import { cleared } from "./support/clearance.mjs";
 
 // The admin screens are pure functions of records and one persona, so these
 // tests read the HTML string itself. No DOM library, and nothing here may reach
@@ -880,7 +881,7 @@ test("adminEligibility answers about a target it was not given", () => {
 
 test("the staff member's own person decides which workspace they are in", () => {
   const state = {
-    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "sam" },
+    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "sam", clearance: cleared({ isAdmin: true }) },
     people: PEOPLE,
     cases: [boardCase()],
     assistance: [item({ assigneeId: "sam", status: "assigned" })],
@@ -947,7 +948,7 @@ test("the office case page uses the same header and five tabs", () => {
 
 test("the office pool and the add-a-case page route by the staff member's person, and the sidebar follows", () => {
   const state = {
-    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "sam" },
+    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "sam", clearance: cleared({ isAdmin: true }) },
     people: PEOPLE,
     cases: [boardCase()],
     assistance: [],
@@ -984,7 +985,7 @@ test("the office pool and the add-a-case page route by the staff member's person
 
 test("the staff sidebar nav holds nothing but its buttons", () => {
   const state = {
-    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "sam" },
+    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "sam", clearance: cleared({ isAdmin: true }) },
     people: PEOPLE, cases: [], assistance: [],
     savedCase: null, screen: "staff", boardFilters: {}, openPanels: [],
     draftAnswers: {}, busy: false, error: null, retryable: false,
@@ -998,7 +999,7 @@ test("the staff sidebar nav holds nothing but its buttons", () => {
 
 test("the volunteer board searches client numbers in the workspace's current season", () => {
   const state = {
-    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "alex" },
+    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "alex", clearance: cleared() },
     people: PEOPLE,
     workspace: { currentSeason: 2025 },
     cases: [

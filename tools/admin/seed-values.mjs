@@ -89,8 +89,21 @@ export const HELP_REQUEST = Object.freeze({
   contactPreference: "Prefers calls from the main office",
 });
 
+// The four role accounts' clearance, which `npm run seed:local` saves before
+// anything acts as one of them: the current-season role, its confirmed
+// certificates, and not new. The roles match each account's ceiling.
+export const ROLE_ACCOUNT_CLEARANCE = Object.freeze({
+  site_coordinator: Object.freeze({ roles: ["admin"], certificates: ["vsc", "itqr"], isNew: false }),
+  preparer: Object.freeze({ roles: ["preparer"], certificates: ["vsc", "itqr", "basic"], isNew: false }),
+  reviewer: Object.freeze({ roles: ["reviewer"], certificates: ["vsc", "itqr", "advanced"], isNew: false }),
+  intaker: Object.freeze({ roles: ["intaker"], certificates: ["vsc", "itqr"], isNew: false }),
+});
+
 // The Roster volunteers `npm run seed:local` adds for a rehearsal. All fictional;
-// the fourth and seventh have no phone.
+// the fourth and seventh have no phone. Every role is backed by its
+// certificates. Priya Venkat is new with the photo ID check recorded, Jordan
+// Reyes is new without it, and Lucy Fong has no roles and no certificates (she
+// is waiting for her Form 13615).
 export const SEED_VOLUNTEERS = Object.freeze([
   Object.freeze({
     name: "Maya Lindgren",
@@ -101,6 +114,8 @@ export const SEED_VOLUNTEERS = Object.freeze([
     otherLanguage: null,
     roles: ["preparer"],
     certificates: ["vsc", "itqr", "basic"],
+    isNew: false,
+    photoIdChecked: false,
   }),
   Object.freeze({
     name: "Tomas Abara",
@@ -111,6 +126,8 @@ export const SEED_VOLUNTEERS = Object.freeze([
     otherLanguage: "Spanish",
     roles: ["reviewer"],
     certificates: ["vsc", "itqr", "advanced"],
+    isNew: false,
+    photoIdChecked: false,
   }),
   Object.freeze({
     name: "Wen Tao Liu",
@@ -121,6 +138,8 @@ export const SEED_VOLUNTEERS = Object.freeze([
     otherLanguage: null,
     roles: ["preparer", "reviewer"],
     certificates: ["vsc", "itqr", "basic", "advanced"],
+    isNew: false,
+    photoIdChecked: false,
   }),
   Object.freeze({
     name: "Priya Venkat",
@@ -131,6 +150,8 @@ export const SEED_VOLUNTEERS = Object.freeze([
     otherLanguage: null,
     roles: ["intaker"],
     certificates: ["vsc", "itqr"],
+    isNew: true,
+    photoIdChecked: true,
   }),
   Object.freeze({
     name: "Jordan Reyes",
@@ -141,6 +162,8 @@ export const SEED_VOLUNTEERS = Object.freeze([
     otherLanguage: null,
     roles: ["greeter"],
     certificates: ["vsc"],
+    isNew: true,
+    photoIdChecked: false,
   }),
   Object.freeze({
     name: "Hana Moretti",
@@ -150,7 +173,9 @@ export const SEED_VOLUNTEERS = Object.freeze([
     languages: ["cantonese", "mandarin"],
     otherLanguage: null,
     roles: ["preparer"],
-    certificates: ["vsc"],
+    certificates: ["vsc", "itqr", "basic"],
+    isNew: false,
+    photoIdChecked: false,
   }),
   Object.freeze({
     name: "Samir Haddad",
@@ -161,6 +186,8 @@ export const SEED_VOLUNTEERS = Object.freeze([
     otherLanguage: "Arabic",
     roles: ["admin"],
     certificates: ["vsc", "itqr", "sc"],
+    isNew: false,
+    photoIdChecked: false,
   }),
   Object.freeze({
     name: "Lucy Fong",
@@ -169,7 +196,9 @@ export const SEED_VOLUNTEERS = Object.freeze([
     works: "on_site_and_remote",
     languages: ["cantonese", "english"],
     otherLanguage: null,
-    roles: ["intaker", "greeter"],
+    roles: [],
     certificates: [],
+    isNew: false,
+    photoIdChecked: false,
   }),
 ]);
