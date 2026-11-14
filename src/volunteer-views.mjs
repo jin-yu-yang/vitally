@@ -19,7 +19,7 @@ const chips = (values, list, none) =>
     : `<span class="muted">${esc(none)}</span>`;
 
 // The languages, with Other replaced by the language it names.
-const languagesText = (volunteer) => {
+export const languagesText = (volunteer) => {
   const names = (volunteer.languages ?? []).map((value) =>
     value === "other" && volunteer.otherLanguage ? volunteer.otherLanguage : labelOf(LANGUAGES, value),
   );

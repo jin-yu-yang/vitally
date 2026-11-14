@@ -278,6 +278,16 @@ export function decorateStaffCase(caseRecord, people = []) {
     decorated.internalHistory = caseRecord.internalHistory.map((entry) => ({
       ...entry,
       actorName: nameOf(entry?.actorPersonId),
+      // An assignment names the person and who held the slot before.
+      ...(entry?.action === "ASSIGN_CASE" && entry?.detail
+        ? {
+            detail: {
+              ...entry.detail,
+              personName: nameOf(entry.detail.personId),
+              previousName: nameOf(entry.detail.previousPersonId),
+            },
+          }
+        : {}),
     }));
   return decorated;
 }
@@ -2169,14 +2179,28 @@ export const EVENT_SENTENCES = Object.freeze({
   SET_DOCUMENT_CARD: "updated a document's status",
   SET_DOCUMENT_GROUP: "changed whether a document is needed",
   SAVE_PREPARER_FIELDS: "saved the shaded section",
+  // The sentence with the person and the slot is built in historySentence;
+  // this is for an entry that does not carry them.
   ASSIGN_CASE: "assigned a volunteer to the case",
 });
+
+const ASSIGN_SLOTS = Object.freeze(["preparer", "reviewer"]);
+
+// "assigned <person> as preparer|reviewer", plus " (was <previous>)" for a reassignment.
+function assignWords(detail) {
+  if (!ASSIGN_SLOTS.includes(detail?.slot)) return null;
+  const previous = detail.previousPersonId ? ` (was ${detail.previousName ?? UNKNOWN_PERSON})` : "";
+  return `assigned ${detail.personName ?? UNKNOWN_PERSON} as ${detail.slot}${previous}`;
+}
 
 export function historySentence(entry) {
   const code = String(entry?.action ?? "");
   // `??` and `||` cannot be mixed without parentheses.
   const seasonEnd = code === "CLOSE_CASE" && entry?.detail?.seasonEnd === true;
-  const words = seasonEnd
+  const assignment = code === "ASSIGN_CASE" ? assignWords(entry?.detail) : null;
+  const words = assignment
+    ? assignment
+    : seasonEnd
     ? `closed the case at season end${
         Object.hasOwn(CLOSING_REASON_NAMES, entry.detail.reason ?? "")
           ? ` · ${CLOSING_REASON_NAMES[entry.detail.reason].split(" (")[0]}`
