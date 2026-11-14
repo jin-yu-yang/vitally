@@ -666,6 +666,7 @@ async function runEngineGate(t, engineName) {
             );
             assert.equal(rows.length, 1, "the invitation created no single Auth user");
             const userId = rows[0].id;
+            let bodyError = null;
             try {
               // The real form with /auth/v1/otp answered by automation, so no
               // second email goes out and the invitation's code stays valid.
@@ -683,11 +684,26 @@ async function runEngineGate(t, engineName) {
                 .waitFor();
               assert.deepEqual(admin.pageErrors, []);
               assert.deepEqual(client.pageErrors, []);
+            } catch (error) {
+              bodyError = error;
+              throw error;
             } finally {
-              // The function's Auth user is not the fixture's: remove it.
-              await fixture.database
-                .service((adminApi) => adminApi.auth.admin.deleteUser(userId))
-                .catch(() => {});
+              // The function's user and membership are not the fixture's: the
+              // membership (its accounts row cascades) goes first, because
+              // memberships.user_id references auth.users with no ON DELETE.
+              // A cleanup failure is raised only when the body passed.
+              try {
+                await fixture.database.sql(
+                  "delete from public.memberships where user_id=$1",
+                  [userId],
+                );
+                const removal = await fixture.database.service((adminApi) =>
+                  adminApi.auth.admin.deleteUser(userId),
+                );
+                if (removal?.error) throw removal.error;
+              } catch (cleanupError) {
+                if (!bodyError) throw cleanupError;
+              }
             }
           } finally {
             await client.context.close();
