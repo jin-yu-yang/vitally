@@ -125,6 +125,21 @@ test("an unread item, or one waiting for confirmation, is highlighted", () => {
   assert.match(renderFeedItem(feedItem()), /<article class="feed-item"/);
 });
 
+test("an item unread when the panel opened stays highlighted after it is marked read", () => {
+  assert.match(renderFeedItem(feedItem(), { fresh: true }), /<article class="feed-item is-unread"/);
+  const html = renderNotificationsPanel(
+    panelState({ updates: [feedItem({ id: "a" }), feedItem({ id: "b" })], notificationsFresh: ["a"] }),
+  );
+  assert.match(html, /<article class="feed-item is-unread" data-update-id="a"/);
+  assert.match(html, /<article class="feed-item" data-update-id="b"/);
+});
+
+test("the IRS link and I've read this sit in one row", () => {
+  const html = renderFeedItem(feedItem({ irsLink: "https://www.irs.gov/x", askConfirm: true }));
+  assert.match(html, /<div class="feed-actions"><a class="feed-link"[^]*data-action="confirm-update"[^]*<\/div><\/article>$/);
+  assert.doesNotMatch(renderFeedItem(feedItem()), /feed-actions/);
+});
+
 test("I've read this shows only for an item that asks and is not confirmed; a confirmed one shows the date", () => {
   const asks = renderFeedItem(feedItem({ askConfirm: true }));
   assert.match(asks, /<button type="button" class="btn secondary feed-confirm" data-action="confirm-update" data-id="u-1"[^>]*>I&#39;ve read this<\/button>/);

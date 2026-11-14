@@ -7121,6 +7121,7 @@ test("posted updates: a window starts with an empty feed, a closed panel and an 
   assert.deepEqual(state.updates, []);
   assert.equal(state.updatesUnread, 0);
   assert.equal(state.notificationsOpen, false);
+  assert.deepEqual(state.notificationsFresh, []);
   assert.equal(state.lists.updates, "loading");
   assert.deepEqual(state.postedUpdates, []);
   assert.equal(state.lists.postedUpdates, "loading");
@@ -7218,6 +7219,7 @@ test("posted updates: opening the panel marks the unread items shown in one call
   await controller.start();
   assert.equal(controller.getState().updatesUnread, 2);
   const reads = callCount(store, "getUpdates");
+  controller.openDialog("notifications");
   await controller.openNotifications();
   const state = controller.getState();
   assert.equal(state.notificationsOpen, true);
@@ -7233,6 +7235,7 @@ test("posted updates: opening the panel with nothing unread marks nothing", asyn
   const store = staffStore({ feed: [feedItem("f-1", { readAt: "2026-11-11T15:00:00Z" })] });
   const { controller } = build({ store });
   await controller.start();
+  controller.openDialog("notifications");
   await controller.openNotifications();
   assert.equal(controller.getState().notificationsOpen, true);
   assert.equal(callCount(store, "markUpdates"), 0);
@@ -7243,6 +7246,7 @@ test("posted updates: a change while the panel is open marks only newly shown un
   const store = staffStore({ feed: [feedItem("f-1")] });
   const { controller } = build({ store });
   await controller.start();
+  controller.openDialog("notifications");
   await controller.openNotifications();
   assert.equal(store.marks.length, 1);
   // An admin fixes a typo: the item is re-read with its new text, still read.
@@ -7272,12 +7276,107 @@ test("posted updates: the panel open on the setup screen marks what a clearance 
   const store = staffStore({ clearance: { ...UNCLEARED_VOLUNTEER }, feed: [feedItem("f-1")] });
   const { controller } = build({ store });
   await controller.start();
+  controller.openDialog("notifications");
   await controller.openNotifications();
   assert.deepEqual(store.marks, [{ ids: ["f-1"], confirm: false }]);
   store.feed.unshift(feedItem("f-2"));
   await controller.checkClearance();
   assert.deepEqual(store.marks.at(-1), { ids: ["f-2"], confirm: false });
   assert.equal(controller.getState().updatesUnread, 0);
+  controller.stop();
+});
+
+test("posted updates: the panel keeps highlighting what was unread when it opened, until it closes", async () => {
+  const store = staffStore({
+    feed: [feedItem("f-1"), feedItem("f-2", { readAt: "2026-11-11T15:00:00Z" })],
+  });
+  const { controller } = build({ store });
+  await controller.start();
+  assert.deepEqual(controller.getState().notificationsFresh, []);
+  controller.openDialog("notifications");
+  await controller.openNotifications();
+  let state = controller.getState();
+  // Marked and re-read: f-1 is read now, and still fresh.
+  assert.deepEqual(store.marks, [{ ids: ["f-1"], confirm: false }]);
+  assert.notEqual(state.updates.find((item) => item.id === "f-1").readAt, null);
+  assert.deepEqual(state.notificationsFresh, ["f-1"]);
+  // A new update while the panel is open joins the set.
+  store.feed.unshift(feedItem("f-3"));
+  await store.handlers.onChange({ table: "posted_updates" });
+  state = controller.getState();
+  assert.deepEqual([...state.notificationsFresh].sort(), ["f-1", "f-3"]);
+  // Closed: the set is gone.
+  controller.closeDialog();
+  controller.closeNotifications();
+  assert.deepEqual(controller.getState().notificationsFresh, []);
+  controller.stop();
+});
+
+test("posted updates: closing the dialog by any path ends the panel's fresh set", async () => {
+  const store = staffStore({ feed: [feedItem("f-1")] });
+  const { controller } = build({ store });
+  await controller.start();
+  controller.openDialog("notifications");
+  await controller.openNotifications();
+  assert.deepEqual(controller.getState().notificationsFresh, ["f-1"]);
+  controller.closeDialog();
+  const state = controller.getState();
+  assert.equal(state.notificationsOpen, false);
+  assert.deepEqual(state.notificationsFresh, []);
+  controller.stop();
+});
+
+test("posted updates: the panel does not open, or mark, without its dialog", async () => {
+  const store = staffStore({ feed: [feedItem("f-1")] });
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.openNotifications();
+  assert.equal(controller.getState().notificationsOpen, false);
+  assert.equal(callCount(store, "markUpdates"), 0);
+  controller.stop();
+});
+
+test("posted updates: after navigating away from the open panel, a realtime change marks nothing", async () => {
+  const store = staffStore({ feed: [feedItem("f-1")] });
+  const { controller } = build({ store });
+  await controller.start();
+  controller.openDialog("notifications");
+  await controller.openNotifications();
+  assert.equal(callCount(store, "markUpdates"), 1);
+  controller.navigate("staff");
+  let state = controller.getState();
+  assert.equal(state.dialog, null);
+  assert.equal(state.notificationsOpen, false);
+  assert.deepEqual(state.notificationsFresh, []);
+  store.feed.unshift(feedItem("f-2"));
+  await store.handlers.onChange({ table: "posted_updates" });
+  assert.equal(callCount(store, "markUpdates"), 1, "no panel shows: nothing is marked");
+  state = controller.getState();
+  assert.equal(state.updatesUnread, 1);
+  controller.stop();
+});
+
+test("posted updates: after clearance is lost with the panel open, a realtime change marks nothing", async () => {
+  const store = staffStore({ feed: [feedItem("f-1")] });
+  const { controller, events } = build({ store });
+  await controller.start();
+  controller.openDialog("notifications");
+  await controller.openNotifications();
+  assert.equal(callCount(store, "markUpdates"), 1);
+  store.nextClearance = { ...UNCLEARED_VOLUNTEER };
+  await controller.checkClearance();
+  let state = controller.getState();
+  assert.equal(state.principal.clearance.cleared, false);
+  assert.equal(state.dialog, null);
+  assert.equal(state.notificationsOpen, false);
+  assert.deepEqual(state.notificationsFresh, []);
+  // An uncleared window has no realtime channel: focus re-reads the feed.
+  store.feed.unshift(feedItem("f-2"));
+  await store.handlers?.onChange({ table: "posted_updates" });
+  await events.emit("focus");
+  assert.equal(callCount(store, "markUpdates"), 1, "no panel shows: nothing is marked");
+  state = controller.getState();
+  assert.equal(state.updatesUnread, 1);
   controller.stop();
 });
 
@@ -7517,6 +7616,52 @@ test("posted updates: Unpublish passes the row's revision and re-reads the table
   controller.stop();
 });
 
+test("posted updates: an action on an update another admin deleted says it is gone and re-reads the table", async () => {
+  const { store, controller } = await onUpdatesScreen({ postedUpdates: [postedRow("u-2", { status: "draft", revision: 1 })] });
+  const listReads = callCount(store, "listPostedUpdates");
+  store.failUpdateAction = domainError("NOT_FOUND");
+  assert.equal(await controller.updateAction("u-2", "POST"), null);
+  assert.equal(controller.getState().error.message, "This update is no longer in the table.");
+  assert.equal(callCount(store, "listPostedUpdates"), listReads + 1);
+  // A save of an edit to it says the same.
+  controller.editUpdate("u-2");
+  store.failSaveUpdate = domainError("NOT_FOUND");
+  assert.equal(await controller.saveUpdate({ ...controller.getState().updateForm }, { post: false }), null);
+  assert.equal(controller.getState().error.message, "This update is no longer in the table.");
+  assert.equal(callCount(store, "listPostedUpdates"), listReads + 2);
+  controller.stop();
+});
+
+test("posted updates: a keep-at-the-top date before today is refused, unless it is the saved date of the update being edited", async () => {
+  const now = Date.parse("2026-11-25T15:00:00Z");
+  const store = adminStaffStore({ postedUpdates: [postedRow("u-1", { keepTopUntil: "2026-11-20" })] });
+  const { controller } = build({ store, clock: () => now });
+  await controller.start();
+  controller.navigate("office-updates");
+  await controller.loadPostedUpdates();
+  const saves = callCount(store, "saveUpdate");
+  // A new update with yesterday's date.
+  assert.equal(await controller.saveUpdate({ ...VALID_UPDATE, keepTopUntil: "2026-11-24" }, { post: true }), null);
+  assert.deepEqual(controller.getState().updateFormError, { keepTopUntil: "Choose today or a later date." });
+  assert.equal(callCount(store, "saveUpdate"), saves);
+  // Today saves.
+  assert.notEqual(await controller.saveUpdate({ ...VALID_UPDATE, keepTopUntil: "2026-11-25" }, { post: true }), null);
+  assert.equal(callCount(store, "saveUpdate"), saves + 1);
+  // Editing an update kept since an earlier day: its own date still saves.
+  controller.editUpdate("u-1");
+  assert.notEqual(await controller.saveUpdate({ ...controller.getState().updateForm, title: "Fixed" }, { post: true }), null);
+  assert.equal(callCount(store, "saveUpdate"), saves + 2);
+  // ...but another past date does not.
+  controller.editUpdate("u-1");
+  assert.equal(
+    await controller.saveUpdate({ ...controller.getState().updateForm, keepTopUntil: "2026-11-19" }, { post: true }),
+    null,
+  );
+  assert.deepEqual(controller.getState().updateFormError, { keepTopUntil: "Choose today or a later date." });
+  assert.equal(callCount(store, "saveUpdate"), saves + 2);
+  controller.stop();
+});
+
 test("posted updates: an action whose answer was lost is retried with the same request", async () => {
   const { store, controller } = await onUpdatesScreen({ postedUpdates: [postedRow("u-2", { status: "draft", revision: 1 })] });
   store.failUpdateAction = domainError("OFFLINE");
@@ -7578,6 +7723,7 @@ test("posted updates: signing out resets every posted-update field", async () =>
   const { store, controller } = await onUpdatesScreen();
   store.feed = [feedItem("f-1")];
   await controller.loadFeed();
+  controller.openDialog("notifications");
   await controller.openNotifications();
   controller.editUpdate("u-1");
   await controller.saveUpdate({ ...VALID_UPDATE, title: "" }, { post: true });
@@ -7586,6 +7732,7 @@ test("posted updates: signing out resets every posted-update field", async () =>
   assert.deepEqual(state.updates, []);
   assert.equal(state.updatesUnread, 0);
   assert.equal(state.notificationsOpen, false);
+  assert.deepEqual(state.notificationsFresh, []);
   assert.equal(state.lists.updates, "loading");
   assert.deepEqual(state.postedUpdates, []);
   assert.equal(state.lists.postedUpdates, "loading");

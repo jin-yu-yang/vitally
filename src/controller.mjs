@@ -37,6 +37,7 @@ import { createWindowState } from "./window-state.mjs";
 import { isLang, readLanguage, writeLanguage } from "./language.mjs";
 import { volunteerProblem, withoutLostRoles, roleNeedsMessage, openWorkMessage } from "./volunteer-roster.mjs";
 import { emptyUpdateForm, toUpdateRequest, validateUpdate } from "./posted-updates.mjs";
+import { nowInput } from "./contact-log.mjs";
 
 // The one place browser state lives. It owns what is loaded, what is being
 // edited, and which action envelope is in flight; it renders nothing and knows
@@ -331,9 +332,13 @@ export function createController({
     // `updatesUnread` its own badge count (never recounted here), and
     // `notificationsOpen` whether the panel shows. A failed read keeps the
     // items and marks `lists.updates` failed; it blocks nothing else.
+    // `notificationsFresh` holds the ids that were unread while the panel
+    // showed (those it opened with, and any marked while open): the panel
+    // highlights them until it closes, though they are marked read at once.
     updates: [],
     updatesUnread: 0,
     notificationsOpen: false,
+    notificationsFresh: [],
     // The Post an update screen (a ceiling admin's): the table, the form as
     // typed, the update being edited (`{id, revision, status}` or null) and
     // the form's own errors (`{field: message}` or null). None persisted.
@@ -1098,17 +1103,30 @@ export function createController({
     state.updatesUnread = Math.max(0, Number(answer?.unread) || 0);
     state.lists = { ...state.lists, updates: "ready" };
     noteConnected();
-    if (mark && state.notificationsOpen) await markShown();
+    if (mark && panelShowing()) await markShown();
+  }
+
+  // The panel shows only while its dialog does: a path that drops the dialog
+  // (navigation, lost clearance) leaves nothing to mark.
+  function panelShowing() {
+    return state.notificationsOpen && state.dialog === "notifications";
+  }
+
+  // The panel is closed, by whatever path: nothing more is marked, and the
+  // highlight of what was fresh goes with it.
+  function endNotifications() {
+    state.notificationsOpen = false;
+    state.notificationsFresh = [];
   }
 
   // The unread items the panel shows, marked read in one call (at most the
   // 200 the RPC takes), then the feed again for the badge. Items already
   // read are never sent. A failed mark leaves them unread, for the next one.
   async function markShown() {
-    const ids = state.updates
-      .filter((item) => item && item.id && item.readAt == null)
-      .map((item) => item.id)
-      .slice(0, 200);
+    const unread = state.updates.filter((item) => item && item.id && item.readAt == null).map((item) => item.id);
+    // Still highlighted after the re-read, until the panel closes.
+    state.notificationsFresh = [...new Set([...state.notificationsFresh, ...unread])];
+    const ids = unread.slice(0, 200);
     if (!ids.length) return;
     try {
       await store.markUpdates({ ids, confirm: false });
@@ -1126,15 +1144,16 @@ export function createController({
   }
 
   async function openNotifications() {
-    if (!staffWindow()) return;
+    if (!staffWindow() || state.dialog !== "notifications") return;
     state.notificationsOpen = true;
+    state.notificationsFresh = [];
     show();
     await markShown();
     show();
   }
 
   function closeNotifications() {
-    state.notificationsOpen = false;
+    endNotifications();
     show();
   }
 
@@ -1241,16 +1260,19 @@ export function createController({
     return Object.hasOwn(messages, field) ? { [field]: messages[field] } : { form: STAFF_UPDATE_FORM_MESSAGE };
   }
 
-  // A refused or lost update write: CONFLICT and INVALID_TRANSITION are said
-  // in their own words, anything else as it came. The table is read again
-  // either way: what the write did, or what changed under it.
+  // A refused or lost update write: CONFLICT, INVALID_TRANSITION and
+  // NOT_FOUND (another admin deleted it) are said in their own words,
+  // anything else as it came. The table is read again either way: what the
+  // write did, or what changed under it.
   async function noteUpdateFailure(error) {
     const message =
       error?.code === "CONFLICT"
         ? STAFF_UPDATE_CONFLICT_MESSAGE
         : error?.code === "INVALID_TRANSITION"
           ? STAFF_UPDATE_TRANSITION_MESSAGE
-          : undefined;
+          : error?.code === "NOT_FOUND"
+            ? STAFF_UPDATE_GONE_MESSAGE
+            : undefined;
     noteFailure(error, message ? { message } : undefined);
     await readPostedUpdates().catch(() => {});
     show();
@@ -1284,7 +1306,13 @@ export function createController({
     let request = pendingUpdateSave?.key === key ? pendingUpdateSave.request : null;
     pendingUpdateSave = null;
     if (!request) {
-      const problem = validateUpdate(typed);
+      // A date before today (New York) is refused, except the saved date of
+      // the update being edited.
+      const saved = editing ? state.postedUpdates.find((entry) => entry?.id === editing.id) : null;
+      const problem = validateUpdate(typed, {
+        today: nowInput(clock()).slice(0, 10),
+        savedKeepTopUntil: saved?.keepTopUntil ?? null,
+      });
       if (problem) {
         state.updateFormError = problem;
         show();
@@ -1502,6 +1530,7 @@ export function createController({
     state.lists = { ...state.lists, cases: "loading", assistance: "loading" };
     state.dialog = null;
     state.dialogContext = null;
+    endNotifications();
     if (!(ceilingAdmin(state.principal) && ADMIN_SETUP_SCREENS.includes(state.screen)))
       state.screen = "staff";
   }
@@ -1744,7 +1773,7 @@ export function createController({
     pendingVolunteerSave = null;
     state.updates = [];
     state.updatesUnread = 0;
-    state.notificationsOpen = false;
+    endNotifications();
     state.postedUpdates = [];
     state.updateForm = emptyUpdateForm();
     state.updateEditing = null;
@@ -1804,6 +1833,7 @@ export function createController({
     state.error = null;
     state.dialog = null;
     state.dialogContext = null;
+    endNotifications();
     persistSession();
     show(true);
   }
@@ -1821,6 +1851,7 @@ export function createController({
   }
 
   function openDialog(name, context = null) {
+    if (name !== "notifications") endNotifications();
     state.dialog = name;
     state.dialogContext = context ? { ...context } : null;
     show();
@@ -1829,6 +1860,7 @@ export function createController({
   function closeDialog() {
     state.dialog = null;
     state.dialogContext = null;
+    endNotifications();
     show();
   }
 
@@ -3388,6 +3420,7 @@ export function createController({
       volunteers: state.volunteers.map((entry) => ({ ...entry })),
       volunteerFilters: { ...state.volunteerFilters },
       updates: state.updates.map((item) => ({ ...item })),
+      notificationsFresh: [...state.notificationsFresh],
       postedUpdates: state.postedUpdates.map((entry) => ({ ...entry })),
       updateForm: copyUpdateForm(state.updateForm),
       updateEditing: state.updateEditing ? { ...state.updateEditing } : null,

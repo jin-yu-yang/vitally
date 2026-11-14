@@ -67,12 +67,14 @@ const needsAttention = (item) => item.readAt == null || (item.askConfirm === tru
 
 /**
  * One update as volunteers see it. In the preview nothing is live: the
- * confirm button is a picture of one, and there is no read state.
+ * confirm button is a picture of one, and there is no read state. `fresh`:
+ * unread when the panel opened (or arrived while it is open), so it stays
+ * highlighted until the panel closes, though it was marked read at once.
  */
-export function renderFeedItem(item = {}, { preview = false } = {}) {
+export function renderFeedItem(item = {}, { preview = false, fresh = false } = {}) {
   const id = String(item.id ?? "");
   const kind = KINDS.includes(item.kind) ? item.kind : "office_notice";
-  const highlight = !preview && needsAttention(item);
+  const highlight = !preview && (fresh || needsAttention(item));
   const posted = preview ? "Just now" : shortDay(item.postedAt);
   const meta = `<div class="feed-meta"><span class="feed-poster">${esc(item.postedByName ?? "")}</span><span class="feed-kind kind-${kind}">${esc(
     KIND_LABELS[kind],
@@ -108,7 +110,9 @@ export function renderFeedItem(item = {}, { preview = false } = {}) {
         `data-id="${esc(id)}" aria-label="${esc(`I've read “${title}”`)}"`,
       );
   }
-  return `<article class="feed-item${highlight ? " is-unread" : ""}" data-update-id="${esc(id)}">${meta}${heading}${body}${link}${confirm}</article>`;
+  // The link and the button side by side, wrapping on a narrow screen.
+  const actions = link || confirm ? `<div class="feed-actions">${link}${confirm}</div>` : "";
+  return `<article class="feed-item${highlight ? " is-unread" : ""}" data-update-id="${esc(id)}">${meta}${heading}${body}${actions}</article>`;
 }
 
 /**
@@ -122,7 +126,9 @@ export function renderNotificationsPanel(state = {}) {
     ? `<p class="feed-stale">${icon("help")}<span>${esc("Couldn't refresh notifications.")}</span></p>`
     : "";
   let body;
-  if (items.length) body = `<div class="feed-list">${items.map((item) => renderFeedItem(item)).join("")}</div>`;
+  const fresh = new Set(Array.isArray(state.notificationsFresh) ? state.notificationsFresh : []);
+  if (items.length)
+    body = `<div class="feed-list">${items.map((item) => renderFeedItem(item, { fresh: fresh.has(item.id) })).join("")}</div>`;
   else if (list === "loading") body = loadingLine("Loading notifications…");
   else if (list === "failed") body = "";
   else body = `<p class="feed-empty">No updates yet.</p>`;

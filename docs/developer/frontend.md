@@ -845,6 +845,14 @@ them. The database side is in [Database: posted updates](database.md#posted-upda
   it had and never blocks the rest.
 - **Opening the panel** marks the unread items it shows read in one `vitally_mark_updates` call,
   then re-reads. While it stays open, each later read marks what is new. I've read this confirms.
+  The items that were unread while it showed (`state.notificationsFresh`) stay highlighted until
+  it closes. Marking needs the panel's dialog itself: a path that drops the dialog (navigation,
+  lost clearance) ends the panel too, so a later read marks nothing.
+- **A narrowed audience.** When an admin narrows a posted update's audience, the people who left
+  it get no Realtime event (the policy checks the new row). Their feed drops the update on its
+  next read (focus, `online`), and marking it does nothing.
+- **Keep at the top until** cannot be before today in New York; an edit may keep the update's own
+  saved date. The check is the form's (`validateUpdate`); the database has none.
 - **Typing in the form** stores the values without a render, and `app.mjs` redraws only
   `#update-preview`, so the text being typed is never replaced. A save or table action that fails
   offline keeps its request, so pressing again resends the same action id.

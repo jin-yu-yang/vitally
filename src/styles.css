@@ -5903,11 +5903,17 @@ html:lang(zh-Hant) {
   white-space: pre-line;
   color: var(--vt-ink);
 }
+.feed-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 8px;
+}
 .feed-link {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-top: 8px;
   color: var(--vt-primary);
   font-weight: 600;
 }
@@ -5916,7 +5922,6 @@ html:lang(zh-Hant) {
   height: 16px;
 }
 .btn.feed-confirm {
-  margin-top: 10px;
   padding: 6px 14px;
   font-size: 14px;
   color: var(--vt-primary);
@@ -5925,7 +5930,7 @@ html:lang(zh-Hant) {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 10px 0 0;
+  margin: 0;
   font-size: 14px;
   color: var(--vt-progress);
   font-weight: 600;
