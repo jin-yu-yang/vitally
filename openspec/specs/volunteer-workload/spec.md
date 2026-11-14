@@ -1,7 +1,7 @@
 # volunteer-workload Specification
 
 ## Purpose
-TBD - created by archiving change add-volunteer-workload. Update Purpose after archive.
+The admin-only Workload under Volunteers: one row per volunteer who can prepare or review, with what each holds (Open, Preparing, Review, Waiting on client, Stalled), sorting and search, an Unassigned row, and the Assign/Reassign drawer with its eligibility rules and same-language-first ordering. It covers who can open it (a cleared staff member with effective admin), where taxpayer names show, and the one case action, `ASSIGN_CASE`, that assigns an empty preparer or reviewer slot like a claim or hands a held one to someone else, with its refusals, handovers, case event and client line.
 
 ## Requirements
 
