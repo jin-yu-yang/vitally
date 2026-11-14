@@ -91,6 +91,8 @@ src/
   pool-views.mjs           The office's case pool (every case, by phase).
   volunteer-views.mjs      The admin-only Volunteers Roster page and its Add / Edit drawer.
   volunteer-roster.mjs     The Roster's pure logic: roles, certificates, search, form reading, validation.
+  workload-views.mjs       The Volunteers > Workload tab (admins) and its Assign / Reassign drawer; the tab strip.
+  volunteer-workload.mjs   The Workload's pure logic: per-volunteer counts, stalled cases, Unassigned, drawer candidates.
   ui.mjs                   HTML helpers, escaping, labels, icons, focus preservation.
   sample-data.mjs          Fictional form filling for demos (version 2).
   styles.css               All styles.
@@ -100,7 +102,7 @@ src/
   vendor/pdfjs.mjs, vendor/pdfjs-worker.mjs
                            Committed copy of pdfjs-dist's legacy build (the shaded-section editor).
 supabase/
-  migrations/001-042       The whole schema, RLS, business logic and intake catalogue, in order.
+  migrations/001-046       The whole schema, RLS, business logic and intake catalogue, in order.
   test-stack.config.example.toml   Reference config for the local test stack.
 tools/
   admin/                   Privileged tooling: target guards, migrate, roster, workspace setup.

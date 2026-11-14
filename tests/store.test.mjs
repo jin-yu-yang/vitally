@@ -381,8 +381,10 @@ function fakeClient({
           read.within = [column, [...values]];
           return builder;
         },
-        order(column) {
+        order(column, options) {
           read.orders.push(column);
+          // The descending columns, apart, so `orders` stays a list of names.
+          if (options?.ascending === false) (read.descending ??= []).push(column);
           return builder;
         },
         then: (onFulfilled, onRejected) =>
@@ -632,14 +634,16 @@ test("listCases maps rows to the Case scalars with no related tables", async () 
 test("a staff list carries the summaries a work board reads", async () => {
   const client = fakeClient({ access: "staff" });
   const [row] = await createStore(client).listCases();
-  // The Case scalars, unchanged, plus exactly eight summary fields (the
-  // eighth, the newest fix note, is read from filing_notes for Follow-ups).
+  // The Case scalars, unchanged, plus exactly nine summary fields (the
+  // eighth, the newest fix note, is read from filing_notes for Follow-ups;
+  // the ninth, the newest contact time, from contact_log for Workload).
   assert.deepEqual(
     Object.keys(row).toSorted(),
     [
       ...Object.keys(mapCase(CASE_ROW)),
       "followupAssigneeIds",
       "goOverOpen",
+      "lastContactAt",
       "latestFixNote",
       "openFollowups",
       "openRequests",
@@ -725,6 +729,36 @@ test("a listed case carries its latest approved review's call status", async () 
   const list = await createStore(client).listCases();
   const byId = Object.fromEntries(list.map((row) => [row.id, row.reviewContactStatus]));
   assert.deepEqual(byId, { "case-1": "completed", "case-2": "pending", "case-3": null });
+});
+
+test("listCases maps the newest contact time", async () => {
+  const log = (id, caseId, loggedAt) => ({
+    ...RELATED_ROWS.contact_log[0],
+    id,
+    case_id: caseId,
+    logged_at: loggedAt,
+  });
+  const client = fakeClient({
+    access: "staff",
+    rows: {
+      cases: [CASE_ROW, { ...CASE_ROW, id: "case-2", reference: "VT-WXYZ-6789" }],
+      // The read is ordered newest first (so a row cap drops the oldest rows),
+      // and the first row of a case is its newest. The fake returns rows as
+      // given, so they are given as the database would return them.
+      contact_log: [
+        log("c-2", "case-1", "2026-09-09T10:00:00Z"),
+        log("c-1", "case-1", "2026-09-04T00:05:00Z"),
+      ],
+    },
+  });
+  const list = await createStore(client).listCases();
+  const byId = Object.fromEntries(list.map((row) => [row.id, row.lastContactAt]));
+  assert.deepEqual(byId, { "case-1": "2026-09-09T10:00:00Z", "case-2": null });
+  const read = client.reads.find((entry) => entry.table === "contact_log");
+  assert.equal(read.columns, "case_id,logged_at");
+  assert.deepEqual(read.within, ["case_id", ["case-1", "case-2"]]);
+  assert.deepEqual(read.orders, ["logged_at", "id"]);
+  assert.deepEqual(read.descending, ["logged_at", "id"]);
 });
 
 test("a listed case with no contact row has no phone", async () => {

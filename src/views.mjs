@@ -30,6 +30,9 @@ import {
 } from "./office-views.mjs";
 import { renderCasePool } from "./pool-views.mjs";
 import { renderRoster, volunteerDrawerBody, deactivateAccountDialogBody } from "./volunteer-views.mjs";
+import { renderRoster, volunteerDrawerBody } from "./volunteer-views.mjs";
+import { volunteerTabs, renderWorkload, assignDrawerBody, assignDrawerTitle, DEFAULT_WORKLOAD_SORT } from "./workload-views.mjs";
+import { workloadRows, unassignedCases, candidates } from "./volunteer-workload.mjs";
 import { awaitingClearance, ceilingAdmin } from "./clearance.mjs";
 import { setupScreen } from "./setup-views.mjs";
 
@@ -94,7 +97,7 @@ export function connectionNotice(state) {
 }
 
 // The office's drawers: the modal frame placed at the right edge.
-export const DRAWERS = Object.freeze(["log-call", "resolve-help", "volunteer"]);
+export const DRAWERS = Object.freeze(["log-call", "resolve-help", "volunteer", "assign"]);
 
 function problemBanner(state) {
   if (!state.error || state.saveState === "failed") return "";
@@ -255,20 +258,43 @@ const frame = (overline, title, intro, backLabel, body, actions = "") =>
     button(`${icon("back")} ${backLabel}`, "open-board", "text"),
   )}${when(actions, `<div class="page-actions">${actions}</div>`)}</div>${body}</main>`;
 
-// The Roster (change add-volunteer-roster-records): for a ceiling admin,
-// cleared or not.
-const rosterPage = (state) =>
-  frame(
+// The Workload's table, from the volunteers, the people and the case list
+// this window already holds (change add-volunteer-workload, design D3).
+const workloadPanel = (state) => {
+  const view = state.workload ?? {};
+  const cases = state.cases ?? [];
+  return renderWorkload({
+    rows: workloadRows({ volunteers: state.volunteers ?? [], people: state.people ?? [], cases, now: Date.now() }),
+    unassigned: unassignedCases(cases),
+    sort: view.sort ?? DEFAULT_WORKLOAD_SORT,
+    search: view.search ?? "",
+    expanded: view.expanded ?? [],
+    now: Date.now(),
+    list: combineLists(state.lists?.cases, state.lists?.volunteers),
+  });
+};
+
+// The Volunteers page (change add-volunteer-roster-records): the Roster, for a
+// ceiling admin, cleared or not; and the Workload tab beside it, only when
+// `workload` — a cleared, effective admin (change add-volunteer-workload, D1).
+const rosterPage = (state, { workload = false } = {}) => {
+  const tab = workload && state.volunteerTab === "workload" ? "workload" : "roster";
+  const panel =
+    tab === "workload"
+      ? workloadPanel(state)
+      : renderRoster(state.volunteers ?? [], {
+          list: state.lists?.volunteers ?? "ready",
+          filters: state.volunteerFilters ?? {},
+        });
+  return frame(
     "OFFICE · VOLUNTEERS",
     "Volunteers",
     "Volunteers work on cases only once they are cleared.",
     "",
-    renderRoster(state.volunteers ?? [], {
-      list: state.lists?.volunteers ?? "ready",
-      filters: state.volunteerFilters ?? {},
-    }),
-    button(`${icon("plus")} Add a volunteer`, "open-add-volunteer", "primary"),
+    `${when(workload, volunteerTabs(tab, { workload }))}${panel}`,
+    tab === "roster" ? button(`${icon("plus")} Add a volunteer`, "open-add-volunteer", "primary") : "",
   );
+};
 
 export function staffScreen(state) {
   const people = state.people ?? [];
@@ -349,7 +375,8 @@ export function staffScreen(state) {
         "Back to Follow-ups",
         addCasePage(state, person, people),
       );
-    if (screen === "office-volunteers") return rosterPage(state);
+    // Past the setup screen above, so cleared: the Workload follows the effective admin.
+    if (screen === "office-volunteers") return rosterPage(state, { workload: office });
     const cases = (state.cases ?? []).map((record) =>
       decorateStaffCase(record, people),
     );
@@ -553,7 +580,22 @@ export function dialog(state) {
     const person = people.find((entry) => entry.id === state.principal?.personId) ?? null;
     const ui = { busy: state.busy, error: state.error, retryable: state.retryable, now: Date.now() };
     // Before log-call: the last branch below assumes resolve-help.
-    if (state.dialog === "volunteer") {
+    if (state.dialog === "assign") {
+      const context = state.dialogContext ?? {};
+      const cases = state.cases ?? [];
+      const volunteers = state.volunteers ?? [];
+      const record = cases.find((entry) => entry?.id === context.caseId) ?? null;
+      const slot = context.slot === "reviewer" ? "reviewer" : "preparer";
+      const rows = workloadRows({ volunteers, people, cases, now: Date.now() });
+      title = record ? assignDrawerTitle(record) : slot === "reviewer" ? "Assign a reviewer" : "Assign a preparer";
+      body = assignDrawerBody({
+        record,
+        slot,
+        result: candidates({ record, slot, volunteers, people, rows }),
+        search: context.search ?? "",
+        ui,
+      });
+    } else if (state.dialog === "volunteer") {
       const volunteerId = state.dialogContext?.volunteerId ?? null;
       const volunteer = volunteerId
         ? ((state.volunteers ?? []).find((entry) => entry?.id === volunteerId) ?? null)
@@ -592,7 +634,9 @@ export function dialog(state) {
   const overline =
     state.dialog === "volunteer"
       ? "OFFICE · VOLUNTEERS"
-      : drawer
+      : state.dialog === "assign"
+        ? "OFFICE · WORKLOAD"
+        : drawer
         ? "OFFICE FOLLOW-UP"
         : t("dialog.overline", {}, lang);
   return `<div class="modal-backdrop"><section class="modal${drawer ? " office-drawer" : ""}" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1"><button class="close-btn" data-action="close-dialog" aria-label="${say("dialog.close")}">${icon("close")}</button><span class="overline">${esc(overline)}</span><h2 id="modal-title">${esc(title)}</h2>${dialogError(state, lang)}${body}</section></div>`;
