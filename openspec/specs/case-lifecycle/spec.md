@@ -956,11 +956,11 @@ When a case closed with reason `dismissed`, `withdrawn`, `out_of_scope` or `no_n
 |---|---|---|
 | federal, accepted | Your federal return was filed and accepted. Do not file it again. | 您的联邦报税表已递交并被接受。请勿再次递交。 |
 | federal, waiting | Your federal return was e-filed and is waiting for an answer. Do not file it again. | 您的联邦报税表已电子递交，正在等待回复。请勿再次递交。 |
-| federal, paper | PCDC gave you your federal return on paper. It is filed only after you mail it. | PCDC 已将纸质的联邦报税表交给您。您寄出后才算递交。 |
+| federal, paper | PCDC gave you your federal return on paper. It is filed only after you mail it. | PCDC 已将您的联邦报税表纸本交给您。您寄出后才算递交。 |
 | federal, not filed | Your federal return was not filed. | 您的联邦报税表未递交。 |
 | Pennsylvania, accepted | Your Pennsylvania return was filed and accepted. Do not file it again. | 您的宾州报税表已递交并被接受。请勿再次递交。 |
 | Pennsylvania, waiting | Your Pennsylvania return was e-filed and is waiting for an answer. Do not file it again. | 您的宾州报税表已电子递交，正在等待回复。请勿再次递交。 |
-| Pennsylvania, paper | PCDC gave you your Pennsylvania return on paper. It is filed only after you mail it. | PCDC 已将纸质的宾州报税表交给您。您寄出后才算递交。 |
+| Pennsylvania, paper | PCDC gave you your Pennsylvania return on paper. It is filed only after you mail it. | PCDC 已将您的宾州报税表纸本交给您。您寄出后才算递交。 |
 | Pennsylvania, not filed | Your Pennsylvania return was not filed. | 您的宾州报税表未递交。 |
 
 When no return was filed, and for reasons `duplicate` and `other` and a case closed before reasons existed, the closed message and history line SHALL be exactly the ones in "Clients are told at each new step". This SHALL hold for Close, at every stage it allows, and for the season-end close. For every case closed with reason `dismissed`, `withdrawn`, `out_of_scope`, `no_need_to_file` or `duplicate`, the status panel and the history line SHALL give the same text; for `other` and no reason they keep today's two different texts. Every line this requirement can produce, for every pair of outcomes with a filed return, SHALL have its 简体 translation, and 繁體 SHALL be generated from it. History lines already stored SHALL keep their words.
