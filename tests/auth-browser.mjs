@@ -830,12 +830,16 @@ async function runEngineGate(t, engineName) {
             bodyError = error;
             throw error;
           } finally {
-            // The function's users are not the fixture's: unlink the person,
-            // then the membership (its account cascades), then the user.
+            // The function's users are not the fixture's: the person's link
+            // and the membership (its account cascades) go in one statement,
+            // since a staff membership needs its person at commit; then the user.
             try {
               for (const userId of created) {
-                await db.sql("update public.people set user_id=null where user_id=$1", [userId]);
-                await db.sql("delete from public.memberships where user_id=$1", [userId]);
+                await db.sql(
+                  `with unlinked as (update public.people set user_id=null where user_id=$1 returning id)
+                   delete from public.memberships where user_id=$1`,
+                  [userId],
+                );
                 const removal = await db.service((adminApi) => adminApi.auth.admin.deleteUser(userId));
                 if (removal?.error) throw removal.error;
               }
