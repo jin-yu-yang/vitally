@@ -42,7 +42,7 @@
   - `validateUpdate`, with the same rules and messages as the database;
   - the labels;
   - `audienceLabel`, `badgeCount`, `isPinned`, `toUpdateRequest`.
-- [ ] 3.2 `src/supabase-store.mjs`:
+- [x] 3.2 `src/supabase-store.mjs`:
   - add `posted_updates` to `STAFF_TABLES`;
   - add the store methods `getUpdates`, `markUpdates`, `listPostedUpdates`, `saveUpdate` and `updateAction` (action ids kept on the request for retry);
   - add tests in `tests/store.test.mjs`.
