@@ -763,9 +763,10 @@ async function runEngineGate(t, engineName) {
             await field.fill(`typo-${email}`);
             await drawer.getByText("Save your changes first.", { exact: true }).waitFor();
             assert.equal(await create.isDisabled(), true, "Create account with unsaved changes");
-            // A fresh page drops the unsaved edit.
+            // A fresh page drops the unsaved edit. The window keeps its screen
+            // (the Volunteers page) but not the drawer.
             await admin.page.reload();
-            await admin.page.getByRole("heading", { name: "Office queue", exact: true }).waitFor();
+            await admin.page.locator('[data-action="open-volunteers"]').first().waitFor();
             drawer = await openDrawer(volunteerId);
             const after = new Date(Date.now() - 2_000);
             await drawer.getByRole("button", { name: "Create account", exact: true }).click();
@@ -794,6 +795,7 @@ async function runEngineGate(t, engineName) {
             await volunteer.page.getByRole("heading", { name: SETUP_HEADING, exact: true }).waitFor();
 
             await admin.page.reload();
+            await admin.page.locator('[data-action="open-volunteers"]').first().waitFor();
             await admin.page.locator('[data-action="open-volunteers"]').first().click();
             await admin.page
               .locator("tr.volunteer-row", { hasText: "Noor Haddad" })
