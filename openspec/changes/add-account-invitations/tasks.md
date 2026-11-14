@@ -40,5 +40,5 @@
 
 ## 6. Verification
 
-- [ ] 6.1 `npm test`, `npm run build:hant -- --check`, `npx openspec validate --all` locally
-- [ ] 6.2 CI on the pushed branch: checks, database, sign-in and both story legs pass; review story screenshots
+- [x] 6.1 `npm test`, `npm run build:hant -- --check`, `npx openspec validate --all` locally
+- [x] 6.2 CI on the pushed branch: checks, database, sign-in and both story legs pass; review story screenshots
