@@ -1070,15 +1070,29 @@ export function createController({
     show();
   }
 
+  // What the drawer was opened on: the case's revision and the slot's holder
+  // (null for an empty slot) as the case list shows them now. Choose sends
+  // these, not the live list's, so a case that changes while the drawer is
+  // open (a volunteer claims it, someone else reassigns it) is refused with
+  // CONFLICT instead of turning an Assign into a Reassign.
+  function assignBasis(caseId, slot) {
+    const record = state.cases.find((entry) => entry?.id === caseId);
+    if (!record) return null;
+    const holder = slot === "reviewer" ? record.reviewerId : record.preparerId;
+    return { revision: Number(record.revision), holderId: holder || null };
+  }
+
   // Assign or Reassign: the drawer for one case's slot, fresh (no earlier
   // refusal). Only for a cleared, effective admin.
   function openAssign(caseId, slot) {
     if (!canSeeWorkload()) return;
     if (typeof caseId !== "string" || !caseId) return;
     if (slot !== "preparer" && slot !== "reviewer") return;
+    const basis = assignBasis(caseId, slot);
+    if (!basis) return;
     dropLocalRetry();
     state.error = null;
-    openDialog("assign", { caseId, slot, search: "" });
+    openDialog("assign", { caseId, slot, search: "", ...basis });
   }
 
   function setAssignSearch(text) {
@@ -1088,8 +1102,9 @@ export function createController({
   }
 
   // The drawer's Choose (spec "An admin assigns or reassigns…"). It needs no
-  // open case: the action names the listed case and the revision the Workload
-  // listed, so a case that moved meanwhile is a CONFLICT. It goes through
+  // open case: the action names the case, the revision captured when the
+  // drawer opened and the holder it showed then (`expectedHolderId`), so a
+  // case that moved meanwhile is a CONFLICT. It goes through
   // `dispatch`, as every case action does (its receipt, its retry of an
   // unknown outcome, its conflict message). On success the drawer closes and
   // the cases (dispatch's refresh) and the volunteers are read again; the
@@ -1097,11 +1112,10 @@ export function createController({
   // over the list as it is now. Returns null when nothing was sent.
   async function assignCase(personId) {
     if (!canSeeWorkload() || state.dialog !== "assign" || state.busy) return null;
-    const { caseId, slot } = state.dialogContext ?? {};
+    const { caseId, slot, revision, holderId } = state.dialogContext ?? {};
     if (slot !== "preparer" && slot !== "reviewer") return null;
     if (typeof personId !== "string" || !personId) return null;
-    const record = state.cases.find((entry) => entry?.id === caseId);
-    if (!record) return null;
+    if (!Number.isFinite(revision)) return null;
     const name =
       state.volunteers.find((entry) => entry?.id === personId)?.name ??
       state.people.find((entry) => entry?.id === personId)?.name ??
@@ -1109,9 +1123,9 @@ export function createController({
     const action = {
       actionId: newActionId(),
       caseId,
-      expectedRevision: Number(record.revision),
+      expectedRevision: revision,
       type: "ASSIGN_CASE",
-      payload: { slot, personId },
+      payload: { slot, personId, expectedHolderId: holderId ?? null },
     };
     let receipt;
     try {
@@ -1121,6 +1135,12 @@ export function createController({
       if (canSeeWorkload()) {
         await loadList().catch(() => {});
         await readVolunteers().catch(() => {});
+        // The refusal is on screen over the case as it is now, so a second
+        // Choose is made knowingly: it is based on what the drawer now shows.
+        const basis = assignBasis(caseId, slot);
+        if (basis && state.dialog === "assign" && state.dialogContext?.caseId === caseId) {
+          state.dialogContext = { ...state.dialogContext, ...basis };
+        }
         show();
       }
       throw error;

@@ -81,7 +81,8 @@ export const CASE_ACTIONS = Object.freeze([
   // builds it from an uploaded copy, not a form.
   "SAVE_PREPARER_FIELDS",
   // Change add-volunteer-workload (migration 046): an admin puts a volunteer
-  // on a case. ASSIGN_CASE carries exactly { slot: 'preparer'|'reviewer', personId }.
+  // on a case. ASSIGN_CASE carries exactly { slot: 'preparer'|'reviewer', personId,
+  // expectedHolderId: uuid|null }.
   "ASSIGN_CASE",
 ]);
 

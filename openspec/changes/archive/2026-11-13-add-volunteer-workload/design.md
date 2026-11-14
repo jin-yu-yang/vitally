@@ -92,6 +92,12 @@ board, the pool and the office queue deliberately show none.
 - **Unchanged**: the Roster's open-work rule ("preparer of any case not closed"), which
   protects the Roster save.
 
+- **Holders without the role** *(added after the PR #195 review)*: anyone who holds an Open
+  case in a slot whose capability they lack (a role unticked by mistake, or a person with no
+  roster entry this season) also gets a row, tagged "Holds cases without the role", and each
+  such case says "No prepare role" or "No review role", so an admin can reassign it. Without
+  this, those cases vanished from the Workload until the role came back.
+
 ### D4: The Unassigned row
 - **Choice**: the first row, labelled "Unassigned". It lists:
   - cases at `preparation_ready` with no preparer (slot: preparer);
@@ -101,12 +107,17 @@ board, the pool and the office queue deliberately show none.
 - **Alternatives**: Reassign only; Assign from the case page. Rejected in the brainstorm.
 
 ### D5: One action, `ASSIGN_CASE`
-- **Choice**: `vitally_apply_action(..., 'ASSIGN_CASE', {slot, personId})` dispatches to
-  `vitally_private.act_assign_case`.
+- **Choice**: `vitally_apply_action(..., 'ASSIGN_CASE', {slot, personId, expectedHolderId})`
+  dispatches to `vitally_private.act_assign_case`.
   - `check_operation_authority` requires effective `admin` (FORBIDDEN otherwise).
-  - `check_payload` requires `slot` in `preparer|reviewer` and `personId` a UUID, and no other
-    keys (VALIDATION).
+  - `check_payload` requires `slot` in `preparer|reviewer`, `personId` a UUID and
+    `expectedHolderId` a UUID or JSON null, and no other keys (VALIDATION).
   - The handler checks, in order:
+    0. *(Added after the PR #195 review.)* The slot's holder is `expectedHolderId` (null for an
+       empty slot), else `CONFLICT`, whatever revision was sent. The drawer also sends the
+       revision and holder captured when it opened, not the live list's, so a volunteer who
+       claims the case while the drawer is open keeps it: the admin gets the usual "this case
+       changed" message and the drawer, now showing Reassign, is based on the case as it is.
     1. The stage allows the slot:
        - preparer, empty: `preparation_ready`;
        - preparer, full: `preparing`, `corrections_required`, `review_ready`, `reviewing`;

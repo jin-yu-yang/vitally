@@ -188,7 +188,7 @@ test("every action builds exactly the payload the contract names", () => {
       "ASSIGN_CASE",
       {},
       { slot: "preparer", personId: "person-alex" },
-      { slot: "preparer", personId: "person-alex" },
+      { slot: "preparer", personId: "person-alex", expectedHolderId: null },
     ],
   ];
   for (const [type, dataset, values, payload] of cases)
@@ -222,13 +222,18 @@ test("the claim buttons send an empty payload and no dataset leaks into it", () 
   });
 });
 
-test("ASSIGN_CASE is a case action with slot and personId", () => {
+test("ASSIGN_CASE is a case action with slot, personId and expectedHolderId", () => {
   assert.ok(CASE_ACTIONS.includes("ASSIGN_CASE"));
   assert.ok(PAYLOAD_ACTIONS.includes("ASSIGN_CASE"));
-  // Only the two named fields travel; a dataset's other keys do not.
+  // Only the three named fields travel; a dataset's other keys do not. An
+  // absent holder is null (an empty slot).
   assert.deepEqual(
     payloadFor("ASSIGN_CASE", { caseId: "case-a" }, { slot: "reviewer", personId: "person-sam", extra: 1 }),
-    { type: "ASSIGN_CASE", payload: { slot: "reviewer", personId: "person-sam" } },
+    { type: "ASSIGN_CASE", payload: { slot: "reviewer", personId: "person-sam", expectedHolderId: null } },
+  );
+  assert.deepEqual(
+    payloadFor("ASSIGN_CASE", {}, { slot: "preparer", personId: "person-sam", expectedHolderId: "person-kim" }).payload,
+    { slot: "preparer", personId: "person-sam", expectedHolderId: "person-kim" },
   );
 });
 

@@ -7317,7 +7317,7 @@ test("the Workload's view: a header pressed again reverses, a new one starts at 
   controller.stop();
 });
 
-test("openAssign opens the drawer for a case and slot, and its search is kept", async () => {
+test("openAssign opens the drawer for a case and slot, with the revision and holder it was opened on, and its search is kept", async () => {
   const { controller } = build({ store: workloadStore() });
   await controller.start();
   controller.navigate("office-volunteers");
@@ -7325,16 +7325,28 @@ test("openAssign opens the drawer for a case and slot, and its search is kept", 
   controller.openAssign("case-w1", "preparer");
   const state = controller.getState();
   assert.equal(state.dialog, "assign");
-  assert.deepEqual(state.dialogContext, { caseId: "case-w1", slot: "preparer", search: "" });
+  const opened = { caseId: "case-w1", slot: "preparer", search: "", revision: 3, holderId: null };
+  assert.deepEqual(state.dialogContext, opened);
   controller.setAssignSearch("mi");
-  assert.deepEqual(controller.getState().dialogContext, { caseId: "case-w1", slot: "preparer", search: "mi" });
+  assert.deepEqual(controller.getState().dialogContext, { ...opened, search: "mi" });
+  controller.closeDialog();
+  controller.openAssign("case-w2", "preparer");
+  assert.deepEqual(controller.getState().dialogContext, {
+    caseId: "case-w2",
+    slot: "preparer",
+    search: "",
+    revision: 7,
+    holderId: "v-1",
+  });
   controller.closeDialog();
   controller.openAssign("case-w1", "owner");
   assert.equal(controller.getState().dialog, null, "an unknown slot opens nothing");
+  controller.openAssign("case-gone", "preparer");
+  assert.equal(controller.getState().dialog, null, "a case that isn't listed opens nothing");
   controller.stop();
 });
 
-test("assignCase sends ASSIGN_CASE with the listed revision, then closes, re-reads and says who was assigned", async () => {
+test("assignCase sends ASSIGN_CASE with the revision and holder the drawer opened on, then closes, re-reads and says who was assigned", async () => {
   const store = workloadStore();
   const { controller } = build({ store, newActionId: () => "assign-1" });
   await controller.start();
@@ -7349,7 +7361,7 @@ test("assignCase sends ASSIGN_CASE with the listed revision, then closes, re-rea
     caseId: "case-w1",
     expectedRevision: 3,
     type: "ASSIGN_CASE",
-    payload: { slot: "preparer", personId: "v-1" },
+    payload: { slot: "preparer", personId: "v-1", expectedHolderId: null },
   });
   assert.equal(done.notice, "Assigned Mira Patel as preparer.");
   const state = controller.getState();
@@ -7374,7 +7386,7 @@ test("assignCase as reviewer says so", async () => {
   controller.openAssign("case-w3", "reviewer");
   const done = await controller.assignCase("v-2");
   assert.equal(store.writes.at(-1).expectedRevision, 5);
-  assert.deepEqual(store.writes.at(-1).payload, { slot: "reviewer", personId: "v-2" });
+  assert.deepEqual(store.writes.at(-1).payload, { slot: "reviewer", personId: "v-2", expectedHolderId: null });
   assert.equal(done.notice, "Assigned Riley Quinn as reviewer.");
   controller.stop();
 });
@@ -7392,7 +7404,7 @@ for (const code of ["CONFLICT", "INELIGIBLE", "SELF_REVIEW"]) {
     await assert.rejects(controller.assignCase("v-1"), (error) => error.code === code);
     const state = controller.getState();
     assert.equal(state.dialog, "assign");
-    assert.deepEqual(state.dialogContext, { caseId: "case-w2", slot: "preparer", search: "" });
+    assert.deepEqual(state.dialogContext, { caseId: "case-w2", slot: "preparer", search: "", revision: 7, holderId: "v-1" });
     assert.equal(state.busy, false);
     assert.equal(state.error.code, code);
     assert.ok(caseListReads(store) > caseReads, "a refusal re-reads the list");
@@ -7401,6 +7413,40 @@ for (const code of ["CONFLICT", "INELIGIBLE", "SELF_REVIEW"]) {
     controller.stop();
   });
 }
+
+// The review finding on PR #195: a volunteer claims the case while the Assign
+// drawer is open. The live list (and the drawer) now show the claim, but Choose
+// still sends what the drawer was opened on, so the database refuses it with
+// CONFLICT rather than taking the case from the volunteer. After the refusal
+// the drawer is based on the case as it now shows.
+test("assignCase for a case claimed while the drawer is open sends what the drawer opened on", async () => {
+  const store = workloadStore();
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.setVolunteerTab("workload");
+  controller.openAssign("case-w1", "preparer");
+  // Mira claims the waiting case in another window.
+  store.records.set("case-w1", { ...store.records.get("case-w1"), stage: "preparing", preparerId: "v-1", revision: 4 });
+  await store.handlers.onChange({ table: "cases", caseId: "case-w1" });
+  assert.equal(controller.getState().cases.find((record) => record.id === "case-w1").revision, 4, "the list is live");
+  store.failNext = Object.assign(new Error("CONFLICT"), { code: "CONFLICT" });
+  await assert.rejects(controller.assignCase("v-2"), (error) => error.code === "CONFLICT");
+  assert.deepEqual(store.writes.at(-1), {
+    actionId: store.writes.at(-1).actionId,
+    caseId: "case-w1",
+    expectedRevision: 3,
+    type: "ASSIGN_CASE",
+    payload: { slot: "preparer", personId: "v-2", expectedHolderId: null },
+  });
+  const state = controller.getState();
+  assert.equal(state.dialog, "assign");
+  assert.match(state.error.message, /Someone else changed this case/);
+  assert.equal(state.dialogContext.revision, 4, "now based on the case as it shows");
+  assert.equal(state.dialogContext.holderId, "v-1");
+  assert.match(dialog(state), /Reassign the preparer/);
+  controller.stop();
+});
 
 test("assignCase does nothing for anyone but a cleared admin", async () => {
   const store = workloadStore({ clearance: { ...UNCLEARED, isAdmin: true } });

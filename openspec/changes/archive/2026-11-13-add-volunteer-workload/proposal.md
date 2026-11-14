@@ -1,8 +1,9 @@
 ## Why
 
 The site coordinator cannot see who is carrying how many cases, which cases have stopped
-moving, or hand a case to someone else. A preparer who leaves mid-season, or a reviewer who
-is stuck, holds the case until it is closed. Waiting cases sit until a volunteer claims
+moving, or hand a case to someone else. When a volunteer is ill, has a schedule conflict, or
+is simply carrying more than others, the cases they hold wait for them: only the holder can
+move a case on. Waiting cases sit until a volunteer claims
 them. Issue #139 (part of #129) asks for a Workload view with reassignment. Migration 045
 already provides the clearance check that a staff-chosen assignee needs, and left this
 change as its first caller.
@@ -11,7 +12,9 @@ change as its first caller.
 
 - **Volunteers gets a Workload tab** next to Roster, for a cleared staff member with
   effective `admin`. An uncleared admin keeps the Roster alone.
-- **One row per volunteer whose effective capabilities include `prepare` or `review`.** Each
+- **One row per volunteer whose effective capabilities include `prepare` or `review`,** and a
+  tagged row for anyone still holding an Open case without the slot's role (added after the
+  PR #195 review). Each
   row shows Open, a Preparing/Review breakdown, Waiting on client and Stalled (no accepted
   action and no contact logged for 5 calendar days). The table is sortable and searchable by
   name. A row expands to that volunteer's cases: case #, the primary taxpayer's full name,
@@ -22,7 +25,7 @@ change as its first caller.
   orders them: speaks the client's preferred language, then any of the client's languages,
   then the rest; within each group, fewest open cases. It marks the current holder and notes
   anyone hidden for independent review.
-- **A new case action, `ASSIGN_CASE {slot, personId}`.**
+- **A new case action, `ASSIGN_CASE {slot, personId, expectedHolderId}`.**
   - It assigns an empty slot with the same effects as the person's own claim, or reassigns a
     full one, at any stage before approval.
   - A mid-review reassignment hands the active review to the new reviewer.

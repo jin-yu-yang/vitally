@@ -12,7 +12,7 @@ import { createAppError } from "../src/errors.mjs";
 
 // OpenSpec change add-volunteer-workload (design D5 and D7), migration 046: an
 // admin assigns or reassigns a case's preparer or reviewer with ASSIGN_CASE
-// {slot, personId}. Spec: volunteer-workload, "An admin assigns or reassigns a
+// {slot, personId, expectedHolderId}. Spec: volunteer-workload, "An admin assigns or reassigns a
 // case's preparer or reviewer"; and volunteer-clearance, "Staff assign work
 // only to a cleared person" (the scenario "Assigning a reviewer whose role is
 // narrower than the ceiling" is the `ceiling wider than roles` case below).
@@ -69,14 +69,29 @@ const helpers = (f) => {
       )
     ).rows,
   });
+  // The slot's holder now, as an admin's open drawer would have it.
+  const holderOf = async (caseId, slot) =>
+    (
+      await f.sql(
+        `select ${slot === "reviewer" ? "reviewer_id" : "preparer_id"} as holder from public.cases
+          where workspace_id=$1 and id=$2`,
+        [f.workspaceId, caseId],
+      )
+    ).rows[0].holder;
+  // The payload with `expectedHolderId` set to the slot's holder now, unless
+  // it already names one (or `raw` sends it exactly as given).
+  const withHolder = async (caseId, payload, raw) =>
+    raw || "expectedHolderId" in payload
+      ? payload
+      : { ...payload, expectedHolderId: await holderOf(caseId, payload.slot) };
   // One ASSIGN_CASE sent straight to the RPC, so the action id is known.
   // Resolves with the mapped error, or null when it was accepted.
-  const send = async (client, caseId, payload, { revision } = {}) => {
+  const send = async (client, caseId, payload, { revision, raw } = {}) => {
     const args = applyArgs({
       caseId,
       revision: revision ?? (await revisionOf(caseId)),
       type: "ASSIGN_CASE",
-      payload,
+      payload: await withHolder(caseId, payload, raw),
     });
     const { error } = await client.rpc("vitally_apply_action", args);
     return { actionId: args.p_action_id, error: error ? createAppError(error) : null };
@@ -93,13 +108,14 @@ const helpers = (f) => {
     assert.deepEqual(await caseState(caseId), before, "the case is unchanged");
     assert.equal(await f.receiptsFor(actionId), 0, "no receipt is stored");
   };
-  return { revisionOf, caseState, send, refused };
+  return { revisionOf, holderOf, withHolder, caseState, send, refused };
 };
 
 test("ASSIGN_CASE refusals against real Supabase", async (t) => {
   const f = await createDatabaseFixture();
   try {
     const { revisionOf, refused } = helpers(f);
+    const RAW = { raw: true };
 
     await t.test("non-admin caller → FORBIDDEN", async () => {
       const caseId = await f.readyCase();
@@ -120,9 +136,13 @@ test("ASSIGN_CASE refusals against real Supabase", async (t) => {
         { slot: "preparer" },
         { slot: "preparer", personId: f.preparerId, note: "x" },
         { slot: "preparer", personId: "not-a-uuid" },
+        { slot: "preparer", personId: f.preparerId, expectedHolderId: "not-a-uuid" },
+        { slot: "preparer", personId: f.preparerId, expectedHolderId: 5 },
         {},
       ])
-        await refused("VALIDATION", f.siteCoordinator, caseId, payload);
+        await refused("VALIDATION", f.siteCoordinator, caseId, payload, RAW);
+      // Without expectedHolderId: the key is required, null for an empty slot.
+      await refused("VALIDATION", f.siteCoordinator, caseId, { slot: "preparer", personId: f.preparerId }, RAW);
     });
 
     await t.test("not allowed at this stage → INVALID_TRANSITION", async () => {
@@ -223,6 +243,39 @@ test("ASSIGN_CASE refusals against real Supabase", async (t) => {
       }
     });
 
+    // The review finding on PR #195: an Assign drawer opened on an empty slot,
+    // and a volunteer claims the case before the admin presses Choose. The
+    // admin's press names the holder it saw (none), so it is refused whatever
+    // revision it carries, and the claimant keeps the case.
+    await t.test("claimed while the drawer is open → CONFLICT", async () => {
+      const noor = await f.staff({ key: "noor_bassi", name: "Noor Bassi", capabilities: ["prepare", "review"] });
+      const ready = await f.readyCase();
+      const seen = await revisionOf(ready);
+      await f.act(f.preparer, ready, "CLAIM_PREPARATION", {});
+      const assignSeen = { slot: "preparer", personId: noor.personId, expectedHolderId: null };
+      // The revision the drawer opened with: the pipeline's revision check.
+      await refused("CONFLICT", f.siteCoordinator, ready, assignSeen, { revision: seen });
+      // The current revision, as a caller re-reading the case would send: the
+      // handler's holder check.
+      await refused("CONFLICT", f.siteCoordinator, ready, assignSeen);
+
+      // The reviewer slot the same way.
+      const prepared = await f.preparedCase();
+      await f.act(f.reviewer, prepared, "CLAIM_REVIEW", {});
+      await refused("CONFLICT", f.siteCoordinator, prepared, {
+        slot: "reviewer",
+        personId: noor.personId,
+        expectedHolderId: null,
+      });
+
+      // A Reassign that names someone other than the holder.
+      await refused("CONFLICT", f.siteCoordinator, ready, {
+        slot: "preparer",
+        personId: noor.personId,
+        expectedHolderId: f.reviewerId,
+      });
+    });
+
     await t.test("stale revision → CONFLICT", async () => {
       const caseId = await f.readyCase();
       await refused(
@@ -244,9 +297,9 @@ test("ASSIGN_CASE refusals against real Supabase", async (t) => {
 test("ASSIGN_CASE effects against real Supabase", async (t) => {
   const f = await createDatabaseFixture();
   try {
-    const { revisionOf, refused, caseState } = helpers(f);
-    const assign = (caseId, slot, personId) =>
-      f.act(f.siteCoordinator, caseId, "ASSIGN_CASE", { slot, personId });
+    const { revisionOf, refused, caseState, withHolder } = helpers(f);
+    const assign = async (caseId, slot, personId) =>
+      f.act(f.siteCoordinator, caseId, "ASSIGN_CASE", await withHolder(caseId, { slot, personId }));
     const caseRow = async (caseId) =>
       (
         await f.sql(
@@ -384,7 +437,7 @@ test("ASSIGN_CASE effects against real Supabase", async (t) => {
         caseId,
         revision: await revisionOf(caseId),
         type: "ASSIGN_CASE",
-        payload: { slot: "preparer", personId: f.preparerId },
+        payload: { slot: "preparer", personId: f.preparerId, expectedHolderId: null },
       });
       const first = await f.siteCoordinator.rpc("vitally_apply_action", args);
       assert.equal(first.error, null);

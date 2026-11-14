@@ -63,16 +63,36 @@ export function taxpayerName(answers) {
 
 const holdsWork = (capabilities) => capabilities.includes("prepare") || capabilities.includes("review");
 
-// One row per volunteer whose effective capabilities include prepare or review.
+const SLOT_NEEDS = Object.freeze({ preparer: "prepare", reviewer: "review" });
+
+// One row per volunteer whose effective capabilities include prepare or review,
+// and one for anyone else who still holds an open case: a volunteer whose role
+// was removed (a certificate unticked, say), or a person no longer on this
+// season's roster. Such a row has `roleRemoved`: it holds at least one case in
+// a slot whose capability its person no longer has, so an admin can reassign it.
 export function workloadRows({ volunteers = [], people = [], cases = [], now = Date.now() } = {}) {
   const personById = new Map(people.map((p) => [p.id, p]));
+  const listed = new Set(volunteers.map((volunteer) => volunteer.id));
+  // Holders of an open case who are not on the roster, as the people list names them.
+  const unlisted = [];
+  for (const record of cases) {
+    for (const [id, stages] of [
+      [record.preparerId, PREPARING_STAGES],
+      [record.reviewerId, REVIEW_STAGES],
+    ]) {
+      if (!id || listed.has(id) || !stages.includes(record.stage)) continue;
+      listed.add(id);
+      unlisted.push({ id, name: personById.get(id)?.name ?? "Unknown person", roles: [], cleared: false });
+    }
+  }
   const rows = [];
-  for (const volunteer of volunteers) {
-    if (!holdsWork(effectiveCapabilities(volunteer, personById.get(volunteer.id)))) continue;
+  for (const volunteer of [...volunteers, ...unlisted]) {
+    const capabilities = effectiveCapabilities(volunteer, personById.get(volunteer.id));
     const row = {
       id: volunteer.id,
       name: volunteer.name,
       cleared: volunteer.cleared === true,
+      roleRemoved: false,
       preparing: 0,
       review: 0,
       open: 0,
@@ -86,6 +106,7 @@ export function workloadRows({ volunteers = [], people = [], cases = [], now = D
       else if (record.reviewerId === volunteer.id && REVIEW_STAGES.includes(record.stage)) slot = "reviewer";
       if (!slot) continue;
       const stalled = isStalled(record, now);
+      const roleRemoved = !capabilities.includes(SLOT_NEEDS[slot]);
       if (slot === "preparer") {
         row.preparing += 1;
         if ((record.openRequests ?? 0) > 0) row.waiting += 1;
@@ -93,9 +114,11 @@ export function workloadRows({ volunteers = [], people = [], cases = [], now = D
         row.review += 1;
       }
       if (stalled) row.stalled += 1;
-      row.cases.push({ record, slot, stalled });
+      if (roleRemoved) row.roleRemoved = true;
+      row.cases.push({ record, slot, stalled, roleRemoved });
     }
     row.open = row.preparing + row.review;
+    if (!holdsWork(capabilities) && row.open === 0) continue;
     rows.push(row);
   }
   return rows;

@@ -1,6 +1,6 @@
 -- 046: volunteer workload (OpenSpec change add-volunteer-workload, design D5
 -- and D7). An admin assigns or reassigns a case's preparer or reviewer with one
--- audited case action, ASSIGN_CASE {slot, personId}, through vitally_apply_action.
+-- audited case action, ASSIGN_CASE {slot, personId, expectedHolderId}, through vitally_apply_action.
 --
 -- Every function below that already existed is re-created in full from its
 -- latest definition, with only the ASSIGN_CASE lines (marked -- 046) added:
@@ -334,11 +334,14 @@ begin
     raise sqlstate 'VT007' using message='VALIDATION'; -- 039
    end if; -- 039
   when 'ASSIGN_CASE' then -- 046
-   -- The slot and the person, nothing else; whether the person exists is the handler's. -- 046
-   if vitally_private.payload_keys(p_payload)<>array['personId','slot'] -- 046
+   -- The slot, the person and the holder the admin saw (JSON null for an empty -- 046
+   -- slot), nothing else; whether the person exists is the handler's. -- 046
+   if vitally_private.payload_keys(p_payload)<>array['expectedHolderId','personId','slot'] -- 046
     or jsonb_typeof(p_payload->'slot')<>'string' -- 046
     or (p_payload->>'slot') not in ('preparer','reviewer') -- 046
-    or vitally_private.payload_uuid(p_payload,'personId') is null then -- 046
+    or vitally_private.payload_uuid(p_payload,'personId') is null -- 046
+    or (jsonb_typeof(p_payload->'expectedHolderId')<>'null' -- 046
+     and vitally_private.payload_uuid(p_payload,'expectedHolderId') is null) then -- 046
     raise sqlstate 'VT007' using message='VALIDATION'; -- 046
    end if; -- 046
   else raise sqlstate 'VT007' using message='VALIDATION';
@@ -349,6 +352,9 @@ revoke all on function vitally_private.check_payload(text,jsonb) from public,ano
 
 -- ---------------------------------------------------------------------------
 -- 3. The handler (design D5). The refusals come first, in this order:
+--   0. the slot's holder is the one the admin saw, `expectedHolderId` (null for
+--      an empty slot), so an Assign never becomes a Reassign of a case someone
+--      claimed meanwhile, whatever revision was sent (CONFLICT);
 --   1. the stage allows the slot, and the person is not its current holder
 --      (INVALID_TRANSITION);
 --   2. the person exists in the case's workspace (FORBIDDEN);
@@ -364,19 +370,24 @@ create or replace function vitally_private.act_assign_case(p_member public.membe
 returns jsonb language plpgsql security definer set search_path='' as $$
 declare v_slot text;
  v_person_id uuid;
+ v_expected uuid;
  v_holder uuid;
  v_allowed boolean;
  v_assignee public.people;
 begin
  v_slot=p_payload->>'slot';
  v_person_id=vitally_private.payload_uuid(p_payload,'personId');
+ v_expected=vitally_private.payload_uuid(p_payload,'expectedHolderId');
+ v_holder=case v_slot when 'preparer' then p_case.preparer_id else p_case.reviewer_id end;
+ -- 0. The holder the admin saw is still the holder.
+ if v_holder is distinct from v_expected then
+  raise sqlstate 'VT003' using message='CONFLICT';
+ end if;
  -- 1. The stage allows the slot; the current holder again is no change.
  if v_slot='preparer' then
-  v_holder=p_case.preparer_id;
   v_allowed=case when v_holder is null then p_case.stage='preparation_ready'
    else p_case.stage in ('preparing','corrections_required','review_ready','reviewing') end;
  else
-  v_holder=p_case.reviewer_id;
   v_allowed=case when v_holder is null then p_case.stage='review_ready'
    else p_case.stage='reviewing' end;
  end if;

@@ -259,3 +259,25 @@ test("a busy drawer disables Choose; a missing case offers Close", () => {
   assert.match(missing, /This case could not be opened\./);
   assert.match(missing, /data-action="close-dialog"/);
 });
+
+// PR #195 review: a volunteer whose role was removed still holds their cases,
+// so they keep a row, tagged, and each case without the role says so.
+test("a holder without the role keeps a tagged row, and the cases say which role is missing", () => {
+  const volunteers = [volunteer("v-gil", "Gil Hart", ["greeter"]), volunteer("v-pia", "Pia Marsh", ["preparer"])];
+  const cases = [
+    kase("c-g", "VT-GGGG-1111", { preparerId: "v-gil" }),
+    kase("c-p", "VT-PPPP-2222", { preparerId: "v-pia" }),
+  ];
+  const html = renderWorkload(
+    args({
+      rows: workloadRows({ volunteers, people: volunteers.map((v) => person(v.id, v.name)), cases, now: NOW }),
+      expanded: ["v-gil", "v-pia"],
+    }),
+  );
+  const gil = /<tr class="workload-row" data-row-id="v-gil">([\s\S]*?)<\/tr>/.exec(html)[1];
+  assert.match(gil, /<span class="workload-role-removed">Holds cases without the role<\/span>/);
+  assert.match(casesOf(html, "v-gil"), /VT-GGGG-1111[\s\S]*?No prepare role[\s\S]*?data-slot="preparer"[^>]*>Reassign</);
+  const pia = /<tr class="workload-row" data-row-id="v-pia">([\s\S]*?)<\/tr>/.exec(html)[1];
+  assert.doesNotMatch(pia, /without the role/);
+  assert.doesNotMatch(casesOf(html, "v-pia"), /No prepare role/);
+});

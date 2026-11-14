@@ -76,9 +76,10 @@ function toggle(id, name, expanded) {
 }
 
 const SLOT_LABEL = Object.freeze({ preparer: "Preparer", reviewer: "Reviewer" });
+const SLOT_NEEDS_WORD = Object.freeze({ preparer: "prepare", reviewer: "review" });
 const WAITING_LABEL = Object.freeze({ preparer: "Needs a preparer", reviewer: "Needs a reviewer" });
 
-function caseItem(record, { slotText, stalled = false, action, slot }) {
+function caseItem(record, { slotText, stalled = false, roleRemoved = false, action, slot }) {
   const reference = record.reference ?? "";
   const verb = action === "Assign" ? `Assign a ${slot} to` : `Reassign the ${slot} of`;
   return `<li class="workload-case"><span class="workload-case-ref">${esc(reference)}</span><span class="workload-case-name">${esc(
@@ -86,7 +87,7 @@ function caseItem(record, { slotText, stalled = false, action, slot }) {
   )}</span>${stageBadge(record.stage, "en", { record })}<span class="workload-slot">${esc(slotText)}</span>${when(
     stalled,
     `<span class="workload-stalled">Stalled</span>`,
-  )}<span class="workload-case-actions">${button(
+  )}${when(roleRemoved, `<span class="workload-role-removed">No ${SLOT_NEEDS_WORD[slot]} role</span>`)}<span class="workload-case-actions">${button(
     "Open",
     "open-case",
     "secondary",
@@ -130,13 +131,16 @@ function volunteerRows(row, expanded) {
   const line = `<tr class="workload-row" data-row-id="${esc(row.id)}"><th scope="row">${toggle(row.id, esc(row.name), open)}${when(
     !row.cleared,
     ` <span class="volunteer-not-cleared">Not cleared</span>`,
+  )}${when(
+    row.roleRemoved,
+    ` <span class="workload-role-removed">Holds cases without the role</span>`,
   )}</th>${cell("open", row.open)}${cell("bar", bar(row.preparing, row.review, `${row.preparing} preparing, ${row.review} in review`))}${cell(
     "preparing",
     row.preparing,
   )}${cell("review", row.review)}${cell("waiting", row.waiting)}${cell("stalled", row.stalled)}</tr>`;
   if (!open) return line;
-  const items = (row.cases ?? []).map(({ record, slot, stalled }) =>
-    caseItem(record, { slotText: SLOT_LABEL[slot] ?? slot, stalled, action: "Reassign", slot }),
+  const items = (row.cases ?? []).map(({ record, slot, stalled, roleRemoved }) =>
+    caseItem(record, { slotText: SLOT_LABEL[slot] ?? slot, stalled, roleRemoved, action: "Reassign", slot }),
   );
   return `${line}${casesRow(row.id, items, "No open cases.")}`;
 }

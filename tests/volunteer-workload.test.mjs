@@ -410,3 +410,65 @@ test("candidates never throws on empty answers or missing rows", () => {
     candidates({ record: kase({ answers: undefined }), slot: "reviewer", volunteers, people: [], rows: undefined }),
   );
 });
+
+// ---- Holders without the role (PR #195 review) ---------------------------
+
+test("A volunteer whose role was removed keeps a row for the cases they hold, tagged", () => {
+  const volunteers = [
+    volunteer("g", "Gil Hart", ["greeter"]),
+    volunteer("e", "Edda Noor", ["greeter"]),
+    volunteer("p", "Pia Marsh", ["preparer"]),
+  ];
+  const people = volunteers.map((v) => person(v.id, v.name));
+  const cases = [
+    kase({ stage: "preparing", preparerId: "g" }),
+    // A preparer slot held by someone who still prepares: not tagged.
+    kase({ stage: "preparing", preparerId: "p" }),
+    // Approved: not open, so no row for it.
+    kase({ stage: "review_approved", preparerId: "e" }),
+  ];
+  const rows = workloadRows({ volunteers, people, cases, now: NOW });
+  assert.deepEqual(rows.map((row) => row.id).sort(), ["g", "p"], "Edda holds nothing open and cannot prepare or review");
+  const gil = rowOf(rows, "g");
+  assert.equal(gil.roleRemoved, true);
+  assert.equal(gil.open, 1);
+  assert.equal(gil.cases[0].roleRemoved, true);
+  assert.equal(rowOf(rows, "p").roleRemoved, false);
+  assert.equal(rowOf(rows, "p").cases[0].roleRemoved, false);
+});
+
+test("A reviewer who lost review but still prepares is tagged for the review they hold only", () => {
+  const volunteers = [volunteer("v", "Vera Lind", ["preparer"])];
+  const cases = [
+    kase({ stage: "preparing", preparerId: "v" }),
+    kase({ stage: "reviewing", preparerId: "other-prep", reviewerId: "v" }),
+  ];
+  const [row] = workloadRows({ volunteers, people: [person("v", "Vera Lind")], cases, now: NOW });
+  assert.equal(row.roleRemoved, true);
+  assert.deepEqual(
+    row.cases.map((entry) => [entry.slot, entry.roleRemoved]),
+    [
+      ["preparer", false],
+      ["reviewer", true],
+    ],
+  );
+});
+
+test("A holder who is not on this season's roster gets a tagged row under the people list's name", () => {
+  const volunteers = [volunteer("p", "Pia Marsh", ["preparer"])];
+  const people = [person("p", "Pia Marsh"), person("gone", "Otto Brink")];
+  const cases = [
+    kase({ stage: "corrections_required", preparerId: "gone" }),
+    kase({ stage: "reviewing", preparerId: "p", reviewerId: "gone" }),
+    kase({ stage: "preparing", preparerId: "nobody" }),
+  ];
+  const rows = workloadRows({ volunteers, people, cases, now: NOW });
+  const otto = rowOf(rows, "gone");
+  assert.equal(otto.name, "Otto Brink");
+  assert.equal(otto.cleared, false);
+  assert.equal(otto.roleRemoved, true);
+  assert.equal(otto.preparing, 1);
+  assert.equal(otto.review, 1);
+  assert.equal(rowOf(rows, "nobody").name, "Unknown person");
+  assert.equal(rows.length, 3, "each holder once");
+});

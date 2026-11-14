@@ -3626,6 +3626,7 @@ textarea::placeholder {
 }
 .volunteer-not-cleared,
 .workload-stalled,
+.workload-role-removed,
 .assign-current {
   display: inline-block;
   padding: 1px 7px;
@@ -3638,6 +3639,11 @@ textarea::placeholder {
   background: var(--vt-background);
   border: 1px solid var(--vt-line);
   color: var(--vt-muted);
+}
+.workload-role-removed {
+  background: var(--vt-error-bg);
+  border: 1px solid var(--vt-error-line);
+  color: var(--vt-error);
 }
 .workload-stalled {
   background: var(--vt-attention-bg);

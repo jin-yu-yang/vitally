@@ -1,7 +1,7 @@
 # volunteer-workload Specification
 
 ## Purpose
-The admin-only Workload under Volunteers: one row per volunteer who can prepare or review, with what each holds (Open, Preparing, Review, Waiting on client, Stalled), sorting and search, an Unassigned row, and the Assign/Reassign drawer with its eligibility rules and same-language-first ordering. It covers who can open it (a cleared staff member with effective admin), where taxpayer names show, and the one case action, `ASSIGN_CASE`, that assigns an empty preparer or reviewer slot like a claim or hands a held one to someone else, with its refusals, handovers, case event and client line.
+The admin-only Workload under Volunteers: one row per volunteer who can prepare or review (and for anyone still holding an open case without the role), with what each holds (Open, Preparing, Review, Waiting on client, Stalled), sorting and search, an Unassigned row, and the Assign/Reassign drawer with its eligibility rules and same-language-first ordering. It covers who can open it (a cleared staff member with effective admin), where taxpayer names show, and the one case action, `ASSIGN_CASE`, that assigns an empty preparer or reviewer slot like a claim or hands a held one to someone else, with its refusals, handovers, case event and client line.
 
 ## Requirements
 
@@ -21,7 +21,9 @@ The Volunteers page SHALL have a Workload tab next to the Roster tab. The Worklo
 - **THEN** there is no Volunteers link and no Workload
 
 ### Requirement: The Workload has one row per volunteer who can prepare or review
-The Workload SHALL list, one row each, every volunteer with a roster entry for the workspace's current season whose effective capabilities include `prepare` or `review`. A volunteer whose effective capabilities include neither SHALL NOT have a row, even with the Admin role. A volunteer with a row who is not cleared SHALL be tagged "Not cleared". Each row SHALL show:
+The Workload SHALL list, one row each, every volunteer with a roster entry for the workspace's current season whose effective capabilities include `prepare` or `review`. A volunteer whose effective capabilities include neither, and who holds no Open case, SHALL NOT have a row, even with the Admin role. A volunteer with a row who is not cleared SHALL be tagged "Not cleared".
+
+Anyone who holds an Open case in a slot whose capability they lack (`prepare` for a preparer, `review` for a reviewer) SHALL also have a row, so an admin can reassign the case: for example a volunteer whose role was removed by mistake, or a person with no roster entry for the current season (shown under their name, and tagged "Not cleared"). Such a row SHALL be tagged "Holds cases without the role", and each such case in its list SHALL say "No prepare role" or "No review role". Each row SHALL show:
 - the volunteer's name;
 - Open;
 - a breakdown bar of Preparing and Review, with both numbers available to screen readers;
@@ -41,8 +43,12 @@ The Workload SHALL NOT show an hours column.
 - **THEN** they have a row
 
 #### Scenario: A ceiling wider than the roles
-- **WHEN** a volunteer's `people.capabilities` include `prepare` but their only role is Greeter
+- **WHEN** a volunteer's `people.capabilities` include `prepare` but their only role is Greeter, and they hold no case
 - **THEN** they have no row
+
+#### Scenario: A role removed while holding a case
+- **WHEN** an admin unticks the Preparer role of a volunteer who is preparing VT-ABCD-EFGH, leaving them only Greeter
+- **THEN** the volunteer keeps a row tagged "Holds cases without the role", with Open 1, and expanding it lists VT-ABCD-EFGH with "No prepare role" and Reassign
 
 ### Requirement: The Workload counts what each volunteer is holding
 For each volunteer the Workload SHALL count:
@@ -163,13 +169,13 @@ Within each group, people SHALL be ordered by fewest Open cases, then by name. T
 - **THEN** the first is in the preferred-or-another group and the second is not
 
 ### Requirement: An admin assigns or reassigns a case's preparer or reviewer
-A staff member whose effective capabilities include `admin` SHALL be able to send `ASSIGN_CASE` with a slot (`preparer` or `reviewer`) and a person. It SHALL go through the case action path: receipt, case lock, revision check, and refusal of an uncleared caller with `NOT_CLEARED` first. It SHALL be allowed:
+A staff member whose effective capabilities include `admin` SHALL be able to send `ASSIGN_CASE` with a slot (`preparer` or `reviewer`), a person, and the slot's holder as the admin saw it (none for an empty slot). It SHALL go through the case action path: receipt, case lock, revision check, and refusal of an uncleared caller with `NOT_CLEARED` first. The drawer SHALL send the case's revision and the slot's holder as they were when it opened, not as they are when Choose is pressed. It SHALL be allowed:
 - preparer, no preparer yet: at Pending intake / filing (an Assign);
 - preparer, already held: at Filing in progress, Corrections in progress, Pending review and Review in progress (a Reassign);
 - reviewer, no reviewer yet: at Pending review (an Assign);
 - reviewer, already held: at Review in progress (a Reassign).
 
-Any other stage, or assigning the slot's current holder again, SHALL be refused with `INVALID_TRANSITION`. A caller without effective `admin` SHALL be refused with `FORBIDDEN`. A person not in the workspace SHALL be refused with `FORBIDDEN`. A person who is not cleared, or whose effective capabilities lack `prepare` (preparer) or `review` (reviewer), SHALL be refused with `INELIGIBLE`. A preparation participant as reviewer, or the case's current reviewer as preparer, SHALL be refused with `SELF_REVIEW`. On any refusal nothing SHALL be written and no receipt SHALL be stored. A stale revision SHALL be refused with `CONFLICT`.
+A slot whose holder is not the one named SHALL be refused with `CONFLICT`, whatever revision is sent, so an Assign never becomes a Reassign. Any other stage, or assigning the slot's current holder again, SHALL be refused with `INVALID_TRANSITION`. A caller without effective `admin` SHALL be refused with `FORBIDDEN`. A person not in the workspace SHALL be refused with `FORBIDDEN`. A person who is not cleared, or whose effective capabilities lack `prepare` (preparer) or `review` (reviewer), SHALL be refused with `INELIGIBLE`. A preparation participant as reviewer, or the case's current reviewer as preparer, SHALL be refused with `SELF_REVIEW`. On any refusal nothing SHALL be written and no receipt SHALL be stored. A stale revision SHALL be refused with `CONFLICT`.
 
 #### Scenario: A non-admin
 - **WHEN** a cleared Reviewer sends `ASSIGN_CASE` for a case's preparer
@@ -190,6 +196,14 @@ Any other stage, or assigning the slot's current holder again, SHALL be refused 
 #### Scenario: Two admins at once
 - **WHEN** two admins reassign the same case's preparer from the same revision
 - **THEN** one succeeds and the other is refused with `CONFLICT`
+
+#### Scenario: Claimed while the drawer is open
+- **WHEN** an admin opens Assign a preparer for a case at Pending intake / filing, and a volunteer claims the case before the admin presses Choose
+- **THEN** the admin's Choose is refused with `CONFLICT`, the drawer says the case changed and now offers Reassign the preparer, and the volunteer keeps the case
+
+#### Scenario: A holder named wrongly at the current revision
+- **WHEN** an admin's `ASSIGN_CASE` carries the case's current revision but names no holder for a preparer slot that is held
+- **THEN** it is refused with `CONFLICT`, and the case is unchanged
 
 ### Requirement: Assigning an empty slot has the effects of the person's own claim
 Assigning a preparer to a case at Pending intake / filing SHALL move it to Filing in progress, set the person as preparer and record them as a preparation participant, as their own claim would. Assigning a reviewer to a case at Pending review SHALL move it to Review in progress, set the person as reviewer and open an active review at the case's current preparation version, as their own claim would. The client SHALL see the same progress line as for a claim: "A volunteer has started preparing your return." or "An independent reviewer is checking your return."
