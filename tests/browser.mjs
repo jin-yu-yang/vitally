@@ -9476,8 +9476,24 @@ test(
       assert.equal(await counts.nth(0).getAttribute("aria-label"), `1 of ${audience} read`);
       assert.equal((await counts.nth(0).textContent()).trim(), `1/${audience}`);
       assert.equal((await counts.nth(1).textContent()).trim(), `1/${audience}`);
+      // At the evidence widths the sidebar is an overlay over the page: it is
+      // closed by its own toggle for the shot and opened again after, as the
+      // story's shootWithoutSidebar does.
+      const setSidebar = async (open) => {
+        await waitForQuiet(admin);
+        await admin.locator('[data-action="toggle-sidebar"]').click({ timeout: CLICK_MS });
+        await waitFor(
+          admin,
+          `the sidebar to be ${open ? "open" : "closed"}`,
+          (wanted) => document.querySelector('[data-action="toggle-sidebar"]')?.getAttribute("aria-expanded") === wanted,
+          String(open),
+          RENDER_MS,
+        );
+      };
+      await setSidebar(false);
       await admin.evaluate(() => window.scrollTo(0, 0));
       await shoot(admin, "posted-updates-admin");
+      await setSidebar(true);
       await press(admin, counts.nth(1), "the confirmed count");
       await waitFor(
         admin,
