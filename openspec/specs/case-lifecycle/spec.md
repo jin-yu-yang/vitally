@@ -260,7 +260,7 @@ Its search SHALL reach a case in any stage.
 - a row for each case at Screening in progress ("Finish screening."), with **Open**;
 - a **Waiting for documents** row for each case at Waiting for documents ("Waiting for the client's documents."), with **Put on hold…**;
 - a **Hold** row for each case on Hold: "Can't reach the client about documents." for a Hold that came from Waiting for documents, or "Can't reach the client to sign." for one that came from Ready to exit. It has **Got in touch…** and **Close…**;
-- a **Withdrawn** row for each open `withdrawal_notice` follow-up, with **Resolve**. It reads "The client withdrew; tell <name> to stop work." for a client's own withdrawal during preparation or review, "The client withdrew; make sure the return is not transmitted in TaxSlayer." for an admin's withdrawn close at Ready to exit, a Hold from Ready to exit, or Ready to e-file, or "The case was closed before filing; make sure the return is not transmitted in TaxSlayer." for an admin's individual close of a Hold from Ready to exit with any other reason;
+- a **Withdrawn** row for each open `withdrawal_notice` follow-up, with **Resolve**. It reads "The client withdrew; tell <name> to stop work." for a client's own withdrawal during preparation or review, "The client withdrew; make sure the return is not transmitted in TaxSlayer." for an admin's withdrawn close at Ready to exit, a Hold from Ready to exit, or Ready to e-file, "The case was closed before filing; make sure the return is not transmitted in TaxSlayer." for an admin's individual close of a Hold from Ready to exit with any other reason when no return was filed, or "The case was closed after a return was filed; make sure the rejected return is not transmitted again in TaxSlayer." for that close when a return was already filed;
 - a row for each case at Ready to exit ("Waiting for the client to sign."), with **Mark ready to e-file…**. While the reviewer's call with the client is still pending, the row SHALL read "Waiting for the reviewer's call with the client." instead, with the call-pending explanation in place of the button. For a case returned to signing after a rejection, the row SHALL read "Waiting for the client to sign again.";
 - a row for each case at Ready to e-file ("Ready to e-file."), with **Mark e-filed…**;
 - a **Filing result** row for each case at E-filed, and for each case at Rejected with an e-filed return still waiting, with **Record filing result…**. It SHALL read "Waiting for the IRS and Pennsylvania." while both returns wait, or "Waiting for Pennsylvania's answer." or "Waiting for the IRS's answer." while one e-filed return waits. A return on paper SHALL never be waited for;
@@ -393,7 +393,7 @@ At E-filed, Rejected and Accepted, the message SHALL be built from one sentence 
 
 A case at E-filed whose returns have no filing method (e-filed before filing methods existed) SHALL show "Your return was e-filed. The IRS will confirm whether it is accepted." / "您的报税表已电子递交。国税局会确认是否接受。". The websites SHALL appear as plain text, not links.
 
-A closed case SHALL show the message for its reason:
+A closed case SHALL show the message for its reason, unless a return was filed before the close (see "A close after a filing says what was filed"):
 
 | Reason | English | 简体 |
 |---|---|---|
@@ -417,7 +417,7 @@ Each new move SHALL add one line to the client's history, in their language:
 | Put on hold | PCDC is trying to reach you. | PCDC 正在设法联系您。 |
 | Got in touch, and the return after the last verified document | PCDC is working on your application again. | PCDC 已继续处理您的申请。 |
 | Withdraw | You withdrew your application. Your return was not filed. | 您已撤回申请。您的报税表未递交。 |
-| Close, and the season-end close | the closed message for its reason, from the table above; for `other`, today's line | the same, in 简体 |
+| Close, and the season-end close | the closed message for its reason, from the table above, or the line from "A close after a filing says what was filed" when a return was filed; for `other`, today's line | the same, in 简体 |
 | Mark ready to e-file | PCDC recorded that your return is ready. PCDC will take the next step. | PCDC 已记录您的报税表已准备好。PCDC 会进行下一步。 |
 | Mark e-filed, both e-filed | PCDC e-filed your return. | PCDC 已电子递交您的报税表。 |
 | Mark e-filed, federal e-filed and state on paper | PCDC e-filed your federal return and gave your Pennsylvania return on paper to you or the person you sent. If it isn't signed yet, sign it, then mail it yourself. A reply can take about 3 months after you mail it. | PCDC 已电子递交您的联邦报税表，并将您的宾州报税表纸本交给您或您委托的人。如果还没有签名，请先签名，然后自行邮寄。邮寄后可能需要约 3 个月才会有回复。 |
@@ -521,7 +521,7 @@ Every history line the system can store SHALL have its 简体 translation. Earli
 - **THEN** the status panel reads "PCDC 需要您提供更多文件，才能准备您的报税表。请查看下方的文件请求。", and the requests are listed below it
 
 #### Scenario: Closed, not filed
-- **WHEN** a client opens a case closed with reason Dismissed
+- **WHEN** a client opens a case closed with reason Dismissed before any return was filed
 - **THEN** the status panel reads "PCDC could not reach you, so this application was closed. Your return was not filed."
 
 #### Scenario: A duplicate doesn't name the other application
@@ -840,7 +840,8 @@ When the client withdraws a case at Filing in progress, Corrections in progress 
 
 When an admin closes a case before filing with Close, an office follow-up with purpose `withdrawal_notice` SHALL open, because a reviewed return that hasn't been transmitted is left in TaxSlayer. Closing before filing means with reason `withdrawn` at Ready to exit or Ready to e-file, or with any reason at a Hold that came from Ready to exit. Follow-ups SHALL show it as:
 - "The client withdrew; make sure the return is not transmitted in TaxSlayer." for reason `withdrawn`;
-- "The case was closed before filing; make sure the return is not transmitted in TaxSlayer." for any other reason.
+- "The case was closed before filing; make sure the return is not transmitted in TaxSlayer." for any other reason when no return was filed;
+- "The case was closed after a return was filed; make sure the rejected return is not transmitted again in TaxSlayer." for any other reason when a return was already filed before the case went back to signing (see "A close after a filing says what was filed").
 
 Each notice SHALL stay open until someone resolves it, like any other follow-up. Closing a Hold that came from Waiting for documents SHALL open no notice. The season-end close of unsigned cases SHALL open no notice: its confirmation states once that none of the returns will be transmitted.
 
@@ -873,6 +874,10 @@ Each notice SHALL stay open until someone resolves it, like any other follow-up.
 #### Scenario: No line once filed
 - **WHEN** a client opens a case at E-filed or Accepted
 - **THEN** there is neither a Withdraw button nor "To withdraw now, contact PCDC."
+
+#### Scenario: Closed before the second filing
+- **WHEN** a case whose Pennsylvania return was accepted and federal return rejected is returned to signing, put on hold, and an admin closes the Hold with reason Dismissed
+- **THEN** the case is Closed, and Follow-ups shows "The case was closed after a return was filed; make sure the rejected return is not transmitted again in TaxSlayer." until the office resolves it
 
 ### Requirement: An admin closes unsigned cases at season end
 Follow-ups SHALL offer an admin **Close unsigned cases…**. It SHALL list every case at Ready to exit and every Hold that came from Ready to exit, whatever its season. When there is none, the button SHALL be disabled with "No case is waiting for a signature.". Volunteers SHALL NOT see it.
@@ -925,3 +930,73 @@ The individual Close SHALL keep its rules: at Ready to exit it stays allowed onl
 #### Scenario: Nothing to close
 - **WHEN** no case is at Ready to exit or on a Hold that came from it
 - **THEN** Close unsigned cases… is disabled with "No case is waiting for a signature."
+
+### Requirement: A close after a filing says what was filed
+A closed case SHALL tell the client what happened to each return when at least one return was filed before the close. Each return SHALL have one outcome, from the case's filing method and result:
+
+| Method and result | Outcome |
+|---|---|
+| any method, result accepted | accepted |
+| e-filed, no result yet | waiting |
+| given to the client (or on paper with no result) | paper |
+| rejected, or no method | not filed |
+
+A case has a filed return when either return is accepted, waiting or paper. The case's filing methods are both set or both unset; a case with no methods has no filed return. The system SHALL NOT tell "no Pennsylvania return needed" apart from "not filed".
+
+When a case closed with reason `dismissed`, `withdrawn`, `out_of_scope` or `no_need_to_file` has a filed return, its closed message and its close history line SHALL be the reason's sentence, then the federal return's sentence, then the Pennsylvania return's sentence. In English the sentences SHALL be joined by one space, in 简体 with nothing between them.
+
+| Reason | English | 简体 |
+|---|---|---|
+| `dismissed` | PCDC could not reach you, so this application was closed. | PCDC 无法联系到您，因此此申请已关闭。 |
+| `withdrawn` | You withdrew this application. | 您已撤回此申请。 |
+| `out_of_scope` | This application was closed because the return is outside what VITA volunteers can prepare. | 此申请已关闭，因为该报税表超出了 VITA 志愿者可以准备的范围。 |
+| `no_need_to_file` | A PCDC volunteer confirmed with you that nothing more needs to be prepared this year, so this application was closed. | PCDC 志愿者已与您确认，今年没有其他需要准备的报税表，因此此申请已关闭。 |
+
+| Return and outcome | English | 简体 |
+|---|---|---|
+| federal, accepted | Your federal return was filed and accepted. Do not file it again. | 您的联邦报税表已递交并被接受。请勿再次递交。 |
+| federal, waiting | Your federal return was e-filed and is waiting for an answer. Do not file it again. | 您的联邦报税表已电子递交，正在等待回复。请勿再次递交。 |
+| federal, paper | PCDC gave you your federal return on paper. It is filed only after you mail it. | PCDC 已将纸质的联邦报税表交给您。您寄出后才算递交。 |
+| federal, not filed | Your federal return was not filed. | 您的联邦报税表未递交。 |
+| Pennsylvania, accepted | Your Pennsylvania return was filed and accepted. Do not file it again. | 您的宾州报税表已递交并被接受。请勿再次递交。 |
+| Pennsylvania, waiting | Your Pennsylvania return was e-filed and is waiting for an answer. Do not file it again. | 您的宾州报税表已电子递交，正在等待回复。请勿再次递交。 |
+| Pennsylvania, paper | PCDC gave you your Pennsylvania return on paper. It is filed only after you mail it. | PCDC 已将纸质的宾州报税表交给您。您寄出后才算递交。 |
+| Pennsylvania, not filed | Your Pennsylvania return was not filed. | 您的宾州报税表未递交。 |
+
+When no return was filed, and for reasons `duplicate` and `other` and a case closed before reasons existed, the closed message and history line SHALL be exactly the ones in "Clients are told at each new step". This SHALL hold for Close, at every stage it allows, and for the season-end close. For every case closed with reason `dismissed`, `withdrawn`, `out_of_scope`, `no_need_to_file` or `duplicate`, the status panel and the history line SHALL give the same text; for `other` and no reason they keep today's two different texts. Every line this requirement can produce, for every pair of outcomes with a filed return, SHALL have its 简体 translation, and 繁體 SHALL be generated from it. History lines already stored SHALL keep their words.
+
+#### Scenario: Closed at Rejected with the other return accepted
+- **WHEN** the federal return was rejected and the Pennsylvania return accepted, and an admin closes the Rejected case with reason Withdrawn
+- **THEN** the client's status panel and new history line read "You withdrew this application. Your federal return was not filed. Your Pennsylvania return was filed and accepted. Do not file it again."
+
+#### Scenario: The same in 简体
+- **WHEN** a client reading in 简体 opens that case
+- **THEN** the status panel and the history line read "您已撤回此申请。您的联邦报税表未递交。您的宾州报税表已递交并被接受。请勿再次递交。"
+
+#### Scenario: Closed while the other return waits
+- **WHEN** the federal return was rejected while the e-filed Pennsylvania return is still waiting, and an admin closes the case with reason Dismissed
+- **THEN** the client reads "PCDC could not reach you, so this application was closed. Your federal return was not filed. Your Pennsylvania return was e-filed and is waiting for an answer. Do not file it again."
+
+#### Scenario: A paper return must still be mailed
+- **WHEN** the federal return was rejected and the Pennsylvania return was given to the client on paper, and an admin closes the case with reason Out of scope
+- **THEN** the client reads "This application was closed because the return is outside what VITA volunteers can prepare. Your federal return was not filed. PCDC gave you your Pennsylvania return on paper. It is filed only after you mail it."
+
+#### Scenario: Season-end close after Return to signing
+- **WHEN** a case with an accepted Pennsylvania return and a rejected federal return is returned to signing, and an admin closes it with the season-end close
+- **THEN** the client reads "PCDC could not reach you, so this application was closed. Your federal return was not filed. Your Pennsylvania return was filed and accepted. Do not file it again."
+
+#### Scenario: No need to file, after a filing
+- **WHEN** a case with an accepted federal return and a rejected Pennsylvania return is closed with reason No need to file
+- **THEN** the client reads "A PCDC volunteer confirmed with you that nothing more needs to be prepared this year, so this application was closed. Your federal return was filed and accepted. Do not file it again. Your Pennsylvania return was not filed."
+
+#### Scenario: Both returns rejected
+- **WHEN** both returns were rejected and an admin closes the Rejected case with reason Dismissed
+- **THEN** the client reads "PCDC could not reach you, so this application was closed. Your return was not filed.", as today
+
+#### Scenario: A duplicate after a filing
+- **WHEN** a case with an accepted Pennsylvania return is closed with reason Duplicate
+- **THEN** the client reads "This application was closed. Your return continues under your other application with PCDC.", as today
+
+#### Scenario: Every combination is translated
+- **WHEN** the database's closed line is computed for every reason and every pair of return outcomes
+- **THEN** each line equals the status panel's English for the same case, and each has a 简体 translation equal to the status panel's 简体
