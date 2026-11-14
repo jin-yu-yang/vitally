@@ -331,7 +331,7 @@ test("sign-in accounts against real Supabase", async (t) => {
       if (args?.p_action_id) assert.equal(await f.receiptsFor(args.p_action_id), 0, `${label} receipt`);
       return error;
     };
-    const prepare = (op, target) => ({ p_op: op, p_target: target });
+    const prepare = (op, target, actionId = null) => ({ p_action_id: actionId, p_op: op, p_target: target });
     const recordArgs = (op, target, userId, actionId = randomUUID()) => ({
       p_action_id: actionId,
       p_op: op,
@@ -468,6 +468,32 @@ test("sign-in accounts against real Supabase", async (t) => {
       assert.equal(await accountCount(f, user.userId), 1);
       assert.equal((await f.readMembership(user.userId)).length, 1);
       assert.equal(await f.receiptsFor(args.p_action_id), 1);
+    });
+
+    // Review Focus 2, end to end: a retried Create or Invite goes prepare, then
+    // record, with the same action id.
+    await t.test("prepare returns the stored result for a recorded action id", async () => {
+      const user = await f.provision();
+      const target = { email: user.email };
+      const args = recordArgs("invite", target, user.userId);
+      const recorded = await rpc(admin, "vitally_record_account", args);
+      const before = await accountOf(f, user.userId);
+      assert.deepEqual(await rpc(admin, "vitally_prepare_account", prepare("invite", target, args.p_action_id)), {
+        replay: recorded,
+      });
+      assert.deepEqual(await accountOf(f, user.userId), before, "prepare writes nothing");
+      assert.equal(await f.receiptsFor(args.p_action_id), 1);
+      // Another caller with that action id holds no such receipt: the check runs.
+      const foreignTarget = { email: `v-${randomUUID()}@example.org` };
+      const foreign = await rpc(
+        f.foreignStaff,
+        "vitally_prepare_account",
+        prepare("invite", foreignTarget, args.p_action_id),
+      );
+      assert.equal(foreign.replay, undefined);
+      assert.equal(foreign.email, foreignTarget.email);
+      // Without an action id, the same address is refused as invited.
+      await refusedWith(admin, "vitally_prepare_account", prepare("invite", target), VALIDATION, "ALREADY_INVITED");
     });
 
     await t.test("record refuses a user whose email differs", async () => {
@@ -816,9 +842,22 @@ test("sign-in accounts against real Supabase", async (t) => {
     });
 
     await t.test("client invitations list", async () => {
+      // A deactivated client account is left out of the list.
+      const gone = await f.provision();
+      await rpc(admin, "vitally_record_account", recordArgs("invite", { email: gone.email }, gone.userId));
+      await f.sql("update public.memberships set active=false where workspace_id=$1 and user_id=$2", [
+        f.workspaceId,
+        gone.userId,
+      ]);
+      await f.sql(
+        "update public.accounts set status='deactivated',deactivated_at=now() where workspace_id=$1 and user_id=$2",
+        [f.workspaceId, gone.userId],
+      );
       const client = await f.provision();
       await rpc(admin, "vitally_record_account", recordArgs("invite", { email: client.email }, client.userId));
       const list = await rpc(admin, "vitally_client_invitations");
+      assert.ok(!list.some((entry) => entry.email === gone.email), "no deactivated client");
+      assert.ok(list.every((entry) => entry.status !== "deactivated"), "no deactivated status");
       assert.ok(Array.isArray(list), "an array");
       for (const entry of list)
         assert.deepEqual(Object.keys(entry).sort(), ["accountRevision", "activatedAt", "email", "invitedAt", "status"]);

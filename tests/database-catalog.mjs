@@ -53,7 +53,7 @@ const RPCS = Object.freeze([
   "vitally_edit_contact(p_action_id uuid, p_contact_id uuid, p_expected_revision bigint, p_entry jsonb)",
   "vitally_save_volunteer(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_volunteer jsonb)",
   "vitally_my_clearance()",
-  "vitally_prepare_account(p_op text, p_target jsonb)",
+  "vitally_prepare_account(p_action_id uuid, p_op text, p_target jsonb)",
   "vitally_record_account(p_action_id uuid, p_op text, p_target jsonb, p_user_id uuid)",
   "vitally_deactivate_account(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)",
   "vitally_reactivate_account(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)",

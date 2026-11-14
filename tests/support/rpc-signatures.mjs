@@ -118,10 +118,11 @@ export const RPC_SIGNATURES = Object.freeze([
   // The read-only check: inviting an address nobody holds.
   Object.freeze({
     name: "vitally_prepare_account",
-    signature: "vitally_prepare_account(text,jsonb)",
+    signature: "vitally_prepare_account(uuid,text,jsonb)",
     authorized: (f) => f.siteCoordinator,
     receiptKeys: Object.freeze(["accountRevision", "email", "op", "reusableUserId", "volunteerId"]),
     args: () => ({
+      p_action_id: crypto.randomUUID(),
       p_op: "invite",
       p_target: { email: `invite-${crypto.randomUUID()}@example.org` },
     }),

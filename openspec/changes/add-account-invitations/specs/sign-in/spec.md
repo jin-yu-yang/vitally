@@ -10,7 +10,7 @@ For a `staff` member, every public RPC that acts on the workspace SHALL act as t
 - `vitally_edit_contact(p_action_id uuid, p_contact_id uuid, p_expected_revision bigint, p_entry jsonb)`;
 - `vitally_save_volunteer(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_volunteer jsonb)`, whose volunteer argument names the volunteer being edited, never the actor;
 - `vitally_my_clearance()`;
-- `vitally_prepare_account(p_op text, p_target jsonb)`;
+- `vitally_prepare_account(p_action_id uuid, p_op text, p_target jsonb)`;
 - `vitally_record_account(p_action_id uuid, p_op text, p_target jsonb, p_user_id uuid)`, whose user argument names the auth user being given an account, never the actor;
 - `vitally_deactivate_account(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)` and `vitally_reactivate_account(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)`, whose volunteer argument names the volunteer whose account changes, never the actor;
 - `vitally_client_invitations()`.

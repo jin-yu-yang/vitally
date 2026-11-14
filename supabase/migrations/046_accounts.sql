@@ -488,22 +488,37 @@ revoke all on function vitally_private.reactivate_account(uuid,uuid) from public
 -- digest (with the resolved person) and the receipt; a replay returns the
 -- stored result. A refusal rolls everything back, the receipt included.
 
--- Read-only: the check alone, for the Edge Function's step 2.
-create function public.vitally_prepare_account(p_op text,p_target jsonb)
-returns jsonb language plpgsql security definer set search_path='' as $$
+-- Read-only: the check alone, for the Edge Function's step 2. A retried
+-- Create or Invite reaches this again with the same action id after its record
+-- succeeded; the check would now refuse it (ALREADY_INVITED), so when the
+-- caller already holds a stored RECORD_ACCOUNT receipt for p_action_id the
+-- answer is {replay: <that receipt>}, before any check. The receipt is read as
+-- reserve_receipt keys it: the caller's workspace, user and action id.
+-- p_action_id may be null (resend).
+create function public.vitally_prepare_account(p_action_id uuid,p_op text,p_target jsonb)
+returns jsonb language plpgsql security definer set search_path='' as $
 declare v_member public.memberships;
  v_person public.people;
+ v_stored jsonb;
 begin
  v_member=vitally_private.require_membership();
  v_person=vitally_private.acting_person(v_member);
  if v_member.access<>'staff' or v_person.id is null or not vitally_policy.is_workspace_admin(v_member.workspace_id) then
   raise sqlstate 'VT001' using message='FORBIDDEN';
  end if;
+ if p_action_id is not null then
+  select r.receipt into v_stored from public.action_receipts r
+   where r.workspace_id=v_member.workspace_id and r.actor_user_id=v_member.user_id and r.action_id=p_action_id
+    and r.operation='RECORD_ACCOUNT' and r.receipt is not null;
+  if v_stored is not null then
+   return jsonb_build_object('replay',v_stored);
+  end if;
+ end if;
  return vitally_private.account_check(v_member.workspace_id,p_op,p_target);
 end;
 $$;
-revoke all on function public.vitally_prepare_account(text,jsonb) from public,anon,authenticated,service_role;
-grant execute on function public.vitally_prepare_account(text,jsonb) to authenticated;
+revoke all on function public.vitally_prepare_account(uuid,text,jsonb) from public,anon,authenticated,service_role;
+grant execute on function public.vitally_prepare_account(uuid,text,jsonb) to authenticated;
 
 -- Create account (create) or Invite (invite) for an auth user the Edge
 -- Function created or reused. The check runs again under the lock, and the
@@ -566,6 +581,7 @@ begin
  exception when unique_violation then
   -- Another active membership for this user (memberships_one_active_workspace)
   -- or a row that appeared meanwhile.
+  -- An accounts (workspace_id,person_id) clash is unreachable: the advisory lock serializes the re-check.
   raise sqlstate 'VT007' using message='VALIDATION',detail='EMAIL_IN_USE';
  end;
  v_result=jsonb_build_object('actionId',p_action_id,'status','invited','email',v_email,'accountRevision',1);
@@ -675,7 +691,8 @@ $$;
 revoke all on function public.vitally_reactivate_account(uuid,uuid,bigint) from public,anon,authenticated,service_role;
 grant execute on function public.vitally_reactivate_account(uuid,uuid,bigint) to authenticated;
 
--- The workspace's client accounts for the office panel, newest first by
+-- The workspace's invited and active client accounts (the panel shows no
+-- deactivated ones) for the office panel, newest first by
 -- invitation (or activation, for a backfilled or roster-made client). The
 -- email is read from auth.users here, inside the definer.
 create function public.vitally_client_invitations()
@@ -695,7 +712,7 @@ begin
   from public.accounts a
   join public.memberships m on m.workspace_id=a.workspace_id and m.user_id=a.user_id and m.access='applicant'
   join auth.users u on u.id=a.user_id
-  where a.workspace_id=v_member.workspace_id),'[]'::jsonb);
+  where a.workspace_id=v_member.workspace_id and a.status<>'deactivated'),'[]'::jsonb);
 end;
 $$;
 revoke all on function public.vitally_client_invitations() from public,anon,authenticated,service_role;
