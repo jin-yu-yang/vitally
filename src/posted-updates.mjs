@@ -35,17 +35,10 @@ export function emptyUpdateForm() {
   };
 }
 
-// Same rule as the database: https, irs.gov or a subdomain, no whitespace, at most 500 characters.
+// The database regex, applied to the raw text: https, irs.gov or a subdomain, at most 500 characters.
+const IRS_LINK = /^https:\/\/([a-z0-9-]+\.)*irs\.gov(\/\S*)?$/i;
 function isIrsLink(text) {
-  if (text.length > LINK_MAX || /\s/.test(text)) return false;
-  let url;
-  try {
-    url = new URL(text);
-  } catch {
-    return false;
-  }
-  if (url.protocol !== "https:") return false;
-  return url.hostname === "irs.gov" || url.hostname.endsWith(".irs.gov");
+  return text.length <= LINK_MAX && IRS_LINK.test(text);
 }
 
 export function validateUpdate(form = {}) {
