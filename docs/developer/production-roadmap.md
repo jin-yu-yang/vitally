@@ -232,7 +232,7 @@ The demo is sized for a classroom: a handful of cases per workspace.
 - The staff case list reads every visible case plus per-case summaries, with no pagination.
 - Child tables (`documents`, `contact_log`, `case_events`, `client_events`) have no index on
   `case_id`; add them before real volumes.
-- Each staff window keeps one Realtime channel over nineteen tables and re-reads on each event. With many
+- Each staff window keeps one Realtime channel over twenty tables and re-reads on each event. With many
   staff online at once, measure and consider narrower subscriptions.
 - One account has one active membership, so one person cannot work at two sites. Revisit if PCDC
   runs several sites.

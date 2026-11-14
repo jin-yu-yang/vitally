@@ -59,7 +59,7 @@ flowchart LR
 
 There is no application server. The browser talks to Supabase directly with the public
 (publishable) key. Every read goes through row-level security, and **every write goes through one
-of eight database functions** that check who may do what, in a fixed order, inside one
+of thirteen database functions** that check who may do what, in a fixed order, inside one
 transaction. The database is the back end.
 
 ## Repository map
@@ -91,6 +91,8 @@ src/
   pool-views.mjs           The office's case pool (every case, by phase).
   volunteer-views.mjs      The admin-only Volunteers Roster page and its Add / Edit drawer.
   volunteer-roster.mjs     The Roster's pure logic: roles, certificates, search, form reading, validation.
+  update-views.mjs         The Notifications panel, the admin's Post an update screen, and their dialogs.
+  posted-updates.mjs       Posted updates' pure logic: the empty form, validation, audience text, pinning.
   ui.mjs                   HTML helpers, escaping, labels, icons, focus preservation.
   sample-data.mjs          Fictional form filling for demos (version 2).
   styles.css               All styles.
@@ -130,7 +132,7 @@ These are load-bearing. Changing any of them is an architecture decision, not a 
    in PostgreSQL. The browser predicts what is allowed so it can hide buttons, but a prediction is
    never permission. See [Database: the action API](database.md#the-action-api).
 2. **Browser roles can read, never write, tables.** `authenticated` has `SELECT` only; all
-   changes go through the eight `SECURITY DEFINER` functions. See
+   changes go through the thirteen `SECURITY DEFINER` functions. See
    [Database: visibility](database.md#who-can-see-what).
 3. **Every write is idempotent and revision-fenced.** A write carries a client-generated action
    id and the revision the person saw. Replaying the same envelope returns the same receipt;

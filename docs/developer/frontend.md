@@ -25,6 +25,7 @@ The front end **predicts** what a person may do so it can show the right buttons
 - [Feedback](#feedback)
 - [Live updates](#live-updates)
 - [The contact log](#the-contact-log)
+- [Posted updates](#posted-updates)
 - [Sign-in](#sign-in)
 - [Window state](#window-state)
 - [Client languages](#client-languages)
@@ -38,9 +39,10 @@ The front end **predicts** what a person may do so it can show the right buttons
 ```mermaid
 flowchart TD
   app["app.mjs<br/>bootstrap + DOM events"] --> controller["controller.mjs<br/>all state"]
-  app --> views["views.mjs, client-views.mjs,<br/>staff-views.mjs, admin-views.mjs,<br/>office-views.mjs, pool-views.mjs,<br/>volunteer-views.mjs"]
+  app --> views["views.mjs, client-views.mjs,<br/>staff-views.mjs, admin-views.mjs,<br/>office-views.mjs, pool-views.mjs,<br/>volunteer-views.mjs, update-views.mjs"]
   app --> caseActions["case-actions.mjs<br/>payload builders"]
   views --> roster["volunteer-roster.mjs<br/>Roster lists, search, form checks"]
+  views --> postedUpdates["posted-updates.mjs<br/>update form checks, audience text"]
   views --> intakeForm["intake-form.mjs<br/>version-2 renderer, draft rules"]
   intakeForm --> catalogue["intake-catalogue.mjs<br/>catalogue rules"]
   controller --> catalogue
@@ -116,7 +118,7 @@ sign-in (`sendCode`, `verifyCode`, `editAuthEmail`, `editAuthCode`, `restartSign
 **`staffWindow()`** is everything a staff screen does (its reads, its eligibility rules and its
 actions), true only for a `staff` account (`isStaffWindow` in [`src/contracts.mjs`](../../src/contracts.mjs)
 says the same for the views). The person acting is always the account's own `principal.personId`; a
-client sends none. None of the eight RPCs takes the acting person, so the browser never claims an identity (`vitally_save_volunteer` takes a volunteer's person id, but as the record to change, not as who is acting); the
+client sends none. None of the thirteen RPCs takes the acting person, so the browser never claims an identity (`vitally_save_volunteer` takes a volunteer's person id, but as the record to change, not as who is acting); the
 database resolves it ([Database: who is acting](database.md#who-is-acting)). An account with any
 other access (a former presenter) gets the "This account has no access" screen and nothing is
 loaded for it.
@@ -141,7 +143,7 @@ Three rules the controller keeps:
 | Signed out | Email and code form ([`client-views.mjs`](../../src/client-views.mjs) `accessScreen`); "cannot reach the server" and "no access" screens ([`views.mjs`](../../src/views.mjs)) |
 | Applicant | `applications` (list and lookup by Application ID), `reference` (new ID to keep), `intake` (the sub-step form, built by `src/intake-views.mjs`), `progress` (status, client number, requests, send document) |
 | Staff window, volunteer account | `staff`: the work board; `staff-case`: the case page with its tabs ([`staff-views.mjs`](../../src/staff-views.mjs)) |
-| Staff window, `admin` account | `staff`: the Follow-ups queue ([`office-views.mjs`](../../src/office-views.mjs)); `office-cases`: the case pool ([`pool-views.mjs`](../../src/pool-views.mjs)); `office-add-case`: Add a case for a walk-in client ([`office-views.mjs`](../../src/office-views.mjs)); `staff-case`: the office's case page ([`admin-views.mjs`](../../src/admin-views.mjs)); `office-volunteers`: the Volunteers Roster and its Add / Edit drawer ([`volunteer-views.mjs`](../../src/volunteer-views.mjs), rules in [`volunteer-roster.mjs`](../../src/volunteer-roster.mjs)) |
+| Staff window, `admin` account | `staff`: the Follow-ups queue ([`office-views.mjs`](../../src/office-views.mjs)); `office-cases`: the case pool ([`pool-views.mjs`](../../src/pool-views.mjs)); `office-add-case`: Add a case for a walk-in client ([`office-views.mjs`](../../src/office-views.mjs)); `staff-case`: the office's case page ([`admin-views.mjs`](../../src/admin-views.mjs)); `office-volunteers`: the Volunteers Roster and its Add / Edit drawer ([`volunteer-views.mjs`](../../src/volunteer-views.mjs), rules in [`volunteer-roster.mjs`](../../src/volunteer-roster.mjs)); `office-updates`: Post an update ([`update-views.mjs`](../../src/update-views.mjs)), for a ceiling admin only, cleared or not |
 | Staff account | The staff screens: the sidebar and the case page header say "Signed in as <name>", and the person is the account's own (`staffScreen` in `views.mjs` picks the office screens when that person has `admin`, and the volunteer work board otherwise). Always English |
 
 **Fill tools.** They follow the demo-tools switch. Three controls exist: the staff "Auto-fill fictional data" button, the client intake's fiction toolbar and the office's Add a case "Fill fictional details" pill. With the switch on, an "Auto-fill fictional data" button appears at the top of each questionnaire, the review-contact form and the filing dialogs (Mark ready to e-file, Mark e-filed, Record filing result, Return to signing). [`src/demo-fill.mjs`](../../src/demo-fill.mjs) fills the form with fictional values that the form's own payload builder accepts. It never overwrites typed text or a defaulted choice, and it sends nothing: the form's own button still submits. `demoFillButton(enabled)` renders nothing when the switch (`state.demoTools`) is off, and the `demo-fill` handler in `app.mjs` checks `demoToolsOn` again. The switch is on only when `/public-config.json` sends `demoTools: true` (`server.mjs` does so only with `VITALLY_DEMO_TOOLS=1` and a loopback `SUPABASE_URL`) and the config's `supabaseUrl` is loopback. When on, these controls show to whoever is on that screen; when off, to no one
@@ -784,7 +786,9 @@ re-reads it:
 - any event about the open case (its requests, documents, history, reviews): that case;
 - an `assistance_items` event: the assistance list;
 - a `workspaces` event (a change to the workspace row, such as its intake
-  version): everything, with a notice if the open case vanished.
+  version): everything, with a notice if the open case vanished;
+- a `posted_updates` event: the Notifications feed, and the admin's table when Post an update is
+  open. `update_reads` is not published, so the table re-reads on opening and on focus instead.
 
 `case_contacts`, `case_materials`, `contact_log` and `contact_log_versions` events carry a case id
 like the other child tables, so they re-read the open case. That is how a contact logged in one
@@ -820,6 +824,30 @@ database side is in [Database: the contact log](database.md#the-contact-log).
   re-read the case. The store reads `contact_log` and `contact_log_versions` for `getCase`.
 - **Copy** writes to the system clipboard with `navigator.clipboard.writeText` (`copyContacts` in
   `app.mjs`). A refused clipboard shows a warning toast instead. Tests that check the text read the clipboard back.
+
+## Posted updates
+
+Admins post IRS policy updates and office notices; every staff member reads the ones addressed to
+them. The database side is in [Database: posted updates](database.md#posted-updates).
+
+- **[`posted-updates.mjs`](../../src/posted-updates.mjs)** is pure: the empty form, the checks
+  and their sentences (also shown for a database `VALIDATION` on that field), the request a save
+  sends, the audience text ("All volunteers", "Preparers and Reviewers") and whether an update
+  is pinned today in New York.
+- **[`update-views.mjs`](../../src/update-views.mjs)** draws the Notifications panel (a drawer),
+  the Post an update screen (the form, its live preview and the table), the who-has-read dialog and
+  the Unpublish and Delete confirmations. Staff screens, so English only.
+- **The bell.** Notifications is in every staff sidebar, Finish your setup included. Its badge
+  is `state.updatesUnread`, the RPC's own count; the view never recounts it.
+- **The feed** (`loadFeed`) is read with the work, on every refresh (focus, `online`), on a
+  `posted_updates` or `workspaces` event, and with every clearance check. An uncleared window has
+  no Realtime channel, so its feed re-reads on focus and Check again. A failed read keeps the items
+  it had and never blocks the rest.
+- **Opening the panel** marks the unread items it shows read in one `vitally_mark_updates` call,
+  then re-reads. While it stays open, each later read marks what is new. I've read this confirms.
+- **Typing in the form** stores the values without a render, and `app.mjs` redraws only
+  `#update-preview`, so the text being typed is never replaced. A save or table action that fails
+  offline keeps its request, so pressing again resends the same action id.
 
 ## Sign-in
 

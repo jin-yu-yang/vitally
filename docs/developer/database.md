@@ -24,7 +24,7 @@ it. Run everything described here against the local stack from [`docs/setup.md`]
 
 ## Migrations
 
-The schema is forty-five plain SQL files (001 to 045) in [`supabase/migrations/`](../../supabase/migrations/), applied
+The schema is forty-six plain SQL files (001 to 046) in [`supabase/migrations/`](../../supabase/migrations/), applied
 in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 
 | File | Adds |
@@ -74,6 +74,7 @@ in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 | `043_remove_presenter_access.sql` | Hand-written: the `presenter` access type, the person parameter (`p_person_id`) of the six RPCs and the demonstration people (Alex, Morgan, Sam) are removed. It refuses with `VT008` if a presenter account is referenced ([setup](../setup.md#migration-failed-vt008)); deletes the presenter receipts, memberships and accounts and the demonstration people nothing references; re-adds the access check as `applicant` and `staff`; changes the 22 policies to `m.access = 'staff'` and renames the 16 `presenter_*` policies to `staff_*`; replaces `acting_person`, the six RPCs and `initialize_workspace`; and rewrites `check_operation_authority`, `contact_person`, `lock_case`, `lock_assistance_item`, `act_close_case` and `add_staff_member` |
 | `044_volunteer_roster_records.sql` | Hand-written: the admin-only records behind Volunteers > Roster. The new schema `vitally_policy` holds only `is_workspace_admin(workspace)`, a `security definer` check that answers for the caller alone, used by row policies that must read `people` without recursing into its own policy (it is not an API: PostgREST exposes only `public`); the tables `volunteer_profiles`, `roster_entries` and `certificates` (read by admins only, written only by `vitally_save_volunteer`, not published to Realtime); `staff_people` now hides a person with no sign-in and no capabilities from everyone but an admin; `add_staff_member` links a matching volunteer with no sign-in by email; existing staff get a profile and an empty roster entry, with no roles inferred. Roles and certificates grant nothing: `people.capabilities` is untouched (045 changes this) |
 | `045_volunteer_clearance.sql` | Hand-written: volunteer clearance ([roster clearance](#roster-clearance)). A guard refuses with `VT008` if a person with a sign-in holds a current-season role their confirmed certificates don't support ([setup](../setup.md#045s-guard)), and strips such roles from people with no sign-in; `roster_entries.is_new` and `photo_id_checked_at`; the private role helpers (`confirmed_certificates`, `missing_certificates`, `role_capabilities`, `effective_capabilities`, `cleared`); the deferred constraint triggers `roster_entries_role_certificates` and `certificates_role_certificates`; the read gate `vitally_policy.cleared_workspace_id()` on the staff branch of the 21 case-data policies; `require_cleared` (`VT009` `NOT_CLEARED`) in the six case RPCs; `acting_person`, `check_operation_authority` and `contact_person` return the effective capabilities; the RPC `vitally_my_clearance`; `require_cleared_assignee` (no caller yet); `open_work`; and `vitally_save_volunteer` with role needs (`VT007` `ROLE_NEEDS`), the photo ID check and the open-work rule (`VT004` `OPEN_WORK`) |
+| `046_posted_updates.sql` | Hand-written: posted updates ([below](#posted-updates)). The tables `posted_updates` and `update_reads`, written only through the RPCs; the live audience `vitally_private.audience_member` and the policy helper `vitally_policy.in_update_audience`; two SELECT policies on `posted_updates` and none on `update_reads`; the RPCs `vitally_save_update` and `vitally_update_action` (ceiling admins, with receipts), `vitally_mark_updates` and `vitally_my_updates` (every staff member, cleared or not) and `vitally_posted_updates` (ceiling admins); `posted_updates` joins the Realtime publication and `update_reads` does not. No clearance check: an update holds no case data |
 **Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
 never edit an applied one.** The build writes a file only when the hash differs from the newest
 catalogue migration's. The hash covers the catalogue and `LOADER_VERSION` in
@@ -120,6 +121,7 @@ do not copy them from older files:
 | --- | --- |
 | `vitally_private.check_payload`, `check_preparer_fields`, `act_save_preparer_fields` | `039_preparer_shaded_fields.sql` |
 | `vitally_private.acting_person`, `contact_person`, `check_operation_authority`, `require_cleared`, `open_work`, the role helpers, `role_certificates_check`, `vitally_policy.cleared_workspace_id`, and the RPCs `public.vitally_apply_action`, `vitally_assistance_action`, `vitally_close_unsigned`, `vitally_create_case`, `vitally_log_contact`, `vitally_edit_contact`, `vitally_save_volunteer`, `vitally_my_clearance` | `045_volunteer_clearance.sql` |
+| `vitally_private.audience_member`, `vitally_policy.in_update_audience`, and the RPCs `public.vitally_save_update`, `vitally_update_action`, `vitally_mark_updates`, `vitally_my_updates`, `vitally_posted_updates` | `046_posted_updates.sql` |
 | `vitally_private.add_staff_member`, `vitally_policy.is_workspace_admin` | `044_volunteer_roster_records.sql` |
 | `vitally_private.lock_case`, `lock_assistance_item`, `act_close_case`, `initialize_workspace` | `043_remove_presenter_access.sql` |
 | `vitally_private.check_staff_links`, `set_default_followup` | `038_staff_identity.sql` |
@@ -154,7 +156,7 @@ grep -n -E "^create (or replace )?function" supabase/migrations/*.sql
 
 Two schemas:
 
-- **`public`**: the application tables and the eight browser-callable functions.
+- **`public`**: the application tables and the thirteen browser-callable functions.
 - **`vitally_private`**: helper functions, the migration ledger, and tables browsers must never
   reach. Every function here is `SECURITY DEFINER` with `search_path=''`, and `EXECUTE` is revoked
   from every role, including `service_role`.
@@ -204,6 +206,8 @@ erDiagram
 | `volunteer_profiles` | A volunteer's email, phone and availability (044) | Primary key `(workspace_id, person_id)`; `email` (stored trimmed and lower-case, unique per workspace), `phone`, `works` (`on_site`, `remote`, `on_site_and_remote`), `languages` (`english`, `mandarin`, `cantonese`, `other`), `other_language` (set exactly when `other` is chosen), `revision` (a stale Edit gets `CONFLICT`). Admin-only select; written only by `vitally_save_volunteer`; not published |
 | `roster_entries` | A volunteer's roles for a season (044) | Primary key `(workspace_id, person_id, season)`; `roles` from `greeter`, `intaker`, `preparer`, `reviewer`, `admin`; `added_by_person_id`; `is_new` and `photo_id_checked_at` (045). A role needs its confirmed certificates (045, [roster clearance](#roster-clearance)). Admin-only select; not published |
 | `certificates` | The certificates an admin has confirmed for a roster entry (044) | One row per certificate per entry, from `vsc`, `itqr`, `sc`, `basic`, `advanced`; `status` (only `confirmed` is written), `confirmed_at`, `confirmed_by_person_id`. Unticking deletes the row. Admin-only select; not published |
+| `posted_updates` | An update an admin posts to volunteers (046) | `kind` (`irs_policy`, `office_notice`), `title` (1 to 120 characters), `message` (1 to 2000), `irs_link` (an https link on irs.gov, IRS policy updates only), `audience` (`everyone` or `roles`) with `audience_roles`, `keep_top_until` (a New York date), `ask_confirm`, `status` (`draft`, `posted`, `unpublished`), `created_by_person_id`, `posted_by_person_id`, `posted_at`, `edited_at`, `unpublished_at`, `revision`. Written only by `vitally_save_update` and `vitally_update_action`; published to Realtime |
+| `update_reads` | Who has read and confirmed each update (046) | Primary key `(update_id, person_id)`; `read_at` (the first read), `confirmed_at` (the first confirmation). Written only by `vitally_mark_updates`; Ask everyone to read it again deletes the update's rows. No policy, so browsers read none of it directly; not published |
 | `contact_log` | The current version of each logged contact | One row per entry on any case: `direction`, `contacted_at` (an instant), `with_whom` (+ `other_name`), `method`, `purpose`, `outcome`, `note`, `followup_id` (null unless logged from a task), `logged_by_*`, `logged_at`, its own `revision`, `edited_at`. The outcome must fit the method. Staff-only; written only by the two contact functions; published to Realtime |
 | `contact_log_versions` | Every version of every entry | Primary key `(contact_id, version)`; version 1 is written with the entry, each edit appends the next. Never updated or deleted by a function, so history cannot be rewritten. Staff-only; published to Realtime |
 | `reviews` | One review attempt of one preparation version | `status`: `active`, `corrections_requested`, `approved`, `superseded`; one active per case; `findings`, `resolution`, `client_contact_*` |
@@ -257,6 +261,8 @@ claimable cases) is a later change; see the [roadmap](production-roadmap.md#1-st
 | `assistance_items` | Nothing | All unlinked items, and items on visible cases |
 | `people` | Nothing | Everyone in the workspace, except a volunteer with no sign-in and no capabilities, whom only an admin reads (044) |
 | `volunteer_profiles`, `roster_entries`, `certificates` | Nothing | Admins only (044); not published to Realtime |
+| `posted_updates` | Nothing | Admins: every row (046). Everyone else: the rows that are not drafts and whose audience includes them, cleared or not. The browser reads updates through the RPCs; the policy is there for Realtime |
+| `update_reads` | Nothing | Nothing (no policy); read through `vitally_my_updates` and `vitally_posted_updates` (046) |
 | `memberships` | Own active membership | Own active membership |
 | `workspaces` | Own workspace | Own workspace |
 | `action_receipts` | Nothing (no policy, no grant) | Nothing |
@@ -277,7 +283,7 @@ policy and `vitally_private.lock_case` (which applies the same rule to writes) i
 
 ## The action API
 
-Browsers can call exactly eight functions. Each runs as its owner (`SECURITY DEFINER`), checks the
+Browsers can call exactly thirteen functions. Each runs as its owner (`SECURITY DEFINER`), checks the
 caller itself, and returns a JSON receipt.
 
 | Function | Purpose | Returns |
@@ -290,12 +296,17 @@ caller itself, and returns a JSON receipt.
 | `vitally_close_unsigned(p_action_id uuid, p_cases jsonb, p_confirmed boolean)` | Season end (037): close the listed signing cases as Dismissed, all or nothing ([below](#season-end-close)) | `{actionId, cases: [{caseId, reference, revision}]}` |
 | `vitally_save_volunteer(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_volunteer jsonb)` | Add or edit a volunteer on the Roster (044; admins, on the ceiling; 045 adds role needs, the photo ID check and the open-work rule) | `{actionId, personId, revision}` |
 | `vitally_my_clearance()` | The caller's own clearance (045, [below](#roster-clearance)) | `{cleared, missing, capabilities, isAdmin, siteCoordinatorName}` |
+| `vitally_save_update(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_update jsonb)` | Save a draft, post it, or edit a draft or a posted update (046; ceiling admins). `askAgain` on a posted update clears every read and confirmation | `{actionId, updateId, revision, status}` |
+| `vitally_update_action(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_type text)` | `POST` a draft, `UNPUBLISH` a posted update, or `DELETE` a draft (046; ceiling admins). A replayed delete answers `deleted` | `{actionId, updateId, revision, status}` |
+| `vitally_mark_updates(p_update_ids uuid[], p_confirm boolean)` | Record that the caller read up to 200 updates in their feed, and with `p_confirm` that they confirmed them (046; any staff member). No receipt: a repeat changes nothing | `{marked}` |
+| `vitally_my_updates()` | The caller's feed, pinned first and then newest first (046; any staff member) | `{items, unread}` |
+| `vitally_posted_updates()` | Every update in the workspace, with its live audience and counts (046; ceiling admins) | `{updates}` |
 
-None of the six takes a person parameter (043 removed `p_person_id`). The database decides who
+None of them takes a person parameter (043 removed `p_person_id`). The database decides who
 the caller acts as ([below](#who-is-acting)).
 
 The exact signatures are pinned by a test ([`tests/support/rpc-signatures.mjs`](../../tests/support/rpc-signatures.mjs)),
-so adding a ninth function or changing an argument fails the database suite until the list is
+so adding a fourteenth function or changing an argument fails the database suite until the list is
 updated.
 
 ### Who is acting
@@ -362,6 +373,24 @@ and the behaviour in the canonical spec
 - **`vitally_my_clearance()`** answers for the caller only: `cleared`, what is `missing` (the Form
   13615, the photo ID check, each role's missing certificates), the effective `capabilities`,
   `isAdmin` (the ceiling) and `siteCoordinatorName`.
+
+### Posted updates
+
+Since 046 a ceiling admin posts IRS policy updates and office notices, and every staff member reads
+the ones addressed to them. The behaviour is in the change's spec,
+[`openspec/changes/add-posted-updates/specs/posted-updates/spec.md`](../../openspec/changes/add-posted-updates/specs/posted-updates/spec.md)
+(`openspec/specs/posted-updates/spec.md` once the change is archived).
+
+- **The audience is live.** A person is in an update's audience when they have an active staff
+  membership, a sign-in, and a roster entry for the workspace's current season, and the update is
+  for everyone or for one of their roles (`vitally_private.audience_member`). Nothing is stored per
+  person, so someone added to the roster later sees earlier updates too.
+- **No clearance check.** An uncleared staff member reads their feed on Finish your setup. An
+  update holds no case data.
+- **Unread** counts the updates not read, or asking for confirmation and not confirmed. Opening the
+  Notifications panel marks what it shows read; I've read this confirms.
+- **Unpublish** takes an update out of every feed and keeps its reads, so the admin's counts stay.
+  Only a draft can be deleted.
 
 ### Calling it
 
@@ -718,13 +747,13 @@ exceptions from an application path; the browser would show them as `SERVER_ERRO
 
 ## Realtime
 
-Nineteen tables are published to `supabase_realtime`, INSERT and UPDATE only. `007_realtime_publication.sql`
+Twenty tables are published to `supabase_realtime`, INSERT and UPDATE only. `007_realtime_publication.sql`
 adds twelve: `cases`, `document_requests`, `documents`, `client_events`, `workspaces`, `people`,
 `preparation_participants`, `admin_followups`, `contact_attempts`, `case_events`,
 `assistance_items`, `reviews`. `011` adds `case_contacts`, `013` adds `case_materials` and `017` adds `case_document_cards`.
 `031` adds `contact_log` and `contact_log_versions` and removes `contact_attempts`; `033` adds the two questionnaire tables and `039` adds `preparer_shaded_fields`.
-`044` adds nothing: `volunteer_profiles`, `roster_entries` and `certificates` are not published, because Realtime sends whole rows and the records are admin-only; the Roster loads on opening and after each save. `action_receipts` is not published. An applicant's window watches seven of them (`CLIENT_TABLES`),
-a staff window's all nineteen (`STAFF_TABLES`).
+`044` adds nothing: `volunteer_profiles`, `roster_entries` and `certificates` are not published, because Realtime sends whole rows and the records are admin-only; the Roster loads on opening and after each save. `046` adds `posted_updates`, so an open window re-reads its feed when an update is posted, edited or unpublished. `update_reads` is deliberately not published: reads are frequent and would wake every admin window, so the admin's table re-reads on opening, on focus and after each save instead. `action_receipts` is not published. An applicant's window watches seven of them (`CLIENT_TABLES`),
+a staff window's all twenty (`STAFF_TABLES`).
 
 Realtime applies each subscriber's RLS, so the same visibility rules hold for events. Deletes are
 not published because a deleted row cannot be authorized. The browser treats events as "something

@@ -82,6 +82,7 @@ import { DRAFT_FONT_FIXTURES } from "../src/draft-pdf.mjs";
 import { cardsFor } from "../src/document-cards.mjs";
 import { CONTACT_NOT_SHOWN } from "../src/staff-views.mjs";
 import { todayIso } from "../src/questionnaires.mjs";
+import { nowInput } from "../src/contact-log.mjs";
 import { findSubstep } from "../src/intake-catalogue.mjs";
 import { t as say, sentence } from "../src/client-text.mjs";
 import { describeStage } from "../src/domain.mjs";
@@ -9204,6 +9205,420 @@ test(
         assertConsoleQuiet(win, { name: "the uncleared admin's window" });
       });
     } finally {
+      await fixture.close();
+    }
+  },
+);
+
+// Posted updates (change add-posted-updates) have their own test, outside the
+// story and its time limit, like the Roster's: it adds no phase to either
+// order. Chrome only, on a fixture of its own. Three windows: the Site
+// Coordinator (the admin) posts; the Preparer (cleared) reads and confirms in
+// the Notifications panel, which follows the admin's posts live; a volunteer
+// with a current-season roster entry and no roles yet (not cleared) reads on
+// Finish your setup, which has no realtime channel and re-reads on focus.
+// Fictional people and content only.
+test(
+  "An admin posts an update and volunteers read and confirm it",
+  { timeout: 300_000 },
+  async (t) => {
+    const fixture = await createBrowserFixture();
+    const SETUP_HEADING = "Finish your setup for this season";
+    const IRS_TITLE = "Sign this year's Volunteer Standards of Conduct";
+    const IRS_MESSAGE =
+      "Before your first shift this season, finish certification and sign this year's Volunteer Standards of Conduct " +
+      "(Form 13615). The office has summarized what changed. Bring questions to Saturday's preseason training.";
+    const IRS_LINK = "https://www.irs.gov/individuals/irs-tax-volunteers";
+    const REVIEWER_TITLE = "Reviewer huddle moves to 9:30 on Saturday";
+    const REVIEWER_MESSAGE = "Reviewers meet in the back room at 9:30, before the first clients arrive.";
+    const ALL_TITLE = "Bring your signed Form 13615 to Saturday's training";
+    const ALL_MESSAGE = "The front desk collects signed forms before training starts at 10 AM.";
+    const NEW_NAME = "Jordan Vale";
+    // Keep at the top until a week from today, in New York.
+    const today = nowInput().slice(0, 10);
+    const keepUntil = new Date(Date.parse(`${today}T12:00:00Z`) + 7 * 86_400_000).toISOString().slice(0, 10);
+    const shortDay = /^[A-Z][a-z]{2} \d{1,2}$/;
+    const marks = [];
+    const started = Date.now();
+    const step = (name) => marks.push(`${name} ${Date.now() - started}ms`);
+
+    // The bell's state: its accessible name when it has a badge, "none" when
+    // it has neither the name nor the badge.
+    const bell = (page) =>
+      page.evaluate(() => {
+        const button = document.querySelector('[data-action="open-notifications"]');
+        if (!button) return "missing";
+        const label = button.getAttribute("aria-label");
+        const badge = button.querySelector(".nav-badge");
+        if (!label && !badge) return "none";
+        return label && badge ? label : `inconsistent: ${label} / ${badge?.textContent}`;
+      });
+    const waitForBell = (page, wanted, what) =>
+      waitFor(
+        page,
+        `${what}: the bell to read ${JSON.stringify(wanted)}`,
+        (want) => {
+          const button = document.querySelector('[data-action="open-notifications"]');
+          if (!button) return false;
+          const label = button.getAttribute("aria-label");
+          const badge = button.querySelector(".nav-badge");
+          return want === "none" ? !label && !badge : label === want && Boolean(badge);
+        },
+        wanted,
+        ARRIVAL_MS,
+      );
+    const alertMark = (page) => page.evaluate(() => (window.__vitallyAlerts ?? []).length);
+    const toastSince = (page, text, mark) =>
+      waitFor(
+        page,
+        `the toast ${JSON.stringify(text)}`,
+        ([wanted, from]) =>
+          (window.__vitallyAlerts ?? []).slice(from).some((line) => line.startsWith("toast: ") && line.includes(wanted)),
+        [text, mark],
+        ARRIVAL_MS,
+      );
+    const feedTitles = (page) =>
+      page.evaluate(() =>
+        [...document.querySelectorAll(".modal article.feed-item h3.feed-title")].map((node) => node.textContent.trim()),
+      );
+    const panelOpen = (page) =>
+      waitFor(
+        page,
+        "the Notifications panel to open",
+        () => (document.querySelector("section.modal.office-drawer #modal-title")?.textContent ?? "").trim() === "Notifications",
+        undefined,
+        RENDER_MS,
+      );
+    const closePanel = async (page) => {
+      await clickAction(page, "close-dialog");
+      await waitFor(
+        page,
+        "the Notifications panel to close",
+        () => !document.querySelector("section.modal.office-drawer"),
+        undefined,
+        RENDER_MS,
+      );
+    };
+    const rowOf = (page, title) => page.locator("tr.update-row").filter({ hasText: title });
+    const press = (page, locator, what) => pressControl(page, locator, { selector: "button", what });
+    // The read the panel's open sent has landed for this person.
+    const readLanded = async (personId, title) => {
+      const by = Date.now() + ARRIVAL_MS;
+      for (;;) {
+        const { rows } = await fixture.database.sql(
+          `select r.read_at from public.update_reads r join public.posted_updates u on u.id=r.update_id
+            where u.workspace_id=$1 and u.title=$2 and r.person_id=$3`,
+          [fixture.database.workspaceId, title, personId],
+        );
+        if (rows[0]?.read_at) return;
+        if (Date.now() > by) throw new Error(`the panel's read of ${JSON.stringify(title)} never landed`);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    };
+    // A screenshot at both evidence widths, with no sideways scroll at the
+    // narrow one (the story's shoot, without its order tag).
+    const shots = [];
+    const shoot = async (page, name) => {
+      if (await page.locator("#toast.visible").count()) await clearToast(page);
+      await waitFor(page, "the toast to close", () => !document.querySelector("#toast.visible"), undefined, ARRIVAL_MS);
+      await waitForQuiet(page);
+      const shot = await capture(page, SHOTS, name);
+      shots.push(...shot.files);
+      assert.equal(
+        shot.overflow.scrollWidth,
+        shot.overflow.clientWidth,
+        `${name}: the page scrolls sideways at ${MOBILE_WIDTH}px`,
+      );
+    };
+    // Fill and post the form, then wait for the toast and the new row.
+    const postUpdate = async (page, { kind, title, message, link = "", roles = null, keep = "", confirm = false }) => {
+      await page.locator(`#update-kind-${kind}`).check();
+      await page.locator("#update-title").fill(title);
+      await page.locator("#update-message").fill(message);
+      if (kind === "irs_policy") await page.locator("#update-irs-link").fill(link);
+      if (roles) {
+        await page.locator("#update-audience-roles").check();
+        await page.locator("#update-roles").waitFor({ state: "visible", timeout: RENDER_MS });
+        for (const role of roles) await page.locator(`#update-role-${role}`).check();
+      } else await page.locator("#update-audience-everyone").check();
+      if (keep) await page.locator("#update-keep").fill(keep);
+      if (confirm) await page.locator("#update-ask-confirm").check();
+      await waitFor(
+        page,
+        "the preview to show the title",
+        (wanted) => (document.querySelector("#update-preview .feed-title")?.textContent ?? "").trim() === wanted,
+        title,
+        RENDER_MS,
+      );
+      const mark = await alertMark(page);
+      await press(page, page.locator('#update-form button[name="intent"][value="post"]'), "Post update");
+      await toastSince(page, "Update posted.", mark);
+      await rowOf(page, title).waitFor({ timeout: ARRIVAL_MS });
+    };
+
+    try {
+      // The volunteer not yet cleared: added to this season's roster by the
+      // fixture with no roles (cleared: false skips clearStaff).
+      const fresh = await fixture.database.staff({
+        key: "uncleared_volunteer",
+        name: NEW_NAME,
+        capabilities: ["prepare"],
+        cleared: false,
+      });
+      const { rows: entry } = await fixture.database.sql(
+        `select r.roles from public.roster_entries r join public.workspaces w on w.id=r.workspace_id and r.season=w.current_season
+          where r.workspace_id=$1 and r.person_id=$2`,
+        [fixture.database.workspaceId, fresh.personId],
+      );
+      assert.deepEqual(entry.map((row) => row.roles), [[]], "the new volunteer has no current-season entry without roles");
+
+      const engine = await fixture.launch("chrome");
+      const adminWin = await engine.newPage({ viewport: DESKTOP });
+      const admin = adminWin.page;
+      await guardToast(admin);
+      await loginTestUser({ page: admin, actor: fixture.actor("siteCoordinator"), fixture, heading: OFFICE_BOARD_HEADING });
+      await watchAlerts(admin);
+      const preparerWin = await engine.newPage({ viewport: DESKTOP });
+      const preparer = preparerWin.page;
+      await guardToast(preparer);
+      await loginTestUser({ page: preparer, actor: fixture.actor("preparer"), fixture, heading: WORK_BOARD_HEADING });
+      assert.equal(await bell(preparer), "none", "the Preparer has notifications before anything was posted");
+      // The Preparer's realtime channel is joined before anything is posted.
+      await warmUpLiveRedraw(t, preparer, fixture, "posted-updates preparer");
+      step("signed in");
+
+      // 1. The admin posts the IRS update to all volunteers, kept at the top
+      //    for a week and asking them to confirm.
+      await clickAction(admin, "open-post-update");
+      await admin.getByRole("heading", { name: "Post an update", exact: true }).waitFor({ timeout: RENDER_MS });
+      await waitForText(admin, "No updates yet. Posted updates and drafts appear here.");
+      assert.equal((await admin.locator("#update-form-title").innerText()).trim(), "New update");
+      await postUpdate(admin, {
+        kind: "irs_policy",
+        title: IRS_TITLE,
+        message: IRS_MESSAGE,
+        link: IRS_LINK,
+        keep: keepUntil,
+        confirm: true,
+      });
+      const irsRow = await rowOf(admin, IRS_TITLE).textContent();
+      for (const fact of ["IRS policy", "All volunteers"])
+        assert.ok(irsRow.includes(fact), `the posted row does not show ${fact}: ${irsRow}`);
+      const { rows: stored } = await fixture.database.sql(
+        "select keep_top_until::text as keep, ask_confirm, irs_link from public.posted_updates where workspace_id=$1 and title=$2",
+        [fixture.database.workspaceId, IRS_TITLE],
+      );
+      assert.deepEqual(stored, [{ keep: keepUntil, ask_confirm: true, irs_link: IRS_LINK }]);
+      step("1 posted");
+
+      // 2. The Preparer's bell lights without a reload.
+      await waitForBell(preparer, "Notifications, 1 unread", "the IRS update arriving live");
+      step("2 badge live");
+
+      // 3. The panel shows it with I've read this. Opening it reads it, but
+      //    it asks for confirmation, so the bell stays lit after closing.
+      await clickAction(preparer, "open-notifications");
+      await panelOpen(preparer);
+      await waitFor(
+        preparer,
+        "the IRS update in the panel",
+        (wanted) =>
+          [...document.querySelectorAll(".modal article.feed-item h3.feed-title")].some((n) => n.textContent.trim() === wanted),
+        IRS_TITLE,
+        ARRIVAL_MS,
+      );
+      const confirmButton = preparer.locator('.modal button[data-action="confirm-update"]');
+      assert.equal((await confirmButton.textContent()).trim(), "I've read this");
+      assert.equal(await confirmButton.getAttribute("aria-label"), `I've read “${IRS_TITLE}”`);
+      assert.equal(await preparer.locator(".modal a.feed-link").getAttribute("href"), IRS_LINK);
+      assert.equal(await preparer.locator(".modal .feed-pinned").count(), 1, "the update kept at the top is not shown pinned");
+      await readLanded(fixture.database.preparerId, IRS_TITLE);
+      await waitForQuiet(preparer);
+      await closePanel(preparer);
+      assert.equal(await bell(preparer), "Notifications, 1 unread", "the bell went out before the update was confirmed");
+      step("3 read, still waiting");
+
+      // 4. I've read this: Confirmed <date>, and the bell goes out.
+      await clickAction(preparer, "open-notifications");
+      await panelOpen(preparer);
+      await press(preparer, preparer.locator('.modal button[data-action="confirm-update"]'), "I've read this");
+      await waitFor(
+        preparer,
+        "Confirmed with today's date",
+        () =>
+          /^Confirmed [A-Z][a-z]{2} \d{1,2}$/.test((document.querySelector(".modal p.feed-confirmed")?.textContent ?? "").trim()),
+        undefined,
+        ARRIVAL_MS,
+      );
+      await waitForBell(preparer, "none", "the confirmed update");
+      await closePanel(preparer);
+      step("4 confirmed");
+
+      // 5. The admin's table, read again by opening the screen, counts the
+      //    read and the confirmation; the confirmed count lists who.
+      await clickAction(admin, "open-post-update");
+      await waitFor(
+        admin,
+        "the table to count one read and one confirmation",
+        (wanted) => {
+          const row = [...document.querySelectorAll("tr.update-row")].find((r) => r.textContent.includes(wanted));
+          const names = [...(row?.querySelectorAll('[data-action="open-update-people"]') ?? [])].map((b) =>
+            b.getAttribute("aria-label"),
+          );
+          return names.length === 2 && /^1 of \d+ read$/.test(names[0]) && /^1 of \d+ confirmed$/.test(names[1]);
+        },
+        IRS_TITLE,
+        ARRIVAL_MS,
+      );
+      const counts = rowOf(admin, IRS_TITLE).locator('[data-action="open-update-people"]');
+      const audience = Number((await counts.nth(1).getAttribute("aria-label")).match(/^1 of (\d+) confirmed$/)[1]);
+      assert.ok(audience >= 4, `the audience of all volunteers is only ${audience}`);
+      assert.equal(await counts.nth(0).getAttribute("aria-label"), `1 of ${audience} read`);
+      assert.equal((await counts.nth(0).textContent()).trim(), `1/${audience}`);
+      assert.equal((await counts.nth(1).textContent()).trim(), `1/${audience}`);
+      await admin.evaluate(() => window.scrollTo(0, 0));
+      await shoot(admin, "posted-updates-admin");
+      await press(admin, counts.nth(1), "the confirmed count");
+      await waitFor(
+        admin,
+        "the who-has-read dialog",
+        (wanted) => (document.querySelector("#modal-title")?.textContent ?? "").trim() === `Who has read “${wanted}”`,
+        IRS_TITLE,
+        RENDER_MS,
+      );
+      const people = await admin.evaluate(() =>
+        [...document.querySelectorAll(".modal table.update-people tbody tr")].map((tr) =>
+          [...tr.children].map((cell) => cell.textContent.trim()),
+        ),
+      );
+      assert.equal(people.length, audience, `the dialog lists ${people.length} people, not the audience of ${audience}`);
+      const taylor = people.find(([name]) => name === ROLE_NAMES.preparer);
+      assert.ok(taylor, `the Preparer is not listed: ${JSON.stringify(people)}`);
+      assert.match(taylor[1], shortDay, "the Preparer's read date");
+      assert.match(taylor[2], shortDay, "the Preparer's confirmed date");
+      for (const [name, read, confirmed] of people.filter(([name]) => name !== ROLE_NAMES.preparer))
+        assert.deepEqual([read, confirmed], ["Not yet", "Not yet"], `${name} is counted as having read`);
+      await clickAction(admin, "close-dialog");
+      await waitFor(admin, "the who dialog to close", () => !document.querySelector("table.update-people"), undefined, RENDER_MS);
+      step("5 counted");
+
+      // 6. Edited with Ask everyone to read it again: the Preparer's bell
+      //    lights again, live.
+      await press(admin, rowOf(admin, IRS_TITLE).locator('[data-action="edit-update"]'), "Edit");
+      await waitFor(
+        admin,
+        "the form to edit the update",
+        () => (document.querySelector("#update-form-title")?.textContent ?? "").trim() === "Edit update",
+        undefined,
+        RENDER_MS,
+      );
+      assert.equal(await admin.locator("#update-title").inputValue(), IRS_TITLE);
+      await admin.locator("#update-ask-again").check();
+      const editMark = await alertMark(admin);
+      await press(admin, admin.locator('#update-form button[name="intent"][value="post"]'), "Save changes");
+      await toastSince(admin, "Changes saved.", editMark);
+      await waitForBell(preparer, "Notifications, 1 unread", "the update asked to be read again");
+      step("6 read again");
+
+      // 7. An office notice to Reviewers only: the Preparer's freshly read
+      //    feed has the IRS update and not the notice.
+      await postUpdate(admin, { kind: "office_notice", title: REVIEWER_TITLE, message: REVIEWER_MESSAGE, roles: ["reviewer"] });
+      const reviewerRow = await rowOf(admin, REVIEWER_TITLE).textContent();
+      for (const fact of ["Office", "Reviewers", "Not asked"])
+        assert.ok(reviewerRow.includes(fact), `the Reviewers notice's row does not show ${fact}: ${reviewerRow}`);
+      await clickAction(preparer, "open-notifications");
+      await panelOpen(preparer);
+      // Opening marks the IRS update read again and reads the feed after.
+      await readLanded(fixture.database.preparerId, IRS_TITLE);
+      await waitForQuiet(preparer);
+      assert.deepEqual(await feedTitles(preparer), [IRS_TITLE], "the Preparer's feed");
+      assert.equal(await preparer.locator(".modal .feed-edited").count(), 1, "the edited update does not say Edited");
+      await shoot(preparer, "posted-updates-panel");
+      step("7 roles");
+
+      // 8. The admin unpublishes the IRS update. With the Preparer's panel
+      //    still open, it goes from it without a reload.
+      await press(admin, rowOf(admin, IRS_TITLE).locator('[data-action="open-unpublish-update"]'), "Unpublish");
+      await waitForText(admin, `Unpublish “${IRS_TITLE}”?`, RENDER_MS);
+      const unpublishMark = await alertMark(admin);
+      await clickAction(admin, "confirm-unpublish-update");
+      await toastSince(admin, "Update unpublished.", unpublishMark);
+      await waitFor(
+        admin,
+        "the row to say Unpublished",
+        (wanted) =>
+          [...document.querySelectorAll("tr.update-row")].some(
+            (row) => row.textContent.includes(wanted) && row.querySelector(".update-status.unpublished"),
+          ),
+        IRS_TITLE,
+        ARRIVAL_MS,
+      );
+      await waitFor(
+        preparer,
+        "the unpublished update to leave the open panel",
+        () =>
+          document.querySelectorAll(".modal article.feed-item").length === 0 && Boolean(document.querySelector(".modal .feed-empty")),
+        undefined,
+        ARRIVAL_MS,
+      );
+      assert.equal((await preparer.locator(".modal .feed-empty").textContent()).trim(), "No updates yet.");
+      await waitForBell(preparer, "none", "the unpublished update");
+      await closePanel(preparer);
+      step("8 unpublished");
+
+      // 9. The volunteer not yet cleared signs in to Finish your setup, with
+      //    nothing to read. The admin posts a notice to all volunteers; the
+      //    setup window, on focus, shows it, and only it, and no case.
+      const freshWin = await engine.newPage({ viewport: DESKTOP });
+      const setup = freshWin.page;
+      await guardToast(setup);
+      await loginTestUser({
+        page: setup,
+        actor: { key: "uncleared_volunteer", email: fresh.email, userId: fresh.userId },
+        fixture,
+        heading: SETUP_HEADING,
+      });
+      await waitForQuiet(setup);
+      assert.equal(await bell(setup), "none", "the setup window has notifications before the notice");
+      await postUpdate(admin, { kind: "office_notice", title: ALL_TITLE, message: ALL_MESSAGE });
+      // The setup window has no realtime channel: a focus re-reads it.
+      const focusBy = Date.now() + ARRIVAL_MS;
+      let lit = false;
+      while (!lit && Date.now() < focusBy) {
+        await setup.evaluate(() => window.dispatchEvent(new Event("focus")));
+        lit = await setup
+          .waitForFunction(
+            () =>
+              document.querySelector('[data-action="open-notifications"]')?.getAttribute("aria-label") ===
+              "Notifications, 1 unread",
+            undefined,
+            { timeout: 3_000, polling: 100 },
+          )
+          .then(() => true, () => false);
+      }
+      assert.ok(lit, `the setup window's bell did not light on focus within ${ARRIVAL_MS}ms: ${await bell(setup)}`);
+      await waitForBell(setup, "Notifications, 1 unread", "the notice to all volunteers");
+      await setup.getByRole("heading", { name: SETUP_HEADING, exact: true }).waitFor({ timeout: RENDER_MS });
+      await clickAction(setup, "open-notifications");
+      await panelOpen(setup);
+      await waitForQuiet(setup);
+      assert.deepEqual(await feedTitles(setup), [ALL_TITLE], "the setup window's feed");
+      assert.equal((await setup.locator(".modal .feed-kind").first().textContent()).trim(), "Office notice");
+      const work = await setup.evaluate(() => ({
+        caseLinks: document.querySelectorAll("[data-case-id]").length,
+        references: /VT-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}/.test(document.querySelector("#app")?.innerText ?? ""),
+        allCases: document.querySelectorAll('[data-action="open-cases"]').length,
+      }));
+      assert.deepEqual(work, { caseLinks: 0, references: false, allCases: 0 }, "the setup window shows a case");
+      await shoot(setup, "posted-updates-setup");
+      step("9 setup");
+
+      assertConsoleQuiet(adminWin, { name: "the admin's window" });
+      assertConsoleQuiet(preparerWin, { name: "the Preparer's window" });
+      assertConsoleQuiet(freshWin, { name: "the setup window" });
+    } finally {
+      t.diagnostic(`posted-updates steps ${JSON.stringify(marks)}`);
+      t.diagnostic(`posted-updates screenshots ${JSON.stringify(shots)}`);
       await fixture.close();
     }
   },
