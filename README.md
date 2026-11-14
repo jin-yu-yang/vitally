@@ -168,7 +168,7 @@ roadmap of what separates the demo from the product described in [`docs/spec.md`
 ```text
 index.html, server.mjs   static entry page and local dev server (no build step)
 src/                     browser app: controller, Supabase store, auth, views, styles
-supabase/migrations/     database schema, row-level security, action functions, intake catalogue (001–042)
+supabase/migrations/     database schema, row-level security, action functions, intake catalogue (001–046)
 tests/                   unit tests (*.test.mjs), database suites, browser suites
 tools/                   vendor bundle and intake catalogue builds, guarded admin tooling (migrate, roster)
 docs/                    specs, plans, setup guide, developer guide, design, project documents

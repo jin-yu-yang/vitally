@@ -17,7 +17,7 @@ exists, what is missing, and where the change lands.
 | State machine (spec §8.2) | Intake, screening, preparation, review, corrections, signature, e-filing, closure | Unreachable client, the IRS's answer after e-filing, amendments, waiting for documents and hold, withdrawal, release back to the pool ([§4](#4-workflow-coverage)) |
 | Client portal (spec §8.3) | Status, requests, document response, progress history | Queue position, preparer/reviewer contact, print, withdraw, notifications |
 | Volunteer portal (spec §8.4) | Work board, filters, case detail, internal history | Profiles, certifications, contact details |
-| Admin dashboard (spec §8.5) | Office board, follow-ups, reminders, closure, assistance | Reassignment, workload, reports, reference materials ([§7](#7-admin-reporting-and-forms)) |
+| Admin dashboard (spec §8.5) | Office board, follow-ups, reminders, closure, assistance | Reports, reference materials, hours per volunteer (#140) ([§7](#7-admin-reporting-and-forms)) |
 | Form generation (spec §8.6) | None | IRS Form 13614-C and Form 14446 drafts ([§7](#7-admin-reporting-and-forms)) |
 | Bilingual (spec §9) | English on screen; the intake catalogue already carries Chinese wording | English and Chinese throughout ([§6](#6-language-and-accessibility)) |
 | Security and audit (spec §9) | RLS, audited writes, no passwords | Production hardening ([§8](#8-security-and-privacy)) |
@@ -144,7 +144,7 @@ To build next:
   follow-up's resolution is where the office learns it, so ask it there and choose the signing-plan
   client text then. Changes `APPROVE_REVIEW`'s validation, `RESOLVE_FOLLOWUP`'s payload and the
   client text. Found on 2026-10-30 rehearsing the demo; PCDC's own practice.
-- **Release and reassignment** (spec §8.5, §13), built (046): an admin assigns a case's preparer or
+- **Release and reassignment** (spec §8.5, §13): reassignment built (046), release not built. Built: an admin assigns a case's preparer or
   reviewer, or hands the case to someone else, from Volunteers > Workload (`ASSIGN_CASE`). The
   participation record still blocks self-review after reassignment. Still to do: releasing a case
   back to the pool without naming a new holder.
@@ -193,8 +193,9 @@ screen readers, and testing with the site's actual clients.
 
 ## 7. Admin, reporting and forms
 
-- **Admin dashboard** (spec §8.5): workload per volunteer, clients on hold, counts by stage (the
-  board already counts), reassignment ([§4](#4-workflow-coverage)), reports, reference materials.
+- **Admin dashboard** (spec §8.5): clients on hold, counts by stage (the
+  board already counts), reports, reference materials, hours per volunteer (#140). Workload per
+  volunteer and reassignment are built (046; [§4](#4-workflow-coverage)).
 - **Volunteer profiles** (spec §8.4): name, certifications, contact details.
 - **Form generation** (spec §8.6): drafts of IRS Form 13614-C and Form 14446 from intake answers.
   This needs a server-side service with PDF generation; see
@@ -268,7 +269,7 @@ Reviewed and accepted for the demo, and worth knowing about:
    decisions for the fields the version-2 intake collects.
 5. **Document storage** (back end, database, front end).
 6. **Bilingual support** (front end, database); the intake's Chinese is part 4d of the redesign.
-7. **Workflow extensions**: withdrawal, reassignment, the unreachable client, the IRS's answer and amendments.
+7. **Workflow extensions**: withdrawal, release back to the pool (reassignment is built, 046), the unreachable client, the IRS's answer and amendments.
 8. **Admin reporting, notifications and form generation** (a new service).
 9. **Security review, accessibility audit, load testing**, then a pilot with fictional data before
    any real client.
