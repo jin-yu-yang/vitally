@@ -56,12 +56,12 @@ Nothing uses Edge Functions yet. The test stack (local and CI) excludes `edge-ru
 
 ### D3: Database functions
 Internal (`vitally_private`, no grants):
-- `account_check(p_workspace_id, p_actor_person_id, p_op, p_target jsonb) returns jsonb`. It applies every refusal rule (D5) without writing, and returns `{email, reusableUserId, personId}`.
+- `account_check(p_workspace_id, p_op, p_target jsonb) returns jsonb`. It applies every refusal rule (D5) without writing, and returns `{op, email, reusableUserId, volunteerId, accountRevision}`. The admin check happens in the public wrappers, so the check needs no actor.
 - `deactivate_account(p_workspace_id, p_user_id)` and `reactivate_account(p_workspace_id, p_user_id)`. They take one membership and do the open-work check (deactivate) or the email-in-use check (reactivate). Start next season can call them in a loop later.
 - `insert_active_account(...)`, used by `add_staff_member`, `initialize_workspace` and the backfill.
 
 Public, `authenticated` only, each resolving the caller as usual; the admin check is `vitally_policy.is_workspace_admin`:
-- `vitally_prepare_account(p_op text, p_target jsonb) returns jsonb`: read-only, wraps `account_check`.
+- `vitally_prepare_account(p_action_id uuid, p_op text, p_target jsonb) returns jsonb`: read-only, wraps `account_check`. When the caller already recorded that action id, it returns `{replay: <stored result>}` before any check. This way a retried Create or Invite through the function gets the same answer, not ALREADY_INVITED.
   - `op` is `create`, `invite` or `resend`.
   - `target` is `{volunteerId}` for create, `{email}` for invite, and `{volunteerId}` or `{email}` for resend.
 - `vitally_record_account(p_action_id uuid, p_op text, p_target jsonb, p_user_id uuid) returns jsonb`. It takes the workspace advisory lock, repeats `account_check`, and requires the auth user's lower-cased email to equal the checked email and the user to have no account row. Then:
@@ -69,7 +69,7 @@ Public, `authenticated` only, each resolving the caller as usual; the admin chec
   - `invite`: inserts the `applicant` membership and an `invited` account.
   - It stores an action receipt; a replay returns the same result.
 - `vitally_deactivate_account(p_action_id, p_volunteer_id, p_expected_revision)` and `vitally_reactivate_account(...)`: receipts, `CONFLICT` on a stale revision, refusal of the caller's own account (deactivate).
-- `vitally_client_invitations() returns jsonb`: admin only. Lists the workspace's `applicant` accounts as `{email, status, invitedAt, activatedAt, revision}`, newest first. The email is read from `auth.users` inside the security definer.
+- `vitally_client_invitations() returns jsonb`: admin only. Lists the workspace's `applicant` accounts that are not `deactivated` as `{email, status, invitedAt, activatedAt, accountRevision}`, newest first. The email is read from `auth.users` inside the security definer.
 - **Why public with the caller's JWT:** see brainstorm "Decided without the user" 2. Passing an arbitrary `p_user_id` to `vitally_record_account` gains nothing, because only an account-less auth user with exactly the checked email is accepted, and only the function (service key) can create one.
 - **Alternatives:** `service_role` RPCs, or a direct Postgres connection from the function.
 
@@ -78,7 +78,7 @@ Public, `authenticated` only, each resolving the caller as usual; the admin chec
 - `verify_jwt = false` for this function; the handler calls `auth.getUser(jwt)` itself. A missing or invalid JWT gets 401 `FORBIDDEN`. CORS headers and an `OPTIONS` answer are included.
 - The request body is `{ op, actionId, volunteerId? , email? }`. The flow (Q6):
   1. get the user;
-  2. `vitally_prepare_account`;
+  2. `vitally_prepare_account` (a `replay` answer is returned to the browser as the result, with `emailSent: false`, skipping steps 3-5);
   3. if there is no `reusableUserId`, `admin.auth.admin.createUser({ email, email_confirm: true })`;
   4. `vitally_record_account`;
   5. anon `signInWithOtp({ email, options: { shouldCreateUser: false } })`.

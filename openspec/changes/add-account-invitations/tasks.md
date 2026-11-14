@@ -1,18 +1,18 @@
 ## 1. Test stack, CI and mail catcher
 
-- [ ] 1.1 Enable the edge runtime in `supabase/test-stack.config.example.toml` (`[edge_runtime] enabled = true`, `[functions.accounts] verify_jwt = false`) and add the test-only `email_sent` override
-- [ ] 1.2 `.github/actions/test-stack/action.yml`: drop `edge-runtime` from `--exclude`, copy `supabase/functions/` into the stack work directory
-- [ ] 1.3 Confirm the CLI 2.117.0 mail catcher API (Mailpit or Inbucket) and its `supabase status` key; write the catcher URL to `.env.test` (`write-test-env.mjs` and its unit test)
-- [ ] 1.4 `tests/support/mail-catcher.mjs`: read the newest code sent to an address
-- [ ] 1.5 `docs/setup.md`: edge runtime, functions copy, email override, restart note, and the hosted SMTP prerequisite
+- [x] 1.1 Enable the edge runtime in `supabase/test-stack.config.example.toml` (`[edge_runtime] enabled = true`, `[functions.accounts] verify_jwt = false`) and add the test-only `email_sent` override
+- [x] 1.2 `.github/actions/test-stack/action.yml`: drop `edge-runtime` from `--exclude`, copy `supabase/functions/` into the stack work directory
+- [x] 1.3 Confirm the CLI 2.117.0 mail catcher API (Mailpit or Inbucket) and its `supabase status` key; write the catcher URL to `.env.test` (`write-test-env.mjs` and its unit test)
+- [x] 1.4 `tests/support/mail-catcher.mjs`: read the newest code sent to an address
+- [x] 1.5 `docs/setup.md`: edge runtime, functions copy, email override, restart note, and the hosted SMTP prerequisite
 
 ## 2. Migration 046: accounts
 
-- [ ] 2.1 `accounts` table, constraints (staff names a person, client none), RLS (admin read only), grants, not published
-- [ ] 2.2 Backfill: active rows for active memberships, deactivated rows for inactive ones
-- [ ] 2.3 Trigger on `auth.users` sign-in: invited -> active
-- [ ] 2.4 `add_staff_member` and `initialize_workspace` write active accounts
-- [ ] 2.5 `cleared()` requires an active account
+- [x] 2.1 `accounts` table, constraints (staff names a person, client none), RLS (admin read only), grants, not published
+- [x] 2.2 Backfill: active rows for active memberships, deactivated rows for inactive ones
+- [x] 2.3 Trigger on `auth.users` sign-in: invited -> active
+- [x] 2.4 `add_staff_member` and `initialize_workspace` write active accounts
+- [x] 2.5 `cleared()` requires an active account
 - [ ] 2.6 `account_check` and the refusal reasons; `vitally_prepare_account`, `vitally_record_account`
 - [ ] 2.7 `deactivate_account` / `reactivate_account` internals and their public RPCs (receipts, revision, open work, self, email in use)
 - [ ] 2.8 `vitally_client_invitations`
