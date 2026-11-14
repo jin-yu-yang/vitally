@@ -343,7 +343,7 @@ test("the drawer is the modal frame at the edge, and each dialog names its place
 });
 
 test("the drawer list is exported once, for the renderer and app.mjs's focus fallback alike", () => {
-  assert.deepEqual([...DRAWERS], ["log-call", "resolve-help", "volunteer"]);
+  assert.deepEqual([...DRAWERS], ["log-call", "resolve-help", "volunteer", "assign"]);
   assert.ok(Object.isFrozen(DRAWERS));
   const app = readFileSync(fileURLToPath(new URL("../src/app.mjs", import.meta.url)), "utf8");
   assert.doesNotMatch(app, /\["log-call",\s*"resolve-help"\]/);
@@ -1485,6 +1485,38 @@ test("the Roster's styles: a hidden Other language field is really hidden, on to
   const block = css.slice(start, end);
   const hexes = (block.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []).filter((hex) => hex.toLowerCase() !== "#fff");
   assert.deepEqual(hexes, []);
+  assert.doesNotMatch(block, /border-(left|right)\s*:/, "no vertical lines in the table");
+  assert.doesNotMatch(block, /(?<![-\w])width:\s*\d+px/, "no fixed widths");
+});
+
+// The Workload (change add-volunteer-workload): app.mjs maps each of its
+// controls to the controller, and checks nothing itself.
+test("app.mjs wires the Workload's tabs, table, search and assign drawer", () => {
+  const app = readFileSync(fileURLToPath(new URL("../src/app.mjs", import.meta.url)), "utf8");
+  for (const action of ["volunteer-tab", "sort-workload", "toggle-workload-row", "open-assign", "assign-case"])
+    assert.match(app, new RegExp(`case "${action}":`), `app.mjs handles ${action}`);
+  assert.match(app, /controller\.setVolunteerTab\(target\.dataset\.tab\)/);
+  assert.match(app, /controller\.setWorkloadView\(\{ sortBy: target\.dataset\.key \}\)/);
+  assert.match(app, /controller\.setWorkloadView\(\{ toggleRow: target\.dataset\.rowId \}\)/);
+  assert.match(app, /controller\.openAssign\(target\.dataset\.caseId, target\.dataset\.slot\)/);
+  assert.match(app, /controller\.assignCase\(target\.dataset\.personId\)/);
+  assert.match(app, /notify\("success", done\.notice, by\)/);
+  assert.match(app, /field\.name === "workloadSearch"[\s\S]*?controller\.setWorkloadView\(\{ search: field\.value \}\)/);
+  assert.match(app, /field\.name === "assignSearch"[\s\S]*?controller\.setAssignSearch\(field\.value\)/);
+  // The drawer opens from the Volunteers page, which has no queue.
+  assert.match(app, /dialog === "assign" \|\| dialog === "volunteer"\s*\? "#main"/);
+});
+
+test("the Workload's styles: tabs, table, bar and drawer list, on tokens only", () => {
+  const css = stylesheet();
+  const start = css.indexOf("/* Volunteers: the Workload */");
+  const end = css.indexOf("/* end Workload */");
+  assert.ok(start >= 0 && end > start, "the Workload block is marked");
+  const block = css.slice(start, end);
+  for (const selector of [".volunteer-tabs", ".volunteer-tab", ".workload-bar", ".workload-bar-preparing", ".workload-bar-review", ".workload-cases", ".assign-list", ".assign-person", ".assign-current"])
+    assert.ok(block.includes(selector), `styles ${selector}`);
+  const hexes = (block.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []).filter((hex) => hex.toLowerCase() !== "#fff");
+  assert.deepEqual(hexes, [], "colours come from the tokens, so dark mode follows");
   assert.doesNotMatch(block, /border-(left|right)\s*:/, "no vertical lines in the table");
   assert.doesNotMatch(block, /(?<![-\w])width:\s*\d+px/, "no fixed widths");
 });

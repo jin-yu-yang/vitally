@@ -297,3 +297,92 @@ test("the volunteer dialog is a drawer with its own overline and title", () => {
   assert.equal(failed.match(/role="alert"/g).length, 1);
   assert.match(failed, /id="drawer-error"/);
 });
+
+// ---- The Workload tab (change add-volunteer-workload) ----------------------
+
+const WORKER = volunteer({ id: "p-alex", name: "Alex Chen", roles: ["preparer"] });
+const workloadState = (overrides = {}) =>
+  baseState({
+    volunteers: [WORKER],
+    cases: [
+      {
+        id: "c-1",
+        reference: "VT-ABCD-EFGH",
+        stage: "preparing",
+        preparerId: "p-alex",
+        reviewerId: null,
+        participants: ["p-alex"],
+        openRequests: 0,
+        updatedAt: new Date().toISOString(),
+        lastContactAt: null,
+        answers: { tp_first_name: "Lena", tp_last_name: "Ortiz" },
+      },
+    ],
+    ...overrides,
+  });
+
+test("a cleared admin has a Roster tab and a Workload tab; the Roster is the default", () => {
+  const html = staffScreen(workloadState());
+  assert.match(html, /data-action="volunteer-tab" data-tab="roster"[^>]*aria-current="page"/);
+  assert.match(html, /data-action="volunteer-tab" data-tab="workload"/);
+  assert.match(html, /id="roster-title"/);
+  assert.doesNotMatch(html, /workload-table/);
+});
+
+test("on the Workload tab the table replaces the Roster, with names and no Add button", () => {
+  const html = staffScreen(workloadState({ volunteerTab: "workload", workload: { sort: { key: "open", dir: "desc" }, search: "", expanded: ["p-alex"] } }));
+  assert.match(html, /data-tab="workload"[^>]*aria-current="page"/);
+  assert.match(html, /workload-table/);
+  assert.doesNotMatch(html, /id="roster-title"/);
+  assert.match(html, /data-row-id="p-alex"/);
+  assert.match(html, /Lena Ortiz/);
+  assert.doesNotMatch(html, /data-action="open-add-volunteer"/);
+  // Without workload state yet, the defaults hold.
+  const bare = staffScreen(workloadState({ volunteerTab: "workload" }));
+  assert.match(bare, /aria-sort="descending"><button type="button"[^>]*data-key="open"/);
+});
+
+test("an uncleared ceiling admin keeps the Roster alone, even if the tab says Workload", () => {
+  const uncleared = { ...cleared({ isAdmin: true }), cleared: false, missing: [{ kind: "photoId" }] };
+  const html = staffScreen(
+    workloadState({
+      volunteerTab: "workload",
+      principal: { userId: "u1", workspaceId: "w1", access: "staff", personId: "p-sam", clearance: uncleared },
+    }),
+  );
+  assert.match(html, /id="roster-title"/);
+  assert.doesNotMatch(html, /data-tab="workload"|workload-table|Lena Ortiz/);
+});
+
+test("a cleared ceiling admin without effective admin gets no Workload", () => {
+  const html = staffScreen(
+    workloadState({
+      volunteerTab: "workload",
+      people: [{ ...ADMIN_PERSON, capabilities: ["followup"] }, PREPARER_PERSON],
+    }),
+  );
+  assert.doesNotMatch(html, /data-tab="workload"|workload-table|Lena Ortiz/);
+});
+
+test("the assign dialog is a drawer naming the case, the client and the slot", () => {
+  const html = dialog(
+    workloadState({
+      volunteers: [WORKER, volunteer({ id: "p-noor", name: "Noor Haddad", roles: ["preparer"] })],
+      people: [ADMIN_PERSON, PREPARER_PERSON, { id: "p-noor", name: "Noor Haddad", capabilities: ["prepare"] }],
+      dialog: "assign",
+      dialogContext: { caseId: "c-1", slot: "preparer", search: "" },
+    }),
+  );
+  assert.match(html, /class="modal office-drawer"/);
+  assert.match(html, /<span class="overline">OFFICE · WORKLOAD<\/span>/);
+  assert.match(html, /<h2 id="modal-title">VT-ABCD-EFGH · Lena Ortiz<\/h2>/);
+  assert.match(html, /Reassign the preparer/);
+  assert.match(html, /data-action="assign-case" data-person-id="p-noor"/);
+  assert.doesNotMatch(html, /data-person-id="p-alex"/);
+  const failed = dialog(
+    workloadState({ dialog: "assign", dialogContext: { caseId: "c-1", slot: "preparer" }, error: { code: "SERVER_ERROR", message: "Boom." } }),
+  );
+  assert.equal(failed.match(/role="alert"/g).length, 1);
+  const gone = dialog(workloadState({ dialog: "assign", dialogContext: { caseId: "gone", slot: "preparer" } }));
+  assert.match(gone, /This case could not be opened/);
+});

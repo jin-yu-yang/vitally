@@ -3505,6 +3505,252 @@ textarea::placeholder {
 }
 /* end Volunteers */
 
+/* Volunteers: the Workload */
+/* The Workload tab (change add-volunteer-workload) reuses .board-table, the
+   Roster's toolbar and the drawer .office-drawer. Every colour is a token, so
+   it follows the theme; the bar carries no text (its numbers are in its
+   aria-label and in the columns beside it), so only its two segments and the
+   track need to stand apart. */
+.volunteer-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 16px;
+  border-bottom: 1px solid var(--vt-line);
+}
+.volunteer-tab {
+  margin-bottom: -1px;
+  padding: 8px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--vt-muted);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.volunteer-tab:hover {
+  color: var(--vt-ink);
+}
+.volunteer-tab.current {
+  border-bottom-color: var(--vt-primary);
+  color: var(--vt-primary-hover);
+}
+.volunteer-tab:focus-visible,
+.workload-sort:focus-visible,
+.workload-toggle:focus-visible {
+  outline: 2px solid var(--vt-primary);
+  outline-offset: 2px;
+}
+.volunteer-workload {
+  padding: 20px 22px;
+  border-color: var(--vt-line);
+  border-radius: var(--vt-radius);
+}
+.volunteer-workload h2 {
+  font-size: 17px;
+  letter-spacing: 0;
+  margin-bottom: 14px;
+}
+.volunteer-workload .board-foot {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--vt-muted);
+}
+.volunteer-toolbar #workload-search {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.workload-note {
+  margin-top: 6px;
+}
+/* The headers are buttons that look like the board's headers. */
+.workload-sort {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.workload-table th[aria-sort="ascending"] .workload-sort,
+.workload-table th[aria-sort="descending"] .workload-sort {
+  color: var(--vt-ink);
+}
+.workload-table th[aria-sort="ascending"] .workload-sort::after {
+  content: " \2191";
+}
+.workload-table th[aria-sort="descending"] .workload-sort::after {
+  content: " \2193";
+}
+.workload-table td[data-col]:not([data-col="bar"]) {
+  font-variant-numeric: tabular-nums;
+}
+.workload-row th {
+  font-weight: 600;
+  white-space: normal;
+}
+.workload-unassigned {
+  background: var(--vt-background);
+}
+.workload-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--vt-ink);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.workload-toggle .icon {
+  flex: none;
+  transition: transform 0.15s ease;
+  transform: rotate(-90deg);
+}
+.workload-toggle[aria-expanded="true"] .icon {
+  transform: none;
+}
+.workload-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--vt-muted);
+}
+.volunteer-not-cleared,
+.workload-stalled,
+.workload-role-removed,
+.assign-current {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.volunteer-not-cleared {
+  background: var(--vt-background);
+  border: 1px solid var(--vt-line);
+  color: var(--vt-muted);
+}
+.workload-role-removed {
+  background: var(--vt-error-bg);
+  border: 1px solid var(--vt-error-line);
+  color: var(--vt-error);
+}
+.workload-stalled {
+  background: var(--vt-attention-bg);
+  color: var(--vt-age-soon-ink);
+}
+.workload-bar {
+  display: flex;
+  min-width: 80px;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--vt-line);
+}
+.workload-bar-preparing {
+  background: var(--vt-phase-preparation);
+}
+.workload-bar-review {
+  background: var(--vt-phase-review);
+}
+.workload-cases-row td {
+  padding-top: 0;
+  border-top: 0;
+  white-space: normal;
+}
+.workload-cases {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.workload-case {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--vt-line);
+  border-radius: var(--vt-radius-sm);
+  background: var(--vt-surface);
+}
+.workload-case-ref {
+  color: var(--vt-primary);
+  font-weight: 600;
+}
+.workload-case-name {
+  color: var(--vt-ink);
+}
+.workload-slot {
+  color: var(--vt-muted);
+  font-size: 13px;
+}
+.workload-case-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+/* The assign drawer's list. */
+.assign-slot {
+  margin: 0 0 10px;
+}
+#assign-search {
+  width: 100%;
+  margin: 0 0 12px;
+}
+.assign-list {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+.assign-person {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--vt-line);
+  border-radius: var(--vt-radius-sm);
+  background: var(--vt-surface);
+}
+.assign-person.is-current {
+  background: var(--vt-primary-soft);
+  border-color: var(--vt-primary-line);
+}
+.assign-person-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.assign-languages,
+.assign-roles,
+.assign-open {
+  font-size: 12px;
+  color: var(--vt-muted);
+}
+.assign-current {
+  background: var(--vt-primary-soft);
+  color: var(--vt-primary-hover);
+}
+.assign-hidden {
+  margin: 0 0 12px;
+}
+/* end Workload */
+
 /* ---- Add a case ---- */
 /* Only Add a case emits the pill, so the class is its own scope. */
 .fiction-pill {

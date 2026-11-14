@@ -3236,3 +3236,30 @@ test("the volunteer page shows a task's assignee as a label (042)", () => {
   assert.doesNotMatch(panel, /data-case-action="RESOLVE_FOLLOWUP"/);
   assert.match(panel, /Contacts for an office task are logged on the office screens\./);
 });
+
+test("an assignment reads with the admin, the person, the slot and who held it before", () => {
+  const people = [
+    { id: "p-sam", name: "Sam Lee" },
+    { id: "p-jordan", name: "Jordan Park" },
+    { id: "p-alex", name: "Alex Chen" },
+    { id: "p-riley", name: "Riley Quinn" },
+  ];
+  const record = decorateStaffCase(
+    {
+      id: "case-a",
+      internalHistory: [
+        { id: "e1", action: "ASSIGN_CASE", actorPersonId: "p-sam", detail: { slot: "preparer", personId: "p-jordan", previousPersonId: "p-alex" } },
+        { id: "e2", action: "ASSIGN_CASE", actorPersonId: "p-sam", detail: { slot: "reviewer", personId: "p-riley", previousPersonId: null } },
+        { id: "e3", action: "ASSIGN_CASE", actorPersonId: "p-sam", detail: { slot: "reviewer", personId: "p-gone", previousPersonId: null } },
+      ],
+    },
+    people,
+  );
+  assert.equal(record.internalHistory[0].detail.personName, "Jordan Park");
+  assert.equal(record.internalHistory[0].detail.previousName, "Alex Chen");
+  assert.equal(historySentence(record.internalHistory[0]), "Sam Lee assigned Jordan Park as preparer (was Alex Chen).");
+  assert.equal(historySentence(record.internalHistory[1]), "Sam Lee assigned Riley Quinn as reviewer.");
+  assert.equal(historySentence(record.internalHistory[2]), "Sam Lee assigned Unknown person as reviewer.");
+  // Without a slot (an undecorated entry), it still reads as words.
+  assert.equal(historySentence({ action: "ASSIGN_CASE", actorName: "Sam Lee" }), "Sam Lee assigned a volunteer to the case.");
+});

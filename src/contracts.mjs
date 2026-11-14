@@ -80,6 +80,10 @@ export const CASE_ACTIONS = Object.freeze([
   // section. It carries exactly { fields, basedOnVersion }; the controller
   // builds it from an uploaded copy, not a form.
   "SAVE_PREPARER_FIELDS",
+  // Change add-volunteer-workload (migration 046): an admin puts a volunteer
+  // on a case. ASSIGN_CASE carries exactly { slot: 'preparer'|'reviewer', personId,
+  // expectedHolderId: uuid|null }.
+  "ASSIGN_CASE",
 ]);
 
 // Where a shaded-section download or upload failure is said: beside the

@@ -275,6 +275,11 @@ const RELATED_KEYS = Object.freeze([
   ["check", "data-check"],
   ["filter", "data-filter"],
   ["value", "data-value"],
+  // The Workload (change add-volunteer-workload): its tabs, its sort headers
+  // and its row toggles share one action each.
+  ["tab", "data-tab"],
+  ["key", "data-key"],
+  ["rowId", "data-row-id"],
 ]);
 
 const attributeValue = (value) =>

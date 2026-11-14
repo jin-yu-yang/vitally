@@ -1025,10 +1025,11 @@ if (!config) {
   // (another window resolved the task), so a drawer always has one: the queue.
   function closeDialog(fallbackFocusSelector) {
     const dialog = controller.getState().dialog;
-    // The volunteer drawer opens from the Roster, which has no queue.
+    // The volunteer and assign drawers open from the Volunteers page, which
+    // has no queue.
     const fallback =
       fallbackFocusSelector ??
-      (dialog === "volunteer"
+      (dialog === "assign" || dialog === "volunteer"
         ? "#main"
         : views.DRAWERS.includes(dialog)
           ? "#office-queue-title"
@@ -1905,6 +1906,34 @@ if (!config) {
         openDialog("volunteer", id ? { volunteerId: id } : null, describeFocus(target));
         break;
       }
+      // The Workload (change add-volunteer-workload). The controller decides
+      // who may see it and open its drawer; these only pass the press on and
+      // keep the keyboard on the control that was pressed.
+      case "volunteer-tab":
+        await controller.setVolunteerTab(target.dataset.tab);
+        root.querySelector(`[data-action="volunteer-tab"][data-tab="${CSS.escape(target.dataset.tab ?? "")}"]`)?.focus();
+        break;
+      case "sort-workload":
+        controller.setWorkloadView({ sortBy: target.dataset.key });
+        break;
+      case "toggle-workload-row":
+        controller.setWorkloadView({ toggleRow: target.dataset.rowId });
+        break;
+      case "open-assign":
+        // Back to this Assign or Reassign when the drawer closes.
+        focusBeforeDialog = describeFocus(target);
+        controller.openAssign(target.dataset.caseId, target.dataset.slot);
+        if (controller.getState().dialog !== "assign") focusBeforeDialog = null;
+        break;
+      case "assign-case": {
+        // A refusal stays in the drawer (the controller records it); the
+        // drawer closes only on an assignment that landed.
+        const done = await controller.assignCase(target.dataset.personId);
+        if (!done) break;
+        closeDialog("#main");
+        notify("success", done.notice, by);
+        break;
+      }
       case "demo-fill":
         // Fills the form with fictional answers; nothing is sent until the
         // form's own submit button is pressed (demo-fill.mjs). A demo tool:
@@ -2370,6 +2399,19 @@ if (!config) {
     }
   });
 
+  // A search box that filters as it is typed: `update` redraws, which
+  // replaces the box, so the keyboard and the caret go back into the new one.
+  function keepTyping(field, selector, update) {
+    const start = field.selectionStart;
+    const end = field.selectionEnd;
+    update();
+    const box = root.querySelector(selector);
+    if (box && box !== field) {
+      box.focus();
+      if (typeof start === "number" && typeof end === "number") box.setSelectionRange(start, end);
+    }
+  }
+
   root.addEventListener("input", (event) => {
     const field = event.target;
     if (field.matches?.(V2_CONTROLS)) {
@@ -2404,14 +2446,12 @@ if (!config) {
       // the keyboard and the caret go back into it. Mid-composition the
       // redraw is held and the box is the same one: touching its selection
       // then would end the composition.
-      const start = field.selectionStart;
-      const end = field.selectionEnd;
-      controller.setVolunteerFilter("search", field.value);
-      const box = root.querySelector("#volunteer-search");
-      if (box && box !== field) {
-        box.focus();
-        if (typeof start === "number" && typeof end === "number") box.setSelectionRange(start, end);
-      }
+      keepTyping(field, "#volunteer-search", () => controller.setVolunteerFilter("search", field.value));
+    } else if (field.name === "workloadSearch") {
+      // The Workload and its drawer filter the same way.
+      keepTyping(field, "#workload-search", () => controller.setWorkloadView({ search: field.value }));
+    } else if (field.name === "assignSearch") {
+      keepTyping(field, "#assign-search", () => controller.setAssignSearch(field.value));
     } else if (field.name === "lookup") controller.setLookup(field.value);
     else if (field.name === "boardSearch") controller.setBoardSearchDraft(field.value);
     // Kept in state so a re-render re-renders them rather than blanking them.
