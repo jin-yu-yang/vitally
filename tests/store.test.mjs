@@ -1386,6 +1386,7 @@ test("a subscription watches only the tables its principal may read", async () =
     "preparer_questionnaires",
     "reviewer_questionnaires",
     "preparer_shaded_fields",
+    "posted_updates",
   ]);
   // The applicant's channel never names a staff-only table.
   for (const staffTable of STAFF_ONLY_TABLES)
@@ -1747,4 +1748,79 @@ test("a staff principal carries the clearance from vitally_my_clearance; an appl
 test("an error from vitally_my_clearance surfaces from getPrincipal", async () => {
   const client = fakeClient({ access: "staff", rpc: async () => ({ data: null, error: { code: "VT001" } }) });
   await assert.rejects(() => createStore(client).getPrincipal(), { code: "FORBIDDEN" });
+});
+
+test("getUpdates calls vitally_my_updates and returns its object", async () => {
+  const feed = { items: [{ source: "posted_update", id: "u-1" }], unread: 1 };
+  const client = fakeClient({ access: "staff", rpc: async () => ({ data: feed, error: null }) });
+  assert.deepEqual(await createStore(client).getUpdates(), feed);
+  assert.deepEqual(client.rpcCalls, [{ name: "vitally_my_updates", args: undefined }]);
+});
+
+test("markUpdates sends the ids and a boolean confirm", async () => {
+  const client = fakeClient({ access: "staff", rpc: async () => ({ data: { marked: 2 }, error: null }) });
+  const store = createStore(client);
+  assert.deepEqual(await store.markUpdates({ ids: ["u-1", "u-2"], confirm: true }), { marked: 2 });
+  await store.markUpdates({ ids: ["u-1"] });
+  assert.deepEqual(client.rpcCalls[0], {
+    name: "vitally_mark_updates",
+    args: { p_update_ids: ["u-1", "u-2"], p_confirm: true },
+  });
+  assert.deepEqual(client.rpcCalls[1].args, { p_update_ids: ["u-1"], p_confirm: false });
+});
+
+test("listPostedUpdates returns the updates array", async () => {
+  const updates = [{ id: "u-1", title: "Closed Monday" }];
+  const client = fakeClient({ access: "staff", rpc: async () => ({ data: { updates }, error: null }) });
+  assert.deepEqual(await createStore(client).listPostedUpdates(), updates);
+  assert.deepEqual(client.rpcCalls, [{ name: "vitally_posted_updates", args: undefined }]);
+});
+
+test("saveUpdate sends the RPC parameters and reuses its action id", async () => {
+  const client = fakeClient({ access: "staff" });
+  const store = createStore(client);
+  const update = { kind: "office_notice", title: "Closed Monday", message: "Office is closed." };
+  const request = { update };
+  await store.saveUpdate(request);
+  await store.saveUpdate(request);
+  assert.ok(request.actionId);
+  assert.deepEqual(client.rpcCalls[0], {
+    name: "vitally_save_update",
+    args: { p_action_id: request.actionId, p_update_id: null, p_expected_revision: null, p_update: update },
+  });
+  assert.deepEqual(client.rpcCalls[1].args, client.rpcCalls[0].args);
+  await store.saveUpdate({ actionId: "a-1", updateId: "u-1", expectedRevision: 2, update });
+  assert.deepEqual(client.rpcCalls[2].args, {
+    p_action_id: "a-1",
+    p_update_id: "u-1",
+    p_expected_revision: 2,
+    p_update: update,
+  });
+});
+
+test("updateAction sends the RPC parameters and reuses its action id", async () => {
+  const client = fakeClient({ access: "staff" });
+  const store = createStore(client);
+  const request = { updateId: "u-1", expectedRevision: 3, type: "unpublish" };
+  await store.updateAction(request);
+  await store.updateAction(request);
+  assert.ok(request.actionId);
+  assert.deepEqual(client.rpcCalls[0], {
+    name: "vitally_update_action",
+    args: { p_action_id: request.actionId, p_update_id: "u-1", p_expected_revision: 3, p_type: "unpublish" },
+  });
+  assert.equal(client.rpcCalls[1].args.p_action_id, request.actionId);
+});
+
+test("posted_updates is watched for staff and never for applicants", () => {
+  assert.ok(SUBSCRIBED_TABLES.staff.includes("posted_updates"));
+  assert.ok(!SUBSCRIBED_TABLES.applicant.includes("posted_updates"));
+});
+
+test("an update RPC error with VT004 becomes INVALID_TRANSITION", async () => {
+  const client = fakeClient({ access: "staff", rpc: async () => ({ data: null, error: { code: "VT004" } }) });
+  await assert.rejects(() => createStore(client).updateAction({ updateId: "u-1", expectedRevision: 1, type: "post" }), {
+    code: "INVALID_TRANSITION",
+  });
+  await assert.rejects(() => createStore(client).saveUpdate({ update: {} }), { code: "INVALID_TRANSITION" });
 });

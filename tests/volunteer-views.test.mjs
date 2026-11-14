@@ -297,3 +297,72 @@ test("the volunteer dialog is a drawer with its own overline and title", () => {
   assert.equal(failed.match(/role="alert"/g).length, 1);
   assert.match(failed, /id="drawer-error"/);
 });
+
+// ---------------------------------------------------------------------------
+// Posted updates (change add-posted-updates): Notifications and Post an update
+// ---------------------------------------------------------------------------
+
+const preparerState = (overrides = {}) =>
+  baseState({
+    screen: "staff",
+    principal: { userId: "u2", workspaceId: "w1", access: "staff", personId: "p-alex", clearance: cleared() },
+    ...overrides,
+  });
+const notificationsButton = (html) => html.match(/<button[^>]*data-action="open-notifications"[^>]*>[\s\S]*?<\/button>/)?.[0] ?? "";
+
+test("a cleared preparer's sidebar has Notifications with a bell, and no badge at 0", () => {
+  const html = staffScreen(preparerState({ updatesUnread: 0 }));
+  const entry = notificationsButton(html);
+  assert.match(entry, /Notifications/);
+  assert.match(entry, /<path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4l2-2ZM10 21h4"\/>/, "the bell");
+  assert.doesNotMatch(entry, /nav-badge|unread/);
+  assert.doesNotMatch(html, /data-action="open-post-update"/);
+});
+
+test("the badge shows the unread count and names it", () => {
+  const entry = notificationsButton(staffScreen(preparerState({ updatesUnread: 3 })));
+  assert.match(entry, /aria-label="Notifications, 3 unread"/);
+  assert.match(entry, /<span class="nav-badge" aria-hidden="true">3<\/span>/);
+});
+
+test("a ceiling admin gets Post an update after Volunteers, and Notifications", () => {
+  const html = staffScreen(baseState({ screen: "staff" }));
+  assert.match(html, /data-action="open-post-update"[^>]*>(?:<svg[\s\S]*?<\/svg>)? Post an update<\/button>/);
+  assert.ok(
+    html.indexOf('data-action="open-volunteers"') < html.indexOf('data-action="open-post-update"'),
+    "Post an update comes after Volunteers",
+  );
+  assert.match(html, /data-action="open-notifications"/);
+});
+
+test("a non-admin left on Post an update gets the work board", () => {
+  const html = staffScreen(preparerState({ screen: "office-updates" }));
+  assert.match(html, /Work board<\/h2>/);
+  assert.doesNotMatch(html, /OFFICE · ADMIN|update-form/);
+});
+
+test("the setup screen still has Notifications; an uncleared ceiling admin also gets Post an update", () => {
+  const uncleared = { cleared: false, missing: [{ kind: "form13615" }], capabilities: [], isAdmin: false, siteCoordinatorName: null };
+  const volunteerHtml = staffScreen(
+    preparerState({ principal: { userId: "u2", workspaceId: "w1", access: "staff", personId: "p-alex", clearance: uncleared }, updatesUnread: 1 }),
+  );
+  assert.match(volunteerHtml, /Finish your setup for this season/);
+  assert.match(notificationsButton(volunteerHtml), /aria-label="Notifications, 1 unread"/);
+  assert.doesNotMatch(volunteerHtml, /open-post-update/);
+
+  const adminPrincipal = { userId: "u1", workspaceId: "w1", access: "staff", personId: "p-sam", clearance: { ...uncleared, isAdmin: true } };
+  const setup = staffScreen(baseState({ screen: "staff", principal: adminPrincipal }));
+  assert.match(setup, /data-action="open-post-update"/);
+  assert.match(setup, /data-action="open-notifications"/);
+  // The uncleared admin's Post an update screen.
+  const updates = staffScreen(baseState({ screen: "office-updates", principal: adminPrincipal, postedUpdates: [], updateForm: null }));
+  assert.match(updates, /<h1>Post an update<\/h1>/);
+  assert.match(updates, /data-action="open-post-update" aria-current="page"/);
+  assert.doesNotMatch(updates, /Finish your setup for this season<\/h1>/);
+});
+
+test("a client has no Notifications", async () => {
+  const { page, clientHeader } = await import("../src/views.mjs");
+  const state = { principal: { access: "applicant" }, connection: "online", screen: "applications" };
+  assert.doesNotMatch(page(state, "<main></main>") + clientHeader(state), /open-notifications|Notifications/);
+});

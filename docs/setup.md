@@ -450,7 +450,7 @@ check failed. Check, in this order:
 
 ## 4. Migrations
 
-Forty-five migrations (001 to 045), applied in order. 020, the version-2 switch-over, was added after 021 and 022: a stack that already has them applies it last, and a new one applies it in number order. Both give the same result. Re-running the migrator on an already-migrated stack is safe,
+Forty-six migrations (001 to 046), applied in order. 020, the version-2 switch-over, was added after 021 and 022: a stack that already has them applies it last, and a new one applies it in number order. Both give the same result. Re-running the migrator on an already-migrated stack is safe,
 but not because the files themselves are re-runnable — `001` and `002` create their tables with a
 plain `create table`, which fails the second time. What makes it safe is the ledger
 `tools/admin/migrate.mjs` keeps: `vitally_private.schema_migrations`, one row per file with a

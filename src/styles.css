@@ -5801,3 +5801,407 @@ html:lang(zh-Hant) {
   border-style: dashed;
   font-size: 0.85em;
 }
+
+/* ---- Posted updates (change add-posted-updates) ---- */
+/* The sidebar's Notifications entry and its unread badge. */
+.btn.nav-link.nav-notifications .nav-label {
+  flex: 1 1 auto;
+  text-align: left;
+}
+.nav-badge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--vt-badge);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+
+/* The Notifications panel: one card per update, tinted while it is unread or
+   waits for a confirmation. Never colour alone: the button or the
+   Confirmed line says the same. */
+.feed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+.feed-item {
+  border: 1px solid var(--vt-line);
+  border-radius: var(--vt-radius);
+  background: var(--vt-surface);
+  padding: 14px 16px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.feed-item.is-unread {
+  background: var(--vt-primary-soft);
+  border-color: var(--vt-primary-line);
+  box-shadow: inset 3px 0 0 var(--vt-primary);
+}
+.feed-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: var(--vt-muted);
+}
+.feed-poster {
+  font-weight: 600;
+  color: var(--vt-ink);
+}
+.feed-kind,
+.update-tag {
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.feed-kind.kind-irs_policy,
+.update-tag.kind-irs_policy {
+  background: var(--vt-stage-intake-bg);
+  color: var(--vt-stage-intake);
+}
+.feed-kind.kind-office_notice,
+.update-tag.kind-office_notice {
+  background: var(--vt-stage-amend-bg);
+  color: var(--vt-stage-amend);
+}
+.feed-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vt-ink);
+}
+.feed-flag .icon {
+  width: 14px;
+  height: 14px;
+}
+.feed-date {
+  margin-left: auto;
+}
+.office-drawer .feed-title,
+.feed-title {
+  font-size: 16px;
+  line-height: 1.35;
+  margin: 0 0 4px;
+  color: var(--vt-ink);
+}
+.feed-message {
+  margin: 0;
+  white-space: pre-line;
+  color: var(--vt-ink);
+}
+.feed-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 8px;
+}
+.feed-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--vt-primary);
+  font-weight: 600;
+}
+.feed-link .icon {
+  width: 16px;
+  height: 16px;
+}
+.btn.feed-confirm {
+  padding: 6px 14px;
+  font-size: 14px;
+  color: var(--vt-primary);
+}
+.feed-confirmed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 14px;
+  color: var(--vt-progress);
+  font-weight: 600;
+}
+.feed-confirmed .icon {
+  width: 16px;
+  height: 16px;
+}
+.feed-empty {
+  margin: 12px 0;
+  color: var(--vt-muted);
+}
+.feed-stale {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0;
+  font-size: 13px;
+  color: var(--vt-muted);
+}
+.feed-footer {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 16px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--vt-line);
+  font-size: 12px;
+  color: var(--vt-muted);
+}
+.feed-footer .icon,
+.feed-stale .icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+/* Post an update: the form beside its preview, stacked below 900px. */
+.update-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+  margin-bottom: 24px;
+}
+@media (max-width: 900px) {
+  .update-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.update-form-panel,
+.update-preview-panel,
+.posted-updates {
+  padding: 20px 22px;
+  border-radius: var(--vt-radius);
+  min-width: 0;
+}
+.update-form-panel h2,
+.update-preview-panel h2,
+.posted-updates h2 {
+  font-size: 17px;
+  letter-spacing: 0;
+  margin-bottom: 16px;
+}
+.update-preview-panel h2 small {
+  font-weight: 400;
+  color: var(--vt-muted);
+  margin-left: 6px;
+}
+.update-form fieldset {
+  margin: 0 0 22px;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.update-form legend {
+  padding: 0;
+  margin-bottom: 9px;
+  font-size: 14px;
+  font-weight: 550;
+  color: #3b5158;
+}
+.update-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+.update-choice,
+.update-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--vt-line);
+  border-radius: var(--vt-radius);
+  cursor: pointer;
+  min-width: 0;
+}
+.update-choice:has(input:checked) {
+  border-color: var(--vt-primary);
+  background: var(--vt-primary-soft);
+}
+.update-choice input,
+.update-check input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  flex-shrink: 0;
+  accent-color: var(--vt-primary);
+}
+.update-choice span,
+.update-check span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.update-choice small,
+.update-check small {
+  color: var(--vt-muted);
+  font-size: 12px;
+}
+.update-check {
+  margin-bottom: 12px;
+}
+.update-form .field {
+  margin-bottom: 8px;
+}
+.update-form .field + .field-note {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+.update-form .field-error {
+  margin: 0 0 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vt-error);
+}
+.update-form [aria-invalid="true"] {
+  border-color: var(--vt-error);
+}
+.update-link-field,
+.update-row-fields {
+  margin-bottom: 14px;
+}
+.update-row-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0 16px;
+}
+.update-audience-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 16px;
+}
+.update-audience .checkbox-row,
+.update-roles .checkbox-row {
+  margin: 0;
+  min-height: var(--vt-tap);
+}
+.update-roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 14px;
+  margin-top: 4px;
+  padding-left: 4px;
+}
+.update-roles[hidden],
+.update-link-field[hidden] {
+  display: none;
+}
+.update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--vt-line);
+}
+.feed-sample {
+  border: 1px solid var(--vt-line);
+  border-radius: var(--vt-radius);
+  padding: 12px 14px;
+}
+.feed-sample-head {
+  margin: 0 0 10px;
+  font-weight: 600;
+  color: var(--vt-ink);
+}
+.feed-sample .feed-item {
+  background: var(--vt-primary-soft);
+}
+.update-shown-to {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--vt-muted);
+}
+
+/* The Posted updates table: counts with bars. */
+.posted-updates .board-foot {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--vt-muted);
+}
+.updates-table .update-row-title {
+  display: block;
+  min-width: 180px;
+  white-space: normal;
+  font-weight: 500;
+}
+.updates-table .update-audience-cell {
+  white-space: normal;
+  min-width: 100px;
+}
+.btn.update-count {
+  min-height: var(--vt-tap);
+  padding: 4px 6px;
+  gap: 8px;
+  background: transparent;
+  color: var(--vt-ink);
+  font-weight: 500;
+}
+.btn.update-count:hover {
+  background: var(--vt-primary-soft);
+}
+.update-count meter {
+  width: 64px;
+  height: 6px;
+}
+.update-count meter::-webkit-meter-bar {
+  background: var(--vt-line);
+  border: 0;
+  border-radius: 999px;
+  height: 6px;
+}
+.update-count meter::-webkit-meter-optimum-value {
+  background: var(--vt-primary);
+  border-radius: 999px;
+}
+.update-count meter::-moz-meter-bar {
+  background: var(--vt-primary);
+  border-radius: 999px;
+}
+.update-status {
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--vt-stage-prep-bg);
+  color: var(--vt-stage-prep);
+}
+.update-status.unpublished {
+  background: var(--vt-stage-stopped-bg);
+  color: var(--vt-stage-stopped);
+}
+.update-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+}
+.update-row-actions .btn.text {
+  color: var(--vt-primary);
+  padding: 8px 10px;
+}
+@media (max-width: 480px) {
+  .update-form-panel,
+  .update-preview-panel,
+  .posted-updates {
+    padding: 16px 14px;
+  }
+  .update-actions .btn {
+    flex: 1 1 auto;
+  }
+}

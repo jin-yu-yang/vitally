@@ -10,9 +10,10 @@ import { openDatabase } from "../tools/admin/database.mjs";
 // reach. Every check reads the catalog over a plain connection; the refused
 // inserts run in a transaction that is rolled back.
 
-// The row-security policies at 044, one per table, by table and name. 043
-// renames the sixteen staff-only policies and drops or adds none; 044 adds the
-// three admin-only Roster policies.
+// The row-security policies at 046, by table and name. 043 renames the
+// sixteen staff-only policies and drops or adds none; 044 adds the three
+// admin-only Roster policies; 046 adds the two posted_updates policies (an
+// admin's and the audience's). update_reads has none.
 const POLICIES = Object.freeze([
   ["admin_followups", "staff_admin_followups"],
   ["assistance_items", "staff_assistance_items"],
@@ -33,6 +34,8 @@ const POLICIES = Object.freeze([
   ["filing_returns", "staff_filing_returns"],
   ["memberships", "own_membership"],
   ["people", "staff_people"],
+  ["posted_updates", "admin_posted_updates"],
+  ["posted_updates", "audience_posted_updates"],
   ["preparation_participants", "staff_preparation_participants"],
   ["preparer_questionnaires", "staff_preparer_questionnaires"],
   ["preparer_shaded_fields", "staff_preparer_shaded_fields"],
@@ -42,7 +45,7 @@ const POLICIES = Object.freeze([
   ["volunteer_profiles", "admin_volunteer_profiles"],
   ["workspaces", "member_workspace"],
 ]);
-// The eight public RPCs after 045, by name and identity arguments.
+// The thirteen public RPCs after 046, by name and identity arguments.
 const RPCS = Object.freeze([
   "vitally_apply_action(p_action_id uuid, p_case_id uuid, p_expected_revision bigint, p_type text, p_payload jsonb)",
   "vitally_assistance_action(p_action_id uuid, p_item_id uuid, p_expected_revision bigint, p_type text, p_note text)",
@@ -52,6 +55,11 @@ const RPCS = Object.freeze([
   "vitally_edit_contact(p_action_id uuid, p_contact_id uuid, p_expected_revision bigint, p_entry jsonb)",
   "vitally_save_volunteer(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_volunteer jsonb)",
   "vitally_my_clearance()",
+  "vitally_save_update(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_update jsonb)",
+  "vitally_update_action(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_type text)",
+  "vitally_mark_updates(p_update_ids uuid[], p_confirm boolean)",
+  "vitally_my_updates()",
+  "vitally_posted_updates()",
 ]);
 // The signatures 043 drops by name.
 const OLD_SIGNATURES = Object.freeze([
@@ -146,7 +154,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
     });
 
-    await t.test("the public API is exactly eight RPCs", async () => {
+    await t.test("the public API is exactly thirteen RPCs", async () => {
       const { rows } = await sql(
         `select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as signature
            from pg_proc p where p.pronamespace='public'::regnamespace`,
@@ -194,8 +202,10 @@ test("the catalog after the sample-case tools and presenter access are removed",
         "select p.proname, p.prosrc from pg_proc p where p.pronamespace='public'::regnamespace order by 1",
       );
       assert.equal(rows.length, RPCS.length);
-      // vitally_my_clearance only reads: it takes no action id and stores no digest.
-      for (const row of rows.filter((entry) => entry.proname !== "vitally_my_clearance"))
+      // These take no action id and store no receipt, so no digest: three only
+      // read, and vitally_mark_updates is naturally idempotent.
+      const NO_RECEIPT = ["vitally_my_clearance", "vitally_my_updates", "vitally_posted_updates", "vitally_mark_updates"];
+      for (const row of rows.filter((entry) => !NO_RECEIPT.includes(entry.proname)))
         assert.match(row.prosrc, /'personId',\s*v_person\.id/, row.proname);
     });
 
@@ -245,7 +255,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
     });
 
-    await t.test("vitally_policy holds exactly the admin check and the clearance check, with exactly their grants", async () => {
+    await t.test("vitally_policy holds exactly the admin check, the clearance check and the update audience check, with exactly their grants", async () => {
       const { rows } = await sql(
         `select p.oid, p.oid::regprocedure::text as signature, p.prosecdef, p.provolatile, p.proconfig,
                 p.proargnames, p.pronargs
@@ -254,13 +264,15 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
       assert.deepEqual(
         rows.map((row) => row.signature.replace(/^vitally_policy\./, "")),
-        ["cleared_workspace_id()", "is_workspace_admin(uuid)"],
+        ["cleared_workspace_id()", "in_update_audience(uuid,text,text[])", "is_workspace_admin(uuid)"],
       );
-      const [cleared, admin] = rows;
+      const [cleared, audience, admin] = rows;
       assert.equal(cleared.proargnames, null);
       assert.equal(cleared.pronargs, 0);
       assert.deepEqual(admin.proargnames, ["p_workspace_id"]);
       assert.equal(admin.pronargs, 1);
+      assert.deepEqual(audience.proargnames, ["p_workspace_id", "p_audience", "p_roles"]);
+      assert.equal(audience.pronargs, 3);
       for (const helper of rows) {
         assert.equal(helper.prosecdef, true, helper.signature);
         assert.equal(helper.provolatile, "s", helper.signature);

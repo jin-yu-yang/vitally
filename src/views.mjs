@@ -32,6 +32,14 @@ import { renderCasePool } from "./pool-views.mjs";
 import { renderRoster, volunteerDrawerBody } from "./volunteer-views.mjs";
 import { awaitingClearance, ceilingAdmin } from "./clearance.mjs";
 import { setupScreen } from "./setup-views.mjs";
+import {
+  renderNotificationsPanel,
+  renderPostUpdatePage,
+  renderUpdatePeople,
+  unpublishConfirm,
+  deleteDraftConfirm,
+  updateGoneBody,
+} from "./update-views.mjs";
 
 // The shared shell: the frame every screen sits in, the dialogs, the two
 // screens that belong to nobody in particular (setup needed, no access), and
@@ -94,7 +102,8 @@ export function connectionNotice(state) {
 }
 
 // The office's drawers: the modal frame placed at the right edge.
-export const DRAWERS = Object.freeze(["log-call", "resolve-help", "volunteer"]);
+// The Notifications panel (change add-posted-updates) is one too.
+export const DRAWERS = Object.freeze(["log-call", "resolve-help", "volunteer", "notifications"]);
 
 function problemBanner(state) {
   if (!state.error || state.saveState === "failed") return "";
@@ -200,6 +209,7 @@ export function staffSidebar(state, person, office, { volunteers = office, board
   const onBoard = state?.screen === "staff";
   const onPool = state?.screen === "office-cases";
   const onRoster = state?.screen === "office-volunteers";
+  const onUpdates = state?.screen === "office-updates";
   const label = office ? "Follow-ups" : "Work board";
   // All cases, then the Roster (admin only, change add-volunteer-roster-records).
   const pool = office && board
@@ -218,6 +228,27 @@ export function staffSidebar(state, person, office, { volunteers = office, board
         onRoster ? 'aria-current="page"' : "",
       )
     : "";
+  // Post an update follows the Roster: the ceiling admin's, cleared or not.
+  const postUpdate = volunteers
+    ? button(
+        `${icon("megaphone")} Post an update`,
+        "open-post-update",
+        `nav-link${onUpdates ? " current" : ""}`,
+        onUpdates ? 'aria-current="page"' : "",
+      )
+    : "";
+  // Every staff window has Notifications, cleared or not (change
+  // add-posted-updates). The badge is drawn for the eye; the name says it.
+  const unread = Math.max(0, Number(state?.updatesUnread) || 0);
+  const notifications = button(
+    `${icon("bell")} <span class="nav-label">Notifications</span>${when(
+      unread > 0,
+      `<span class="nav-badge" aria-hidden="true">${unread}</span>`,
+    )}`,
+    "open-notifications",
+    "nav-link nav-notifications",
+    `aria-haspopup="dialog"${unread > 0 ? ` aria-label="Notifications, ${unread} unread"` : ""}`,
+  );
   // On the setup screen there is no board: a ceiling admin's way back from
   // the Roster is the setup screen itself.
   const home = board || volunteers
@@ -228,7 +259,7 @@ export function staffSidebar(state, person, office, { volunteers = office, board
         onBoard ? 'aria-current="page"' : "",
       )
     : "";
-  const links = `${home}${pool}${roster}`;
+  const links = `${home}${pool}${roster}${postUpdate}${notifications}`;
   return `<div class="sidebar-brand"><img src="src/pcdc-logo.png" alt="PCDC" width="36" height="36"><span class="sidebar-wordmark">ViTally<span class="brand-dot">.</span></span></div>${when(links, `<nav class="sidebar-nav" aria-label="Main navigation">${links}</nav>`)}<div class="sidebar-account"><div class="account-row">${icon("user")}<span>${accountRow}</span></div>${button(
     `${icon("help")} Need help?`,
     "open-help",
@@ -238,7 +269,9 @@ export function staffSidebar(state, person, office, { volunteers = office, board
 
 // The records are decorated here — once, with the roster this screen already
 // holds — so the renderers never see a bare id.
-const OFFICE_SCREENS = ["office-cases", "office-add-case", "office-volunteers"];
+const OFFICE_SCREENS = ["office-cases", "office-add-case", "office-volunteers", "office-updates"];
+// The ceiling admin's screens, cleared or not: the Roster and Post an update.
+const CEILING_SCREENS = ["office-volunteers", "office-updates"];
 
 // The Follow-ups queue reads the cases and the help requests; it is ready only
 // when both are (a list that was never given counts as loaded).
@@ -270,6 +303,17 @@ const rosterPage = (state) =>
     button(`${icon("plus")} Add a volunteer`, "open-add-volunteer", "primary"),
   );
 
+// Post an update (change add-posted-updates): for a ceiling admin, cleared or not.
+const postUpdatePage = (state) =>
+  frame(
+    "OFFICE · ADMIN",
+    "Post an update",
+    "Post IRS policy updates and office notices to volunteers. Replies are turned off.",
+    "",
+    renderPostUpdatePage(state),
+  );
+const ceilingPage = (state) => (state.screen === "office-updates" ? postUpdatePage(state) : rosterPage(state));
+
 export function staffScreen(state) {
   const people = state.people ?? [];
   const person =
@@ -279,22 +323,25 @@ export function staffScreen(state) {
   const office = isAdmin(person);
   const volunteers = ceilingAdmin(state.principal);
   const open = state.sidebarOpen !== false;
-  // Not cleared: the setup screen, and for a ceiling admin the Roster. No work.
+  // Not cleared: the setup screen, and for a ceiling admin the Roster and
+  // Post an update. No work.
   if (awaitingClearance(state)) {
-    const onRoster = volunteers && state.screen === "office-volunteers";
+    const onCeiling = volunteers && CEILING_SCREENS.includes(state.screen);
     return appShell({
       sidebar: staffSidebar(
-        { ...state, screen: onRoster ? state.screen : "staff" },
+        { ...state, screen: onCeiling ? state.screen : "staff" },
         person,
         false,
         { volunteers, board: false },
       ),
-      body: onRoster ? rosterPage(state) : setupScreen(state),
+      body: onCeiling ? ceilingPage(state) : setupScreen(state),
       open,
     });
   }
   // A volunteer whose window was left on an office screen gets the work board.
-  const allowed = (name) => office || (name === "office-volunteers" && volunteers);
+  // Post an update follows the ceiling only, as the controller does.
+  const allowed = (name) =>
+    name === "office-updates" ? volunteers : office || (name === "office-volunteers" && volunteers);
   const screen =
     OFFICE_SCREENS.includes(state.screen) && !allowed(state.screen) ? "staff" : state.screen;
   const main = (() => {
@@ -350,6 +397,7 @@ export function staffScreen(state) {
         addCasePage(state, person, people),
       );
     if (screen === "office-volunteers") return rosterPage(state);
+    if (screen === "office-updates") return postUpdatePage(state);
     const cases = (state.cases ?? []).map((record) =>
       decorateStaffCase(record, people),
     );
@@ -458,6 +506,10 @@ function decorateAssistance(item, people = []) {
 const OWN_ERROR_DIALOGS = Object.freeze([...DRAWERS, "request-corrections"]);
 export function dialogError(state, lang) {
   if (!state.error || !state.dialog || OWN_ERROR_DIALOGS.includes(state.dialog)) return "";
+  return errorNotice(state, lang);
+}
+// The notice itself, for a drawer that places it in its own body.
+function errorNotice(state, lang) {
   const say = (key) => esc(t(key, {}, lang));
   return `<div class="notice error" role="alert" id="dialog-error">${icon("help")}<div><p>${esc(sentence(state.error.message, lang))}</p><div class="conflict-choices">${when(
     state.retryable,
@@ -538,7 +590,26 @@ export function dialog(state) {
     title = "Ask the preparer for corrections";
     body = correctionsDialogBody(state);
   }
-  if (DRAWERS.includes(state.dialog)) {
+  // Posted updates (change add-posted-updates): the who-has-read list and
+  // the two confirmations, each for the row it was opened from.
+  const update = (state.postedUpdates ?? []).find((entry) => entry?.id === state.dialogContext?.updateId) ?? null;
+  if (state.dialog === "update-people") {
+    title = update ? `Who has read “${update.title}”` : "Who has read it";
+    body = update ? renderUpdatePeople(update) : updateGoneBody();
+  }
+  if (state.dialog === "unpublish-update") {
+    title = "Unpublish this update?";
+    body = update ? unpublishConfirm(update, { busy: state.busy }) : updateGoneBody();
+  }
+  if (state.dialog === "delete-update") {
+    title = "Delete this draft?";
+    body = update ? deleteDraftConfirm(update, { busy: state.busy }) : updateGoneBody();
+  }
+  if (state.dialog === "notifications") {
+    title = "Notifications";
+    // A drawer says its own failure (a confirm that did not go through).
+    body = `${state.error ? errorNotice(state, lang) : ""}${renderNotificationsPanel(state)}`;
+  } else if (DRAWERS.includes(state.dialog)) {
     const people = state.people ?? [];
     const person = people.find((entry) => entry.id === state.principal?.personId) ?? null;
     const ui = { busy: state.busy, error: state.error, retryable: state.retryable, now: Date.now() };
@@ -578,6 +649,10 @@ export function dialog(state) {
   const overline =
     state.dialog === "volunteer"
       ? "OFFICE · VOLUNTEERS"
+      : state.dialog === "notifications"
+        ? "FROM THE OFFICE"
+        : ["update-people", "unpublish-update", "delete-update"].includes(state.dialog)
+          ? "OFFICE · ADMIN"
       : drawer
         ? "OFFICE FOLLOW-UP"
         : t("dialog.overline", {}, lang);

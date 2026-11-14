@@ -36,6 +36,8 @@ import { createShadedSave } from "./shaded-editor.mjs";
 import { createWindowState } from "./window-state.mjs";
 import { isLang, readLanguage, writeLanguage } from "./language.mjs";
 import { volunteerProblem, withoutLostRoles, roleNeedsMessage, openWorkMessage } from "./volunteer-roster.mjs";
+import { emptyUpdateForm, toUpdateRequest, validateUpdate } from "./posted-updates.mjs";
+import { nowInput } from "./contact-log.mjs";
 
 // The one place browser state lives. It owns what is loaded, what is being
 // edited, and which action envelope is in flight; it renders nothing and knows
@@ -72,7 +74,13 @@ const STAFF_SCREENS = Object.freeze([
   "office-cases",
   "office-add-case",
   "office-volunteers",
+  // Post an update (change add-posted-updates): a ceiling admin's only,
+  // cleared or not (`screenAllowed`).
+  "office-updates",
 ]);
+// The admin screens an uncleared ceiling admin keeps (design D10 of
+// add-volunteer-clearance, and add-posted-updates).
+const ADMIN_SETUP_SCREENS = Object.freeze(["office-volunteers", "office-updates"]);
 
 // An action whose answer never arrived may or may not have been applied. Those
 // are the only failures worth retrying with the same envelope; a refusal is
@@ -111,6 +119,13 @@ const STAFF_CONTACT_CONFLICT_MESSAGE =
 const STAFF_VOLUNTEER_CONFLICT_MESSAGE =
   "Someone else changed this volunteer. Close this and open it again to see their changes.";
 export const VOLUNTEER_CONFLICT_MESSAGE = STAFF_VOLUNTEER_CONFLICT_MESSAGE;
+// Post an update (change add-posted-updates): the table is read again and
+// the form keeps what was typed. Staff-only, so named STAFF_.
+const STAFF_UPDATE_CONFLICT_MESSAGE = "Someone changed this update. Check the table and try again.";
+const STAFF_UPDATE_TRANSITION_MESSAGE = "This update can no longer be changed.";
+const STAFF_UPDATE_GONE_MESSAGE = "This update is no longer in the table.";
+const STAFF_UPDATE_FORM_MESSAGE = "Please check the update and try again.";
+const UPDATE_ACTIONS = Object.freeze(["POST", "UNPUBLISH", "DELETE"]);
 const STAFF_VOLUNTEER_GONE_MESSAGE = "This volunteer could not be opened. Close this and try again.";
 const EDIT_CONFLICT_MESSAGE =
   "Someone else changed this application while you were editing. Choose which answers to keep.";
@@ -298,7 +313,13 @@ export function createController({
     cases: [],
     // Whether each list has been read (design D6): a first load that failed
     // must never look like an empty list.
-    lists: { cases: "loading", assistance: "loading", volunteers: "loading" },
+    lists: {
+      cases: "loading",
+      assistance: "loading",
+      volunteers: "loading",
+      updates: "loading",
+      postedUpdates: "loading",
+    },
     people: [],
     // The Roster (admin only): read when its screen opens and after each
     // save, never live. Its filters and the drawer's own sentence are
@@ -306,6 +327,25 @@ export function createController({
     volunteers: [],
     volunteerFilters: { search: "", role: "all" },
     volunteerFormError: null,
+    // Posted updates (change add-posted-updates). The feed is every staff
+    // window's, cleared or not: `updates` is the RPC's items as read,
+    // `updatesUnread` its own badge count (never recounted here), and
+    // `notificationsOpen` whether the panel shows. A failed read keeps the
+    // items and marks `lists.updates` failed; it blocks nothing else.
+    // `notificationsFresh` holds the ids that were unread while the panel
+    // showed (those it opened with, and any marked while open): the panel
+    // highlights them until it closes, though they are marked read at once.
+    updates: [],
+    updatesUnread: 0,
+    notificationsOpen: false,
+    notificationsFresh: [],
+    // The Post an update screen (a ceiling admin's): the table, the form as
+    // typed, the update being edited (`{id, revision, status}` or null) and
+    // the form's own errors (`{field: message}` or null). None persisted.
+    postedUpdates: [],
+    updateForm: emptyUpdateForm(),
+    updateEditing: null,
+    updateFormError: null,
     // The caller's own workspace row, read only for a staff window: the
     // office's defaults.
     workspace: null,
@@ -392,6 +432,10 @@ export function createController({
   // The Roster save whose outcome is unknown, likewise the very request sent
   // (`saveVolunteer`). Window memory only: a reload starts without it.
   let pendingVolunteerSave = null;
+  // Post an update's save and table action whose outcome is unknown, kept
+  // the same way: `{ key, request }`, where the key says what was pressed.
+  let pendingUpdateSave = null;
+  let pendingUpdateAction = null;
   // The screening start for the open case, if one is due or held:
   // `{ action, inFlight, gaveUp }` (`startScreeningIfDue`).
   let screeningStart = null;
@@ -472,6 +516,11 @@ export function createController({
   // Screens the current principal may be on, first entry first.
   const screens = () => (staffWindow() ? STAFF_SCREENS : CLIENT_SCREENS);
 
+  // Whether this principal may be on a screen: in its list, and Post an
+  // update only for a ceiling admin.
+  const screenAllowed = (screen) =>
+    screens().includes(screen) && (screen !== "office-updates" || ceilingAdmin(state.principal));
+
   // Where "back to the list" goes for whoever is signed in.
   const homeScreen = () => screens()[0];
 
@@ -508,7 +557,7 @@ export function createController({
     if (!saved) return;
     // Every field has already been checked for its shape; the screen is checked
     // here, against the list this principal is allowed.
-    if (screens().includes(saved.screen)) state.screen = saved.screen;
+    if (screenAllowed(saved.screen)) state.screen = saved.screen;
     if (saved.selectedCaseId) state.selectedCaseId = saved.selectedCaseId;
     if (saved.openPanels) state.openPanels = saved.openPanels;
     if (saved.pendingCreateActionId)
@@ -803,8 +852,13 @@ export function createController({
     // Not cleared: the focus, `online` and retry re-read the clearance only.
     if (awaitingClearance(state)) {
       await checkClearance();
+      // Post an update's table re-reads on focus too (an uncleared admin's
+      // window has no realtime channel).
+      if (awaitingClearance(state) && state.screen === "office-updates") await loadPostedUpdates();
       return;
     }
+    // The feed never blocks the rest, and never fails the refresh.
+    await readFeed();
     let failure = null;
     if (!dataLoaded) {
       // The first load never finished: read everything it reads.
@@ -826,6 +880,12 @@ export function createController({
       } catch (error) {
         failure = failure ?? error;
       }
+      if (state.screen === "office-updates")
+        try {
+          await readPostedUpdates();
+        } catch (error) {
+          failure = failure ?? error;
+        }
     }
     try {
       await loadSelected();
@@ -934,11 +994,16 @@ export function createController({
     // rather than by a case id: a claim in another window has to reach this one.
     const touchesAssistance =
       touchesWorkspace || change.table === "assistance_items";
-    if (!touchesList && !touchesOpen && !touchesAssistance) return;
+    // A posted update reaches the feed, and the admin's table when it shows
+    // (a workspace change may move the season, and so every audience).
+    const touchesUpdates = touchesWorkspace || change.table === "posted_updates";
+    if (!touchesList && !touchesOpen && !touchesAssistance && !touchesUpdates) return;
     try {
+      if (touchesUpdates) await readFeed();
       if (touchesList) await loadList();
       if (touchesWorkspace) await loadWorkspace();
       if (touchesAssistance) await loadAssistance();
+      if (touchesUpdates && state.screen === "office-updates") await readPostedUpdates();
       // The open case comes last, because it is the one read that may
       // legitimately find nothing: a case that is gone must not stop the
       // lists around it from being refreshed.
@@ -966,6 +1031,7 @@ export function createController({
       await loadWorkspace();
       // The Roster is read only where it is shown (a restored window on it).
       if (state.screen === "office-volunteers") await readVolunteers();
+      if (state.screen === "office-updates") await readPostedUpdates();
     } else {
       state.lists.assistance = "ready";
     }
@@ -1009,6 +1075,317 @@ export function createController({
 
   function clearVolunteerFormError() {
     state.volunteerFormError = null;
+  }
+
+  // ---- posted updates (change add-posted-updates) --------------------------
+  //
+  // The feed: every staff window's, cleared or not. A read that fails marks
+  // the feed failed and keeps what it showed; it never reaches the page-wide
+  // error, so the board and the setup screen carry on. While the panel is
+  // open, each read marks the unread items it shows (`markShown`), once:
+  // the re-read after marking marks nothing, so an item the database did not
+  // mark is never sent round again by that read.
+  async function readFeed({ mark = true } = {}) {
+    if (!staffWindow() || typeof store.getUpdates !== "function") return;
+    const asked = state.principal.userId;
+    const same = () => staffWindow() && state.principal.userId === asked;
+    let answer;
+    try {
+      answer = await store.getUpdates();
+    } catch (error) {
+      if (!same()) return;
+      state.lists = { ...state.lists, updates: "failed" };
+      if (error?.code === "OFFLINE") state.connection = "offline";
+      return;
+    }
+    if (!same()) return;
+    state.updates = Array.isArray(answer?.items) ? answer.items.map((item) => ({ ...item })) : [];
+    state.updatesUnread = Math.max(0, Number(answer?.unread) || 0);
+    state.lists = { ...state.lists, updates: "ready" };
+    noteConnected();
+    if (mark && panelShowing()) await markShown();
+  }
+
+  // The panel shows only while its dialog does: a path that drops the dialog
+  // (navigation, lost clearance) leaves nothing to mark.
+  function panelShowing() {
+    return state.notificationsOpen && state.dialog === "notifications";
+  }
+
+  // The panel is closed, by whatever path: nothing more is marked, and the
+  // highlight of what was fresh goes with it.
+  function endNotifications() {
+    state.notificationsOpen = false;
+    state.notificationsFresh = [];
+  }
+
+  // The unread items the panel shows, marked read in one call (at most the
+  // 200 the RPC takes), then the feed again for the badge. Items already
+  // read are never sent. A failed mark leaves them unread, for the next one.
+  async function markShown() {
+    const unread = state.updates.filter((item) => item && item.id && item.readAt == null).map((item) => item.id);
+    // Still highlighted after the re-read, until the panel closes.
+    state.notificationsFresh = [...new Set([...state.notificationsFresh, ...unread])];
+    const ids = unread.slice(0, 200);
+    if (!ids.length) return;
+    try {
+      await store.markUpdates({ ids, confirm: false });
+    } catch (error) {
+      if (error?.code === "OFFLINE") state.connection = "offline";
+      return;
+    }
+    await readFeed({ mark: false });
+  }
+
+  // The public feed read: never rejects.
+  async function loadFeed() {
+    await readFeed();
+    show();
+  }
+
+  async function openNotifications() {
+    if (!staffWindow() || state.dialog !== "notifications") return;
+    state.notificationsOpen = true;
+    state.notificationsFresh = [];
+    show();
+    await markShown();
+    show();
+  }
+
+  function closeNotifications() {
+    endNotifications();
+    show();
+  }
+
+  // "I've read this": the one item, confirmed, then the feed again. A
+  // failure is said with its own Try again. Resolves true when it landed.
+  async function confirmUpdate(id) {
+    if (!staffWindow() || !id) return false;
+    try {
+      await store.markUpdates({ ids: [id], confirm: true });
+    } catch (error) {
+      noteLocalFailure(error, () => confirmUpdate(id));
+      return false;
+    }
+    noteConnected();
+    await readFeed();
+    show();
+    return true;
+  }
+
+  // Post an update's table: a ceiling admin's, cleared or not. Like the
+  // Roster's list, a first read that fails marks it failed, and one that
+  // loaded once keeps what it shows. It throws, for loadData and refresh.
+  async function readPostedUpdates() {
+    if (!staffWindow() || !ceilingAdmin(state.principal)) return;
+    try {
+      const rows = await store.listPostedUpdates();
+      state.postedUpdates = Array.isArray(rows) ? rows : [];
+      state.lists = { ...state.lists, postedUpdates: "ready" };
+      noteConnected();
+    } catch (error) {
+      if (state.lists.postedUpdates !== "ready") state.lists = { ...state.lists, postedUpdates: "failed" };
+      throw error;
+    }
+  }
+
+  // Opening the screen: read the table, and say a failure with its own Try
+  // again. Never rejects.
+  async function loadPostedUpdates() {
+    try {
+      await readPostedUpdates();
+    } catch (error) {
+      noteLocalFailure(error, loadPostedUpdates);
+      return;
+    }
+    show();
+  }
+
+  function copyUpdateForm(form) {
+    const source = form && typeof form === "object" ? form : {};
+    return { ...source, roles: Array.isArray(source.roles) ? [...source.roles] : [] };
+  }
+
+  // The form as typed: kept, never drawn (the page draws its own preview),
+  // so a re-render cannot empty a field somebody is using.
+  function setUpdateForm(form) {
+    state.updateForm = copyUpdateForm(form);
+  }
+
+  // Edit from the table: the form holds the row, and the save carries its
+  // revision. Only a draft or a posted update is edited.
+  function editUpdate(id) {
+    const row = state.postedUpdates.find((entry) => entry?.id === id);
+    if (!row || (row.status !== "draft" && row.status !== "posted")) return false;
+    state.updateForm = {
+      kind: row.kind,
+      title: String(row.title ?? ""),
+      message: String(row.message ?? ""),
+      irsLink: row.irsLink ?? "",
+      audience: row.audience === "roles" ? "roles" : "everyone",
+      roles: Array.isArray(row.roles) ? [...row.roles] : [],
+      keepTopUntil: row.keepTopUntil ?? "",
+      askConfirm: Boolean(row.askConfirm),
+      askAgain: false,
+    };
+    state.updateEditing = { id: row.id, revision: Number(row.revision), status: row.status };
+    state.updateFormError = null;
+    pendingUpdateSave = null;
+    show();
+    return true;
+  }
+
+  function resetUpdateForm() {
+    state.updateForm = emptyUpdateForm();
+    state.updateEditing = null;
+    state.updateFormError = null;
+    pendingUpdateSave = null;
+  }
+
+  function cancelUpdateEdit() {
+    resetUpdateForm();
+    show();
+  }
+
+  // What a VALIDATION refusal's field says, in the form's own words.
+  function updateFieldError(field, form) {
+    const messages = {
+      kind: "Choose a type.",
+      title: "Enter a title of up to 120 characters.",
+      message: "Enter a message of up to 2000 characters.",
+      irsLink:
+        form?.kind === "office_notice" ? "Only IRS policy updates link to the IRS." : "Use an https link on irs.gov.",
+      roles: "Choose at least one role.",
+    };
+    return Object.hasOwn(messages, field) ? { [field]: messages[field] } : { form: STAFF_UPDATE_FORM_MESSAGE };
+  }
+
+  // A refused or lost update write: CONFLICT, INVALID_TRANSITION and
+  // NOT_FOUND (another admin deleted it) are said in their own words,
+  // anything else as it came. The table is read again either way: what the
+  // write did, or what changed under it.
+  async function noteUpdateFailure(error) {
+    const message =
+      error?.code === "CONFLICT"
+        ? STAFF_UPDATE_CONFLICT_MESSAGE
+        : error?.code === "INVALID_TRANSITION"
+          ? STAFF_UPDATE_TRANSITION_MESSAGE
+          : error?.code === "NOT_FOUND"
+            ? STAFF_UPDATE_GONE_MESSAGE
+            : undefined;
+    noteFailure(error, message ? { message } : undefined);
+    await readPostedUpdates().catch(() => {});
+    show();
+  }
+
+  // After a write landed: the table and the feed (the admin may be in the
+  // audience) as they are now.
+  async function afterUpdateWrite() {
+    try {
+      await readPostedUpdates();
+      state.error = null;
+    } catch (error) {
+      noteFailure(error);
+    }
+    await readFeed();
+    show();
+  }
+
+  // Save draft, Post update and Save changes. Resolves to the store's
+  // receipt (`{actionId, updateId, revision, status}`) when it landed, and
+  // null when it did not; the form keeps what was typed until it lands.
+  // A save whose answer never came is kept, as the Roster's is: the same
+  // press with the same form sends that very request, so its action id is
+  // the same and the database replays its receipt (Review Focus 4).
+  async function saveUpdate(form, { post = false } = {}) {
+    if (state.busy || !staffWindow()) return null;
+    const typed = copyUpdateForm(form);
+    state.updateForm = typed;
+    const editing = state.updateEditing ? { ...state.updateEditing } : null;
+    const key = JSON.stringify({ typed, post: Boolean(post), editing });
+    let request = pendingUpdateSave?.key === key ? pendingUpdateSave.request : null;
+    pendingUpdateSave = null;
+    if (!request) {
+      // A date before today (New York) is refused, except the saved date of
+      // the update being edited.
+      const saved = editing ? state.postedUpdates.find((entry) => entry?.id === editing.id) : null;
+      const problem = validateUpdate(typed, {
+        today: nowInput(clock()).slice(0, 10),
+        savedKeepTopUntil: saved?.keepTopUntil ?? null,
+      });
+      if (problem) {
+        state.updateFormError = problem;
+        show();
+        return null;
+      }
+      // "Ask everyone to read it again" goes only with a posted update.
+      const askAgain = editing?.status === "posted" && typed.askAgain === true;
+      request = {
+        actionId: newActionId(),
+        updateId: editing?.id ?? null,
+        expectedRevision: editing ? editing.revision : null,
+        update: toUpdateRequest(typed, { post: Boolean(post), askAgain }),
+      };
+    }
+    state.updateFormError = null;
+    state.busy = true;
+    state.error = null;
+    show();
+    let result;
+    try {
+      result = await store.saveUpdate(request);
+    } catch (error) {
+      state.busy = false;
+      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingUpdateSave = { key, request };
+      if (error?.code === "VALIDATION") {
+        state.updateFormError = updateFieldError(error?.cause?.details, typed);
+        show();
+        return null;
+      }
+      await noteUpdateFailure(error);
+      return null;
+    }
+    state.busy = false;
+    noteConnected();
+    resetUpdateForm();
+    await afterUpdateWrite();
+    return result ?? { status: request.update.post ? "posted" : "draft" };
+  }
+
+  // A table action: POST (a draft), UNPUBLISH (a posted update) or DELETE
+  // (a draft), with the revision the table shows. Resolves to the receipt,
+  // or null. A lost answer is kept and resent unchanged, as a save is.
+  async function updateAction(id, type) {
+    if (state.busy || !staffWindow() || !UPDATE_ACTIONS.includes(type)) return null;
+    const row = state.postedUpdates.find((entry) => entry?.id === id);
+    if (!row) {
+      noteFailure({ code: "NOT_FOUND" }, { message: STAFF_UPDATE_GONE_MESSAGE });
+      show();
+      return null;
+    }
+    const key = JSON.stringify({ id, type, revision: Number(row.revision) });
+    let request = pendingUpdateAction?.key === key ? pendingUpdateAction.request : null;
+    pendingUpdateAction = null;
+    if (!request)
+      request = { actionId: newActionId(), updateId: id, expectedRevision: Number(row.revision), type };
+    state.busy = true;
+    state.error = null;
+    show();
+    let result;
+    try {
+      result = await store.updateAction(request);
+    } catch (error) {
+      state.busy = false;
+      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingUpdateAction = { key, request };
+      await noteUpdateFailure(error);
+      return null;
+    }
+    state.busy = false;
+    noteConnected();
+    // The form held that update at its old revision: it is done with.
+    if (state.updateEditing?.id === id) resetUpdateForm();
+    await afterUpdateWrite();
+    return result ?? { status: type };
   }
 
   // A list that never loaded and whose read failed says so; one that loaded
@@ -1100,7 +1477,7 @@ export function createController({
     restoreSession();
     // A staff window lands on the work board and a client on their applications,
     // unless this window was already somewhere this principal may be.
-    if (!screens().includes(state.screen)) state.screen = homeScreen();
+    if (!screenAllowed(state.screen)) state.screen = homeScreen();
     state.error = null;
     if (awaitingClearance(state)) {
       await holdForClearance();
@@ -1113,6 +1490,8 @@ export function createController({
   // the realtime channel and the open case. `focus` moves the keyboard to the
   // rebuilt page, as navigation does (the window just became cleared).
   async function loadWork({ focus = false } = {}) {
+    // The feed first: it never fails the load, and the load never stops it.
+    await readFeed();
     try {
       await loadData();
       state.error = null;
@@ -1151,7 +1530,8 @@ export function createController({
     state.lists = { ...state.lists, cases: "loading", assistance: "loading" };
     state.dialog = null;
     state.dialogContext = null;
-    if (!(ceilingAdmin(state.principal) && state.screen === "office-volunteers"))
+    endNotifications();
+    if (!(ceilingAdmin(state.principal) && ADMIN_SETUP_SCREENS.includes(state.screen)))
       state.screen = "staff";
   }
 
@@ -1159,7 +1539,11 @@ export function createController({
     dropWork();
     persistSession();
     show();
+    // The feed is the setup screen's too.
+    await readFeed();
+    show();
     if (state.screen === "office-volunteers") await loadVolunteers();
+    if (state.screen === "office-updates") await loadPostedUpdates();
   }
 
   // An action refused NOT_CLEARED: the window is not cleared any more. It
@@ -1204,6 +1588,9 @@ export function createController({
         throw controllerError("SERVER_ERROR", "Something went wrong.");
     } catch (error) {
       if (same()) noteLocalFailure(error, checkClearance);
+      // The feed re-reads with every check, answered or not.
+      await readFeed();
+      if (same()) show();
       return;
     }
     if (!same()) return;
@@ -1219,12 +1606,14 @@ export function createController({
     }
     const now = !awaitingClearance(state);
     if (now && !was) {
-      if (state.screen !== "office-volunteers") state.screen = homeScreen();
+      if (!ADMIN_SETUP_SCREENS.includes(state.screen)) state.screen = homeScreen();
       // The setup screen is replaced by the work: the keyboard goes to it.
       await loadWork({ focus: true });
       return;
     }
     if (!now && was) dropWork();
+    // Still not cleared: the feed re-reads with the check.
+    await readFeed();
     persistSession();
     show();
   }
@@ -1369,13 +1758,28 @@ export function createController({
     state.session = "none";
     state.principal = null;
     state.cases = [];
-    state.lists = { cases: "loading", assistance: "loading", volunteers: "loading" };
+    state.lists = {
+      cases: "loading",
+      assistance: "loading",
+      volunteers: "loading",
+      updates: "loading",
+      postedUpdates: "loading",
+    };
     dataLoaded = false;
     state.people = [];
     state.volunteers = [];
     state.volunteerFilters = { search: "", role: "all" };
     state.volunteerFormError = null;
     pendingVolunteerSave = null;
+    state.updates = [];
+    state.updatesUnread = 0;
+    endNotifications();
+    state.postedUpdates = [];
+    state.updateForm = emptyUpdateForm();
+    state.updateEditing = null;
+    state.updateFormError = null;
+    pendingUpdateSave = null;
+    pendingUpdateAction = null;
     state.assistance = [];
     state.workspace = null;
     state.openPanels = [];
@@ -1417,6 +1821,8 @@ export function createController({
     // The no-access window has nowhere to go: the logo and every other
     // navigation do nothing, so the screen and its Sign out stay.
     if (state.screen === "no-access" && !state.principal) return;
+    // Post an update is a ceiling admin's: anyone else lands on their home.
+    if (screen === "office-updates" && !screenAllowed(screen)) screen = homeScreen();
     // A new office draft belongs to the Add a case page: leaving drops it.
     if (screen !== "office-add-case") {
       state.officeDraft = false;
@@ -1427,6 +1833,7 @@ export function createController({
     state.error = null;
     state.dialog = null;
     state.dialogContext = null;
+    endNotifications();
     persistSession();
     show(true);
   }
@@ -1444,6 +1851,7 @@ export function createController({
   }
 
   function openDialog(name, context = null) {
+    if (name !== "notifications") endNotifications();
     state.dialog = name;
     state.dialogContext = context ? { ...context } : null;
     show();
@@ -1452,6 +1860,7 @@ export function createController({
   function closeDialog() {
     state.dialog = null;
     state.dialogContext = null;
+    endNotifications();
     show();
   }
 
@@ -3010,6 +3419,12 @@ export function createController({
       assistance: [...state.assistance],
       volunteers: state.volunteers.map((entry) => ({ ...entry })),
       volunteerFilters: { ...state.volunteerFilters },
+      updates: state.updates.map((item) => ({ ...item })),
+      notificationsFresh: [...state.notificationsFresh],
+      postedUpdates: state.postedUpdates.map((entry) => ({ ...entry })),
+      updateForm: copyUpdateForm(state.updateForm),
+      updateEditing: state.updateEditing ? { ...state.updateEditing } : null,
+      updateFormError: state.updateFormError ? { ...state.updateFormError } : null,
       draftAnswers: { ...state.draftAnswers },
       revealed: [...state.revealed],
       openAddSubsteps: [...state.openAddSubsteps],
@@ -3046,6 +3461,16 @@ export function createController({
     setVolunteerFilter,
     saveVolunteer,
     clearVolunteerFormError,
+    loadFeed,
+    openNotifications,
+    closeNotifications,
+    confirmUpdate,
+    loadPostedUpdates,
+    saveUpdate,
+    updateAction,
+    editUpdate,
+    cancelUpdateEdit,
+    setUpdateForm,
     closeUnsigned,
     editContact,
     setBoardFilter,
