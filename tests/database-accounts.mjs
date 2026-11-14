@@ -1152,14 +1152,15 @@ test("sign-in accounts against real Supabase", async (t) => {
     // A cancellation that fails for a reason nothing foresaw: a test-only table
     // whose foreign key to memberships membership_in_use does not know about.
     await t.test("a cancellation that fails does not break the Roster read", async () => {
-      const invitedExpired = async () => {
+      // Both are invited before either expires: an invite sweeps first, and
+      // would cancel the other's expired invitation before it is held.
+      const invited = async () => {
         const client = await f.provision();
         await rpc(admin, "vitally_record_account", recordArgs("invite", { email: client.email }, client.userId));
-        await expire(client.userId);
         return client;
       };
-      const client = await invitedExpired();
-      const signer = await invitedExpired();
+      const client = await invited();
+      const signer = await invited();
       const schema = `test_hold_${randomUUID().replaceAll("-", "")}`;
       await f.sql(
         `create schema ${schema};
@@ -1167,8 +1168,10 @@ test("sign-in accounts against real Supabase", async (t) => {
           foreign key (workspace_id,user_id) references public.memberships(workspace_id,user_id))`,
       );
       try {
-        for (const held of [client, signer])
+        for (const held of [client, signer]) {
           await f.sql(`insert into ${schema}.hold values($1,$2)`, [f.workspaceId, held.userId]);
+          await expire(held.userId);
+        }
         // The Roster read: the sweep, then the tables, as listVolunteers does.
         const swept = await rpc(admin, "vitally_expire_invitations");
         assert.ok(swept.failed >= 1, `failed ${swept.failed}`);
