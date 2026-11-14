@@ -38,7 +38,7 @@
 
 ## 3. Browser rules and store
 
-- [ ] 3.1 `src/posted-updates.mjs` with tests:
+- [x] 3.1 `src/posted-updates.mjs` with tests:
   - `validateUpdate`, with the same rules and messages as the database;
   - the labels;
   - `audienceLabel`, `badgeCount`, `isPinned`, `toUpdateRequest`.
