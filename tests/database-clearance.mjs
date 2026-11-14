@@ -1072,6 +1072,9 @@ test("assignees must be cleared against real Supabase", async (t) => {
         rows.map((row) => row.proname),
         [
           "act_approve_review",
+          // Calls require_cleared_assignee (046, add-volunteer-workload); the
+          // narrower-role scenario is in tests/database-workload.mjs.
+          "act_assign_case",
           "act_assistance_claim",
           "act_claim_preparation",
           "act_claim_review",
