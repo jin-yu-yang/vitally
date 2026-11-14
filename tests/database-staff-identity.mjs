@@ -25,10 +25,12 @@ import { initializeWorkspace } from "../tools/admin/workspace-setup.mjs";
 const ALL_CAPABILITIES = ["prepare", "review", "admin", "followup", "receive_documents", "assist"];
 const FORBIDDEN = "VT001";
 // The tables the staff screens read: what staff subscribe to, plus the
-// filing tables staff read but do not subscribe to.
+// filing tables staff read but do not subscribe to. `posted_updates` is left
+// out: its rows are audience-scoped (drafts and other roles' updates are
+// hidden), and database-posted-updates.mjs covers who reads them.
 const STAFF_READ_TABLES = [
   ...new Set([
-    ...SUBSCRIBED_TABLES.staff,
+    ...SUBSCRIBED_TABLES.staff.filter((table) => table !== "posted_updates"),
     "filing_attempts",
     "filing_returns",
     "filing_notes",
