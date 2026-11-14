@@ -425,6 +425,11 @@ begin
   update public.cases set reviewer_id=v_assignee.id where id=p_case.id;
   update public.reviews set reviewer_person_id=v_assignee.id
    where workspace_id=p_case.workspace_id and case_id=p_case.id and status='active';
+  -- A reviewing case always has its active review; without one the invariant
+  -- is broken, and the handover fails rather than leaving the case half moved.
+  if not found then
+   raise sqlstate 'VT004' using message='INVALID_TRANSITION';
+  end if;
  end if;
  return jsonb_build_object('detail',jsonb_build_object('slot',v_slot,'personId',v_assignee.id,'previousPersonId',v_holder))
   || case when v_holder is not null then '{}'::jsonb

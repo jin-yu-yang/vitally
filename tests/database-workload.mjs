@@ -244,7 +244,7 @@ test("ASSIGN_CASE refusals against real Supabase", async (t) => {
 test("ASSIGN_CASE effects against real Supabase", async (t) => {
   const f = await createDatabaseFixture();
   try {
-    const { revisionOf, refused } = helpers(f);
+    const { revisionOf, refused, caseState } = helpers(f);
     const assign = (caseId, slot, personId) =>
       f.act(f.siteCoordinator, caseId, "ASSIGN_CASE", { slot, personId });
     const caseRow = async (caseId) =>
@@ -338,6 +338,66 @@ test("ASSIGN_CASE effects against real Supabase", async (t) => {
       ]);
       await f.act(jordan.client, caseId, "RESUBMIT_REVIEW", { questionnaire: PREPARER, resolution: RESOLUTION });
       assert.equal((await caseRow(caseId)).stage, "review_ready");
+    });
+
+    // A preparer handover during review keeps the stage and the review: the
+    // new preparer becomes a participant, and the active review is untouched.
+    await t.test("reassign preparer at reviewing", async () => {
+      const caseId = await f.preparedCase();
+      await f.act(f.reviewer, caseId, "CLAIM_REVIEW", {});
+      const reviewsBefore = await reviews(caseId);
+      const messagesBefore = await f.clientMessages(caseId);
+      await assign(caseId, "preparer", jordan.personId);
+      const row = await caseRow(caseId);
+      assert.equal(row.stage, "reviewing");
+      assert.equal(row.preparer_id, jordan.personId);
+      assert.equal(row.reviewer_id, f.reviewerId);
+      assert.deepEqual(await participants(caseId), [f.preparerId, jordan.personId].sort());
+      assert.deepEqual(await reviews(caseId), reviewsBefore, "the active review is untouched");
+      assert.deepEqual(await f.clientMessages(caseId), messagesBefore, "no client line");
+      assert.deepEqual(await assignEvents(caseId), [
+        {
+          actor_person_id: f.siteCoordinatorId,
+          detail: { slot: "preparer", personId: jordan.personId, previousPersonId: f.preparerId },
+        },
+      ]);
+    });
+
+    await t.test("reassign preparer at review_ready", async () => {
+      const caseId = await f.preparedCase();
+      const messagesBefore = await f.clientMessages(caseId);
+      await assign(caseId, "preparer", jordan.personId);
+      const row = await caseRow(caseId);
+      assert.equal(row.stage, "review_ready");
+      assert.equal(row.preparer_id, jordan.personId);
+      assert.equal(row.reviewer_id, null);
+      assert.deepEqual(await participants(caseId), [f.preparerId, jordan.personId].sort());
+      assert.deepEqual(await reviews(caseId), [], "no review is opened");
+      assert.deepEqual(await f.clientMessages(caseId), messagesBefore, "no client line");
+    });
+
+    // An identical ASSIGN_CASE resent with the same action id returns the
+    // stored receipt and writes nothing more.
+    await t.test("replay returns the stored receipt", async () => {
+      const caseId = await f.readyCase();
+      const args = applyArgs({
+        caseId,
+        revision: await revisionOf(caseId),
+        type: "ASSIGN_CASE",
+        payload: { slot: "preparer", personId: f.preparerId },
+      });
+      const first = await f.siteCoordinator.rpc("vitally_apply_action", args);
+      assert.equal(first.error, null);
+      const after = await caseState(caseId);
+      const events = await assignEvents(caseId);
+      const messages = await f.clientMessages(caseId);
+      const replay = await f.siteCoordinator.rpc("vitally_apply_action", args);
+      assert.equal(replay.error, null);
+      assert.deepEqual(replay.data, first.data, "the stored receipt");
+      assert.deepEqual(await caseState(caseId), after, "nothing more is written");
+      assert.deepEqual(await assignEvents(caseId), events, "no second event");
+      assert.deepEqual(await f.clientMessages(caseId), messages, "no second client line");
+      assert.equal(await f.receiptsFor(args.p_action_id), 1, "one receipt");
     });
 
     // A case at reviewing whose active review f.reviewer claimed and the admin
