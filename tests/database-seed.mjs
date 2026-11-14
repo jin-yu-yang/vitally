@@ -717,11 +717,16 @@ test("seed command against real Supabase", async (t) => {
         await seedVolunteers(seedClient, args);
         // What Create account does to the person: give them a sign-in.
         const account = await f.provision();
+        // One statement, so the staff membership and the link exist together at commit.
         const linked = await f.sql(
-          `update public.people p set user_id=$3
-            from public.volunteer_profiles v
-           where v.person_id=p.id and v.workspace_id=p.workspace_id
-             and p.workspace_id=$1 and v.email=$2 returning p.id`,
+          `with m as (
+             insert into public.memberships(workspace_id,user_id,access)
+             values($1,$3,'staff') returning user_id
+           )
+           update public.people p set user_id=(select user_id from m)
+             from public.volunteer_profiles v
+            where v.person_id=p.id and v.workspace_id=p.workspace_id
+              and p.workspace_id=$1 and v.email=$2 returning p.id`,
           [f.workspaceId, emails[0], account.userId],
         );
         assert.equal(linked.rows.length, 1);

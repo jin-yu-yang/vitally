@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { assertTestTarget } from "../tools/admin/test-target.mjs";
+import { openDatabase } from "../tools/admin/database.mjs";
 import { createDatabaseFixture } from "./support/database-fixture.mjs";
 import { latestCode } from "./support/mail-catcher.mjs";
 
@@ -124,17 +125,39 @@ test("accounts Edge Function against real Supabase", async (t) => {
     });
     passed = true;
   } finally {
-    // The function creates Auth users the fixture does not track: remove them by address.
-    // Their memberships go first (memberships.user_id has no ON DELETE).
+    // Close first, in a finally nothing can skip: closing deletes the workspace, which
+    // cascades its memberships, people and accounts. Then remove the Auth users the
+    // function created and the fixture does not track.
     const failures = [];
+    const userIds = [];
     for (const email of createdEmails) {
-      const row = (await f.sql("select id from auth.users where lower(email)=$1", [email])).rows[0];
-      if (!row) continue;
-      await f.sql("delete from public.memberships where user_id=$1", [row.id]);
-      const { error } = await service.auth.admin.deleteUser(row.id);
-      if (error) failures.push(`${email}: ${error.message}`);
+      try {
+        const row = (await f.sql("select id from auth.users where lower(email)=$1", [email])).rows[0];
+        if (row) userIds.push([email, row.id]);
+      } catch (error) {
+        failures.push(`${email}: ${error.message}`);
+      }
     }
-    await f.close();
+    try {
+      await f.close();
+    } catch (error) {
+      failures.push(`close: ${error.message}`);
+    }
+    // The fixture's connection is closed now: use one of our own for any membership left.
+    const cleanup = await openDatabase({ kind: "test" });
+    try {
+      for (const [email, id] of userIds) {
+        try {
+          await cleanup.query("delete from public.memberships where user_id=$1", [id]);
+          const { error } = await service.auth.admin.deleteUser(id);
+          if (error) failures.push(`${email}: ${error.message}`);
+        } catch (error) {
+          failures.push(`${email}: ${error.message}`);
+        }
+      }
+    } finally {
+      await cleanup.end();
+    }
     if (failures.length && passed) throw new Error(`Cleanup failed: ${failures.join("; ")}`);
   }
 });
