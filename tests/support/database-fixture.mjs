@@ -676,7 +676,7 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
     clients.push(client);
     const auth = await client.auth.signInWithPassword({ email, password });
     if (auth.error) throw new Error("Synthetic Auth sign-in failed.");
-    // The password lets a test sign in again (046: the first sign-in trigger).
+    // The password lets a test sign in again (047: the first sign-in trigger).
     return { client, userId: data.user.id, email, password };
   };
   // A staff member of this run's workspace (OpenSpec change add-staff-identity):

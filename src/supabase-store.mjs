@@ -758,7 +758,7 @@ export function createStore(client) {
       });
     },
 
-    // Accounts (migration 046). Create, invite and resend go through the
+    // Accounts (migration 047). Create, invite and resend go through the
     // `accounts` Edge Function; a refusal is its `{code, reason}` body, mapped
     // like an RPC refusal (`cause.message` is the code, `cause.details` the reason).
     async createAccount(request) {

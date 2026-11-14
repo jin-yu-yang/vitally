@@ -119,8 +119,8 @@ The roster command keeps its own checks.
   - DB tests that call `cleared()` on an unlinked person expecting true are converted to expect false with the account reason, and a linked active counterpart is added. Nothing is deleted.
 
 ### D7: Creation paths write active accounts
-- 046 redefines `add_staff_member`: after its membership insert, it calls `insert_active_account` with the person. The identical re-run path inserts nothing new.
-- 046 redefines `initialize_workspace`: each applicant membership gets an active account.
+- 047 redefines `add_staff_member`: after its membership insert, it calls `insert_active_account` with the person. The identical re-run path inserts nothing new.
+- 047 redefines `initialize_workspace`: each applicant membership gets an active account.
 - The roster command code itself needs no change.
 - Backfill:
   - every active membership gets an `active` row (`activated_at = coalesce(last_sign_in_at, now())`, `person_id` from `people` for staff);
@@ -156,7 +156,7 @@ The roster command keeps its own checks.
 - [Risk] The mail catcher's API differs from the assumption. → Mitigation: the first plan task checks it before anything is built on it.
 - [Trade-off] The invitation reuses the "Your ViTally code" email. → Accepted for now; custom wording is later work.
 - [Trade-off] An invited volunteer becomes visible to all staff (`people.user_id` set) and has a four-capability ceiling before being cleared. → They can do nothing until cleared, and assignment pickers list only cleared people.
-- [Risk] Concurrent PRs (#139, #150) may take 046, or modify the sign-in RPC list. → Mitigation: merge `main` before the PR, renumber, and re-run CI. Spec conflicts are surfaced at archive.
+- [Risk] Concurrent PRs (#139, #150) may take 046, or modify the sign-in RPC list. → Mitigation: merge `main` before the PR, renumber, and re-run CI. Spec conflicts are surfaced at archive. (Done: renumbered to 047 when #195 took 046.)
 
 ## Migration Plan
 

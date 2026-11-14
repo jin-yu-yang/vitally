@@ -123,7 +123,7 @@ Options:
 1. Roster row: an Account column showing Not created · Invited · Active · Deactivated. The Edit drawer's Account section shows status with Create account, Resend, Deactivate or Reactivate as the state allows.
 2. Clearance "what is missing" gains one reason, after the Form 13615 and photo ID: "No account yet", "Hasn't signed in yet" or "Account deactivated".
 3. Capabilities: new `accounts`; modified `volunteer-clearance`, `volunteer-roster`, `sign-in` and `local-seed-data`.
-4. Migration `046_accounts.sql`. It backfills an `active` row for every existing active membership, staff and applicant. Before the PR: sync with main and renumber if #139 (Workload) or #150 (notifications) took 046.
+4. Migration `046_accounts.sql`. It backfills an `active` row for every existing active membership, staff and applicant. Before the PR: sync with main and renumber if #139 (Workload) or #150 (notifications) took 047.
 
 ## Scope
 

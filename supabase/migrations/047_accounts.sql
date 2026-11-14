@@ -1,4 +1,4 @@
--- 046: sign-in accounts (OpenSpec change add-account-invitations, design D1,
+-- 047: sign-in accounts (OpenSpec change add-account-invitations, design D1,
 -- D2, D6, D7).
 --
 -- Part 1: one account row per membership, and clearance needs an active one.
@@ -202,7 +202,7 @@ begin
  if v_link is not null then
   update public.people set person_key=p_person_key,capabilities=p_capabilities,user_id=p_user_id where id=v_link;
   update public.volunteer_profiles set revision=revision+1,updated_at=now() where workspace_id=p_workspace_id and person_id=v_link;
-  perform vitally_private.insert_active_account(p_workspace_id,p_user_id,v_link); -- 046
+  perform vitally_private.insert_active_account(p_workspace_id,p_user_id,v_link); -- 047
   return v_link;
  end if;
  insert into public.people(workspace_id,person_key,name,capabilities,user_id)
@@ -210,7 +210,7 @@ begin
  insert into public.volunteer_profiles(workspace_id,person_id,email) values(p_workspace_id,v_person_id,v_email);
  insert into public.roster_entries(workspace_id,person_id,season)
   select p_workspace_id,v_person_id,w.current_season from public.workspaces w where w.id=p_workspace_id;
- perform vitally_private.insert_active_account(p_workspace_id,p_user_id,v_person_id); -- 046
+ perform vitally_private.insert_active_account(p_workspace_id,p_user_id,v_person_id); -- 047
  return v_person_id;
 end;
 $$;
@@ -251,7 +251,7 @@ begin
   raise sqlstate 'VT007' using message='VALIDATION';
  end if;
   insert into public.memberships(workspace_id,user_id,access) values(p_workspace_id,v_member.id,v_member.access) on conflict do nothing;
-  perform vitally_private.insert_active_account(p_workspace_id,v_member.id,null); -- 046
+  perform vitally_private.insert_active_account(p_workspace_id,v_member.id,null); -- 047
  end loop;
  return jsonb_build_object('workspaceId',p_workspace_id);
 end;

@@ -102,7 +102,7 @@ src/
   vendor/pdfjs.mjs, vendor/pdfjs-worker.mjs
                            Committed copy of pdfjs-dist's legacy build (the shaded-section editor).
 supabase/
-  migrations/001-046       The whole schema, RLS, business logic and intake catalogue, in order.
+  migrations/001-047       The whole schema, RLS, business logic and intake catalogue, in order.
   test-stack.config.example.toml   Reference config for the local test stack.
 tools/
   admin/                   Privileged tooling: target guards, migrate, roster, workspace setup.

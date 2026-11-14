@@ -10,9 +10,9 @@ import { openDatabase } from "../tools/admin/database.mjs";
 // reach. Every check reads the catalog over a plain connection; the refused
 // inserts run in a transaction that is rolled back.
 
-// The row-security policies at 046, one per table, by table and name. 043
+// The row-security policies at 047, one per table, by table and name. 043
 // renames the sixteen staff-only policies and drops or adds none; 044 adds the
-// three admin-only Roster policies; 046 adds the admin-only accounts policy.
+// three admin-only Roster policies; 047 adds the admin-only accounts policy.
 const POLICIES = Object.freeze([
   ["accounts", "admin_accounts"],
   ["admin_followups", "staff_admin_followups"],
@@ -43,7 +43,7 @@ const POLICIES = Object.freeze([
   ["volunteer_profiles", "admin_volunteer_profiles"],
   ["workspaces", "member_workspace"],
 ]);
-// The thirteen public RPCs after 046, by name and identity arguments.
+// The thirteen public RPCs after 047, by name and identity arguments.
 const RPCS = Object.freeze([
   "vitally_apply_action(p_action_id uuid, p_case_id uuid, p_expected_revision bigint, p_type text, p_payload jsonb)",
   "vitally_assistance_action(p_action_id uuid, p_item_id uuid, p_expected_revision bigint, p_type text, p_note text)",

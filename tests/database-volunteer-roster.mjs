@@ -611,7 +611,7 @@ test("volunteer roster records against real Supabase", async (t) => {
       );
     });
 
-    // 046 (add-account-invitations, design D6): this volunteer has no sign-in
+    // 047 (add-account-invitations, design D6): this volunteer has no sign-in
     // and so no account, and is never cleared. The test below is its
     // counterpart with an active account.
     await t.test("photo ID check is kept while ticked", async () => {

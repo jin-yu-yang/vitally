@@ -435,7 +435,7 @@ test("seed command against real Supabase", async (t) => {
           assert.equal(empty.length, 1);
           assert.equal(empty[0].certs, 0);
           assert.equal(empty[0].cleared, false);
-          // 046 (add-account-invitations, design D6): the seed volunteers have
+          // 047 (add-account-invitations, design D6): the seed volunteers have
           // no sign-in and so no account, and none is cleared, not even the new
           // one whose photo ID is checked. The role accounts above, which have
           // active accounts, are the cleared counterpart.

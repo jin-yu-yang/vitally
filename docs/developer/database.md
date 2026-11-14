@@ -24,7 +24,7 @@ it. Run everything described here against the local stack from [`docs/setup.md`]
 
 ## Migrations
 
-The schema is forty-six plain SQL files (001 to 046) in [`supabase/migrations/`](../../supabase/migrations/), applied
+The schema is forty-seven plain SQL files (001 to 047) in [`supabase/migrations/`](../../supabase/migrations/), applied
 in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 
 | File | Adds |

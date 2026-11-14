@@ -6,7 +6,7 @@
 - [x] 1.4 `tests/support/mail-catcher.mjs`: read the newest code sent to an address
 - [x] 1.5 `docs/setup.md`: edge runtime, functions copy, email override, restart note, and the hosted SMTP prerequisite
 
-## 2. Migration 046: accounts
+## 2. Migration 047: accounts
 
 - [x] 2.1 `accounts` table, constraints (staff names a person, client none), RLS (admin read only), grants, not published
 - [x] 2.2 Backfill: active rows for active memberships, deactivated rows for inactive ones

@@ -32,7 +32,7 @@ Only the operator's roster command can give anyone a sign-in today. An admin can
 
 ## Impact
 
-- **Database:** new migration `046_accounts.sql` (renumbered before the PR if 046 is taken). It adds the table, backfill, trigger on `auth.users`, check and commit functions for `service_role`, Deactivate and Reactivate RPCs, the list read for the office panel, and changes to `cleared()` or `cleared_workspace_id()` and to the Roster read.
+- **Database:** new migration `046_accounts.sql` (renumbered before the PR if 047 is taken). It adds the table, backfill, trigger on `auth.users`, check and commit functions for `service_role`, Deactivate and Reactivate RPCs, the list read for the office panel, and changes to `cleared()` or `cleared_workspace_id()` and to the Roster read.
 - **New `supabase/functions/accounts/`:** a Deno entry plus a plain handler module tested under `npm test`.
 - **Browser:** the Roster view and Edit drawer, the office screen panel, and the store calls (`functions.invoke` and the new RPCs).
 - **Tools:** `tools/admin/roster.mjs` and workspace setup, the seed, test fixtures, `supabase/test-stack.config.example.toml`, `.github/actions/test-stack`, and `docs/setup.md`.

@@ -5,7 +5,7 @@ import { createDatabaseFixture, rejected } from "./support/database-fixture.mjs"
 import { initializeWorkspace } from "../tools/admin/workspace-setup.mjs";
 
 // OpenSpec change add-account-invitations (design D1, D2, D6, D7), migration
-// 046: one `accounts` row per membership, the backfill, the first sign-in
+// 047: one `accounts` row per membership, the backfill, the first sign-in
 // trigger, the active accounts that the roster command and workspace setup
 // write, and clearance needing an active account. Specs: sign-in-accounts and
 // volunteer-clearance. The file shares one fixture; every staff member below
