@@ -115,6 +115,10 @@ const STAFF_VOLUNTEER_GONE_MESSAGE = "This volunteer could not be opened. Close 
 const EDIT_CONFLICT_MESSAGE =
   "Someone else changed this application while you were editing. Choose which answers to keep.";
 
+// The Workload's sortable columns (workload-views.mjs) and its starting view.
+const WORKLOAD_SORT_KEYS = Object.freeze(["name", "open", "preparing", "review", "waiting", "stalled"]);
+const freshWorkloadView = () => ({ sort: { key: "open", dir: "desc" }, search: "", expanded: [] });
+
 function controllerError(code, message, cause) {
   return Object.assign(new Error(message, { cause }), { code });
 }
@@ -306,6 +310,11 @@ export function createController({
     volunteers: [],
     volunteerFilters: { search: "", role: "all" },
     volunteerFormError: null,
+    // The Volunteers page's tab, and the Workload's own view (change
+    // add-volunteer-workload): window-local and never persisted. The Workload
+    // tab is only ever set for a cleared, effective admin (`canSeeWorkload`).
+    volunteerTab: "roster",
+    workload: freshWorkloadView(),
     // The caller's own workspace row, read only for a staff window: the
     // office's defaults.
     workspace: null,
@@ -1007,6 +1016,122 @@ export function createController({
     show();
   }
 
+  // ---- the Workload (change add-volunteer-workload) ------------------------
+
+  // Who may see the Workload and open its drawer: a cleared staff member with
+  // effective admin (design D1). The views hide the tab for anyone else; this
+  // is the second gate, so nothing here opens it for them either.
+  const canSeeWorkload = () => staffWindow() && !awaitingClearance(state) && actingAdmin();
+
+  // The Volunteers page's tab. Either tab reads the volunteers, as opening the
+  // Roster does: the Workload's rows and its drawer are built from them, and
+  // its cases are the list this window already keeps live.
+  async function setVolunteerTab(tab) {
+    if (tab !== "roster" && tab !== "workload") return;
+    if (tab === "workload" && !canSeeWorkload()) return;
+    state.volunteerTab = tab;
+    show();
+    await loadVolunteers();
+  }
+
+  // The Workload's search, sort and open rows, one change at a time:
+  // `search` (text), `sortBy` (a header pressed: the same key again reverses
+  // it; a new key starts with its natural order, A to Z for the name and
+  // highest first for a count) and `toggleRow` (a row id, or "unassigned").
+  function setWorkloadView(patch = {}) {
+    const view = state.workload;
+    let next = view;
+    if (typeof patch.search === "string") next = { ...next, search: patch.search };
+    if (WORKLOAD_SORT_KEYS.includes(patch.sortBy)) {
+      const dir =
+        next.sort.key === patch.sortBy
+          ? next.sort.dir === "asc"
+            ? "desc"
+            : "asc"
+          : patch.sortBy === "name"
+            ? "asc"
+            : "desc";
+      next = { ...next, sort: { key: patch.sortBy, dir } };
+    }
+    if (typeof patch.toggleRow === "string" && patch.toggleRow) {
+      const id = patch.toggleRow;
+      next = {
+        ...next,
+        expanded: next.expanded.includes(id)
+          ? next.expanded.filter((entry) => entry !== id)
+          : [...next.expanded, id],
+      };
+    }
+    if (next === view) return;
+    state.workload = next;
+    show();
+  }
+
+  // Assign or Reassign: the drawer for one case's slot, fresh (no earlier
+  // refusal). Only for a cleared, effective admin.
+  function openAssign(caseId, slot) {
+    if (!canSeeWorkload()) return;
+    if (typeof caseId !== "string" || !caseId) return;
+    if (slot !== "preparer" && slot !== "reviewer") return;
+    dropLocalRetry();
+    state.error = null;
+    openDialog("assign", { caseId, slot, search: "" });
+  }
+
+  function setAssignSearch(text) {
+    if (state.dialog !== "assign" || !state.dialogContext) return;
+    state.dialogContext = { ...state.dialogContext, search: String(text ?? "") };
+    show();
+  }
+
+  // The drawer's Choose (spec "An admin assigns or reassigns…"). It needs no
+  // open case: the action names the listed case and the revision the Workload
+  // listed, so a case that moved meanwhile is a CONFLICT. It goes through
+  // `dispatch`, as every case action does (its receipt, its retry of an
+  // unknown outcome, its conflict message). On success the drawer closes and
+  // the cases (dispatch's refresh) and the volunteers are read again; the
+  // result carries the sentence the page says. A refusal stays in the drawer,
+  // over the list as it is now. Returns null when nothing was sent.
+  async function assignCase(personId) {
+    if (!canSeeWorkload() || state.dialog !== "assign" || state.busy) return null;
+    const { caseId, slot } = state.dialogContext ?? {};
+    if (slot !== "preparer" && slot !== "reviewer") return null;
+    if (typeof personId !== "string" || !personId) return null;
+    const record = state.cases.find((entry) => entry?.id === caseId);
+    if (!record) return null;
+    const name =
+      state.volunteers.find((entry) => entry?.id === personId)?.name ??
+      state.people.find((entry) => entry?.id === personId)?.name ??
+      "the volunteer";
+    const action = {
+      actionId: newActionId(),
+      caseId,
+      expectedRevision: Number(record.revision),
+      type: "ASSIGN_CASE",
+      payload: { slot, personId },
+    };
+    let receipt;
+    try {
+      receipt = await dispatch(action);
+    } catch (error) {
+      // Not after NOT_CLEARED, which has dropped the work: no case is read.
+      if (canSeeWorkload()) {
+        await loadList().catch(() => {});
+        await readVolunteers().catch(() => {});
+        show();
+      }
+      throw error;
+    }
+    if (state.dialog === "assign" && state.dialogContext?.caseId === caseId) {
+      state.dialog = null;
+      state.dialogContext = null;
+    }
+    // A failed re-read keeps the list it shows: the assignment landed.
+    await readVolunteers().catch(() => {});
+    show();
+    return { receipt, notice: `Assigned ${name} as ${slot}.` };
+  }
+
   function clearVolunteerFormError() {
     state.volunteerFormError = null;
   }
@@ -1151,6 +1276,8 @@ export function createController({
     state.lists = { ...state.lists, cases: "loading", assistance: "loading" };
     state.dialog = null;
     state.dialogContext = null;
+    // The Workload is case data: back to the Roster.
+    state.volunteerTab = "roster";
     if (!(ceilingAdmin(state.principal) && state.screen === "office-volunteers"))
       state.screen = "staff";
   }
@@ -1375,6 +1502,8 @@ export function createController({
     state.volunteers = [];
     state.volunteerFilters = { search: "", role: "all" };
     state.volunteerFormError = null;
+    state.volunteerTab = "roster";
+    state.workload = freshWorkloadView();
     pendingVolunteerSave = null;
     state.assistance = [];
     state.workspace = null;
@@ -3010,6 +3139,12 @@ export function createController({
       assistance: [...state.assistance],
       volunteers: state.volunteers.map((entry) => ({ ...entry })),
       volunteerFilters: { ...state.volunteerFilters },
+      workload: {
+        ...state.workload,
+        sort: { ...state.workload.sort },
+        expanded: [...state.workload.expanded],
+      },
+      dialogContext: state.dialogContext ? { ...state.dialogContext } : null,
       draftAnswers: { ...state.draftAnswers },
       revealed: [...state.revealed],
       openAddSubsteps: [...state.openAddSubsteps],
@@ -3046,6 +3181,11 @@ export function createController({
     setVolunteerFilter,
     saveVolunteer,
     clearVolunteerFormError,
+    setVolunteerTab,
+    setWorkloadView,
+    openAssign,
+    setAssignSearch,
+    assignCase,
     closeUnsigned,
     editContact,
     setBoardFilter,

@@ -5,7 +5,7 @@ import { SHADED_EDITOR, SHADED_UPLOAD } from "../src/contracts.mjs";
 import { POOL_FILTER_KEYS } from "../src/pool-views.mjs";
 import { saveStatus } from "../src/client-views.mjs";
 import { closeUnsignedDialogBody, closeUnsignedListKey } from "../src/office-views.mjs";
-import { staffScreen } from "../src/views.mjs";
+import { dialog, staffScreen } from "../src/views.mjs";
 import { CONTACT_FIELDS, findQuestion, isMemberId } from "../src/intake-catalogue.mjs";
 import { newMemberId, renderQuestion, reviewAlerts, valuesFromControls, withholdInvalid } from "../src/intake-form.mjs";
 import { fictionalAnswers, fillBlankAnswers, makeSampleAnswers } from "../src/sample-data.mjs";
@@ -7215,5 +7215,215 @@ test("the window's focus re-checks the clearance only while the setup screen sho
   assert.equal(store.calls.filter((entry) => entry === "listCases").length, caseReads + 1);
   state = controller.getState();
   assert.equal(state.error, null);
+  controller.stop();
+});
+
+// ---------------------------------------------------------------------------
+// The Workload tab and the Assign/Reassign drawer (change add-volunteer-workload)
+// ---------------------------------------------------------------------------
+
+// A cleared admin's store with the Roster's calls, two volunteers and two
+// cases: one waiting for a preparer, one Mira prepares.
+const workloadStore = (overrides = {}) => {
+  const store = rosterStore({
+    people: [
+      { id: "person-sam", name: "Sam Lee", capabilities: ["admin"] },
+      { id: "v-1", name: "Mira Patel", capabilities: ["prepare"] },
+      { id: "v-2", name: "Riley Quinn", capabilities: ["review"] },
+    ],
+    cases: [
+      { id: "case-w1", reference: "VT-WORK-0001", stage: "preparation_ready", revision: 3, answers: {}, preparerId: null },
+      { id: "case-w2", reference: "VT-WORK-0002", stage: "preparing", revision: 7, answers: {}, preparerId: "v-1" },
+    ],
+    ...overrides,
+  });
+  store.volunteers = [
+    { ...ROSTER_VOLUNTEER, cleared: true },
+    { ...ROSTER_VOLUNTEER, id: "v-2", name: "Riley Quinn", email: "riley@example.test", roles: ["reviewer"], cleared: true },
+  ];
+  return store;
+};
+const caseListReads = (store) => store.calls.filter((entry) => entry === "listCases").length;
+
+test("the Workload tab opens only for a cleared, effective admin, and loads the volunteers", async () => {
+  const store = workloadStore();
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  assert.equal(controller.getState().volunteerTab, "roster");
+  await controller.setVolunteerTab("workload");
+  const state = controller.getState();
+  assert.equal(state.volunteerTab, "workload");
+  assert.equal(volunteerReads(store), 1, "the Workload reads the volunteers it lists");
+  assert.match(staffScreen(state), /id="workload-title"/);
+  await controller.setVolunteerTab("roster");
+  assert.equal(controller.getState().volunteerTab, "roster");
+  controller.stop();
+});
+
+test("an uncleared ceiling admin stays on the Roster: no Workload tab and no assign drawer", async () => {
+  const store = workloadStore({ clearance: { ...UNCLEARED, isAdmin: true } });
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.setVolunteerTab("workload");
+  assert.equal(controller.getState().volunteerTab, "roster");
+  controller.openAssign("case-w1", "preparer");
+  assert.equal(controller.getState().dialog, null);
+  assert.equal(store.calls.includes("listCases"), false, "no case is read");
+  controller.stop();
+});
+
+test("a cleared staff member without effective admin gets no Workload and no assign drawer", async () => {
+  const store = workloadStore({
+    // Admin on the ceiling, but the roster gives only Preparer.
+    clearance: { cleared: true, missing: [], capabilities: ["prepare"], isAdmin: true, siteCoordinatorName: null },
+    people: [{ id: "person-sam", name: "Sam Lee", capabilities: ["admin", "prepare"] }],
+  });
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.setVolunteerTab("workload");
+  assert.equal(controller.getState().volunteerTab, "roster");
+  controller.openAssign("case-w1", "preparer");
+  assert.equal(controller.getState().dialog, null);
+  controller.stop();
+});
+
+test("the Workload's view: a header pressed again reverses, a new one starts at its natural order", async () => {
+  const { controller } = build({ store: workloadStore() });
+  await controller.start();
+  assert.deepEqual(controller.getState().workload, { sort: { key: "open", dir: "desc" }, search: "", expanded: [] });
+  controller.setWorkloadView({ sortBy: "open" });
+  assert.deepEqual(controller.getState().workload.sort, { key: "open", dir: "asc" });
+  controller.setWorkloadView({ sortBy: "name" });
+  assert.deepEqual(controller.getState().workload.sort, { key: "name", dir: "asc" });
+  controller.setWorkloadView({ sortBy: "name" });
+  assert.deepEqual(controller.getState().workload.sort, { key: "name", dir: "desc" });
+  controller.setWorkloadView({ sortBy: "stalled" });
+  assert.deepEqual(controller.getState().workload.sort, { key: "stalled", dir: "desc" });
+  controller.setWorkloadView({ sortBy: "hours" });
+  assert.deepEqual(controller.getState().workload.sort, { key: "stalled", dir: "desc" }, "an unknown key changes nothing");
+  controller.setWorkloadView({ search: "par" });
+  assert.equal(controller.getState().workload.search, "par");
+  controller.setWorkloadView({ toggleRow: "unassigned" });
+  controller.setWorkloadView({ toggleRow: "v-1" });
+  assert.deepEqual(controller.getState().workload.expanded, ["unassigned", "v-1"]);
+  controller.setWorkloadView({ toggleRow: "unassigned" });
+  assert.deepEqual(controller.getState().workload.expanded, ["v-1"]);
+  // getState hands out a copy.
+  controller.getState().workload.expanded.push("x");
+  assert.deepEqual(controller.getState().workload.expanded, ["v-1"]);
+  controller.stop();
+});
+
+test("openAssign opens the drawer for a case and slot, and its search is kept", async () => {
+  const { controller } = build({ store: workloadStore() });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.setVolunteerTab("workload");
+  controller.openAssign("case-w1", "preparer");
+  const state = controller.getState();
+  assert.equal(state.dialog, "assign");
+  assert.deepEqual(state.dialogContext, { caseId: "case-w1", slot: "preparer", search: "" });
+  controller.setAssignSearch("mi");
+  assert.deepEqual(controller.getState().dialogContext, { caseId: "case-w1", slot: "preparer", search: "mi" });
+  controller.closeDialog();
+  controller.openAssign("case-w1", "owner");
+  assert.equal(controller.getState().dialog, null, "an unknown slot opens nothing");
+  controller.stop();
+});
+
+test("assignCase sends ASSIGN_CASE with the listed revision, then closes, re-reads and says who was assigned", async () => {
+  const store = workloadStore();
+  const { controller } = build({ store, newActionId: () => "assign-1" });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.setVolunteerTab("workload");
+  controller.openAssign("case-w1", "preparer");
+  const caseReads = caseListReads(store);
+  const rosterReads = volunteerReads(store);
+  const done = await controller.assignCase("v-1");
+  assert.deepEqual(store.writes.at(-1), {
+    actionId: "assign-1",
+    caseId: "case-w1",
+    expectedRevision: 3,
+    type: "ASSIGN_CASE",
+    payload: { slot: "preparer", personId: "v-1" },
+  });
+  assert.equal(done.notice, "Assigned Mira Patel as preparer.");
+  const state = controller.getState();
+  assert.equal(state.dialog, null);
+  assert.equal(state.dialogContext, null);
+  assert.equal(state.busy, false);
+  assert.equal(state.error, null);
+  assert.ok(caseListReads(store) > caseReads, "cases re-read");
+  assert.ok(volunteerReads(store) > rosterReads, "volunteers re-read");
+  assert.equal(state.savedCase, null, "no case was opened");
+  assert.equal(state.screen, "office-volunteers");
+  controller.stop();
+});
+
+test("assignCase as reviewer says so", async () => {
+  const store = workloadStore();
+  store.records.set("case-w3", { id: "case-w3", reference: "VT-WORK-0003", stage: "prepared", revision: 5, answers: {}, preparerId: "v-1", reviewerId: null });
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.setVolunteerTab("workload");
+  controller.openAssign("case-w3", "reviewer");
+  const done = await controller.assignCase("v-2");
+  assert.equal(store.writes.at(-1).expectedRevision, 5);
+  assert.deepEqual(store.writes.at(-1).payload, { slot: "reviewer", personId: "v-2" });
+  assert.equal(done.notice, "Assigned Riley Quinn as reviewer.");
+  controller.stop();
+});
+
+for (const code of ["CONFLICT", "INELIGIBLE", "SELF_REVIEW"]) {
+  test(`assignCase refused ${code}: the drawer stays open with the error inside it`, async () => {
+    const store = workloadStore();
+    const { controller } = build({ store });
+    await controller.start();
+    controller.navigate("office-volunteers");
+    await controller.setVolunteerTab("workload");
+    controller.openAssign("case-w2", "preparer");
+    const caseReads = caseListReads(store);
+    store.failNext = Object.assign(new Error(code), { code });
+    await assert.rejects(controller.assignCase("v-1"), (error) => error.code === code);
+    const state = controller.getState();
+    assert.equal(state.dialog, "assign");
+    assert.deepEqual(state.dialogContext, { caseId: "case-w2", slot: "preparer", search: "" });
+    assert.equal(state.busy, false);
+    assert.equal(state.error.code, code);
+    assert.ok(caseListReads(store) > caseReads, "a refusal re-reads the list");
+    if (code === "CONFLICT") assert.match(state.error.message, /Someone else changed this case/);
+    assert.match(dialog(state), /id="drawer-error"/);
+    controller.stop();
+  });
+}
+
+test("assignCase does nothing for anyone but a cleared admin", async () => {
+  const store = workloadStore({ clearance: { ...UNCLEARED, isAdmin: true } });
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(await controller.assignCase("v-1"), null);
+  assert.equal(store.writes.length, 0);
+  controller.stop();
+});
+
+test("a Realtime case change redraws the Workload from the new case list", async () => {
+  const store = workloadStore();
+  const { controller, renders } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.setVolunteerTab("workload");
+  const preparing = (html) => html.match(/data-row-id="v-1"[\s\S]*?data-col="preparing">(\d+)</)[1];
+  assert.equal(preparing(staffScreen(controller.getState())), "1");
+  // Mira claims the waiting case in another window.
+  store.records.set("case-w1", { ...store.records.get("case-w1"), stage: "preparing", preparerId: "v-1", revision: 4 });
+  const before = renders.count;
+  await store.handlers.onChange({ table: "cases", caseId: "case-w1" });
+  assert.ok(renders.count > before, "redrawn");
+  assert.equal(preparing(staffScreen(controller.getState())), "2");
   controller.stop();
 });

@@ -612,3 +612,16 @@ test("an empty section is one muted line", () => {
   assert.equal(emptyLine("No call has been recorded on this task yet."), '<p class="muted">No call has been recorded on this task yet.</p>');
   assert.equal(emptyLine("T", 'data-role="x"'), '<p class="muted" data-role="x">T</p>');
 });
+
+test("the Workload's tab, sort header and row toggle each come back as the same control", () => {
+  const control = (dataset) => ({ tagName: "BUTTON", dataset });
+  assert.deepEqual(focusSelectors(describeFocus(control({ action: "volunteer-tab", tab: "workload" }))), [
+    '[data-action="volunteer-tab"][data-tab="workload"]',
+  ]);
+  assert.deepEqual(focusSelectors(describeFocus(control({ action: "sort-workload", key: "stalled" }))), [
+    '[data-action="sort-workload"][data-key="stalled"]',
+  ]);
+  assert.deepEqual(focusSelectors(describeFocus(control({ action: "toggle-workload-row", rowId: "unassigned" }))), [
+    '[data-action="toggle-workload-row"][data-row-id="unassigned"]',
+  ]);
+});
