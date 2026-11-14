@@ -1330,6 +1330,22 @@ test("lists clients newest first with status and Resend only while Invited", () 
   assert.match(resends[0], /data-email="newer@example\.org"/);
 });
 
+test("an invitation never used gets Cancel next to Resend, with its email and revision", () => {
+  const html = followupsWith(sam);
+  const cancels = html.match(/<button[^>]*data-action="client-cancel"[^>]*>[^<]*</g) ?? [];
+  assert.equal(cancels.length, 1, "the active row has none");
+  assert.match(cancels[0], /data-email="newer@example\.org"/);
+  assert.match(cancels[0], /data-revision="1"/);
+  assert.match(cancels[0], />Cancel</);
+  assert.ok(html.indexOf('data-action="client-resend"') < html.indexOf('data-action="client-cancel"'), "after Resend");
+  // Invited again after it was used: Resend only.
+  const used = followupsWith(sam, {
+    invitations: [{ ...INVITATIONS[0], activatedAt: "2026-11-02T10:00:00Z", accountRevision: 4 }],
+  });
+  assert.doesNotMatch(used, /client-cancel/);
+  assert.match(used, /client-resend/);
+});
+
 test("empty list says No clients invited yet", () => {
   assert.match(followupsWith(sam, { invitations: [] }), /No clients invited yet/);
 });

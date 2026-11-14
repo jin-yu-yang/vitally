@@ -83,7 +83,12 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
     const isNew = entry.is_new === true;
     const photoIdChecked = entry.photo_id_checked_at != null;
     const row = accountById.get(person.id);
-    const account = { status: row?.status ?? "none", revision: row ? Number(row.revision) : null };
+    const account = {
+      status: row?.status ?? "none",
+      revision: row ? Number(row.revision) : null,
+      activatedAt: row?.activated_at ?? null,
+      expiresAt: row?.expires_at ?? null
+    };
     const cleared = roles.length > 0 && (!isNew || photoIdChecked) && account.status === "active";
     // What the row waits for, in order: the Form 13615 (no roles) or the photo ID, then the account.
     const missing = roles.length === 0 ? ["form13615"] : !isNew || photoIdChecked ? [] : ["photoId"];
@@ -100,6 +105,8 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
       certificates: certsById.get(person.id) ?? [],
       revision: profile.revision,
       hasSignIn: Boolean(person.user_id),
+      // The name the volunteer gave at their site check (migration 047).
+      signedInName: profile.signed_in_name ?? null,
       isNew,
       photoIdChecked,
       account,
@@ -136,6 +143,26 @@ export function volunteerFromForm(formData) {
     isNew: formData.get("isNew") != null,
     photoIdChecked: formData.get("photoIdChecked") != null
   };
+}
+
+// Whether the drawer's form holds something the saved volunteer does not:
+// `payload` is `volunteerFromForm` of the form as it is now. Create account
+// sends the saved profile, so it waits while this is true.
+export function volunteerFormChanged(volunteer, payload) {
+  if (!volunteer) return true;
+  const same = (a, b) => JSON.stringify([...(a ?? [])].sort()) === JSON.stringify([...(b ?? [])].sort());
+  return (
+    payload.name !== (volunteer.name ?? "") ||
+    payload.email !== String(volunteer.email ?? "").toLowerCase() ||
+    (payload.phone ?? null) !== (volunteer.phone ?? null) ||
+    payload.works !== (volunteer.works || "on_site") ||
+    !same(payload.languages, volunteer.languages) ||
+    (payload.otherLanguage ?? null) !== (volunteer.languages?.includes("other") ? volunteer.otherLanguage ?? null : null) ||
+    !same(payload.roles, volunteer.roles) ||
+    !same(payload.certificates, volunteer.certificates) ||
+    payload.isNew !== (volunteer.isNew === true) ||
+    payload.photoIdChecked !== (volunteer.photoIdChecked === true)
+  );
 }
 
 // Returns the first problem as a sentence, or null when the payload may be saved.
@@ -187,7 +214,7 @@ export function roleNeedsMessage(details) {
 // Edge Function's `reason`) as the drawer's sentence; null when unknown.
 const ACCOUNT_MESSAGES = Object.freeze({
   NO_EMAIL: "Add an email first",
-  ALREADY_INVITED: "This client is already invited",
+  ALREADY_INVITED: "This person is already invited or signed in.",
   USE_REACTIVATE: "This account is deactivated. Use Reactivate.",
   EMAIL_IN_USE: "That email is already used by another sign-in. Use another email.",
   EMAIL_ON_ROSTER: "That email belongs to a volunteer. Use another email.",

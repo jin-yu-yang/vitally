@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { setupScreen, awaitingClearance } from "../src/setup-views.mjs";
+import { setupScreen, siteCheckScreen, awaitingClearance } from "../src/setup-views.mjs";
 import { staffScreen } from "../src/views.mjs";
 
 // Fictional people only.
@@ -116,4 +116,49 @@ test("a cleared staff member gets the normal staff screens", () => {
   }));
   assert.doesNotMatch(html, /Finish your setup/);
   assert.match(html, /Work board/);
+});
+
+// ---- the site check (change add-account-invitations, decision 4) ----------
+
+test("the site check asks for a name and the site's SIDN", () => {
+  const html = siteCheckScreen(staffState({ siteCheck: true }));
+  assert.match(html, /<h1>Confirm your site<\/h1>/);
+  assert.match(html, /<p>Enter your name and this site&#39;s SIDN to finish signing in\.<\/p>|<p>Enter your name and this site's SIDN to finish signing in\.<\/p>/);
+  assert.match(html, /<form id="site-check-form"/);
+  assert.match(html, /<span>Your name<\/span><input id="site-check-name" name="name" type="text" value="" maxlength="80"[^>]* required>/);
+  assert.match(html, /<span>Site number \(SIDN\)<\/span><input id="site-check-sidn" name="sidn"/);
+  assert.match(html, /<button type="submit" class="btn primary">Confirm<\/button>/);
+  assert.doesNotMatch(html, /role="alert"/);
+});
+
+test("the site check keeps the name, says its error, both escaped, and never keeps the SIDN", () => {
+  const html = siteCheckScreen(
+    staffState({ siteCheck: true }, { siteCheck: { name: "Kim <b>N</b>", error: "That isn't this site's number.", cancelled: false } }),
+  );
+  assert.match(html, /id="site-check-name" name="name" type="text" value="Kim &lt;b&gt;N&lt;\/b&gt;"/);
+  assert.match(html, /role="alert" id="site-check-error">[^]*That isn&#39;t this site&#39;s number\./);
+  assert.match(html, /id="site-check-sidn" name="sidn" type="text" value=""/);
+});
+
+test("a cancelled site check says so and offers no form", () => {
+  const html = siteCheckScreen(staffState({ siteCheck: true }, { siteCheck: { name: "Kim", error: null, cancelled: true } }));
+  assert.match(html, /This invitation was cancelled\. Ask your site coordinator to invite you again\./);
+  assert.doesNotMatch(html, /site-check-form|Confirm<\/button>/);
+});
+
+test("a staff window with siteCheck shows the site check instead of the setup screen, with Sign out", () => {
+  const html = staffScreen(staffState({ siteCheck: true, missing: [{ kind: "form13615" }] }));
+  assert.match(html, /<h1>Confirm your site<\/h1>/);
+  assert.doesNotMatch(html, /Finish your setup for this season/);
+  assert.match(html, /data-action="sign-out"/);
+  // A ceiling admin left on the Roster sees the site check too.
+  const admin = staffScreen(staffState({ siteCheck: true, isAdmin: true }, { screen: "office-volunteers" }));
+  assert.match(admin, /Confirm your site/);
+  assert.doesNotMatch(admin, /<h1>Volunteers<\/h1>/);
+  // The cancelled message keeps Sign out.
+  const cancelled = staffScreen(staffState({ siteCheck: true }, { siteCheck: { cancelled: true } }));
+  assert.match(cancelled, /This invitation was cancelled/);
+  assert.match(cancelled, /data-action="sign-out"/);
+  // Without siteCheck: the setup screen as before.
+  assert.match(staffScreen(staffState({ siteCheck: false })), /Finish your setup for this season/);
 });

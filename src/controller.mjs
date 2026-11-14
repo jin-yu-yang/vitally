@@ -318,6 +318,9 @@ export function createController({
     invitationsFailed: false,
     inviteEmail: "",
     inviteNotice: null,
+    // The site check's own state (change add-account-invitations): null, or
+    // `{name, error, cancelled}` once Confirm was pressed. Window-local.
+    siteCheck: null,
     // The Volunteers page's tab, and the Workload's own view (change
     // add-volunteer-workload): window-local and never persisted. The Workload
     // tab is only ever set for a cleared, effective admin (`canSeeWorkload`).
@@ -1375,6 +1378,9 @@ export function createController({
 
   async function recheckClearance() {
     if (!staffWindow()) return;
+    // A cancelled site check has no membership left to ask about: the screen
+    // says so and offers only Sign out.
+    if (state.siteCheck?.cancelled) return;
     const asked = state.principal.userId;
     const same = () => staffWindow() && state.principal.userId === asked;
     let answer;
@@ -1560,6 +1566,7 @@ export function createController({
     state.invitationsFailed = false;
     state.inviteEmail = "";
     state.inviteNotice = null;
+    state.siteCheck = null;
     state.volunteerTab = "roster";
     state.workload = freshWorkloadView();
     pendingVolunteerSave = null;
@@ -1632,6 +1639,10 @@ export function createController({
     state.lookup = String(value ?? "");
   }
 
+  // The questions the drawer's Account section asks; the office panel asks
+  // the same two with an email and no volunteer.
+  const DRAWER_QUESTIONS = Object.freeze(["send-invitation", "cancel-invitation"]);
+
   function openDialog(name, context = null) {
     state.dialog = name;
     state.dialogContext = context ? { ...context } : null;
@@ -1639,8 +1650,12 @@ export function createController({
   }
 
   function closeDialog() {
-    // Keeping the account goes back to the drawer it was asked from.
-    if (state.dialog === "deactivate-account") {
+    // Keeping the account (or not sending, or keeping the invitation) goes
+    // back to the drawer it was asked from.
+    if (
+      state.dialog === "deactivate-account" ||
+      (DRAWER_QUESTIONS.includes(state.dialog) && state.dialogContext?.volunteerId)
+    ) {
       state.dialog = "volunteer";
       show();
       return;
@@ -3112,21 +3127,28 @@ export function createController({
   // used email) is said in the drawer and returns false; a stale revision
   // (CONFLICT) or anything unreadable is the banner's message, thrown. An
   // answer that never came is kept: the same press again sends the same
-  // action id. Deactivate is sent only from its confirmation dialog, which
-  // returns to the drawer whatever the outcome.
+  // action id. Create account, Cancel invitation and Deactivate are sent only
+  // from their question (`asked`), which returns to the drawer whatever the
+  // outcome.
   const ACCOUNT_ACTIONS = Object.freeze({
-    create: { send: (request) => store.createAccount(request) },
+    create: { send: (request) => store.createAccount(request), asked: "send-invitation" },
     resend: { send: (request) => store.resendAccount(request) },
-    deactivate: { send: (request) => store.deactivateAccount(request), confirmed: true },
+    deactivate: { send: (request) => store.deactivateAccount(request), asked: "deactivate-account" },
     reactivate: { send: (request) => store.reactivateAccount(request) },
+    cancel: { send: (request) => store.cancelInvitation(request), asked: "cancel-invitation" },
   });
   const EMAIL_NOT_SENT = "The email wasn't sent. Use Resend in a minute.";
   const CREATED_NOT_SENT = "Account created; the email wasn't sent. Use Resend in a minute.";
+  // A replayed answer (the same action id again) sent nothing this time, but
+  // the first attempt did (decision 6).
+  const ALREADY_SENT = "This invitation was already sent. If it didn't arrive, use Resend.";
+  const INVITATION_CANCELLED = "Invitation cancelled.";
+  const NOT_CANCELLABLE = "This invitation can no longer be cancelled.";
 
   async function runAccountAction(kind) {
     const action = ACCOUNT_ACTIONS[kind];
     if (state.busy || !action) return false;
-    if (action.confirmed ? state.dialog !== "deactivate-account" : state.dialog !== "volunteer") return false;
+    if (state.dialog !== (action.asked ?? "volunteer")) return false;
     const volunteerId = state.dialogContext?.volunteerId ?? null;
     const current = volunteerId
       ? (state.volunteers.find((entry) => entry?.id === volunteerId) ?? null)
@@ -3134,19 +3156,23 @@ export function createController({
     if (!current) throw refuse("NOT_FOUND", STAFF_VOLUNTEER_GONE_MESSAGE);
     const revision = current.account?.revision ?? null;
     const key = `${kind}:${volunteerId}:${revision}`;
-    const request = {
-      actionId: pendingAccountAction?.key === key ? pendingAccountAction.actionId : newActionId(),
-      volunteerId,
-      ...(kind === "deactivate" || kind === "reactivate" ? { expectedRevision: revision } : {}),
-    };
+    const id = pendingAccountAction?.key === key ? pendingAccountAction.actionId : newActionId();
+    const request =
+      kind === "cancel"
+        ? { actionId: id, target: { volunteerId }, expectedRevision: revision }
+        : {
+            actionId: id,
+            volunteerId,
+            ...(kind === "deactivate" || kind === "reactivate" ? { expectedRevision: revision } : {}),
+          };
     pendingAccountAction = null;
     state.volunteerAccountNotice = null;
     state.busy = true;
     state.error = null;
     show();
-    // The confirmation closes into the drawer, so its notice and errors show there.
+    // The question closes into the drawer, so its notice and errors show there.
     const backToDrawer = () => {
-      if (state.dialog === "deactivate-account") state.dialog = "volunteer";
+      if (action.asked && state.dialog === action.asked) state.dialog = "volunteer";
     };
     let result;
     try {
@@ -3161,7 +3187,9 @@ export function createController({
           ? openWorkMessage(current.name || "This volunteer", cause.details)
           : error?.code === "CONFLICT"
             ? null
-            : accountMessage(cause?.details);
+            : kind === "cancel" && error?.code === "INVALID_TRANSITION"
+              ? NOT_CANCELLABLE
+              : accountMessage(cause?.details);
       if (sentence) {
         state.volunteerAccountNotice = { kind: "error", text: sentence };
         await readVolunteers().catch(() => {});
@@ -3184,18 +3212,22 @@ export function createController({
       kind: "ok",
       text:
         kind === "create"
-          ? sent
-            ? "Account created and sign-in code sent"
-            : CREATED_NOT_SENT
-          : kind === "resend"
-            ? sent
-              ? "Sign-in code sent"
-              : EMAIL_NOT_SENT
-            : kind === "deactivate"
-              ? "Account deactivated"
-              : result?.status === "invited"
-                ? "Account reactivated. Use Resend to send a sign-in code."
-                : "Account reactivated",
+          ? result?.replay === true
+            ? ALREADY_SENT
+            : sent
+              ? "Account created and sign-in code sent"
+              : CREATED_NOT_SENT
+          : kind === "cancel"
+            ? INVITATION_CANCELLED
+            : kind === "resend"
+              ? sent
+                ? "Sign-in code sent"
+                : EMAIL_NOT_SENT
+              : kind === "deactivate"
+                ? "Account deactivated"
+                : result?.status === "invited"
+                  ? "Account reactivated. Use Resend to send a sign-in code."
+                  : "Account reactivated",
     };
     try {
       await readVolunteers();
@@ -3205,6 +3237,33 @@ export function createController({
     }
     show();
     return true;
+  }
+
+  // Invite a client asks first (decision 5): the typed email is kept and the
+  // question names it, trimmed. An empty email is refused here, with no
+  // question. Nothing is sent until `inviteClient` is called from the question.
+  function askInviteClient(rawEmail) {
+    if (state.busy) return false;
+    const email = String(rawEmail ?? "");
+    state.inviteEmail = email;
+    if (!email.trim()) {
+      state.inviteNotice = { kind: "error", text: accountMessage("NO_EMAIL") };
+      show();
+      return false;
+    }
+    state.inviteNotice = null;
+    openDialog("send-invitation", { email: email.trim() });
+    return true;
+  }
+
+  // The question's Send (no volunteer): the panel's invite, closing the
+  // question first so the panel says the result.
+  async function inviteClient() {
+    if (state.dialog !== "send-invitation" || state.dialogContext?.volunteerId) return false;
+    const email = state.dialogContext?.email ?? "";
+    state.dialog = null;
+    state.dialogContext = null;
+    return await runClientInvite("invite", email);
   }
 
   // Invite a client / Resend (the office screen's panel). The action id is
@@ -3225,7 +3284,6 @@ export function createController({
     };
     pendingInviteAction = null;
     state.inviteNotice = null;
-    if (kind === "invite") state.inviteEmail = email;
     state.busy = true;
     state.error = null;
     show();
@@ -3254,9 +3312,11 @@ export function createController({
       kind: "ok",
       text:
         kind === "invite"
-          ? sent
-            ? "Account created and sign-in code sent"
-            : CREATED_NOT_SENT
+          ? result?.replay === true
+            ? ALREADY_SENT
+            : sent
+              ? "Account created and sign-in code sent"
+              : CREATED_NOT_SENT
           : sent
             ? "Sign-in code sent"
             : EMAIL_NOT_SENT,
@@ -3267,8 +3327,124 @@ export function createController({
     return true;
   }
 
-  const inviteClient = (email) => runClientInvite("invite", email);
   const resendClient = (email) => runClientInvite("resend", email);
+
+  // The office list's Cancel, from its question: the email and the account
+  // revision the row showed. INVALID_TRANSITION is said in the panel; a stale
+  // row or anything unreadable goes to the safety net. The list is re-read
+  // whatever the outcome.
+  async function cancelClientInvitation() {
+    if (state.busy || state.dialog !== "cancel-invitation" || state.dialogContext?.volunteerId) return false;
+    const email = String(state.dialogContext?.email ?? "");
+    const revision = Number(state.dialogContext?.revision);
+    state.dialog = null;
+    state.dialogContext = null;
+    const key = `cancel:${email.toLowerCase()}:${revision}`;
+    const request = {
+      actionId: pendingInviteAction?.key === key ? pendingInviteAction.actionId : newActionId(),
+      target: { email },
+      expectedRevision: revision,
+    };
+    pendingInviteAction = null;
+    state.inviteNotice = null;
+    state.busy = true;
+    state.error = null;
+    show();
+    try {
+      await store.cancelInvitation(request);
+    } catch (error) {
+      state.busy = false;
+      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingInviteAction = { key, actionId: request.actionId };
+      if (error?.code === "INVALID_TRANSITION") {
+        state.inviteNotice = { kind: "error", text: NOT_CANCELLABLE };
+        await readInvitations();
+        show();
+        return false;
+      }
+      noteFailure(error);
+      await readInvitations();
+      show();
+      throw error;
+    }
+    state.busy = false;
+    noteConnected();
+    state.inviteNotice = { kind: "ok", text: INVITATION_CANCELLED };
+    await readInvitations();
+    show();
+    return true;
+  }
+
+  // The cancel question's confirm: the drawer's (a volunteer) or the office
+  // list's (an email).
+  const cancelInvitation = () =>
+    state.dialogContext?.volunteerId ? runAccountAction("cancel") : cancelClientInvitation();
+
+  // ---- the site check (change add-account-invitations, decision 4) --------
+  //
+  // An invited volunteer's first sign-in: their name and this site's SIDN.
+  // The right number makes the account active and the clearance is read
+  // again, so the window moves on to the setup screen or the work. A wrong
+  // number keeps the name and says so; a cancelled invitation replaces the
+  // form. A refusal the screen can say is said there; anything else goes to
+  // the safety net. Answers "active", "wrong-site", "cancelled", "invalid",
+  // or null when this window has no site check.
+  const SITE_CHECK_TEXT = Object.freeze({
+    NO_NAME: "Enter your name.",
+    SITE_NOT_SET: "This site isn't set up for sign-in yet. Ask your site coordinator.",
+  });
+  const WRONG_SITE_TEXT = "That isn't this site's number.";
+
+  async function completeSiteCheck(rawName, rawSidn) {
+    if (state.busy || !staffWindow() || state.principal.clearance?.siteCheck !== true) return null;
+    if (state.siteCheck?.cancelled) return null;
+    const name = String(rawName ?? "").trim();
+    if (!name) {
+      state.siteCheck = { name: "", error: SITE_CHECK_TEXT.NO_NAME, cancelled: false };
+      show();
+      return "invalid";
+    }
+    state.siteCheck = { name, error: null, cancelled: false };
+    state.busy = true;
+    state.error = null;
+    show();
+    let answer;
+    try {
+      answer = await store.completeSiteCheck(name, String(rawSidn ?? ""));
+    } catch (error) {
+      state.busy = false;
+      const said =
+        error?.code === "VALIDATION" ? (SITE_CHECK_TEXT[String(error?.cause?.details ?? "")] ?? null) : null;
+      if (said) {
+        state.siteCheck = { name, error: said, cancelled: false };
+        show();
+        return "invalid";
+      }
+      noteFailure(error);
+      show();
+      throw error;
+    }
+    state.busy = false;
+    noteConnected();
+    if (answer?.status === "active") {
+      state.siteCheck = null;
+      await checkClearance();
+      return "active";
+    }
+    if (answer?.status === "cancelled") {
+      state.siteCheck = { name, error: null, cancelled: true };
+      show();
+      return "cancelled";
+    }
+    if (answer?.status === "invited" && answer?.reason === "WRONG_SITE") {
+      state.siteCheck = { name, error: WRONG_SITE_TEXT, cancelled: false };
+      show();
+      return "wrong-site";
+    }
+    const unread = controllerError("SERVER_ERROR", "Something went wrong.");
+    noteFailure(unread);
+    show();
+    throw unread;
+  }
 
   const createAccount = () => runAccountAction("create");
   const resendAccount = () => runAccountAction("resend");
@@ -3417,8 +3593,11 @@ export function createController({
     runAssistanceAction,
     logContact,
     loadVolunteers,
+    askInviteClient,
     inviteClient,
     resendClient,
+    cancelInvitation,
+    completeSiteCheck,
     setVolunteerFilter,
     saveVolunteer,
     createAccount,

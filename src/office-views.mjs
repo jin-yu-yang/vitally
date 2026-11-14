@@ -460,7 +460,8 @@ const INVITE_LABELS = Object.freeze({ invited: "Invited", active: "Active" });
 
 /**
  * The admin's "Invite a client" panel: an email field, Invite, and the
- * workspace's client accounts, newest first, with Resend while Invited.
+ * workspace's client accounts, newest first, with Resend while Invited and
+ * Cancel while the invitation was never used.
  *
  * @param {object} args `{invitations, ui}`: `invitations` is the list from
  *   `listClientInvitations()` (null while unread); `ui` is `{busy, inviteEmail,
@@ -481,7 +482,17 @@ export function inviteClientPanel({ invitations = null, ui = {} } = {}) {
       (entry) =>
         `<tr><th scope="row">${esc(entry.email)}</th><td>${esc(INVITE_LABELS[entry.status] ?? entry.status)}</td><td>${
           entry.status === "invited"
-            ? button("Resend", "client-resend", "secondary", `data-email="${esc(entry.email)}" ${busy}`)
+            ? `${button("Resend", "client-resend", "secondary", `data-email="${esc(entry.email)}" ${busy}`)}${
+                // An invitation never used can be taken back (it asks first).
+                entry.activatedAt == null
+                  ? button(
+                      "Cancel",
+                      "client-cancel",
+                      "secondary",
+                      `data-email="${esc(entry.email)}" data-revision="${esc(entry.accountRevision ?? "")}" aria-label="Cancel the invitation for ${esc(entry.email)}" ${busy}`,
+                    )
+                  : ""
+              }`
             : ""
         }</td></tr>`,
     )

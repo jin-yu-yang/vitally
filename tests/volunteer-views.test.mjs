@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { renderRoster, volunteerDrawerBody, deactivateAccountDialogBody } from "../src/volunteer-views.mjs";
+import {
+  renderRoster,
+  volunteerDrawerBody,
+  deactivateAccountDialogBody,
+  cancelInvitationDialogBody,
+} from "../src/volunteer-views.mjs";
 import { staffScreen, dialog } from "../src/views.mjs";
 import { cleared } from "./support/clearance.mjs";
 
@@ -335,16 +340,35 @@ test("drawer account section offers Create account with no account", () => {
   const section = accountPart(drawerFor("none"));
   assert.match(section, /Not created/);
   assert.match(section, /data-action="account-create"/);
+  // The page shows the hint (and turns the button off) while the form has
+  // unsaved changes; it is drawn hidden.
+  assert.match(section, /aria-describedby="volunteer-account-hint"/);
+  assert.match(section, /<p class="field-note" id="volunteer-account-hint" hidden>Save your changes first\.<\/p>/);
   assert.doesNotMatch(section, /account-resend|account-deactivate|account-reactivate/);
   assert.ok(drawerFor("none").indexOf("Photo ID checked") < drawerFor("none").indexOf("volunteer-account"), "after the season section");
 });
 
-test("drawer account section offers Resend and Deactivate when invited", () => {
+test("drawer account section offers Resend, Cancel invitation and Deactivate when invited", () => {
   const section = accountPart(drawerFor("invited"));
   assert.match(section, /Invited/);
   assert.match(section, /data-action="account-resend"/);
+  assert.match(section, /data-action="account-cancel-invitation" data-volunteer-id="v-1">Cancel invitation</);
+  assert.ok(section.indexOf("account-resend") < section.indexOf("account-cancel-invitation"), "next to Resend");
   assert.match(section, /data-action="account-deactivate"/);
   assert.doesNotMatch(section, /account-create|account-reactivate/);
+});
+
+test("Cancel invitation is offered only for an invitation never used", () => {
+  // Invited again after being active (a reactivation): not cancellable.
+  const used = volunteerDrawerBody({
+    volunteer: volunteer({ account: { status: "invited", revision: 6, activatedAt: "2026-11-02T10:00:00Z" } }),
+    isNew: false,
+    ui: {},
+  });
+  assert.doesNotMatch(accountPart(used), /account-cancel-invitation/);
+  assert.match(accountPart(used), /account-resend/);
+  for (const status of ["none", "active", "deactivated"])
+    assert.doesNotMatch(accountPart(drawerFor(status)), /account-cancel-invitation/, status);
 });
 
 test("drawer account section offers Deactivate when active", () => {
@@ -376,6 +400,52 @@ test("the drawer says the last account result, and the confirmation asks before 
   assert.match(confirm, /data-action="close-dialog"/);
   const html = dialog(baseState({ dialog: "deactivate-account", dialogContext: { volunteerId: "v-1" } }));
   assert.match(html, /Deactivate this account?/);
+});
+
+test("Signed in as shows in the row's Account cell and in the drawer, escaped", () => {
+  const signed = withStatus("active", { signedInName: "Mira <b>P</b>" });
+  const [row] = rowsOf(renderRoster([signed], { list: "ready", filters: {} }));
+  assert.match(row, /<td>Active<span class="volunteer-signed-in">Signed in as Mira &lt;b&gt;P&lt;\/b&gt;<\/span><\/td>/);
+  const section = accountPart(volunteerDrawerBody({ volunteer: signed, isNew: false, ui: {} }));
+  assert.match(section, /<p class="volunteer-signed-in">Signed in as Mira &lt;b&gt;P&lt;\/b&gt;<\/p>/);
+  assert.doesNotMatch(section, /<b>P/);
+  // No name given yet: no line.
+  const [plain] = rowsOf(renderRoster([withStatus("invited")], { list: "ready", filters: {} }));
+  assert.doesNotMatch(plain, /Signed in as/);
+  assert.doesNotMatch(accountPart(drawerFor("invited")), /Signed in as/);
+});
+
+test("the cancel question names the volunteer and the email, and changes nothing until confirmed", () => {
+  const body = cancelInvitationDialogBody({ volunteer: volunteer({ account: { status: "invited", revision: 4 } }) });
+  assert.match(body, /Mira Patel \(mira@example\.test\)/);
+  assert.match(body, /The email can be edited again, and you can invite them again later\./);
+  assert.match(body, /data-action="confirm-cancel-invitation"[^>]*>Cancel invitation</);
+  assert.match(body, /data-action="close-dialog"/);
+  const html = dialog(baseState({ dialog: "cancel-invitation", dialogContext: { volunteerId: "v-1" } }));
+  assert.match(html, /<h2 id="modal-title">Cancel this invitation\?<\/h2>/);
+  assert.match(html, /Mira Patel \(mira@example\.test\)/);
+  // From the office list: the email only.
+  const office = dialog(baseState({ dialog: "cancel-invitation", dialogContext: { email: "ana@example.org", revision: 1 } }));
+  assert.match(office, /Cancel this invitation\?/);
+  assert.match(office, /The invitation for ana@example\.org will be cancelled/);
+  assert.match(office, /data-action="confirm-cancel-invitation"/);
+});
+
+test("the send question is exactly the email it goes to", () => {
+  const drawer = dialog(
+    baseState({
+      volunteers: [volunteer({ email: "ada@example.org", account: { status: "none", revision: null } })],
+      dialog: "send-invitation",
+      dialogContext: { volunteerId: "v-1" },
+    }),
+  );
+  assert.match(drawer, /<h2 id="modal-title">Send a sign-in invitation to ada@example\.org\?<\/h2>/);
+  assert.match(drawer, /data-action="confirm-send-invitation"[^>]*>Send</);
+  assert.match(drawer, /data-action="close-dialog"[^>]*>Cancel</);
+  const office = dialog(baseState({ dialog: "send-invitation", dialogContext: { email: "ada@example.org" } }));
+  assert.match(office, /Send a sign-in invitation to ada@example\.org\?/);
+  const hostile = dialog(baseState({ dialog: "send-invitation", dialogContext: { email: "<i>x</i>@example.org" } }));
+  assert.match(hostile, /Send a sign-in invitation to &lt;i&gt;x&lt;\/i&gt;@example\.org\?/);
 });
 
 // ---- The Workload tab (change add-volunteer-workload) ----------------------

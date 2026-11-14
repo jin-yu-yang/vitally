@@ -4,7 +4,7 @@ import {
   ROLES, CERTIFICATES, WORKS, LANGUAGES,
   combineVolunteers, filterVolunteers, volunteerFromForm, volunteerProblem,
   ROLE_NEEDS, missingFor, withoutLostRoles, roleNeedsMessage, openWorkMessage, rolesToUntick,
-  accountMessage
+  accountMessage, volunteerFormChanged
 } from "../src/volunteer-roster.mjs";
 
 const people = [
@@ -51,11 +51,12 @@ test("combine keeps only people with a roster entry", () => {
   assert.deepEqual(list[0], {
     id: "p1", name: "ana Lopez", email: "ana@x.org", phone: null, works: "remote",
     languages: ["english", "other"], otherLanguage: "Tagalog", roles: ["preparer"],
-    certificates: ["vsc", "basic"], revision: 3, hasSignIn: true,
-    isNew: false, photoIdChecked: false, account: { status: "active", revision: 2 },
+    certificates: ["vsc", "basic"], revision: 3, hasSignIn: true, signedInName: null,
+    isNew: false, photoIdChecked: false,
+    account: { status: "active", revision: 2, activatedAt: null, expiresAt: null },
     cleared: true, missing: []
   });
-  assert.deepEqual(list[1].account, { status: "invited", revision: 1 });
+  assert.deepEqual(list[1].account, { status: "invited", revision: 1, activatedAt: null, expiresAt: null });
   assert.deepEqual(list[1].certificates, []);
 });
 
@@ -243,7 +244,7 @@ const withAccount = (account, roles = ["preparer"]) => combineVolunteers({
 
 test("combineVolunteers marks a volunteer with roles and no account not cleared with noAccount", () => {
   const v = withAccount(null);
-  assert.deepEqual(v.account, { status: "none", revision: null });
+  assert.deepEqual(v.account, { status: "none", revision: null, activatedAt: null, expiresAt: null });
   assert.deepEqual([v.cleared, v.missing], [false, ["noAccount"]]);
 });
 
@@ -268,11 +269,61 @@ test("the account reason follows the Form 13615 and the photo ID in missing", ()
 
 test("accountMessage maps each reason", () => {
   assert.equal(accountMessage("NO_EMAIL"), "Add an email first");
-  assert.equal(accountMessage("ALREADY_INVITED"), "This client is already invited");
+  assert.equal(accountMessage("ALREADY_INVITED"), "This person is already invited or signed in.");
   assert.equal(accountMessage("USE_REACTIVATE"), "This account is deactivated. Use Reactivate.");
   assert.equal(accountMessage("EMAIL_IN_USE"), "That email is already used by another sign-in. Use another email.");
   assert.equal(accountMessage("EMAIL_ON_ROSTER"), "That email belongs to a volunteer. Use another email.");
   assert.equal(accountMessage("SELF"), "You can't deactivate your own account.");
   assert.equal(accountMessage("OTHER"), null);
   assert.equal(accountMessage(undefined), null);
+});
+
+test("combineVolunteers carries the account's dates and the site check's name", () => {
+  const [v] = combineVolunteers({
+    profiles: [profile("p1", { signed_in_name: "Ana L." })],
+    people: [people[1]],
+    certificates: [],
+    entries: [{ person_id: "p1", season: 2026, roles: ["greeter"] }],
+    accounts: [{
+      person_id: "p1", status: "active", revision: 4,
+      activated_at: "2026-11-02T10:00:00Z", expires_at: null
+    }]
+  });
+  assert.equal(v.signedInName, "Ana L.");
+  assert.deepEqual(v.account, { status: "active", revision: 4, activatedAt: "2026-11-02T10:00:00Z", expiresAt: null });
+  const [invited] = combineVolunteers({
+    profiles: [profile("p1")],
+    people: [people[1]],
+    certificates: [],
+    entries: [{ person_id: "p1", season: 2026, roles: ["greeter"] }],
+    accounts: [{ person_id: "p1", status: "invited", revision: 1, activated_at: null, expires_at: "2026-11-09T10:00:00Z" }]
+  });
+  assert.equal(invited.signedInName, null);
+  assert.equal(invited.account.expiresAt, "2026-11-09T10:00:00Z");
+});
+
+test("volunteerFormChanged is false for the saved values and true for any edit", () => {
+  const saved = sample.find((v) => v.id === "p1");
+  const form = (edit = (fd) => fd) => {
+    const fd = new FormData();
+    fd.set("name", saved.name);
+    fd.set("email", saved.email);
+    fd.set("phone", saved.phone ?? "");
+    fd.set("works", saved.works);
+    for (const value of saved.languages) fd.append("language", value);
+    fd.set("otherLanguage", saved.otherLanguage ?? "");
+    for (const value of saved.roles) fd.append("role", value);
+    for (const value of saved.certificates) fd.append("certificate", value);
+    edit(fd);
+    return volunteerFromForm(fd);
+  };
+  assert.equal(volunteerFormChanged(saved, form()), false);
+  assert.equal(volunteerFormChanged(saved, form((fd) => fd.set("name", " ana Lopez "))), false, "trimmed text is the same");
+  assert.equal(volunteerFormChanged(saved, form((fd) => fd.set("email", "ANA@X.ORG"))), false, "email case is the same");
+  assert.equal(volunteerFormChanged(saved, form((fd) => fd.set("email", "ana2@x.org"))), true);
+  assert.equal(volunteerFormChanged(saved, form((fd) => fd.set("phone", "555-0199"))), true);
+  assert.equal(volunteerFormChanged(saved, form((fd) => fd.append("role", "greeter"))), true);
+  assert.equal(volunteerFormChanged(saved, form((fd) => fd.set("isNew", "on"))), true);
+  assert.equal(volunteerFormChanged(saved, form((fd) => fd.set("otherLanguage", "Ilocano"))), true);
+  assert.equal(volunteerFormChanged(null, form()), true, "no saved volunteer: nothing is saved yet");
 });

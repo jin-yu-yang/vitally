@@ -29,12 +29,18 @@ import {
   closeUnsignedDialogBody,
 } from "./office-views.mjs";
 import { renderCasePool } from "./pool-views.mjs";
-import { renderRoster, volunteerDrawerBody, deactivateAccountDialogBody } from "./volunteer-views.mjs";
-import { renderRoster, volunteerDrawerBody } from "./volunteer-views.mjs";
+import {
+  renderRoster,
+  volunteerDrawerBody,
+  deactivateAccountDialogBody,
+  sendInvitationTitle,
+  sendInvitationDialogBody,
+  cancelInvitationDialogBody,
+} from "./volunteer-views.mjs";
 import { volunteerTabs, renderWorkload, assignDrawerBody, assignDrawerTitle, DEFAULT_WORKLOAD_SORT } from "./workload-views.mjs";
 import { workloadRows, unassignedCases, candidates } from "./volunteer-workload.mjs";
 import { awaitingClearance, ceilingAdmin } from "./clearance.mjs";
-import { setupScreen } from "./setup-views.mjs";
+import { setupScreen, siteCheckScreen } from "./setup-views.mjs";
 
 // The shared shell: the frame every screen sits in, the dialogs, the two
 // screens that belong to nobody in particular (setup needed, no access), and
@@ -315,7 +321,14 @@ export function staffScreen(state) {
         false,
         { volunteers, board: false },
       ),
-      body: onRoster ? rosterPage(state) : setupScreen(state),
+      // An invited volunteer's first sign-in confirms the site first (the
+      // site check, change add-account-invitations); nothing else shows.
+      body:
+        state.principal?.clearance?.siteCheck === true
+          ? siteCheckScreen(state)
+          : onRoster
+            ? rosterPage(state)
+            : setupScreen(state),
       open,
     });
   }
@@ -529,6 +542,23 @@ export function dialog(state) {
     const volunteer = (state.volunteers ?? []).find((entry) => entry?.id === volunteerId) ?? null;
     title = "Deactivate this account?";
     body = deactivateAccountDialogBody({ volunteer });
+  }
+  if (state.dialog === "send-invitation") {
+    // From the drawer (the saved profile email) or the office panel (the typed one).
+    const volunteerId = state.dialogContext?.volunteerId ?? null;
+    const volunteer = volunteerId
+      ? ((state.volunteers ?? []).find((entry) => entry?.id === volunteerId) ?? null)
+      : null;
+    title = sendInvitationTitle(volunteer ? (volunteer.email ?? "") : (state.dialogContext?.email ?? ""));
+    body = sendInvitationDialogBody();
+  }
+  if (state.dialog === "cancel-invitation") {
+    const volunteerId = state.dialogContext?.volunteerId ?? null;
+    const volunteer = volunteerId
+      ? ((state.volunteers ?? []).find((entry) => entry?.id === volunteerId) ?? null)
+      : null;
+    title = "Cancel this invitation?";
+    body = cancelInvitationDialogBody({ volunteer, email: state.dialogContext?.email ?? "" });
   }
   if (state.dialog === "withdraw") {
     title = t("withdraw.title", {}, lang);

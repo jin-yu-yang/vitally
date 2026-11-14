@@ -1776,8 +1776,74 @@ test("listVolunteers reads the accounts and puts each on its volunteer", async (
     rows: { ...ROSTER_ROWS, accounts: [{ workspace_id: "workspace-1", user_id: "u", person_id: "person-ana", status: "invited", revision: 2 }] },
   });
   const list = await createStore(client).listVolunteers();
-  assert.deepEqual(list[0].account, { status: "invited", revision: 2 });
-  assert.equal(client.reads.find((read) => read.table === "accounts").columns, "workspace_id,user_id,person_id,status,revision");
+  assert.deepEqual(list[0].account, { status: "invited", revision: 2, activatedAt: null, expiresAt: null });
+  assert.equal(
+    client.reads.find((read) => read.table === "accounts").columns,
+    "workspace_id,user_id,person_id,status,revision,activated_at,expires_at",
+  );
+});
+
+test("listVolunteers cancels expired invitations before it reads the Roster", async () => {
+  const client = fakeClient({ access: "staff", rows: ROSTER_ROWS });
+  // One log of what was asked, in order: the RPCs and the table reads.
+  const order = [];
+  const rpc = client.rpc.bind(client);
+  client.rpc = (name, args) => {
+    order.push(`rpc:${name}`);
+    return rpc(name, args);
+  };
+  const from = client.from.bind(client);
+  client.from = (name) => {
+    order.push(`read:${name}`);
+    return from(name);
+  };
+  await createStore(client).listVolunteers();
+  const expire = order.indexOf("rpc:vitally_expire_invitations");
+  assert.notEqual(expire, -1);
+  for (const table of ["workspaces", "volunteer_profiles", "roster_entries", "certificates", "people", "accounts"])
+    assert.ok(order.indexOf(`read:${table}`) > expire, table);
+  assert.deepEqual(client.rpcCalls.find((call) => call.name === "vitally_expire_invitations").args, {});
+});
+
+test("a failed expiry fails the Roster read like any other", async () => {
+  const client = fakeClient({
+    access: "staff",
+    rows: ROSTER_ROWS,
+    rpc: async () => ({ data: null, error: { code: "VT001", message: "FORBIDDEN" } }),
+  });
+  await assert.rejects(() => createStore(client).listVolunteers(), { code: "FORBIDDEN" });
+  assert.equal(client.reads.some((read) => read.table === "volunteer_profiles"), false);
+});
+
+test("cancelInvitation sends the target and the expected revision", async () => {
+  const client = fakeClient({ access: "staff" });
+  const store = createStore(client);
+  await store.cancelInvitation({ actionId: "a-1", target: { volunteerId: "person-ana" }, expectedRevision: 2 });
+  await store.cancelInvitation({ actionId: "a-2", target: { email: "c@example.org" }, expectedRevision: 5 });
+  assert.deepEqual(client.rpcCalls, [
+    {
+      name: "vitally_cancel_invitation",
+      args: { p_action_id: "a-1", p_target: { volunteerId: "person-ana" }, p_expected_revision: 2 },
+    },
+    {
+      name: "vitally_cancel_invitation",
+      args: { p_action_id: "a-2", p_target: { email: "c@example.org" }, p_expected_revision: 5 },
+    },
+  ]);
+  // No action id given: one is minted and kept on the request.
+  const request = { target: { volunteerId: "person-ana" }, expectedRevision: 2 };
+  await store.cancelInvitation(request);
+  assert.ok(request.actionId);
+  assert.equal(client.rpcCalls[2].args.p_action_id, request.actionId);
+});
+
+test("completeSiteCheck sends the name and the SIDN and returns the answer", async () => {
+  const answer = { status: "invited", reason: "WRONG_SITE", attemptsLeft: 3 };
+  const client = fakeClient({ access: "staff", rpc: async () => ({ data: answer, error: null }) });
+  assert.deepEqual(await createStore(client).completeSiteCheck("Ana Example", "S12345"), answer);
+  assert.deepEqual(client.rpcCalls, [
+    { name: "vitally_complete_site_check", args: { p_name: "Ana Example", p_sidn: "S12345" } },
+  ]);
 });
 
 test("createAccount invokes the accounts function with op create", async () => {

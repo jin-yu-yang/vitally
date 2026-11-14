@@ -733,6 +733,9 @@ export function createStore(client) {
     // current season. The tables are admin-only under RLS and are not watched.
     async listVolunteers() {
       await requireStaffAccess();
+      // Expired invitations are cancelled when next looked at (migration 047),
+      // so the list never shows one as Invited.
+      await call("vitally_expire_invitations", {});
       const season = (await read(client.from("workspaces").select("current_season")))[0]
         ?.current_season;
       const bySeason = (table) =>
@@ -744,7 +747,11 @@ export function createStore(client) {
         bySeason("roster_entries"),
         bySeason("certificates"),
         read(client.from("people").select("id,name,user_id")),
-        read(client.from("accounts").select("workspace_id,user_id,person_id,status,revision")),
+        read(
+          client
+            .from("accounts")
+            .select("workspace_id,user_id,person_id,status,revision,activated_at,expires_at"),
+        ),
       ]);
       return combineVolunteers({ profiles, entries, certificates, people, accounts });
     },
@@ -783,6 +790,23 @@ export function createStore(client) {
         p_volunteer_id: request.volunteerId,
         p_expected_revision: request.expectedRevision,
       });
+    },
+
+    // Cancel an invitation nobody has used (migration 047): `target` is
+    // `{volunteerId}` from the drawer or `{email}` from the office list, at
+    // the account revision the window read.
+    async cancelInvitation(request) {
+      return await call("vitally_cancel_invitation", {
+        p_action_id: actionId(request),
+        p_target: request.target,
+        p_expected_revision: request.expectedRevision,
+      });
+    },
+
+    // The signed-in volunteer's site check (migration 047). WRONG_SITE and a
+    // cancellation are answers, not errors.
+    async completeSiteCheck(name, sidn) {
+      return await call("vitally_complete_site_check", { p_name: name, p_sidn: sidn });
     },
 
     async reactivateAccount(request) {

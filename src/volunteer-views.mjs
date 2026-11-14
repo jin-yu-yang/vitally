@@ -42,6 +42,10 @@ const ACCOUNT_LABELS = Object.freeze({
 });
 const accountLabel = (volunteer) => ACCOUNT_LABELS[volunteer?.account?.status ?? "none"] ?? "Not created";
 
+// The name the volunteer gave at their site check, under the account status.
+const signedInAs = (volunteer, className) =>
+  volunteer?.signedInName ? `<span class="${className}">Signed in as ${esc(volunteer.signedInName)}</span>` : "";
+
 const clearedCell = (volunteer) =>
   volunteer.cleared === true
     ? `<span class="volunteer-cleared">Cleared</span>`
@@ -60,7 +64,7 @@ function volunteerRow(volunteer) {
     "No roles recorded",
   )}</td><td>${chips(volunteer.certificates, CERTIFICATES, "None recorded")}</td><td>${esc(
     languagesText(volunteer),
-  )}</td><td>${esc(accountLabel(volunteer))}</td><td>${clearedCell(volunteer)}</td><td>${button(
+  )}</td><td>${esc(accountLabel(volunteer))}${signedInAs(volunteer, "volunteer-signed-in")}</td><td>${clearedCell(volunteer)}</td><td>${button(
     "Edit",
     "open-edit-volunteer",
     "secondary",
@@ -121,12 +125,26 @@ const tickRow = (name, text, on) =>
 // The drawer's Account section: the status and the one or two actions it
 // allows. A volunteer who is not saved yet has none. `notice` is the last
 // result, `{kind: "ok" | "error", text}`.
+// Create account sends the saved profile, so it waits while the form has
+// unsaved changes: the page turns it off and shows the hint as the form is
+// edited (`volunteerFormChanged`).
 function accountSection(volunteer, notice) {
   const status = volunteer?.account?.status ?? "none";
   const id = `data-volunteer-id="${esc(volunteer.id)}"`;
+  // An invitation nobody has used yet can be taken back; one that was ever
+  // active cannot.
+  const cancellable = volunteer?.account?.activatedAt == null;
   const actions = {
-    none: button("Create account", "account-create", "secondary", id),
-    invited: `${button("Resend", "account-resend", "secondary", id)}${button("Deactivate", "account-deactivate", "secondary", id)}`,
+    none: `${button(
+      "Create account",
+      "account-create",
+      "secondary",
+      `${id} aria-describedby="volunteer-account-hint"`,
+    )}<p class="field-note" id="volunteer-account-hint" hidden>Save your changes first.</p>`,
+    invited: `${button("Resend", "account-resend", "secondary", id)}${when(
+      cancellable,
+      button("Cancel invitation", "account-cancel-invitation", "secondary", id),
+    )}${button("Deactivate", "account-deactivate", "secondary", id)}`,
     active: button("Deactivate", "account-deactivate", "secondary", id),
     deactivated: button("Reactivate", "account-reactivate", "secondary", id),
   }[status];
@@ -137,7 +155,10 @@ function accountSection(volunteer, notice) {
     : "";
   return `<fieldset class="check-group volunteer-account"><legend>Account</legend><p>Status: <strong>${esc(
     ACCOUNT_LABELS[status] ?? "Not created",
-  )}</strong></p>${said}<div class="drawer-actions">${actions}</div></fieldset>`;
+  )}</strong></p>${when(
+    volunteer?.signedInName,
+    `<p class="volunteer-signed-in">Signed in as ${esc(volunteer?.signedInName ?? "")}</p>`,
+  )}${said}<div class="drawer-actions">${actions}</div></fieldset>`;
 }
 
 /**
@@ -150,6 +171,36 @@ export function deactivateAccountDialogBody({ volunteer = null } = {}) {
     lead: `${esc(name)} will no longer be able to open ViTally. Their roster entry and their work stay as they are, and you can reactivate the account later.`,
     confirm: button("Deactivate account", "confirm-deactivate-account", "primary full"),
     keep: "Keep account",
+  });
+}
+
+/**
+ * The question before an invitation is sent (Create account, Invite). The
+ * question itself, naming the email, is the dialog's title
+ * (`sendInvitationTitle`); nothing is sent until Send is pressed.
+ */
+export const sendInvitationTitle = (email) => `Send a sign-in invitation to ${email}?`;
+
+export function sendInvitationDialogBody() {
+  return confirmBody({
+    confirm: button("Send", "confirm-send-invitation", "primary full"),
+    keep: "Cancel",
+  });
+}
+
+/**
+ * The cancel-invitation confirmation, from the drawer (`volunteer`) or the
+ * office list (`email` only). Nothing changes until its confirm is pressed.
+ */
+export function cancelInvitationDialogBody({ volunteer = null, email = "" } = {}) {
+  const address = volunteer?.email ?? email;
+  const who = volunteer ? `${esc(volunteer.name)} (${esc(address)})` : esc(address);
+  return confirmBody({
+    lead: `The invitation for ${who} will be cancelled and its sign-in code will no longer work. ${
+      volunteer ? "The email can be edited again, and you" : "You"
+    } can invite them again later.`,
+    confirm: button("Cancel invitation", "confirm-cancel-invitation", "primary full"),
+    keep: "Keep invitation",
   });
 }
 

@@ -65,7 +65,7 @@ import { t, SENTENCES } from "./client-text.mjs";
 import { createToastTimer } from "./toast.mjs";
 import { contactEntryFromForm, contactSummary, contactSummaries } from "./contact-log.mjs";
 import { decorateStaffCase, outcomeGroup, staffEligibility } from "./staff-views.mjs";
-import { volunteerFromForm, rolesToUntick } from "./volunteer-roster.mjs";
+import { volunteerFromForm, volunteerFormChanged, rolesToUntick } from "./volunteer-roster.mjs";
 
 // Bootstrap and DOM wiring, and nothing else. No state lives here (the
 // controller owns it), no HTML is written here (the view modules own it), and
@@ -309,6 +309,7 @@ if (!config) {
     syncContactForms();
     syncCloseUnsigned();
     syncVolunteerOther();
+    syncCreateAccount();
     showDraftLink();
     markPressed(state);
     tickCooldown(state);
@@ -466,6 +467,22 @@ if (!config) {
     const box = root.querySelector("#volunteer-language-other");
     const field = root.querySelector("#volunteer-other-language");
     if (box && field) field.hidden = !box.checked;
+  }
+
+  // Create account sends the saved profile (decision 5), so it waits while
+  // the drawer's form holds unsaved changes: off, with its hint shown. On
+  // every edit of the form, and after a redraw that put unsent text back.
+  function syncCreateAccount() {
+    const form = root.querySelector("#volunteer-form");
+    const create = form?.querySelector('[data-action="account-create"]');
+    if (!create) return;
+    const state = controller.getState();
+    const volunteerId = state.dialogContext?.volunteerId ?? null;
+    const volunteer = (state.volunteers ?? []).find((entry) => entry?.id === volunteerId) ?? null;
+    const changed = volunteerFormChanged(volunteer, volunteerFromForm(new FormData(form)));
+    create.disabled = changed || state.busy === true;
+    const hint = form.querySelector("#volunteer-account-hint");
+    if (hint) hint.hidden = !changed;
   }
 
   // Unticking a certificate unticks the roles that lose what they need, in the
@@ -1370,6 +1387,29 @@ if (!config) {
     if (saved) closeDialog("#main");
   }
 
+  // The site check (decision 4). A wrong number keeps the name and empties
+  // the number for another try; a name the controller refuses keeps both.
+  async function submitSiteCheck(form) {
+    const values = new FormData(form);
+    const result = await controller.completeSiteCheck(
+      String(values.get("name") ?? ""),
+      String(values.get("sidn") ?? ""),
+    );
+    if (result === "wrong-site") {
+      formDrafts.delete("site-check-sidn");
+      const sidn = root.querySelector("#site-check-sidn");
+      if (sidn) {
+        sidn.value = "";
+        sidn.focus();
+      }
+    } else if (result === "invalid") {
+      root.querySelector("#site-check-name")?.focus();
+    } else if (result === "active" || result === "cancelled") {
+      formDrafts.delete("site-check-name");
+      formDrafts.delete("site-check-sidn");
+    }
+  }
+
   async function submitContact(form, by) {
     const values = Object.fromEntries(new FormData(form));
     if (values.withWhom === "other" && !String(values.otherName ?? "").trim()) {
@@ -1906,14 +1946,59 @@ if (!config) {
         openDialog("volunteer", id ? { volunteerId: id } : null, describeFocus(target));
         break;
       }
-      case "account-create":
       case "account-resend":
       case "account-reactivate":
         // Said in the drawer (a refusal) or thrown to the safety net.
-        await controller[
-          { "account-create": "createAccount", "account-resend": "resendAccount", "account-reactivate": "reactivateAccount" }[action]
-        ]();
+        await controller[{ "account-resend": "resendAccount", "account-reactivate": "reactivateAccount" }[action]]();
         break;
+      case "account-create":
+        // Asks first (decision 5): nothing is sent until the question's Send.
+        // The button is off while the form has unsaved changes.
+        if (target.disabled) break;
+        openDialog("send-invitation", { volunteerId: target.dataset.volunteerId }, describeFocus(target));
+        break;
+      case "confirm-send-invitation":
+        // The drawer's Create account returns to the drawer; the panel's
+        // invite closes the question, so the keyboard goes back to the field.
+        if (controller.getState().dialogContext?.volunteerId) {
+          await controller.createAccount();
+          break;
+        }
+        focusBeforeDialog = null;
+        try {
+          await controller.inviteClient();
+        } finally {
+          root.querySelector("#invite-client-email")?.focus();
+        }
+        break;
+      case "account-cancel-invitation":
+        // Asks first: nothing is sent until the question's confirm.
+        openDialog("cancel-invitation", { volunteerId: target.dataset.volunteerId }, describeFocus(target));
+        break;
+      case "client-cancel":
+        openDialog(
+          "cancel-invitation",
+          { email: target.dataset.email ?? "", revision: Number(target.dataset.revision) },
+          describeFocus(target),
+        );
+        break;
+      case "confirm-cancel-invitation": {
+        // The drawer's returns to the drawer; the office list's closes the
+        // question, and its row is gone on success: the panel's field takes
+        // the keyboard.
+        const fromDrawer = Boolean(controller.getState().dialogContext?.volunteerId);
+        if (fromDrawer) {
+          await controller.cancelInvitation();
+          break;
+        }
+        focusBeforeDialog = null;
+        try {
+          await controller.cancelInvitation();
+        } finally {
+          root.querySelector("#invite-client-email")?.focus();
+        }
+        break;
+      }
       case "client-resend":
         // The office screen's Invite a client list: said in the panel, or
         // thrown to the safety net.
@@ -2461,6 +2546,7 @@ if (!config) {
       // is.
       else if (!field.matches("[data-action], #field-confirmed"))
         for (const [id, draft] of checkDrafts(field)) keepDraft(id, draft);
+      if (field.closest("#volunteer-form")) syncCreateAccount();
     } else if (field.name === "volunteerSearch") {
       // The Roster filters as it is typed; the redraw replaces the box, so
       // the keyboard and the caret go back into it. Mid-composition the
@@ -2498,6 +2584,7 @@ if (!config) {
     }
     if (field.closest?.("#volunteer-form") && field.name === "certificate") {
       syncVolunteerRoles(field.form, field.value);
+      syncCreateAccount();
       return;
     }
     if (field.closest?.("#volunteer-form") && field.name === "language" && field.value === "other") {
@@ -2550,7 +2637,8 @@ if (!config) {
     // The volunteer drawer skips `reportValidity`, which ignores `novalidate`:
     // a half-typed `type="email"` would get the browser's bubble instead of
     // the drawer's own sentence (volunteerProblem).
-    if (form.id !== "volunteer-form" && !form.reportValidity()) return;
+    // The site check says its own "Enter your name." the same way.
+    if (form.id !== "volunteer-form" && form.id !== "site-check-form" && !form.reportValidity()) return;
     const values = new FormData(form);
     try {
       // A staff form carries its action on its own submit button and names its
@@ -2572,7 +2660,11 @@ if (!config) {
       } else if (assistControl) {
         await runAssistanceAction(assistControl, form, by);
       } else if (form.id === "invite-client-form") {
-        await controller.inviteClient(String(values.get("email") ?? ""));
+        // Asks first (decision 5); an empty email is refused with no question.
+        focusBeforeDialog = describeFocus(event.submitter ?? form.querySelector("#invite-client-email"));
+        if (!controller.askInviteClient(String(values.get("email") ?? ""))) focusBeforeDialog = null;
+      } else if (form.id === "site-check-form") {
+        await submitSiteCheck(form);
       } else if (form.id === "close-unsigned-form") {
         await submitCloseUnsigned(form, by);
       } else if (form.id === "email-form") {
