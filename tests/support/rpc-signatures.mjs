@@ -112,6 +112,59 @@ export const RPC_SIGNATURES = Object.freeze([
     receiptKeys: Object.freeze(["capabilities", "cleared", "isAdmin", "missing", "siteCoordinatorName"]),
     args: () => ({}),
   }),
+  // Posted updates (OpenSpec change add-posted-updates): a ceiling admin writes
+  // them; every staff member reads and marks the ones addressed to them. The
+  // two reads and the mark store no receipt, so their keys are their answers.
+  Object.freeze({
+    name: "vitally_save_update",
+    signature: "vitally_save_update(uuid,uuid,bigint,jsonb)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["actionId", "updateId", "revision", "status"]),
+    args: () => ({
+      p_action_id: crypto.randomUUID(),
+      p_update_id: null,
+      p_expected_revision: null,
+      p_update: {
+        kind: "office_notice", title: "Sample notice", message: "The office opens at 10 am on Saturday.",
+        irsLink: null, audience: "everyone", roles: [], keepTopUntil: null, askConfirm: false, post: false,
+        askAgain: false,
+      },
+    }),
+  }),
+  Object.freeze({
+    name: "vitally_update_action",
+    signature: "vitally_update_action(uuid,uuid,bigint,text)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["actionId", "updateId", "revision", "status"]),
+    // The draft in `context` was saved by the Site Coordinator at revision 1.
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_update_id: context.updateId,
+      p_expected_revision: 1,
+      p_type: "POST",
+    }),
+  }),
+  Object.freeze({
+    name: "vitally_mark_updates",
+    signature: "vitally_mark_updates(uuid[],boolean)",
+    authorized: (f) => f.preparer,
+    receiptKeys: Object.freeze(["marked"]),
+    args: (context) => ({ p_update_ids: [context.updateId], p_confirm: false }),
+  }),
+  Object.freeze({
+    name: "vitally_my_updates",
+    signature: "vitally_my_updates()",
+    authorized: (f) => f.preparer,
+    receiptKeys: Object.freeze(["items", "unread"]),
+    args: () => ({}),
+  }),
+  Object.freeze({
+    name: "vitally_posted_updates",
+    signature: "vitally_posted_updates()",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["updates"]),
+    args: () => ({}),
+  }),
 ]);
 
 // The private roster functions (OpenSpec change add-staff-identity, design D6).

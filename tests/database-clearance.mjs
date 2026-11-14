@@ -430,7 +430,9 @@ test("volunteer clearance against real Supabase", async (t) => {
 // ---------------------------------------------------------------------------
 // The read gate (design D3): the 21 case-data policies read only for a cleared
 // staff member, through the no-argument InitPlan helper
-// `vitally_policy.cleared_workspace_id()`. `people` is not gated.
+// `vitally_policy.cleared_workspace_id()`. `people` is not gated, and neither
+// is `posted_updates` (046): it holds no case data, and its audience policy
+// lets an uncleared staff member read the updates addressed to them.
 
 const CASE_TABLES = Object.freeze([
   "admin_followups",
@@ -574,10 +576,10 @@ test("the read gate against real Supabase", async (t) => {
       assert.deepEqual(await own(), before);
     });
 
-    await t.test("every case-data policy is gated", async () => {
+    await t.test("every case-data policy is gated, except on people and posted_updates", async () => {
       const { rows } = await f.sql(
         `select tablename,policyname,qual from pg_policies
-          where schemaname='public' and qual like '%access = ''staff''%' and tablename<>'people'
+          where schemaname='public' and qual like '%access = ''staff''%' and tablename not in ('people','posted_updates')
           order by tablename`,
       );
       assert.equal(rows.length, 21);
@@ -586,6 +588,10 @@ test("the read gate against real Supabase", async (t) => {
         assert.ok(row.qual.includes("cleared_workspace_id"), `${row.tablename}.${row.policyname}`);
       const people = await f.sql("select qual from pg_policies where schemaname='public' and tablename='people'");
       for (const row of people.rows) assert.equal(row.qual.includes("cleared_workspace_id"), false, "people");
+      const updates = await f.sql("select qual from pg_policies where schemaname='public' and tablename='posted_updates'");
+      assert.equal(updates.rows.length, 2, "posted_updates has its two policies");
+      for (const row of updates.rows)
+        assert.equal(row.qual.includes("cleared_workspace_id"), false, "posted_updates");
     });
 
     await t.test("the helper runs once per statement", async () => {
