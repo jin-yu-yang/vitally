@@ -518,6 +518,15 @@ export function createStore(client) {
           .order("recorded_at")
           .order("id"),
       );
+      // The newest contact logged on each case, for Workload's last activity.
+      // The logged time, so editing an entry changes nothing (staff only).
+      const contactLog = await read(
+        client
+          .from("contact_log")
+          .select("case_id,logged_at")
+          .in("case_id", ids)
+          .order("logged_at"),
+      );
       const forCase = (rows, id) => rows.filter((row) => row.case_id === id);
       return cases.map((record) => {
         const open = forCase(followups, record.id);
@@ -542,6 +551,7 @@ export function createStore(client) {
           reviewContactStatus:
             forCase(approvals, record.id).at(-1)?.client_contact_status ?? null,
           latestFixNote: forCase(fixNotes, record.id).at(-1)?.note ?? null,
+          lastContactAt: forCase(contactLog, record.id).at(-1)?.logged_at ?? null,
         };
       });
     },

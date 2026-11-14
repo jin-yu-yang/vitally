@@ -244,6 +244,8 @@ const BUILDERS = Object.freeze({
   CLAIM_PREPARATION: () => ({}),
   SUBMIT_REVIEW: (dataset, values) => ({ questionnaire: preparerQuestionnaire(values) }),
   CLAIM_REVIEW: () => ({}),
+  // The database checks the slot and the person; only the two fields travel.
+  ASSIGN_CASE: (dataset, values) => ({ slot: values?.slot, personId: values?.personId }),
   // The approve button carries `data-service`: the appointment rule needs it.
   APPROVE_REVIEW: (dataset, values) => ({
     questionnaire: reviewerQuestionnaire(values, dataset?.service),

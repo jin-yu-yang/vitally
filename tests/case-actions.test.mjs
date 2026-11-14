@@ -184,6 +184,12 @@ test("every action builds exactly the payload the contract names", () => {
       { received: ["photo_id", "w2"] },
       { received: ["photo_id", "w2"] },
     ],
+    [
+      "ASSIGN_CASE",
+      {},
+      { slot: "preparer", personId: "person-alex" },
+      { slot: "preparer", personId: "person-alex" },
+    ],
   ];
   for (const [type, dataset, values, payload] of cases)
     assert.deepEqual(payloadFor(type, dataset, values), { type, payload }, type);
@@ -214,6 +220,16 @@ test("the claim buttons send an empty payload and no dataset leaks into it", () 
     type: "CLAIM_PREPARATION",
     payload: {},
   });
+});
+
+test("ASSIGN_CASE is a case action with slot and personId", () => {
+  assert.ok(CASE_ACTIONS.includes("ASSIGN_CASE"));
+  assert.ok(PAYLOAD_ACTIONS.includes("ASSIGN_CASE"));
+  // Only the two named fields travel; a dataset's other keys do not.
+  assert.deepEqual(
+    payloadFor("ASSIGN_CASE", { caseId: "case-a" }, { slot: "reviewer", personId: "person-sam", extra: 1 }),
+    { type: "ASSIGN_CASE", payload: { slot: "reviewer", personId: "person-sam" } },
+  );
 });
 
 test("an unknown type is a local validation failure, never a request", () => {

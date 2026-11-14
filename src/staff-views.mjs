@@ -2169,6 +2169,7 @@ export const EVENT_SENTENCES = Object.freeze({
   SET_DOCUMENT_CARD: "updated a document's status",
   SET_DOCUMENT_GROUP: "changed whether a document is needed",
   SAVE_PREPARER_FIELDS: "saved the shaded section",
+  ASSIGN_CASE: "assigned a volunteer to the case",
 });
 
 export function historySentence(entry) {
