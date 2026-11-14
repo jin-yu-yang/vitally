@@ -120,10 +120,13 @@ test("ASSIGN_CASE refusals against real Supabase", async (t) => {
         personId: f.preparerId,
       });
 
+      // A cleared preparer who is not the case's preparer, so the stage is the
+      // only reason for the refusal (the spec's scenario "After approval").
+      const penn = await f.staff({ key: "penn_prep", name: "Penn Aldana", capabilities: ["prepare"] });
       const approved = await f.approvedCase();
       await refused("INVALID_TRANSITION", f.siteCoordinator, approved, {
         slot: "preparer",
-        personId: f.preparerId,
+        personId: penn.personId,
       });
 
       const preparing = await f.readyCase();

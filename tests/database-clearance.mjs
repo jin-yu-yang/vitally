@@ -1072,8 +1072,11 @@ test("assignees must be cleared against real Supabase", async (t) => {
         rows.map((row) => row.proname),
         [
           "act_approve_review",
-          // Calls require_cleared_assignee (046, add-volunteer-workload); the
-          // narrower-role scenario is in tests/database-workload.mjs.
+          // Listed for its writes to preparer_id/reviewer_id and its inserts
+          // into reviews and preparation_participants (046,
+          // add-volunteer-workload); it checks the assignee with
+          // require_cleared_assignee. The narrower-role scenario is in
+          // tests/database-workload.mjs.
           "act_assign_case",
           "act_assistance_claim",
           "act_claim_preparation",
