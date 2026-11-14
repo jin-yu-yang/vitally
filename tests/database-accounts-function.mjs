@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { assertTestTarget } from "../tools/admin/test-target.mjs";
 import { openDatabase } from "../tools/admin/database.mjs";
-import { createDatabaseFixture } from "./support/database-fixture.mjs";
+import { createDatabaseFixture, TEST_SITE_NUMBER } from "./support/database-fixture.mjs";
 import { latestCode } from "./support/mail-catcher.mjs";
 
 // OpenSpec change add-account-invitations (design D4): the accounts Edge
@@ -79,6 +79,8 @@ test("accounts Edge Function against real Supabase", async (t) => {
     const authUserExists = async (email) =>
       (await f.sql("select 1 from auth.users where lower(email)=$1", [email])).rowCount > 0;
 
+    // The code signs the volunteer in; the site check (design D12) then makes
+    // the account active.
     await t.test("create account sends a code that signs the volunteer in", async () => {
       const email = newEmail();
       const volunteerId = await addVolunteer(email);
@@ -92,6 +94,10 @@ test("accounts Edge Function against real Supabase", async (t) => {
       const signedIn = createClient(target.apiUrl, target.publishableKey, clientOptions);
       const { error } = await signedIn.auth.verifyOtp({ email, token: code, type: "email" });
       assert.equal(error, null, `verifyOtp: ${error?.message}`);
+      assert.equal(await accountStatus(volunteerId), "invited", "invited until the site check");
+      const checked = await signedIn.rpc("vitally_complete_site_check", { p_name: "Rowan Pike", p_sidn: TEST_SITE_NUMBER });
+      assert.equal(checked.error, null, `site check: ${checked.error?.message}`);
+      assert.deepEqual(checked.data, { status: "active" });
       await signedIn.auth.signOut({ scope: "local" });
       assert.equal(await accountStatus(volunteerId), "active");
     });

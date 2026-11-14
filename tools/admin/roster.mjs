@@ -91,6 +91,18 @@ function parseDefaultFollowup(raw, staff) {
   return raw;
 }
 
+// The site's SIDN, which a volunteer types at their first sign-in (change
+// add-account-invitations, design D12): optional; S and eight digits, spaces
+// and hyphens ignored. Only a roster file kept out of the repository holds the
+// real one.
+const SIDN = /^S[0-9]{8}$/;
+function parseSiteNumber(raw) {
+  if (raw === undefined || raw === null) return null;
+  const sidn = typeof raw === "string" ? raw.replace(/[\s-]/g, "").toUpperCase() : "";
+  if (!SIDN.test(sidn)) throw invalid("siteNumber must be the site's SIDN: S followed by eight digits.");
+  return sidn;
+}
+
 export function parseRoster(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw))
     throw invalid("The roster must be a JSON object.");
@@ -102,6 +114,7 @@ export function parseRoster(raw) {
   const staff = parseStaff(raw.staff);
   if (staff.length === 0) throw invalid("The roster needs at least one staff member.");
   const defaultFollowup = parseDefaultFollowup(raw.defaultFollowup, staff);
+  const siteNumber = parseSiteNumber(raw.siteNumber);
   const seen = new Set();
   for (const [field, list] of [
     ["staff", staff.map((member) => member.email)],
@@ -117,6 +130,7 @@ export function parseRoster(raw) {
     applicants,
     staff,
     defaultFollowup,
+    siteNumber,
   };
 }
 
@@ -207,6 +221,7 @@ export async function applyRoster(
       capabilities,
     })),
     defaultFollowup: roster.defaultFollowup,
+    siteNumber: roster.siteNumber,
   });
   return {
     workspaceId: roster.workspaceId,

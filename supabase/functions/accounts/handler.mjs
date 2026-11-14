@@ -121,6 +121,16 @@ export async function handleAccountRequest(request, deps) {
       });
       if (recorded.error) return refusal(recorded.error);
       accountRevision = recorded.data.accountRevision;
+    } else {
+      // A resend starts the invitation's seven days again (design D11).
+      const restarted = await user.rpc("vitally_record_account", {
+        p_action_id: null,
+        p_op: "resend",
+        p_target: target,
+        p_user_id: null,
+      });
+      if (restarted.error) return refusal(restarted.error);
+      accountRevision = restarted.data.accountRevision;
     }
 
     // The record stands even if the email fails (rate limit, cooldown): the admin can Resend.

@@ -17,6 +17,10 @@ import { extendTestWorkspace } from "./workspace-overrides.mjs";
 import { createStore, camelRow } from "../../src/supabase-store.mjs";
 // The screening checks the office records (design D2): three for every case,
 // and identity only for an online one.
+// The site number every fixture workspace gets (change add-account-invitations,
+// design D12): fictional, and never a real site's SIDN.
+export const TEST_SITE_NUMBER = "S00000000";
+
 export const screeningChecks = (service) => ({
   phone: true,
   documents: true,
@@ -774,6 +778,7 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
         capabilities,
       })),
       defaultFollowup: DEFAULT_FOLLOWUP_KEY,
+      siteNumber: TEST_SITE_NUMBER,
     };
     const initializeOwned = async (setup) => {
       run.pendingWorkspaces.add(setup.workspaceId);

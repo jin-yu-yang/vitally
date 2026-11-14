@@ -656,6 +656,9 @@ async function runEngineGate(t, engineName) {
             await panel.getByLabel("Client email", { exact: true }).fill(email);
             const after = new Date(Date.now() - 2_000);
             await panel.getByRole("button", { name: "Invite", exact: true }).click();
+            // Design D13: nothing is sent until the address is confirmed.
+            const confirm = admin.page.getByRole("dialog", { name: `Send a sign-in invitation to ${email}?` });
+            await confirm.getByRole("button", { name: "Send", exact: true }).click();
             const row = panel.locator("tbody tr", { hasText: email });
             await row.getByText("Invited", { exact: true }).waitFor();
 

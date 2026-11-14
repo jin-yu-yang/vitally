@@ -133,21 +133,37 @@ test("a reusable user id skips createUser", async () => {
   assert.equal(calls.find((c) => c.rpc === "vitally_record_account").args.p_user_id, USER);
 });
 
-test("resend runs prepare and signInWithOtp only", async () => {
+test("resend runs prepare, restarts the seven days, then sends", async () => {
   const { deps, calls } = fakes({
     prepare: {
       data: { op: "resend", email: "ada@example.org", reusableUserId: null, volunteerId: VOLUNTEER, accountRevision: 4 },
       error: null,
     },
+    record: { data: { status: "invited", email: "ada@example.org", accountRevision: 5 }, error: null },
   });
   const response = await handleAccountRequest(post({ op: "resend", volunteerId: VOLUNTEER }), deps);
-  assert.deepEqual(await response.json(), { status: "invited", emailSent: true, accountRevision: 4 });
-  assert.deepEqual(names(calls), ["getUser", "vitally_prepare_account", "signInWithOtp"]);
+  assert.deepEqual(await response.json(), { status: "invited", emailSent: true, accountRevision: 5 });
+  assert.deepEqual(names(calls), ["getUser", "vitally_prepare_account", "vitally_record_account", "signInWithOtp"]);
   assert.deepEqual(calls.find((c) => c.rpc === "vitally_prepare_account").args, {
     p_action_id: null,
     p_op: "resend",
     p_target: { volunteerId: VOLUNTEER },
   });
+  assert.deepEqual(calls.find((c) => c.rpc === "vitally_record_account").args, {
+    p_action_id: null,
+    p_op: "resend",
+    p_target: { volunteerId: VOLUNTEER },
+    p_user_id: null,
+  });
+});
+
+test("a resend whose restart is refused sends no email", async () => {
+  const { deps, calls } = fakes({
+    record: { data: null, error: { code: "VT004", message: "INVALID_TRANSITION", details: null } },
+  });
+  const response = await handleAccountRequest(post({ op: "resend", email: "ada@example.org" }), deps);
+  assert.equal(response.status, 400);
+  assert.ok(!names(calls).includes("signInWithOtp"));
 });
 
 test("a refusal maps VT007 detail to 400 {code:'VALIDATION', reason}", async () => {

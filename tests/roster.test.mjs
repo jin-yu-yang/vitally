@@ -46,7 +46,16 @@ test("a roster is trimmed, lower-cased and kept in order", () => {
       },
     ],
     defaultFollowup: "riley",
+    siteNumber: null,
   });
+});
+
+// Change add-account-invitations (design D12). Fictional numbers only.
+test("a roster's site number is optional, and spaces, hyphens and case are ignored", () => {
+  assert.equal(parseRoster({ ...valid(), siteNumber: " s0000-0000 " }).siteNumber, "S00000000");
+  assert.equal(parseRoster({ ...valid(), siteNumber: null }).siteNumber, null);
+  for (const bad of ["S0000000", "00000000", "S000000000", "X00000000", 12345678, ""])
+    assert.throws(() => parseRoster({ ...valid(), siteNumber: bad }), invalid(/siteNumber must be the site's SIDN/));
 });
 
 test("an old roster's sampleCaseOwners is ignored with a note", () => {
@@ -213,6 +222,7 @@ test("missing accounts are created confirmed, and the workspace gets their ids",
         },
       ],
       defaultFollowup: "riley",
+      siteNumber: null,
     },
   ]);
   assert.deepEqual(result, {

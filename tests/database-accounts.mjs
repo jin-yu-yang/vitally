@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { createDatabaseFixture, rejected } from "./support/database-fixture.mjs";
+import { createDatabaseFixture, rejected, TEST_SITE_NUMBER } from "./support/database-fixture.mjs";
 import { initializeWorkspace } from "../tools/admin/workspace-setup.mjs";
 
 // OpenSpec change add-account-invitations (design D1, D2, D6, D7), migration
 // 047: one `accounts` row per membership, the backfill, the first sign-in
 // trigger, the active accounts that the roster command and workspace setup
-// write, and clearance needing an active account. Specs: sign-in-accounts and
+// write, and clearance needing an active account; then (design D10-D12) Cancel
+// invitation, the seven-day expiry and the volunteer site check. Specs: sign-in-accounts and
 // volunteer-clearance. The file shares one fixture; every staff member below
 // has a person key of their own, since `add_staff_member` refuses changed
 // values for an existing key.
@@ -16,7 +17,8 @@ const one = async (f, text, values) => (await f.sql(text, values)).rows[0];
 const accountOf = (f, userId, workspaceId = f.workspaceId) =>
   one(
     f,
-    `select person_id,status,invited_at,activated_at,deactivated_at,invited_by,revision::int as revision,updated_at
+    `select person_id,status,invited_at,activated_at,deactivated_at,invited_by,expires_at,
+       site_check_attempts,revision::int as revision,updated_at
        from public.accounts where workspace_id=$1 and user_id=$2`,
     [workspaceId, userId],
   );
@@ -173,7 +175,9 @@ test("sign-in accounts against real Supabase", async (t) => {
       assert.equal((await accountOf(f, f.preparerUserId)).person_id, f.preparerId);
     });
 
-    await t.test("sign-in activates an invited account", async () => {
+    // Design D12: a volunteer's first sign-in leaves the account invited until
+    // the site check; a client's makes it active.
+    await t.test("sign-in activates an invited client account, not a volunteer's", async () => {
       const member = await f.staff({ key: "ivo_invited", name: "Ivo Marsh", capabilities: ["prepare"] });
       await setStatus(f, member.userId, "invited");
       await f.sql("update public.accounts set activated_at=null where workspace_id=$1 and user_id=$2", [
@@ -181,33 +185,43 @@ test("sign-in accounts against real Supabase", async (t) => {
         member.userId,
       ]);
       const before = await accountOf(f, member.userId);
-      assert.equal(before.status, "invited");
-      assert.equal(await clearedOf(f, member.personId), false, "not cleared while invited");
       const { error } = await member.client.auth.signInWithPassword({
         email: member.email,
         password: member.password,
       });
       assert.equal(error, null, "sign-in");
-      const after = await accountOf(f, member.userId);
+      assert.deepEqual(await accountOf(f, member.userId), before, "a volunteer stays invited");
+      assert.equal(await clearedOf(f, member.personId), false, "not cleared before the site check");
+
+      const client = await f.provision();
+      const { data: recorded, error: recordError } = await admin.rpc("vitally_record_account", {
+        p_action_id: randomUUID(),
+        p_op: "invite",
+        p_target: { email: client.email },
+        p_user_id: client.userId,
+      });
+      assert.equal(recordError, null, "invite");
+      assert.equal(recorded.status, "invited");
+      const invited = await accountOf(f, client.userId);
+      const signedIn = await client.client.auth.signInWithPassword({ email: client.email, password: client.password });
+      assert.equal(signedIn.error, null, "client sign-in");
+      const after = await accountOf(f, client.userId);
       assert.equal(after.status, "active");
       assert.ok(after.activated_at, "activated_at");
-      assert.equal(after.revision, before.revision + 1);
-      assert.ok(after.updated_at > before.updated_at, "updated_at");
+      assert.equal(after.expires_at, null, "no expiry once active");
+      assert.equal(after.revision, invited.revision + 1);
+      assert.ok(after.updated_at > invited.updated_at, "updated_at");
       const stamped = await one(
         f,
         `select a.activated_at=u.last_sign_in_at as same from public.accounts a
           join auth.users u on u.id=a.user_id where a.workspace_id=$1 and a.user_id=$2`,
-        [f.workspaceId, member.userId],
+        [f.workspaceId, client.userId],
       );
       assert.equal(stamped.same, true, "activated_at is the sign-in time");
-      assert.equal(await clearedOf(f, member.personId), true, "cleared after the sign-in");
       // A later sign-in changes nothing more.
-      const again = await member.client.auth.signInWithPassword({
-        email: member.email,
-        password: member.password,
-      });
+      const again = await client.client.auth.signInWithPassword({ email: client.email, password: client.password });
       assert.equal(again.error, null, "second sign-in");
-      assert.equal((await accountOf(f, member.userId)).revision, after.revision);
+      assert.equal((await accountOf(f, client.userId)).revision, after.revision);
     });
 
     // Review Focus 5.
@@ -360,7 +374,8 @@ test("sign-in accounts against real Supabase", async (t) => {
     const accountOfPerson = (personId) =>
       one(
         f,
-        `select user_id,status,invited_at,activated_at,deactivated_at,invited_by,revision::int as revision
+        `select user_id,status,invited_at,activated_at,deactivated_at,invited_by,expires_at,
+           site_check_attempts,revision::int as revision
            from public.accounts where workspace_id=$1 and person_id=$2`,
         [f.workspaceId, personId],
       );
@@ -388,6 +403,26 @@ test("sign-in accounts against real Supabase", async (t) => {
     const deactivate = async (personId) =>
       rpc(admin, "vitally_deactivate_account", changeArgs(personId, (await accountOfPerson(personId)).revision));
     const fresh = () => `v-${randomUUID()}@example.org`;
+    // Design D12: the volunteer's own site check, through their own session.
+    const siteCheck = async (volunteer, sidn = TEST_SITE_NUMBER, name = "Rowan Pike") =>
+      rpc(volunteer.client, "vitally_complete_site_check", { p_name: name, p_sidn: sidn });
+    const cancelArgs = (target, revision, actionId = randomUUID()) => ({
+      p_action_id: actionId,
+      p_target: target,
+      p_expected_revision: revision,
+    });
+    // Seven days on from now, give or take the test's own run time.
+    const aboutAWeekOn = (at) => {
+      const days = (Date.parse(at) - Date.now()) / 86_400_000;
+      assert.ok(days > 6.99 && days <= 7, `expires in ${days} days`);
+    };
+    const expire = (userId) =>
+      f.sql("update public.accounts set expires_at=now()-interval '1 minute' where workspace_id=$1 and user_id=$2", [
+        f.workspaceId,
+        userId,
+      ]);
+    // The staff tables an uncleared or cancelled user must not read.
+    const caseTables = ["cases", "documents", "document_requests", "client_events"];
 
     await t.test("accounts is not in the realtime publication", async () => {
       const { rows } = await f.sql(
@@ -440,6 +475,8 @@ test("sign-in accounts against real Supabase", async (t) => {
       assert.ok(account.invited_at, "invited_at");
       assert.equal(account.invited_by, f.siteCoordinatorId);
       assert.equal(account.activated_at, null);
+      aboutAWeekOn(account.expires_at);
+      assert.equal(account.site_check_attempts, 0);
       assert.equal(account.revision, 1);
       assert.equal(await profileRevision(personId), revision + 1);
       assert.equal(await f.receiptsFor(actionId), 1);
@@ -764,13 +801,9 @@ test("sign-in accounts against real Supabase", async (t) => {
       assert.equal((await accountOfPerson(member.personId)).status, "deactivated");
     });
 
-    await t.test("reactivate after sign-in gives active", async () => {
+    await t.test("reactivate after the site check gives active", async () => {
       const volunteer = await invitedVolunteer();
-      const { error } = await volunteer.client.auth.signInWithPassword({
-        email: volunteer.email,
-        password: volunteer.password,
-      });
-      assert.equal(error, null, "sign-in");
+      assert.deepEqual(await siteCheck(volunteer), { status: "active" });
       assert.equal((await accountOfPerson(volunteer.personId)).status, "active");
       await deactivate(volunteer.personId);
       const read = (await accountOfPerson(volunteer.personId)).revision;
@@ -789,7 +822,9 @@ test("sign-in accounts against real Supabase", async (t) => {
       const read = (await accountOfPerson(volunteer.personId)).revision;
       const result = await rpc(admin, "vitally_reactivate_account", changeArgs(volunteer.personId, read));
       assert.equal(result.status, "invited");
-      assert.equal((await accountOfPerson(volunteer.personId)).status, "invited");
+      const account = await accountOfPerson(volunteer.personId);
+      assert.equal(account.status, "invited");
+      aboutAWeekOn(account.expires_at);
       assert.deepEqual(await membershipOf(volunteer.userId), { access: "staff", active: true });
       // Reactivating an account that is not deactivated is refused.
       await refusedWith(
@@ -841,6 +876,274 @@ test("sign-in accounts against real Supabase", async (t) => {
       assert.equal(await clearedOf(f, member.personId), false, "still needs roles to be cleared");
     });
 
+    // ---- Design D10: Cancel invitation -------------------------------------
+
+    await t.test("cancel invitation while invited rolls the volunteer back", async () => {
+      const volunteer = await invitedVolunteer();
+      const account = await accountOfPerson(volunteer.personId);
+      const revision = await profileRevision(volunteer.personId);
+      const actionId = randomUUID();
+      assert.deepEqual(
+        await rpc(admin, "vitally_cancel_invitation", cancelArgs({ volunteerId: volunteer.personId }, account.revision, actionId)),
+        { actionId, status: "none" },
+      );
+      assert.equal(await accountOfPerson(volunteer.personId), undefined, "no account");
+      assert.equal(await membershipOf(volunteer.userId), undefined, "no membership");
+      const person = await one(f, "select user_id,capabilities from public.people where id=$1", [volunteer.personId]);
+      assert.equal(person.user_id, null, "unlinked");
+      assert.deepEqual(person.capabilities, [], "ceiling reset");
+      assert.equal(await profileRevision(volunteer.personId), revision + 1, "the drawer's revision moves on");
+      assert.equal(await f.receiptsFor(actionId), 1);
+      // The email is the Roster's to change again: a save with another email lands.
+      const edited = `v-${randomUUID()}@example.org`;
+      await rpc(admin, "vitally_save_volunteer", {
+        p_action_id: randomUUID(),
+        p_volunteer_id: volunteer.personId,
+        p_expected_revision: revision + 1,
+        p_volunteer: {
+          name: "Rowan Pike", email: edited, phone: null, works: "on_site", languages: ["english"],
+          otherLanguage: null, roles: [], certificates: [], isNew: false, photoIdChecked: false,
+        },
+      });
+      const profile = await one(f, "select email from public.volunteer_profiles where person_id=$1", [volunteer.personId]);
+      assert.equal(profile.email, edited);
+      // The old auth user has no account row, so it is reusable for its email.
+      const again = await rpc(admin, "vitally_prepare_account", prepare("invite", { email: volunteer.email }));
+      assert.equal(again.reusableUserId, volunteer.userId);
+    });
+
+    await t.test("cancel a client invitation by email", async () => {
+      const client = await f.provision();
+      await rpc(admin, "vitally_record_account", recordArgs("invite", { email: client.email }, client.userId));
+      const { revision } = await accountOf(f, client.userId);
+      await rpc(admin, "vitally_cancel_invitation", cancelArgs({ email: ` ${client.email.toUpperCase()} ` }, revision));
+      assert.equal(await accountOf(f, client.userId), undefined);
+      assert.equal(await membershipOf(client.userId), undefined);
+      const list = await rpc(admin, "vitally_client_invitations");
+      assert.ok(!list.some((entry) => entry.email === client.email), "gone from the office list");
+    });
+
+    await t.test("cancel invitation is refused once active, when stale, and for a preparer", async () => {
+      const volunteer = await invitedVolunteer();
+      const read = (await accountOfPerson(volunteer.personId)).revision;
+      await refusedWith(f.preparer, "vitally_cancel_invitation", cancelArgs({ volunteerId: volunteer.personId }, read), FORBIDDEN);
+      await refusedWith(admin, "vitally_cancel_invitation", cancelArgs({ volunteerId: volunteer.personId }, read + 5), CONFLICT);
+      await siteCheck(volunteer);
+      const active = (await accountOfPerson(volunteer.personId)).revision;
+      await refusedWith(
+        admin,
+        "vitally_cancel_invitation",
+        cancelArgs({ volunteerId: volunteer.personId }, active),
+        INVALID_TRANSITION,
+        undefined,
+        "active",
+      );
+      // Deactivated, then reactivated: active again, since it signed in before.
+      await deactivate(volunteer.personId);
+      await refusedWith(
+        admin,
+        "vitally_cancel_invitation",
+        cancelArgs({ volunteerId: volunteer.personId }, (await accountOfPerson(volunteer.personId)).revision),
+        INVALID_TRANSITION,
+        undefined,
+        "deactivated",
+      );
+      // An active client, and a volunteer with no account at all.
+      const { revision: clientRevision } = await accountOf(f, f.applicantAUserId);
+      await refusedWith(admin, "vitally_cancel_invitation", cancelArgs({ email: f.applicantAEmail }, clientRevision), INVALID_TRANSITION);
+      const bare = await addVolunteer(fresh());
+      await refusedWith(admin, "vitally_cancel_invitation", cancelArgs({ volunteerId: bare }, 1), INVALID_TRANSITION);
+      await refusedWith(admin, "vitally_cancel_invitation", cancelArgs({ email: fresh() }, 1), NOT_FOUND);
+      await refusedWith(admin, "vitally_cancel_invitation", cancelArgs({ volunteerId: "nope" }, 1), VALIDATION);
+    });
+
+    await t.test("a cancelled invitee's sign-in reaches nothing", async () => {
+      const volunteer = await invitedVolunteer();
+      await f.clearStaff(volunteer.personId, ["prepare"]);
+      await rpc(admin, "vitally_cancel_invitation",
+        cancelArgs({ volunteerId: volunteer.personId }, (await accountOfPerson(volunteer.personId)).revision));
+      await f.readyCase();
+      // A fresh sign-in, as the code from the invitation would give.
+      const { error } = await volunteer.client.auth.signInWithPassword({ email: volunteer.email, password: volunteer.password });
+      assert.equal(error, null, "the auth user still signs in");
+      assert.equal(await accountCount(f, volunteer.userId), 0, "the sign-in creates no account");
+      assert.deepEqual(await readable(volunteer.client, "memberships"), []);
+      for (const table of caseTables) assert.deepEqual(await readable(volunteer.client, table), [], table);
+      await refusedWith(volunteer.client, "vitally_my_clearance", undefined, FORBIDDEN);
+      await refusedWith(volunteer.client, "vitally_complete_site_check", { p_name: "Rowan Pike", p_sidn: TEST_SITE_NUMBER }, FORBIDDEN);
+    });
+
+    // ---- Design D11: the seven-day expiry ------------------------------------
+
+    await t.test("an expired invitation is cancelled when next looked at", async () => {
+      const volunteer = await invitedVolunteer();
+      const client = await f.provision();
+      await rpc(admin, "vitally_record_account", recordArgs("invite", { email: client.email }, client.userId));
+      await expire(volunteer.userId);
+      await expire(client.userId);
+      const { cancelled } = await rpc(admin, "vitally_expire_invitations");
+      assert.ok(cancelled >= 2, `cancelled ${cancelled}`);
+      assert.equal(await accountOfPerson(volunteer.personId), undefined);
+      assert.equal(await membershipOf(volunteer.userId), undefined);
+      assert.equal((await one(f, "select user_id from public.people where id=$1", [volunteer.personId])).user_id, null);
+      assert.equal(await accountOf(f, client.userId), undefined);
+      assert.deepEqual(await rpc(admin, "vitally_expire_invitations"), { cancelled: 0 }, "nothing left");
+      await refusedWith(f.preparer, "vitally_expire_invitations", undefined, FORBIDDEN);
+      // Not yet expired, or active: left alone.
+      const fresher = await invitedVolunteer();
+      await rpc(admin, "vitally_expire_invitations");
+      assert.equal((await accountOfPerson(fresher.personId)).status, "invited");
+      assert.equal((await accountOf(f, f.applicantAUserId)).status, "active");
+    });
+
+    await t.test("Create account, the office list and a sign-in each cancel an expired invitation first", async () => {
+      // Create account: an expired invitation is no longer ALREADY_INVITED.
+      const volunteer = await invitedVolunteer();
+      await expire(volunteer.userId);
+      const answer = await rpc(admin, "vitally_prepare_account", prepare("create", { volunteerId: volunteer.personId }));
+      assert.equal(answer.reusableUserId, volunteer.userId, "the old auth user is reusable");
+      assert.equal(await accountOfPerson(volunteer.personId), undefined);
+      // The office list.
+      const listed = await f.provision();
+      await rpc(admin, "vitally_record_account", recordArgs("invite", { email: listed.email }, listed.userId));
+      await expire(listed.userId);
+      const list = await rpc(admin, "vitally_client_invitations");
+      assert.ok(!list.some((entry) => entry.email === listed.email), "not listed");
+      assert.equal(await accountOf(f, listed.userId), undefined);
+      // A client's sign-in after expiry is not an activation.
+      const late = await f.provision();
+      await rpc(admin, "vitally_record_account", recordArgs("invite", { email: late.email }, late.userId));
+      await expire(late.userId);
+      const { error } = await late.client.auth.signInWithPassword({ email: late.email, password: late.password });
+      assert.equal(error, null);
+      assert.equal(await accountOf(f, late.userId), undefined, "cancelled at the sign-in");
+      assert.deepEqual(await readable(late.client, "memberships"), []);
+    });
+
+    await t.test("resend starts the seven days again", async () => {
+      const volunteer = await invitedVolunteer();
+      await f.sql("update public.accounts set expires_at=now()+interval '1 day' where workspace_id=$1 and user_id=$2", [
+        f.workspaceId,
+        volunteer.userId,
+      ]);
+      const before = await accountOfPerson(volunteer.personId);
+      const result = await rpc(admin, "vitally_record_account", {
+        p_action_id: null,
+        p_op: "resend",
+        p_target: { volunteerId: volunteer.personId },
+        p_user_id: null,
+      });
+      const after = await accountOfPerson(volunteer.personId);
+      assert.deepEqual(result, { status: "invited", email: volunteer.email, accountRevision: before.revision + 1 });
+      aboutAWeekOn(after.expires_at);
+      assert.ok(after.invited_at > before.invited_at, "invited_at moves on");
+      // An expired one is gone before the resend can restart it.
+      await expire(volunteer.userId);
+      await refusedWith(admin, "vitally_record_account", {
+        p_action_id: null,
+        p_op: "resend",
+        p_target: { volunteerId: volunteer.personId },
+        p_user_id: null,
+      }, INVALID_TRANSITION);
+    });
+
+    // ---- Design D12: the site check ------------------------------------------
+
+    await t.test("the right site number activates the volunteer and stores the name", async () => {
+      const volunteer = await invitedVolunteer();
+      await f.clearStaff(volunteer.personId, ["prepare"]);
+      const before = await rpc(volunteer.client, "vitally_my_clearance");
+      assert.equal(before.siteCheck, true);
+      assert.equal(before.cleared, false);
+      const revision = await profileRevision(volunteer.personId);
+      // Spaces, hyphens and case are ignored; the name is trimmed.
+      const typed = ` ${TEST_SITE_NUMBER.slice(0, 5).toLowerCase()}-${TEST_SITE_NUMBER.slice(5)} `;
+      assert.deepEqual(await siteCheck(volunteer, typed, "  Rowan P. "), { status: "active" });
+      const account = await accountOfPerson(volunteer.personId);
+      assert.equal(account.status, "active");
+      assert.ok(account.activated_at, "activated_at");
+      assert.equal(account.expires_at, null);
+      const profile = await one(f, "select signed_in_name,revision from public.volunteer_profiles where person_id=$1", [volunteer.personId]);
+      assert.equal(profile.signed_in_name, "Rowan P.");
+      assert.equal(Number(profile.revision), revision + 1);
+      const person = await one(f, "select name from public.people where id=$1", [volunteer.personId]);
+      assert.equal(person.name, "Rowan Pike", "the name is never written to people");
+      const after = await rpc(volunteer.client, "vitally_my_clearance");
+      assert.equal(after.siteCheck, false);
+      assert.equal(after.cleared, true);
+      // Only once.
+      await refusedWith(volunteer.client, "vitally_complete_site_check", { p_name: "Rowan", p_sidn: TEST_SITE_NUMBER }, INVALID_TRANSITION);
+      // The name is admin-only, like the rest of the profile.
+      const seen = await readable(f.preparer, "volunteer_profiles");
+      assert.ok(!seen.some((row) => row.signed_in_name), "a preparer reads no profile");
+    });
+
+    await t.test("a wrong site number keeps the account invited; the fifth cancels it", async () => {
+      const volunteer = await invitedVolunteer();
+      for (let left = 4; left >= 1; left--) {
+        assert.deepEqual(await siteCheck(volunteer, "S99999999"), { status: "invited", reason: "WRONG_SITE", attemptsLeft: left });
+        const account = await accountOfPerson(volunteer.personId);
+        assert.equal(account.status, "invited");
+        assert.equal(account.site_check_attempts, 5 - left);
+      }
+      assert.equal(await clearedOf(f, volunteer.personId), false);
+      assert.deepEqual(await siteCheck(volunteer, "S99999999"), { status: "cancelled", reason: "TOO_MANY_ATTEMPTS" });
+      assert.equal(await accountOfPerson(volunteer.personId), undefined);
+      assert.equal(await membershipOf(volunteer.userId), undefined);
+      assert.equal((await one(f, "select user_id from public.people where id=$1", [volunteer.personId])).user_id, null);
+      await refusedWith(volunteer.client, "vitally_complete_site_check", { p_name: "Rowan", p_sidn: TEST_SITE_NUMBER }, FORBIDDEN);
+    });
+
+    await t.test("the site check needs a name and a site number; neither counts as an attempt", async () => {
+      const volunteer = await invitedVolunteer();
+      for (const name of ["", "   ", null, "x".repeat(81)])
+        await refusedWith(volunteer.client, "vitally_complete_site_check", { p_name: name, p_sidn: TEST_SITE_NUMBER }, VALIDATION, "NO_NAME");
+      await f.sql("delete from vitally_private.site_numbers where workspace_id=$1", [f.workspaceId]);
+      try {
+        await refusedWith(volunteer.client, "vitally_complete_site_check", { p_name: "Rowan", p_sidn: TEST_SITE_NUMBER }, VALIDATION, "SITE_NOT_SET");
+      } finally {
+        await f.sql("select vitally_private.set_site_number($1,$2)", [f.workspaceId, TEST_SITE_NUMBER]);
+      }
+      assert.equal((await accountOfPerson(volunteer.personId)).site_check_attempts, 0);
+      // An expired invitation is cancelled instead.
+      await expire(volunteer.userId);
+      assert.deepEqual(await siteCheck(volunteer), { status: "cancelled", reason: "EXPIRED" });
+      assert.equal(await accountOfPerson(volunteer.personId), undefined);
+    });
+
+    await t.test("the site check is the invited volunteer's only", async () => {
+      const args = { p_name: "Rowan", p_sidn: TEST_SITE_NUMBER };
+      await refusedWith(f.applicantA, "vitally_complete_site_check", args, FORBIDDEN, undefined, "a client");
+      await refusedWith(admin, "vitally_complete_site_check", args, INVALID_TRANSITION, undefined, "an active admin");
+      // The number is never readable through the API.
+      const { error } = await admin.schema("vitally_private").from("site_numbers").select("*");
+      assert.ok(error, "site_numbers is not exposed");
+      await assert.rejects(
+        () => f.sql("select vitally_private.set_site_number($1,'12345678')", [f.workspaceId]),
+        rejected("VALIDATION"),
+      );
+    });
+
+    await t.test("an invited volunteer who has not passed the site check reads no case data", async () => {
+      const volunteer = await invitedVolunteer();
+      await f.clearStaff(volunteer.personId, ["prepare", "review"]);
+      const caseId = await f.readyCase();
+      assert.ok((await readable(f.preparer, "cases")).length > 0, "a cleared preparer sees cases");
+      const { error } = await volunteer.client.auth.signInWithPassword({ email: volunteer.email, password: volunteer.password });
+      assert.equal(error, null);
+      for (const table of caseTables) assert.deepEqual(await readable(volunteer.client, table), [], table);
+      const claimed = await volunteer.client.rpc("vitally_apply_action", {
+        p_action_id: randomUUID(),
+        p_case_id: caseId,
+        p_expected_revision: 1,
+        p_type: "CLAIM_PREPARATION",
+        p_payload: {},
+      });
+      assert.equal(claimed.error?.code, "VT009", "NOT_CLEARED");
+      await refusedWith(volunteer.client, "vitally_client_invitations", undefined, FORBIDDEN);
+      assert.equal((await rpc(volunteer.client, "vitally_my_clearance")).siteCheck, true);
+    });
+
     await t.test("client invitations list", async () => {
       // A deactivated client account is left out of the list.
       const gone = await f.provision();
@@ -860,14 +1163,18 @@ test("sign-in accounts against real Supabase", async (t) => {
       assert.ok(list.every((entry) => entry.status !== "deactivated"), "no deactivated status");
       assert.ok(Array.isArray(list), "an array");
       for (const entry of list)
-        assert.deepEqual(Object.keys(entry).sort(), ["accountRevision", "activatedAt", "email", "invitedAt", "status"]);
+        assert.deepEqual(Object.keys(entry).sort(), [
+          "accountRevision", "activatedAt", "email", "expiresAt", "invitedAt", "status",
+        ]);
       assert.deepEqual(list[0], {
         email: client.email,
         status: "invited",
         invitedAt: list[0].invitedAt,
         activatedAt: null,
+        expiresAt: list[0].expiresAt,
         accountRevision: 1,
       });
+      aboutAWeekOn(list[0].expiresAt);
       assert.ok(list[0].invitedAt, "invitedAt");
       const emails = list.map((entry) => entry.email);
       assert.ok(emails.includes(f.applicantAEmail.toLowerCase()), "a roster-made client");

@@ -109,7 +109,7 @@ export const RPC_SIGNATURES = Object.freeze([
     name: "vitally_my_clearance",
     signature: "vitally_my_clearance()",
     authorized: (f) => f.siteCoordinator,
-    receiptKeys: Object.freeze(["capabilities", "cleared", "isAdmin", "missing", "siteCoordinatorName"]),
+    receiptKeys: Object.freeze(["capabilities", "cleared", "isAdmin", "missing", "siteCheck", "siteCoordinatorName"]),
     args: () => ({}),
   }),
   // Sign-in accounts (OpenSpec change add-account-invitations). An entry's
@@ -190,8 +190,71 @@ export const RPC_SIGNATURES = Object.freeze([
     name: "vitally_client_invitations",
     signature: "vitally_client_invitations()",
     authorized: (f) => f.siteCoordinator,
-    receiptKeys: Object.freeze(["accountRevision", "activatedAt", "email", "invitedAt", "status"]),
+    receiptKeys: Object.freeze(["accountRevision", "activatedAt", "email", "expiresAt", "invitedAt", "status"]),
     args: () => ({}),
+  }),
+  // Cancelling a client's invitation by email, at its revision (design D10).
+  Object.freeze({
+    name: "vitally_cancel_invitation",
+    signature: "vitally_cancel_invitation(uuid,jsonb,bigint)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["actionId", "status"]),
+    context: async (f) => {
+      const { userId, email } = await f.provision();
+      const { error } = await f.siteCoordinator.rpc("vitally_record_account", {
+        p_action_id: crypto.randomUUID(),
+        p_op: "invite",
+        p_target: { email },
+        p_user_id: userId,
+      });
+      if (error) throw new Error(`invite for the cancel shape: ${error.code}`);
+      return { cancelEmail: email };
+    },
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_target: { email: context.cancelEmail },
+      p_expected_revision: 1,
+    }),
+  }),
+  // The Roster read's expiry sweep (design D11).
+  Object.freeze({
+    name: "vitally_expire_invitations",
+    signature: "vitally_expire_invitations()",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["cancelled"]),
+    args: () => ({}),
+  }),
+  // The site check (design D12): only a volunteer whose account is invited may
+  // call it, so the context makes one with Create account's record and keeps
+  // their client on the fixture for `authorized`. A wrong number is a result.
+  Object.freeze({
+    name: "vitally_complete_site_check",
+    signature: "vitally_complete_site_check(text,text)",
+    authorized: (f) => f.siteCheckVolunteer,
+    receiptKeys: Object.freeze(["attemptsLeft", "reason", "status"]),
+    context: async (f) => {
+      const { client, userId, email } = await f.provision();
+      const saved = await f.siteCoordinator.rpc("vitally_save_volunteer", {
+        p_action_id: crypto.randomUUID(),
+        p_volunteer_id: null,
+        p_expected_revision: null,
+        p_volunteer: {
+          name: "Sample Volunteer", email, phone: null, works: "on_site", languages: ["english"],
+          otherLanguage: null, roles: [], certificates: [], isNew: false, photoIdChecked: false,
+        },
+      });
+      if (saved.error) throw new Error(`volunteer for the site check shape: ${saved.error.code}`);
+      const { error } = await f.siteCoordinator.rpc("vitally_record_account", {
+        p_action_id: crypto.randomUUID(),
+        p_op: "create",
+        p_target: { volunteerId: saved.data.personId },
+        p_user_id: userId,
+      });
+      if (error) throw new Error(`create account for the site check shape: ${error.code}`);
+      f.siteCheckVolunteer = client;
+      return {};
+    },
+    args: () => ({ p_name: "Sample Volunteer", p_sidn: "S99999999" }),
   }),
 ]);
 
@@ -222,6 +285,15 @@ export const PRIVATE_SETUP_FUNCTIONS = Object.freeze([
     args: (context) => ({
       p_workspace_id: context.workspaceId,
       p_person_key: context.personKey,
+    }),
+  }),
+  // The site number (change add-account-invitations, design D12). Fictional.
+  Object.freeze({
+    name: "set_site_number",
+    signature: "set_site_number(uuid,text)",
+    args: (context) => ({
+      p_workspace_id: context.workspaceId,
+      p_sidn: "S99999999",
     }),
   }),
 ]);
