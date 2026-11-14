@@ -63,7 +63,16 @@ const RPCS = Object.freeze([
   "vitally_complete_site_check(p_name text, p_sidn text)",
 ]);
 // The public RPCs that only read: no action id, no digest.
-const READ_ONLY_RPCS = Object.freeze(["vitally_client_invitations", "vitally_my_clearance", "vitally_prepare_account"]);
+// The RPCs that take no action id and store no digest: the reads, and (047,
+// design D11, D12) the expiry sweep and the caller's own site check, whose
+// repeat is harmless or judged afresh.
+const READ_ONLY_RPCS = Object.freeze([
+  "vitally_client_invitations",
+  "vitally_complete_site_check",
+  "vitally_expire_invitations",
+  "vitally_my_clearance",
+  "vitally_prepare_account",
+]);
 // The signatures 043 drops by name.
 const OLD_SIGNATURES = Object.freeze([
   "public.vitally_apply_action(uuid,uuid,bigint,uuid,text,jsonb)",
@@ -205,7 +214,6 @@ test("the catalog after the sample-case tools and presenter access are removed",
         "select p.proname, p.prosrc from pg_proc p where p.pronamespace='public'::regnamespace order by 1",
       );
       assert.equal(rows.length, RPCS.length);
-      // The read-only RPCs take no action id and store no digest.
       for (const row of rows.filter((entry) => !READ_ONLY_RPCS.includes(entry.proname)))
         assert.match(row.prosrc, /'personId',\s*v_person\.id/, row.proname);
     });

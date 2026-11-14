@@ -1018,6 +1018,13 @@ test("sign-in accounts against real Supabase", async (t) => {
       assert.equal(error, null);
       assert.equal(await accountOf(f, late.userId), undefined, "cancelled at the sign-in");
       assert.deepEqual(await readable(late.client, "memberships"), []);
+      // A volunteer's sign-in after expiry cancels it the same way.
+      const lateVolunteer = await invitedVolunteer();
+      await expire(lateVolunteer.userId);
+      const again = await lateVolunteer.client.auth.signInWithPassword({ email: lateVolunteer.email, password: lateVolunteer.password });
+      assert.equal(again.error, null);
+      assert.equal(await accountOfPerson(lateVolunteer.personId), undefined, "a volunteer's too");
+      assert.equal((await one(f, "select user_id from public.people where id=$1", [lateVolunteer.personId])).user_id, null);
     });
 
     await t.test("resend starts the seven days again", async () => {
@@ -1045,6 +1052,16 @@ test("sign-in accounts against real Supabase", async (t) => {
         p_target: { volunteerId: volunteer.personId },
         p_user_id: null,
       }, INVALID_TRANSITION);
+      // A client named by email: no invitation is left under that email.
+      const client = await f.provision();
+      await rpc(admin, "vitally_record_account", recordArgs("invite", { email: client.email }, client.userId));
+      await expire(client.userId);
+      await refusedWith(admin, "vitally_record_account", {
+        p_action_id: null,
+        p_op: "resend",
+        p_target: { email: client.email },
+        p_user_id: null,
+      }, NOT_FOUND);
     });
 
     // ---- Design D12: the site check ------------------------------------------
@@ -1094,10 +1111,12 @@ test("sign-in accounts against real Supabase", async (t) => {
       await refusedWith(volunteer.client, "vitally_complete_site_check", { p_name: "Rowan", p_sidn: TEST_SITE_NUMBER }, FORBIDDEN);
     });
 
-    await t.test("the site check needs a name and a site number; neither counts as an attempt", async () => {
+    await t.test("the site check needs a name, a number typed and a site number; none counts as an attempt", async () => {
       const volunteer = await invitedVolunteer();
       for (const name of ["", "   ", null, "x".repeat(81)])
         await refusedWith(volunteer.client, "vitally_complete_site_check", { p_name: name, p_sidn: TEST_SITE_NUMBER }, VALIDATION, "NO_NAME");
+      for (const sidn of ["", "  ", " - ", null])
+        await refusedWith(volunteer.client, "vitally_complete_site_check", { p_name: "Rowan", p_sidn: sidn }, VALIDATION, "NO_SIDN");
       await f.sql("delete from vitally_private.site_numbers where workspace_id=$1", [f.workspaceId]);
       try {
         await refusedWith(volunteer.client, "vitally_complete_site_check", { p_name: "Rowan", p_sidn: TEST_SITE_NUMBER }, VALIDATION, "SITE_NOT_SET");
@@ -1118,6 +1137,12 @@ test("sign-in accounts against real Supabase", async (t) => {
       // The number is never readable through the API.
       const { error } = await admin.schema("vitally_private").from("site_numbers").select("*");
       assert.ok(error, "site_numbers is not exposed");
+      const grants = await one(
+        f,
+        `select bool_or(has_table_privilege(r, 'vitally_private.site_numbers', 'select')) as any
+           from unnest(array['anon','authenticated','service_role']) r`,
+      );
+      assert.equal(grants.any, false, "no API role may read the site number");
       await assert.rejects(
         () => f.sql("select vitally_private.set_site_number($1,'12345678')", [f.workspaceId]),
         rejected("VALIDATION"),

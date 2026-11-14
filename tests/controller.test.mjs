@@ -7348,9 +7348,42 @@ test("the server's NO_NAME and SITE_NOT_SET are said on the screen; anything els
     cancelled: false,
   });
   assert.equal(controller.getState().error, null);
-  store.siteAnswer = Object.assign(new Error("FORBIDDEN"), { code: "FORBIDDEN" });
-  await assert.rejects(() => controller.completeSiteCheck("Kim Novak", "S1"), (error) => error.code === "FORBIDDEN");
+  store.siteAnswer = siteRefusal("NO_SIDN");
+  assert.equal(await controller.completeSiteCheck("Kim Novak", ""), "invalid");
+  assert.equal(controller.getState().siteCheck.error, "Enter this site's SIDN.");
+  store.siteAnswer = Object.assign(new Error("SERVER_ERROR"), { code: "SERVER_ERROR" });
+  await assert.rejects(() => controller.completeSiteCheck("Kim Novak", "S1"), (error) => error.code === "SERVER_ERROR");
   assert.equal(controller.getState().busy, false);
+  controller.stop();
+});
+
+// Review round finding I1: the invitation went away before the press, or an
+// earlier press landed and its answer was lost.
+test("a site check refused as FORBIDDEN says the invitation was cancelled", async () => {
+  const store = siteCheckStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.siteAnswer = Object.assign(new Error("FORBIDDEN"), { code: "FORBIDDEN" });
+  assert.equal(await controller.completeSiteCheck("Kim Novak", "S1"), "cancelled");
+  const state = controller.getState();
+  assert.match(staffScreen(state), /This invitation was cancelled\. Ask your site coordinator to invite you again\./);
+  assert.equal(state.error, null);
+  controller.stop();
+});
+
+test("a site check refused as INVALID_TRANSITION reads the clearance again", async () => {
+  const store = siteCheckStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.siteAnswer = Object.assign(new Error("INVALID_TRANSITION"), { code: "INVALID_TRANSITION" });
+  store.nextClearance = { ...UNCLEARED, siteCheck: false };
+  const before = clearanceCalls(store);
+  assert.equal(await controller.completeSiteCheck("Kim Novak", "S1"), "active");
+  assert.equal(clearanceCalls(store) - before, 1);
+  const state = controller.getState();
+  assert.equal(state.siteCheck, null);
+  assert.equal(state.error, null);
+  assert.match(staffScreen(state), /Finish your setup for this season/);
   controller.stop();
 });
 

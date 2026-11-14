@@ -128,20 +128,23 @@ select vitally_private.backfill_accounts();
 -- while it issues the session, so the account is settled before the
 -- session's first request reaches the database. Only `invited` rows change: a
 -- deactivated account stays deactivated however often its person signs in.
---   - an invitation past its expiry is cancelled (cancel_invitation, Part 2);
+--   - an invitation past its expiry is cancelled (expire_invitations, Part 2),
+--     under the workspace lock every account write takes, and judged again
+--     once the lock is held, so a Resend that just restarted it is kept;
 --   - a client's invitation becomes active;
 --   - a volunteer's stays invited until the site check passes
 --     (vitally_complete_site_check, Part 2).
--- cancel_invitation is defined below; plpgsql resolves it when this runs.
+-- expire_invitations is defined below; plpgsql resolves it when this runs.
 
 create function vitally_private.account_signed_in()
 returns trigger language plpgsql security definer set search_path='' as $$
 declare v_workspace uuid;
 begin
  if new.last_sign_in_at is not null and new.last_sign_in_at is distinct from old.last_sign_in_at then
-  for v_workspace in select a.workspace_id from public.accounts a
+  for v_workspace in select distinct a.workspace_id from public.accounts a
    where a.user_id=new.id and a.status='invited' and a.activated_at is null and a.expires_at<now() loop
-   perform vitally_private.cancel_invitation(v_workspace,new.id);
+   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_workspace::text,0));
+   perform vitally_private.expire_invitations(v_workspace);
   end loop;
   update public.accounts set status='active',activated_at=new.last_sign_in_at,expires_at=null,
     revision=revision+1,updated_at=now()
@@ -586,7 +589,10 @@ revoke all on function vitally_private.cancel_invitation(uuid,uuid) from public,
 -- many. Expiry is applied when it is next looked at, not by a timer (brainstorm,
 -- "Decided without the user" 17): every account RPC, the office list, the
 -- Roster's read and the first sign-in call this first, and an expired invitee
--- was never cleared, so nothing could act as them in between.
+-- was never cleared, so nothing could act as them in between. A caller that
+-- then refuses (a Resend of the expired invitation, say) rolls the
+-- cancellation back with everything else; the next reader that commits applies
+-- it again, and until then every reader treats the row as gone.
 create function vitally_private.expire_invitations(p_workspace_id uuid)
 returns integer language plpgsql security definer set search_path='' as $$
 declare v_user uuid;
@@ -629,6 +635,9 @@ begin
  if v_member.access<>'staff' or v_person.id is null or not vitally_policy.is_workspace_admin(v_member.workspace_id) then
   raise sqlstate 'VT001' using message='FORBIDDEN';
  end if;
+ -- The lock first, so a retry that arrives while its first request is still
+ -- recording waits for that record and then finds its receipt.
+ perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_member.workspace_id::text,0));
  if p_action_id is not null then
   select r.receipt into v_stored from public.action_receipts r
    where r.workspace_id=v_member.workspace_id and r.actor_user_id=v_member.user_id and r.action_id=p_action_id
@@ -638,7 +647,6 @@ begin
   end if;
  end if;
  -- An expired invitation is cancelled before it is judged.
- perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_member.workspace_id::text,0));
  perform vitally_private.expire_invitations(v_member.workspace_id);
  return vitally_private.account_check(v_member.workspace_id,p_op,p_target);
 end;
@@ -970,6 +978,7 @@ grant execute on function public.vitally_expire_invitations() to authenticated;
 -- order, each answer a result, not an error, when it writes:
 --   - past its expiry: the invitation is cancelled, {status:'cancelled',reason:'EXPIRED'};
 --   - no name (blank or over 80 characters): VALIDATION NO_NAME, nothing counted;
+--   - no site number typed: VALIDATION NO_SIDN, nothing counted;
 --   - the workspace has no site number: VALIDATION SITE_NOT_SET, nothing counted;
 --   - the right number: the name is stored on the profile and the account is
 --     active, {status:'active'};
@@ -1003,6 +1012,9 @@ begin
  end if;
  if v_name='' or length(v_name)>80 then
   raise sqlstate 'VT007' using message='VALIDATION',detail='NO_NAME';
+ end if;
+ if vitally_private.normalize_sidn(p_sidn)='' then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='NO_SIDN';
  end if;
  select n.sidn into v_site from vitally_private.site_numbers n where n.workspace_id=v_member.workspace_id;
  if v_site is null then

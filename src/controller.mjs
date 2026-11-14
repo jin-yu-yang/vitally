@@ -3390,6 +3390,7 @@ export function createController({
   // or null when this window has no site check.
   const SITE_CHECK_TEXT = Object.freeze({
     NO_NAME: "Enter your name.",
+    NO_SIDN: "Enter this site's SIDN.",
     SITE_NOT_SET: "This site isn't set up for sign-in yet. Ask your site coordinator.",
   });
   const WRONG_SITE_TEXT = "That isn't this site's number.";
@@ -3418,6 +3419,20 @@ export function createController({
         state.siteCheck = { name, error: said, cancelled: false };
         show();
         return "invalid";
+      }
+      // No invited account of their own any more: an admin cancelled it, or
+      // it expired, before this press.
+      if (error?.code === "FORBIDDEN") {
+        state.siteCheck = { name, error: null, cancelled: true };
+        show();
+        return "cancelled";
+      }
+      // Not invited any more: an earlier press landed and its answer was
+      // lost. The clearance says where the window goes next.
+      if (error?.code === "INVALID_TRANSITION") {
+        state.siteCheck = null;
+        await checkClearance();
+        return "active";
       }
       noteFailure(error);
       show();

@@ -91,10 +91,13 @@ The SIDN SHALL be a workspace setting, `S` followed by eight digits, set by the 
 The check SHALL be a database RPC for the caller's own account. In order:
 - an invitation past its `expires_at` SHALL be cancelled, and the window SHALL say "This invitation was cancelled. Ask your site coordinator to invite you again.";
 - a missing name SHALL be refused with `VALIDATION` (`NO_NAME`), "Enter your name.", and counts as no attempt;
+- a blank SIDN SHALL be refused with `VALIDATION` (`NO_SIDN`), "Enter this site's SIDN.", and counts as no attempt;
 - a workspace with no SIDN SHALL refuse with `VALIDATION` (`SITE_NOT_SET`), "This site isn't set up for sign-in yet. Ask your site coordinator.", and counts as no attempt;
 - the right SIDN SHALL make the account `active` with `activated_at`, and store the name as the volunteer's signed-in name;
 - a wrong SIDN SHALL keep the account `invited`, count one attempt, and say "That isn't this site's number.";
 - the fifth wrong SIDN SHALL cancel the invitation, as Cancel invitation does.
+
+When the RPC answers `FORBIDDEN` because the invitation was cancelled meanwhile, the window SHALL show the cancelled message; when it answers `INVALID_TRANSITION` because an earlier press already passed, the window SHALL read the clearance again and move on.
 
 The signed-in name SHALL be stored on the admin-only volunteer profile, never on the person. The RPC SHALL be refused with `FORBIDDEN` for a caller with no `invited` volunteer account of their own, and with `INVALID_TRANSITION` once the account is not `invited`.
 
@@ -168,7 +171,7 @@ When the email cannot be sent, the account SHALL stay `invited`, and the drawer 
 - **THEN** the account is `invited`, and the drawer says "Account created; the email wasn't sent. Use Resend in a minute."
 
 ### Requirement: Resend sends a new code to an invited account
-While an account is `invited`, the drawer for a volunteer, and the office panel for a client, SHALL offer Resend. Resend SHALL send a new sign-in code email to the account's address through the same Edge Function, and SHALL start the invitation's seven days again, increasing the account revision. It SHALL change nothing else. Resend SHALL be refused with `INVALID_TRANSITION` for an account that is not `invited`, including one cancelled because it expired. Within its seven days, an invited person SHALL be able to request a code from the sign-in screen.
+While an account is `invited`, the drawer for a volunteer, and the office panel for a client, SHALL offer Resend. Resend SHALL send a new sign-in code email to the account's address through the same Edge Function, and SHALL start the invitation's seven days again, increasing the account revision. It SHALL change nothing else. Resend SHALL be refused with `INVALID_TRANSITION` for an account that is not `invited`, including a volunteer's cancelled because it expired; a client named by an email that no longer has an account SHALL be refused with `NOT_FOUND`. Within its seven days, an invited person SHALL be able to request a code from the sign-in screen.
 
 #### Scenario: Resend
 - **WHEN** an admin presses Resend for an invited volunteer whose invitation has one day left
