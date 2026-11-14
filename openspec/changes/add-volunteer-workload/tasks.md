@@ -22,7 +22,7 @@
 
 ## 4. Checks and docs
 
-- [ ] 4.1 `npm test`, `npm run build:hant -- --check`, `npx openspec validate --all`
+- [x] 4.1 `npm test`, `npm run build:hant -- --check`, `npx openspec validate --all`
 - [ ] 4.2 `npm run db:migrate:test` and `npm run test:database` (or a passing CI `database` job on the commit)
 - [ ] 4.3 `npm run test:browser` as a regression run (or passing CI `story` jobs on the commit, screenshots reviewed)
-- [ ] 4.4 Update `docs/developer/` where it describes the Volunteers page, the case actions or the production roadmap's reassignment line
+- [x] 4.4 Update `docs/developer/` where it describes the Volunteers page, the case actions or the production roadmap's reassignment line
