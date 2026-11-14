@@ -85,11 +85,16 @@ For a `staff` member, every public RPC that acts on the workspace SHALL act as t
 - `vitally_log_contact(p_action_id uuid, p_case_id uuid, p_followup_id uuid, p_entry jsonb)`;
 - `vitally_edit_contact(p_action_id uuid, p_contact_id uuid, p_expected_revision bigint, p_entry jsonb)`;
 - `vitally_save_volunteer(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_volunteer jsonb)`, whose volunteer argument names the volunteer being edited, never the actor;
-- `vitally_my_clearance()`.
+- `vitally_my_clearance()`;
+- `vitally_save_update(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_update jsonb)`;
+- `vitally_update_action(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_type text)`;
+- `vitally_mark_updates(p_update_ids uuid[], p_confirm boolean)`;
+- `vitally_my_updates()`;
+- `vitally_posted_updates()`.
 
 None of them SHALL take a person parameter. Each SHALL be executable by `authenticated` and by no other client role.
 
-The acting person SHALL be resolved before the request digest and the receipt, so `action_receipts.actor_person_id` records the staff member's person. The request digest SHALL keep its `personId` entry, filled with the resolved person, so receipts stored before the parameter was removed still match their replays. The acting person's capabilities SHALL be their effective capabilities (capability `volunteer-clearance`).
+The acting person SHALL be resolved before the request digest and the receipt of every RPC that stores a receipt, so `action_receipts.actor_person_id` records the staff member's person. The request digest SHALL keep its `personId` entry, filled with the resolved person, so receipts stored before the parameter was removed still match their replays. The acting person's capabilities SHALL be their effective capabilities (capability `volunteer-clearance`).
 
 #### Scenario: A staff call
 - **WHEN** a cleared staff member whose effective capabilities include `prepare` claims preparation
@@ -113,7 +118,11 @@ The acting person SHALL be resolved before the request digest and the receipt, s
 
 #### Scenario: The old signatures are gone
 - **WHEN** the database catalog is read
-- **THEN** no public function takes `p_person_id`, and `public` holds exactly these eight RPCs, each with execute granted to `authenticated` only
+- **THEN** no public function takes `p_person_id`, and `public` holds exactly these thirteen RPCs, each with execute granted to `authenticated` only
+
+#### Scenario: The read-only and naturally idempotent RPCs store no receipt
+- **WHEN** a staff member calls `vitally_my_clearance`, `vitally_my_updates`, `vitally_posted_updates` or `vitally_mark_updates`
+- **THEN** no action receipt is stored, and each still acts only for the signed-in person
 
 ### Requirement: A client acts with no person
 An `applicant` SHALL act with no person. The RPCs take no person parameter, so a client's request SHALL have no way to name one. Clients' behaviour SHALL NOT otherwise change.
