@@ -65,17 +65,17 @@
 
 ## 5. Views and wiring
 
-- [ ] 5.1 Sidebar (`src/views.mjs`):
+- [x] 5.1 Sidebar (`src/views.mjs`):
   - Notifications, with a bell and a badge, in every staff window, setup screen included;
   - Post an update for a ceiling admin;
   - routing for `office-updates`;
   - tests.
-- [ ] 5.2 `src/update-views.mjs`, with tests:
+- [x] 5.2 `src/update-views.mjs`, with tests:
   - the Notifications panel (items, highlight, Edited, pinned, I've read this, confirmed date, footer, empty state);
   - the Post an update page (form, conditional link and roles, the "ask again" checkbox when editing posted, preview, table with bars and actions);
   - the who-has-read dialog;
   - the Unpublish and Delete confirm bodies (golden file `tests/fixtures/confirm-dialogs.json`).
-- [ ] 5.3 `src/app.mjs` actions and form submit, the preview re-rendering on input, toasts. `src/styles.css` for the bell badge, the panel, the form, the preview and the count bars. Check for horizontal overflow at phone width.
+- [x] 5.3 `src/app.mjs` actions and form submit, the preview re-rendering on input, toasts. `src/styles.css` for the bell badge, the panel, the form, the preview and the count bars. Check for horizontal overflow at phone width.
 
 ## 6. Browser test and docs
 
