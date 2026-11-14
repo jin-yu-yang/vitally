@@ -1905,6 +1905,21 @@ if (!config) {
         openDialog("volunteer", id ? { volunteerId: id } : null, describeFocus(target));
         break;
       }
+      case "account-create":
+      case "account-resend":
+      case "account-reactivate":
+        // Said in the drawer (a refusal) or thrown to the safety net.
+        await controller[
+          { "account-create": "createAccount", "account-resend": "resendAccount", "account-reactivate": "reactivateAccount" }[action]
+        ]();
+        break;
+      case "account-deactivate":
+        // Asks first: nothing is sent until the dialog's confirm.
+        openDialog("deactivate-account", { volunteerId: target.dataset.volunteerId }, describeFocus(target));
+        break;
+      case "confirm-deactivate-account":
+        await controller.deactivateAccount();
+        break;
       case "demo-fill":
         // Fills the form with fictional answers; nothing is sent until the
         // form's own submit button is pressed (demo-fill.mjs). A demo tool:

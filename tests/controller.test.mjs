@@ -6451,6 +6451,7 @@ const ROSTER_VOLUNTEER = Object.freeze({
   certificates: [],
   revision: 4,
   hasSignIn: false,
+  account: { status: "none", revision: null },
 });
 
 const VOLUNTEER_PAYLOAD = Object.freeze({
@@ -6492,6 +6493,26 @@ const rosterStore = (overrides = {}) => {
     }
     return { actionId: request.actionId, personId: request.volunteerId ?? "v-new", revision: 1 };
   };
+  // The account calls: `accountAnswer` is what the next call resolves to,
+  // `failAccount` makes the next call reject.
+  store.accountAnswer = { status: "invited", emailSent: true, accountRevision: 1 };
+  store.failAccount = null;
+  for (const [method, type] of [
+    ["createAccount", "create"],
+    ["resendAccount", "resend"],
+    ["deactivateAccount", "deactivate"],
+    ["reactivateAccount", "reactivate"],
+  ])
+    store[method] = async (request) => {
+      store.calls.push(method);
+      store.writes.push({ type, ...request });
+      if (store.failAccount) {
+        const error = store.failAccount;
+        store.failAccount = null;
+        throw error;
+      }
+      return { ...store.accountAnswer };
+    };
   return store;
 };
 const volunteerReads = (store) => store.calls.filter((entry) => entry === "listVolunteers").length;
@@ -7215,5 +7236,133 @@ test("the window's focus re-checks the clearance only while the setup screen sho
   assert.equal(store.calls.filter((entry) => entry === "listCases").length, caseReads + 1);
   state = controller.getState();
   assert.equal(state.error, null);
+  controller.stop();
+});
+
+// ---- the drawer's Account section (change add-account-invitations) --------
+
+const accountRefusal = (code, message, details) =>
+  Object.assign(new Error(code), { code, cause: { message, details } });
+
+async function accountDrawer(store, options = {}) {
+  let n = 0;
+  const built = build({ store, newActionId: () => `action-${++n}`, ...options });
+  await built.controller.start();
+  built.controller.navigate("office-volunteers");
+  await built.controller.loadVolunteers();
+  built.controller.openDialog("volunteer", { volunteerId: "v-1" });
+  return built;
+}
+
+test("create account shows the sent message and re-reads the roster", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  const reads = volunteerReads(store);
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "invited", revision: 1 } }];
+  assert.equal(await controller.createAccount(), true);
+  assert.deepEqual(store.writes.at(-1), { type: "create", actionId: "action-1", volunteerId: "v-1" });
+  const state = controller.getState();
+  assert.deepEqual(state.volunteerAccountNotice, { kind: "ok", text: "Account created and sign-in code sent" });
+  assert.equal(volunteerReads(store), reads + 1);
+  assert.equal(state.volunteers[0].account.status, "invited");
+  assert.equal(state.dialog, "volunteer");
+  assert.equal(state.busy, false);
+  controller.stop();
+});
+
+test("email not sent shows the Resend message", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  store.accountAnswer = { status: "invited", emailSent: false, accountRevision: 1 };
+  assert.equal(await controller.createAccount(), true);
+  assert.equal(
+    controller.getState().volunteerAccountNotice.text,
+    "Account created; the email wasn't sent. Use Resend in a minute.",
+  );
+  // A replayed answer says the same: nothing was sent this time.
+  store.accountAnswer = { status: "invited", emailSent: false, accountRevision: 1, replay: true };
+  assert.equal(await controller.resendAccount(), true);
+  assert.equal(controller.getState().volunteerAccountNotice.text, "The email wasn't sent. Use Resend in a minute.");
+  controller.stop();
+});
+
+test("a refusal with a sentence is said in the drawer and returns false", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  store.failAccount = accountRefusal("VALIDATION", "VALIDATION", "NO_EMAIL");
+  assert.equal(await controller.createAccount(), false);
+  const state = controller.getState();
+  assert.deepEqual(state.volunteerAccountNotice, { kind: "error", text: "Add an email first" });
+  assert.equal(state.error, null);
+  assert.equal(state.busy, false);
+  controller.stop();
+});
+
+test("OPEN_WORK on deactivate shows the open-work sentence", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "active", revision: 3 } }];
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("deactivate-account", { volunteerId: "v-1" });
+  store.failAccount = accountRefusal("INVALID_TRANSITION", "OPEN_WORK", JSON.stringify(["Pat Doe (preparing)"]));
+  assert.equal(await controller.deactivateAccount(), false);
+  const state = controller.getState();
+  assert.equal(
+    state.volunteerAccountNotice.text,
+    "Mira Patel still has open work: Pat Doe (preparing). Finish it or hand it over first.",
+  );
+  assert.equal(state.dialog, "volunteer", "back in the drawer, which says it");
+  assert.deepEqual(store.writes.at(-1), { type: "deactivate", actionId: "action-1", volunteerId: "v-1", expectedRevision: 3 });
+  controller.stop();
+});
+
+test("CONFLICT on deactivate says someone else changed this volunteer", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "active", revision: 3 } }];
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("deactivate-account", { volunteerId: "v-1" });
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "deactivated", revision: 4 } }];
+  store.failAccount = Object.assign(new Error("stale"), { code: "CONFLICT" });
+  const reads = volunteerReads(store);
+  await assert.rejects(() => controller.deactivateAccount(), (error) => error.code === "CONFLICT");
+  const state = controller.getState();
+  assert.equal(state.error.message, VOLUNTEER_CONFLICT_MESSAGE);
+  assert.equal(volunteerReads(store), reads + 1);
+  assert.equal(state.volunteers[0].account.revision, 4);
+  assert.equal(state.dialog, "volunteer");
+  controller.stop();
+});
+
+test("deactivate asks for confirmation first", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "active", revision: 3 } }];
+  const { controller } = await accountDrawer(store);
+  // From the drawer alone, nothing is sent.
+  assert.equal(await controller.deactivateAccount(), false);
+  assert.equal(store.calls.includes("deactivateAccount"), false);
+  controller.openDialog("deactivate-account", { volunteerId: "v-1" });
+  assert.equal(store.calls.includes("deactivateAccount"), false, "asking sends nothing");
+  // Keeping the account returns to the drawer.
+  controller.closeDialog();
+  assert.equal(controller.getState().dialog, "volunteer");
+  assert.equal(controller.getState().dialogContext.volunteerId, "v-1");
+  controller.openDialog("deactivate-account", { volunteerId: "v-1" });
+  assert.equal(await controller.deactivateAccount(), true);
+  assert.equal(store.calls.filter((entry) => entry === "deactivateAccount").length, 1);
+  assert.equal(controller.getState().volunteerAccountNotice.text, "Account deactivated");
+  assert.equal(controller.getState().dialog, "volunteer");
+  controller.stop();
+});
+
+test("an account action whose answer never came is sent again with the same action id", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  store.failAccount = Object.assign(new Error("offline"), { code: "OFFLINE" });
+  await assert.rejects(() => controller.createAccount(), (error) => error.code === "OFFLINE");
+  assert.equal(await controller.createAccount(), true);
+  const sent = store.writes.filter((entry) => entry.type === "create");
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].actionId, sent[0].actionId);
+  assert.equal(await controller.resendAccount(), true);
+  assert.notEqual(store.writes.at(-1).actionId, sent[0].actionId);
   controller.stop();
 });

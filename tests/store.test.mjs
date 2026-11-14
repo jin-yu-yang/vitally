@@ -335,6 +335,7 @@ function fakeClient({
   user = { id: "user-1", email: "student@example.com" },
   rows = {},
   rpc,
+  invoke,
   readError,
   authError,
   authThrows,
@@ -350,6 +351,7 @@ function fakeClient({
   const client = {
     reads: [],
     rpcCalls: [],
+    invokeCalls: [],
     channels: [],
     removed: [],
     auth: {
@@ -408,6 +410,12 @@ function fakeClient({
             .then(onFulfilled, onRejected),
       };
       return builder;
+    },
+    functions: {
+      invoke: async (name, options) => {
+        client.invokeCalls.push({ name, options });
+        return invoke ? invoke(name, options) : { data: { status: "invited", emailSent: true, accountRevision: 1 }, error: null };
+      },
     },
     async rpc(name, args) {
       client.rpcCalls.push({ name, args });
@@ -1726,6 +1734,94 @@ test("saveVolunteer sends the RPC parameters, nulls for an Add", async () => {
     p_expected_revision: 3,
     p_volunteer: volunteer,
   });
+});
+
+test("listVolunteers reads the accounts and puts each on its volunteer", async () => {
+  const client = fakeClient({
+    access: "staff",
+    rows: { ...ROSTER_ROWS, accounts: [{ workspace_id: "workspace-1", user_id: "u", person_id: "person-ana", status: "invited", revision: 2 }] },
+  });
+  const list = await createStore(client).listVolunteers();
+  assert.deepEqual(list[0].account, { status: "invited", revision: 2 });
+  assert.equal(client.reads.find((read) => read.table === "accounts").columns, "workspace_id,user_id,person_id,status,revision");
+});
+
+test("createAccount invokes the accounts function with op create", async () => {
+  const client = fakeClient({ access: "staff" });
+  const store = createStore(client);
+  const answer = await store.createAccount({ actionId: "a-1", volunteerId: "person-ana" });
+  assert.deepEqual(client.invokeCalls, [
+    { name: "accounts", options: { body: { op: "create", actionId: "a-1", volunteerId: "person-ana" } } },
+  ]);
+  assert.deepEqual(answer, { status: "invited", emailSent: true, accountRevision: 1 });
+  await store.resendAccount({ actionId: "a-2", volunteerId: "person-ana" });
+  await store.inviteClient({ actionId: "a-3", email: "c@example.org" });
+  await store.resendClient({ actionId: "a-4", email: "c@example.org" });
+  assert.deepEqual(client.invokeCalls.slice(1).map((call) => call.options.body), [
+    { op: "resend", actionId: "a-2", volunteerId: "person-ana" },
+    { op: "invite", actionId: "a-3", email: "c@example.org" },
+    { op: "resend", actionId: "a-4", email: "c@example.org" },
+  ]);
+});
+
+const httpError = (status, body) => ({
+  data: null,
+  error: Object.assign(new Error("Edge Function returned a non-2xx status code"), {
+    context: { status, json: async () => body },
+  }),
+});
+
+test("a 400 response becomes VALIDATION with the reason", async () => {
+  const store = createStore(
+    fakeClient({ access: "staff", invoke: async () => httpError(400, { code: "VALIDATION", reason: "NO_EMAIL" }) }),
+  );
+  await assert.rejects(
+    () => store.createAccount({ actionId: "a-1", volunteerId: "p" }),
+    (error) => error.code === "VALIDATION" && error.cause.details === "NO_EMAIL" && error.cause.message === "VALIDATION",
+  );
+});
+
+test("the accounts function's other answers map like RPC errors", async () => {
+  const failing = (invoke) => createStore(fakeClient({ access: "staff", invoke }));
+  await assert.rejects(
+    () => failing(async () => httpError(409, { code: "CONFLICT" })).createAccount({ actionId: "a" }),
+    { code: "CONFLICT" },
+  );
+  await assert.rejects(
+    () => failing(async () => httpError(500, { code: "SERVER_ERROR" })).createAccount({ actionId: "a" }),
+    { code: "SERVER_ERROR" },
+  );
+  await assert.rejects(
+    () => failing(async () => httpError(502, null)).createAccount({ actionId: "a" }),
+    { code: "SERVER_ERROR" },
+  );
+  // A network failure (FunctionsFetchError) has no response and no code.
+  await assert.rejects(
+    () => failing(async () => ({ data: null, error: new Error("Failed to send a request") })).createAccount({ actionId: "a" }),
+    { code: "OFFLINE" },
+  );
+  await assert.rejects(
+    () => failing(async () => { throw new TypeError("fetch failed"); }).createAccount({ actionId: "a" }),
+    { code: "OFFLINE" },
+  );
+});
+
+test("deactivateAccount calls vitally_deactivate_account with the expected revision", async () => {
+  const client = fakeClient({ access: "staff" });
+  const store = createStore(client);
+  await store.deactivateAccount({ actionId: "a-1", volunteerId: "person-ana", expectedRevision: 4 });
+  await store.reactivateAccount({ actionId: "a-2", volunteerId: "person-ana", expectedRevision: 5 });
+  assert.deepEqual(client.rpcCalls, [
+    { name: "vitally_deactivate_account", args: { p_action_id: "a-1", p_volunteer_id: "person-ana", p_expected_revision: 4 } },
+    { name: "vitally_reactivate_account", args: { p_action_id: "a-2", p_volunteer_id: "person-ana", p_expected_revision: 5 } },
+  ]);
+});
+
+test("listClientInvitations calls vitally_client_invitations and returns its array", async () => {
+  const rows = [{ email: "c@example.org", status: "invited", invitedAt: "2026-11-01T00:00:00Z", activatedAt: null, accountRevision: 1 }];
+  const client = fakeClient({ access: "staff", rpc: async () => ({ data: rows, error: null }) });
+  assert.deepEqual(await createStore(client).listClientInvitations(), rows);
+  assert.equal(client.rpcCalls[0].name, "vitally_client_invitations");
 });
 
 test("the Roster tables are not in the subscribed staff tables", () => {

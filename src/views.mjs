@@ -29,7 +29,7 @@ import {
   closeUnsignedDialogBody,
 } from "./office-views.mjs";
 import { renderCasePool } from "./pool-views.mjs";
-import { renderRoster, volunteerDrawerBody } from "./volunteer-views.mjs";
+import { renderRoster, volunteerDrawerBody, deactivateAccountDialogBody } from "./volunteer-views.mjs";
 import { awaitingClearance, ceilingAdmin } from "./clearance.mjs";
 import { setupScreen } from "./setup-views.mjs";
 
@@ -493,6 +493,12 @@ export function dialog(state) {
       keep: "Keep editing",
     });
   }
+  if (state.dialog === "deactivate-account") {
+    const volunteerId = state.dialogContext?.volunteerId ?? null;
+    const volunteer = (state.volunteers ?? []).find((entry) => entry?.id === volunteerId) ?? null;
+    title = "Deactivate this account?";
+    body = deactivateAccountDialogBody({ volunteer });
+  }
   if (state.dialog === "withdraw") {
     title = t("withdraw.title", {}, lang);
     body = withdrawDialogBody(state);
@@ -552,7 +558,11 @@ export function dialog(state) {
       body = volunteerDrawerBody({
         volunteer,
         isNew: !volunteerId,
-        ui: { ...ui, formError: state.volunteerFormError ?? null },
+        ui: {
+          ...ui,
+          formError: state.volunteerFormError ?? null,
+          accountNotice: state.volunteerAccountNotice ?? null,
+        },
       });
     } else if (state.dialog === "log-call") {
       title = "Log contact";

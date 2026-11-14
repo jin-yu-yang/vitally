@@ -1,4 +1,5 @@
 import { createAppError } from "./errors.mjs";
+import { SQLSTATE_ERROR_CODES } from "./contracts.mjs";
 import { isAuthTransportError } from "./auth.mjs";
 import { combineVolunteers } from "./volunteer-roster.mjs";
 
@@ -349,6 +350,41 @@ export function createStore(client) {
 
   const call = (name, args) => settled(client.rpc(name, args));
 
+  // The `accounts` Edge Function. A non-2xx answer is a FunctionsHttpError
+  // whose `context` is the Response; its `{code, reason}` body is mapped to
+  // the database's own SQLSTATE shape so one mapper serves both. A transport
+  // failure carries no code and so becomes OFFLINE.
+  const FUNCTION_CODES = Object.fromEntries(
+    Object.entries(SQLSTATE_ERROR_CODES).map(([sqlstate, name]) => [name, sqlstate]),
+  );
+  const invokeAccounts = async (body) => {
+    let result;
+    try {
+      result = await client.functions.invoke("accounts", { body });
+    } catch (cause) {
+      throw createAppError(cause);
+    }
+    if (result?.error) {
+      const response = result.error.context;
+      if (response && typeof response.json === "function") {
+        let payload = null;
+        try {
+          payload = await response.json();
+        } catch {
+          payload = null;
+        }
+        const sqlstate = FUNCTION_CODES[payload?.code];
+        throw createAppError(
+          sqlstate
+            ? { code: sqlstate, message: payload.code, details: payload.reason ?? null }
+            : { code: "XX000", message: payload?.code ?? "SERVER_ERROR" },
+        );
+      }
+      throw createAppError({ message: result.error.message });
+    }
+    return result?.data;
+  };
+
   // Rows of one case-scoped table, in the order the history and lists are
   // shown: oldest first, with a stable tiebreak.
   const relatedRows = (table, caseId, tiebreak = "id", columns = "*") =>
@@ -690,13 +726,14 @@ export function createStore(client) {
         season == null
           ? []
           : read(client.from(table).select("*").eq("season", season));
-      const [profiles, entries, certificates, people] = await Promise.all([
+      const [profiles, entries, certificates, people, accounts] = await Promise.all([
         read(client.from("volunteer_profiles").select("*")),
         bySeason("roster_entries"),
         bySeason("certificates"),
         read(client.from("people").select("id,name,user_id")),
+        read(client.from("accounts").select("workspace_id,user_id,person_id,status,revision")),
       ]);
-      return combineVolunteers({ profiles, entries, certificates, people });
+      return combineVolunteers({ profiles, entries, certificates, people, accounts });
     },
 
     async saveVolunteer(request) {
@@ -706,6 +743,46 @@ export function createStore(client) {
         p_expected_revision: request.expectedRevision ?? null,
         p_volunteer: request.volunteer,
       });
+    },
+
+    // Accounts (migration 046). Create, invite and resend go through the
+    // `accounts` Edge Function; a refusal is its `{code, reason}` body, mapped
+    // like an RPC refusal (`cause.message` is the code, `cause.details` the reason).
+    async createAccount(request) {
+      return await invokeAccounts({ op: "create", actionId: actionId(request), volunteerId: request.volunteerId });
+    },
+
+    async resendAccount(request) {
+      return await invokeAccounts({ op: "resend", actionId: actionId(request), volunteerId: request.volunteerId });
+    },
+
+    async inviteClient(request) {
+      return await invokeAccounts({ op: "invite", actionId: actionId(request), email: request.email });
+    },
+
+    async resendClient(request) {
+      return await invokeAccounts({ op: "resend", actionId: actionId(request), email: request.email });
+    },
+
+    async deactivateAccount(request) {
+      return await call("vitally_deactivate_account", {
+        p_action_id: actionId(request),
+        p_volunteer_id: request.volunteerId,
+        p_expected_revision: request.expectedRevision,
+      });
+    },
+
+    async reactivateAccount(request) {
+      return await call("vitally_reactivate_account", {
+        p_action_id: actionId(request),
+        p_volunteer_id: request.volunteerId,
+        p_expected_revision: request.expectedRevision,
+      });
+    },
+
+    async listClientInvitations() {
+      await requireStaffAccess();
+      return (await call("vitally_client_invitations")) ?? [];
     },
 
     async logContact(request) {

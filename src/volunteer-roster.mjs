@@ -61,8 +61,11 @@ const EMAIL_MAX = 254;
 const PHONE_MAX = 30;
 const OTHER_LANGUAGE_MAX = 40;
 
+const ACCOUNT_MISSING = Object.freeze({ none: "noAccount", invited: "notSignedIn", deactivated: "deactivated" });
+
 // Joins raw PostgREST rows into volunteers. Only people with a roster entry appear.
-export function combineVolunteers({ profiles = [], entries = [], certificates = [], people = [] }) {
+export function combineVolunteers({ profiles = [], entries = [], certificates = [], people = [], accounts = [] }) {
+  const accountById = new Map(accounts.map((a) => [a.person_id, a]));
   const profileById = new Map(profiles.map((p) => [p.person_id, p]));
   const entryById = new Map(entries.map((e) => [e.person_id, e]));
   const certsById = new Map();
@@ -79,7 +82,12 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
     const roles = [...(entry.roles ?? [])];
     const isNew = entry.is_new === true;
     const photoIdChecked = entry.photo_id_checked_at != null;
-    const cleared = roles.length > 0 && (!isNew || photoIdChecked);
+    const row = accountById.get(person.id);
+    const account = { status: row?.status ?? "none", revision: row ? Number(row.revision) : null };
+    const cleared = roles.length > 0 && (!isNew || photoIdChecked) && account.status === "active";
+    // What the row waits for, in order: the Form 13615 (no roles) or the photo ID, then the account.
+    const missing = roles.length === 0 ? ["form13615"] : !isNew || photoIdChecked ? [] : ["photoId"];
+    if (account.status !== "active") missing.push(ACCOUNT_MISSING[account.status]);
     list.push({
       id: person.id,
       name: person.name,
@@ -94,9 +102,9 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
       hasSignIn: Boolean(person.user_id),
       isNew,
       photoIdChecked,
+      account,
       cleared,
-      // The one thing a row waits for: the Form 13615 (no roles) or the photo ID.
-      missing: cleared ? [] : roles.length === 0 ? ["form13615"] : ["photoId"]
+      missing
     });
   }
   return list.sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
@@ -174,6 +182,18 @@ export function roleNeedsMessage(details) {
   if (!match || !ROLE_NEEDS[match[1]]) return null;
   return `${roleLabel(match[1])} needs ${match[2].split(", ").join(" and ")}.`;
 }
+
+// The refusal reason an account action carries (the RPC's `detail`, or the
+// Edge Function's `reason`) as the drawer's sentence; null when unknown.
+const ACCOUNT_MESSAGES = Object.freeze({
+  NO_EMAIL: "Add an email first",
+  ALREADY_INVITED: "This client is already invited",
+  USE_REACTIVATE: "This account is deactivated. Use Reactivate.",
+  EMAIL_IN_USE: "That email is already used by another sign-in. Use another email.",
+  EMAIL_ON_ROSTER: "That email belongs to a volunteer. Use another email.",
+  SELF: "You can't deactivate your own account."
+});
+export const accountMessage = (reason) => ACCOUNT_MESSAGES[String(reason ?? "")] ?? null;
 
 // The server's OPEN_WORK detail, a JSON array of labels, as the drawer's
 // sentence; null when it isn't a non-empty array of strings.

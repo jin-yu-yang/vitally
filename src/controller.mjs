@@ -35,7 +35,7 @@ import { cardsFor } from "./document-cards.mjs";
 import { createShadedSave } from "./shaded-editor.mjs";
 import { createWindowState } from "./window-state.mjs";
 import { isLang, readLanguage, writeLanguage } from "./language.mjs";
-import { volunteerProblem, withoutLostRoles, roleNeedsMessage, openWorkMessage } from "./volunteer-roster.mjs";
+import { volunteerProblem, withoutLostRoles, roleNeedsMessage, openWorkMessage, accountMessage } from "./volunteer-roster.mjs";
 
 // The one place browser state lives. It owns what is loaded, what is being
 // edited, and which action envelope is in flight; it renders nothing and knows
@@ -306,6 +306,8 @@ export function createController({
     volunteers: [],
     volunteerFilters: { search: "", role: "all" },
     volunteerFormError: null,
+    // The last account action's result in the drawer: {kind: "ok" | "error", text}.
+    volunteerAccountNotice: null,
     // The caller's own workspace row, read only for a staff window: the
     // office's defaults.
     workspace: null,
@@ -392,6 +394,9 @@ export function createController({
   // The Roster save whose outcome is unknown, likewise the very request sent
   // (`saveVolunteer`). Window memory only: a reload starts without it.
   let pendingVolunteerSave = null;
+  // An account action whose answer never came, kept with the revision it was
+  // sent at, so pressing the same button again sends the same action id.
+  let pendingAccountAction = null;
   // The screening start for the open case, if one is due or held:
   // `{ action, inFlight, gaveUp }` (`startScreeningIfDue`).
   let screeningStart = null;
@@ -1009,6 +1014,7 @@ export function createController({
 
   function clearVolunteerFormError() {
     state.volunteerFormError = null;
+    state.volunteerAccountNotice = null;
   }
 
   // A list that never loaded and whose read failed says so; one that loaded
@@ -1375,7 +1381,9 @@ export function createController({
     state.volunteers = [];
     state.volunteerFilters = { search: "", role: "all" };
     state.volunteerFormError = null;
+    state.volunteerAccountNotice = null;
     pendingVolunteerSave = null;
+    pendingAccountAction = null;
     state.assistance = [];
     state.workspace = null;
     state.openPanels = [];
@@ -1450,6 +1458,12 @@ export function createController({
   }
 
   function closeDialog() {
+    // Keeping the account goes back to the drawer it was asked from.
+    if (state.dialog === "deactivate-account") {
+      state.dialog = "volunteer";
+      show();
+      return;
+    }
     state.dialog = null;
     state.dialogContext = null;
     show();
@@ -2907,6 +2921,111 @@ export function createController({
     return true;
   }
 
+  // The drawer's Account section (change add-account-invitations): Create
+  // account, Resend, Deactivate and Reactivate for the volunteer the drawer
+  // names. A refusal with a sentence of its own (a missing email, open work, a
+  // used email) is said in the drawer and returns false; a stale revision
+  // (CONFLICT) or anything unreadable is the banner's message, thrown. An
+  // answer that never came is kept: the same press again sends the same
+  // action id. Deactivate is sent only from its confirmation dialog, which
+  // returns to the drawer whatever the outcome.
+  const ACCOUNT_ACTIONS = Object.freeze({
+    create: { send: (request) => store.createAccount(request) },
+    resend: { send: (request) => store.resendAccount(request) },
+    deactivate: { send: (request) => store.deactivateAccount(request), confirmed: true },
+    reactivate: { send: (request) => store.reactivateAccount(request) },
+  });
+  const EMAIL_NOT_SENT = "The email wasn't sent. Use Resend in a minute.";
+
+  async function runAccountAction(kind) {
+    const action = ACCOUNT_ACTIONS[kind];
+    if (state.busy || !action) return false;
+    if (action.confirmed ? state.dialog !== "deactivate-account" : state.dialog !== "volunteer") return false;
+    const volunteerId = state.dialogContext?.volunteerId ?? null;
+    const current = volunteerId
+      ? (state.volunteers.find((entry) => entry?.id === volunteerId) ?? null)
+      : null;
+    if (!current) throw refuse("NOT_FOUND", STAFF_VOLUNTEER_GONE_MESSAGE);
+    const revision = current.account?.revision ?? null;
+    const key = `${kind}:${volunteerId}:${revision}`;
+    const request = {
+      actionId: pendingAccountAction?.key === key ? pendingAccountAction.actionId : newActionId(),
+      volunteerId,
+      ...(kind === "deactivate" || kind === "reactivate" ? { expectedRevision: revision } : {}),
+    };
+    pendingAccountAction = null;
+    state.volunteerAccountNotice = null;
+    state.busy = true;
+    state.error = null;
+    show();
+    // The confirmation closes into the drawer, so its notice and errors show there.
+    const backToDrawer = () => {
+      if (state.dialog === "deactivate-account") state.dialog = "volunteer";
+    };
+    let result;
+    try {
+      result = await action.send(request);
+    } catch (error) {
+      state.busy = false;
+      backToDrawer();
+      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingAccountAction = { key, actionId: request.actionId };
+      const cause = error?.cause;
+      const sentence =
+        cause?.message === "OPEN_WORK"
+          ? openWorkMessage(current.name || "This volunteer", cause.details)
+          : error?.code === "CONFLICT"
+            ? null
+            : accountMessage(cause?.details);
+      if (sentence) {
+        state.volunteerAccountNotice = { kind: "error", text: sentence };
+        await readVolunteers().catch(() => {});
+        show();
+        return false;
+      }
+      noteFailure(
+        error,
+        error?.code === "CONFLICT" ? { message: VOLUNTEER_CONFLICT_MESSAGE } : undefined,
+      );
+      await readVolunteers().catch(() => {});
+      show();
+      throw error;
+    }
+    state.busy = false;
+    backToDrawer();
+    noteConnected();
+    const sent = result?.emailSent === true && result?.replay !== true;
+    state.volunteerAccountNotice = {
+      kind: "ok",
+      text:
+        kind === "create"
+          ? sent
+            ? "Account created and sign-in code sent"
+            : "Account created; the email wasn't sent. Use Resend in a minute."
+          : kind === "resend"
+            ? sent
+              ? "Sign-in code sent"
+              : EMAIL_NOT_SENT
+            : kind === "deactivate"
+              ? "Account deactivated"
+              : result?.status === "invited"
+                ? "Account reactivated. Use Resend to send a sign-in code."
+                : "Account reactivated",
+    };
+    try {
+      await readVolunteers();
+      state.error = null;
+    } catch (error) {
+      noteFailure(error);
+    }
+    show();
+    return true;
+  }
+
+  const createAccount = () => runAccountAction("create");
+  const resendAccount = () => runAccountAction("resend");
+  const deactivateAccount = () => runAccountAction("deactivate");
+  const reactivateAccount = () => runAccountAction("reactivate");
+
   // Season end: the ticked cases and the revisions the dialog showed. The
   // database moves all of them or none. A refusal is shown inside the dialog,
   // which stays open; a CONFLICT also re-reads the list, so the dialog reopens
@@ -3045,6 +3164,10 @@ export function createController({
     loadVolunteers,
     setVolunteerFilter,
     saveVolunteer,
+    createAccount,
+    resendAccount,
+    deactivateAccount,
+    reactivateAccount,
     clearVolunteerFormError,
     closeUnsigned,
     editContact,
