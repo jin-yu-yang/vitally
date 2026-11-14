@@ -111,11 +111,14 @@ const listed = async (client, id) =>
 const nyDay = async (f, offset = 0) =>
   (await one(f, "select ((now() at time zone 'America/New_York')::date + $1::int)::text as d", [offset])).d;
 // A roster entry for the workspace's current season (or one before it), with
-// the given roles; no roles needs no certificates.
+// the given roles; no roles needs no certificates. add_staff_member already
+// gives every new staff member a current-season entry with no roles, so this
+// sets the roles of an existing entry.
 const addEntry = (f, personId, { seasonOffset = 0, roles = [] } = {}) =>
   f.sql(
     `insert into public.roster_entries(workspace_id,person_id,season,roles)
-      select $1::uuid,$2::uuid,w.current_season+$3::int,$4::text[] from public.workspaces w where w.id=$1::uuid`,
+      select $1::uuid,$2::uuid,w.current_season+$3::int,$4::text[] from public.workspaces w where w.id=$1::uuid
+      on conflict (workspace_id,person_id,season) do update set roles=excluded.roles`,
     [f.workspaceId, personId, seasonOffset, roles],
   );
 const removeEntry = (f, personId) =>
@@ -155,6 +158,7 @@ test("posted updates against real Supabase", async (t) => {
 
     await t.test("audience: added to the roster after posting sees the update", async () => {
       const late = await f.staff({ key: "lee_late_entry", name: "Lee Okafor", capabilities: [], cleared: false });
+      await removeEntry(f, late.personId);
       const posted = await post({ title: "New shift sign-up sheet" });
       assert.equal((await feedIds(late.client)).includes(posted.updateId), false, "no entry yet");
       await addEntry(f, late.personId);
@@ -163,6 +167,7 @@ test("posted updates against real Supabase", async (t) => {
 
     await t.test("audience: an earlier-season entry only gives no items", async () => {
       const last = await f.staff({ key: "lou_last_season", name: "Lou Barros", capabilities: [], cleared: false });
+      await removeEntry(f, last.personId);
       await addEntry(f, last.personId, { seasonOffset: -1 });
       const posted = await post({ title: "Parking lot closed Monday" });
       assert.deepEqual(await feed(last.client), { items: [], unread: 0 });
