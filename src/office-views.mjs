@@ -493,7 +493,7 @@ export function inviteClientPanel({ invitations = null, ui = {} } = {}) {
     : view.invitationsFailed
       ? unloadedLine("The client list couldn't load.")
       : loadingLine("Loading clients…");
-  return `<section class="panel invite-client" aria-labelledby="invite-client-title"><div class="section-head"><div><h2 id="invite-client-title">Invite a client</h2></div></div><form id="invite-client-form" class="staff-form" novalidate><label class="field" for="invite-client-email"><span>Client email</span><input id="invite-client-email" name="email" type="email" value="${esc(
+  return `<section class="panel invite-client" aria-labelledby="invite-client-title"><div class="section-head"><div><h2 id="invite-client-title">Invite a client</h2></div></div><form id="invite-client-form" class="staff-form"><label class="field" for="invite-client-email"><span>Client email</span><input id="invite-client-email" name="email" type="email" value="${esc(
     view.inviteEmail ?? "",
   )}" autocomplete="off" required></label><button type="submit" class="btn primary" ${busy}>Invite</button></form>${notice}${list}</section>`;
 }

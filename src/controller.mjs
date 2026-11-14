@@ -838,6 +838,8 @@ export function createController({
       } catch (error) {
         failure = failure ?? error;
       }
+      // A client who signed in since shows as Active (never throws).
+      await readInvitations();
     }
     try {
       await loadSelected();
@@ -2963,6 +2965,7 @@ export function createController({
     reactivate: { send: (request) => store.reactivateAccount(request) },
   });
   const EMAIL_NOT_SENT = "The email wasn't sent. Use Resend in a minute.";
+  const CREATED_NOT_SENT = "Account created; the email wasn't sent. Use Resend in a minute.";
 
   async function runAccountAction(kind) {
     const action = ACCOUNT_ACTIONS[kind];
@@ -3027,7 +3030,7 @@ export function createController({
         kind === "create"
           ? sent
             ? "Account created and sign-in code sent"
-            : "Account created; the email wasn't sent. Use Resend in a minute."
+            : CREATED_NOT_SENT
           : kind === "resend"
             ? sent
               ? "Sign-in code sent"
@@ -3054,6 +3057,11 @@ export function createController({
   async function runClientInvite(kind, rawEmail) {
     if (state.busy) return false;
     const email = String(rawEmail ?? "");
+    if (!email.trim()) {
+      state.inviteNotice = { kind: "error", text: accountMessage("NO_EMAIL") };
+      show();
+      return false;
+    }
     const key = `${kind}:${email.trim().toLowerCase()}`;
     const request = {
       actionId: pendingInviteAction?.key === key ? pendingInviteAction.actionId : newActionId(),
@@ -3092,7 +3100,7 @@ export function createController({
         kind === "invite"
           ? sent
             ? "Account created and sign-in code sent"
-            : "Account created; the email wasn't sent. Use Resend in a minute."
+            : CREATED_NOT_SENT
           : sent
             ? "Sign-in code sent"
             : EMAIL_NOT_SENT,

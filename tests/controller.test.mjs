@@ -7457,3 +7457,31 @@ test("resend a client sends the email and says so", async () => {
   assert.equal(controller.getState().inviteNotice.text, "Sign-in code sent");
   controller.stop();
 });
+
+test("a focus refresh re-reads the client invitations", async () => {
+  const store = inviteStore();
+  const { controller, events } = build({ store });
+  await controller.start();
+  const reads = inviteReads(store);
+  store.invitations = [{ ...INVITATION_ROW, status: "active" }];
+  await events.emit("focus");
+  assert.equal(inviteReads(store), reads + 1);
+  assert.equal(controller.getState().invitations[0].status, "active");
+  // A failed read never fails the refresh.
+  store.listClientInvitations = async () => {
+    throw new Error("down");
+  };
+  await events.emit("focus");
+  assert.equal(controller.getState().error, null);
+  controller.stop();
+});
+
+test("an empty email sends no invite", async () => {
+  const store = inviteStore();
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(await controller.inviteClient("   "), false);
+  assert.equal(store.calls.includes("inviteClient"), false);
+  assert.deepEqual(controller.getState().inviteNotice, { kind: "error", text: "Add an email first" });
+  controller.stop();
+});
