@@ -50,8 +50,10 @@ test("the staff sidebar carries the logo, the one screen that exists, and the ac
   assert.match(html, /data-action="open-help"/);
   assert.match(html, /data-action="sign-out"/);
   assert.match(html, /Sign out/);
-  // Nothing without a screen behind it.
-  assert.doesNotMatch(html, /Dashboard|Schedule|Documents|Messages|Notifications/);
+  // Nothing without a screen behind it. Notifications has its panel (change
+  // add-posted-updates).
+  assert.doesNotMatch(html, /Dashboard|Schedule|Documents|Messages/);
+  assert.match(html, /data-action="open-notifications"/);
 
   const office = staffSidebar({ screen: "staff-case" }, { id: "sam", name: "Sam", capabilities: ["admin"] }, true);
   assert.match(office, /Follow-ups/);
@@ -343,7 +345,7 @@ test("the drawer is the modal frame at the edge, and each dialog names its place
 });
 
 test("the drawer list is exported once, for the renderer and app.mjs's focus fallback alike", () => {
-  assert.deepEqual([...DRAWERS], ["log-call", "resolve-help", "volunteer"]);
+  assert.deepEqual([...DRAWERS], ["log-call", "resolve-help", "volunteer", "notifications"]);
   assert.ok(Object.isFrozen(DRAWERS));
   const app = readFileSync(fileURLToPath(new URL("../src/app.mjs", import.meta.url)), "utf8");
   assert.doesNotMatch(app, /\["log-call",\s*"resolve-help"\]/);
