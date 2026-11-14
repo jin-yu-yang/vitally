@@ -14,7 +14,7 @@ exists, what is missing, and where the change lands.
 | Roles (spec §6) | Client, and real per-person `staff` accounts (038); presenter access was removed in #136 | Role-based visibility, role-to-capability mapping ([§1](#1-staff-identity)) |
 | Client accounts (spec §8.1) | Rostered email addresses only, one-time codes; the drafted intake (steps 0–9 with sub-steps) is built but not switched on yet | Open client sign-up; the intake-first flow the spec describes ([§2](#2-client-accounts-and-intake)) |
 | Documents (spec §5, §7.1) | Metadata for one fixed fictional file | Real upload, storage, scanning, retention ([§3](#3-documents)) |
-| State machine (spec §8.2) | Intake, screening, preparation, review, corrections, signature, e-filing, closure | Unreachable client, the IRS's answer after e-filing, amendments, waiting for documents and hold, withdrawal, reassignment ([§4](#4-workflow-coverage)) |
+| State machine (spec §8.2) | Intake, screening, preparation, review, corrections, signature, e-filing, closure | Unreachable client, the IRS's answer after e-filing, amendments, waiting for documents and hold, withdrawal, release back to the pool ([§4](#4-workflow-coverage)) |
 | Client portal (spec §8.3) | Status, requests, document response, progress history | Queue position, preparer/reviewer contact, print, withdraw, notifications |
 | Volunteer portal (spec §8.4) | Work board, filters, case detail, internal history | Profiles, certifications, contact details |
 | Admin dashboard (spec §8.5) | Office board, follow-ups, reminders, closure, assistance | Reassignment, workload, reports, reference materials ([§7](#7-admin-reporting-and-forms)) |
@@ -46,7 +46,9 @@ of the six RPCs and the demonstration people (Alex, Morgan, Sam) are gone. See
   and others). Since 045 (volunteer clearance) the Roster's roles (044) map to the capabilities
   (`vitally_private.role_capabilities`), each role needs its confirmed certificates, and a staff
   member acts only when cleared, with their roles' capabilities within `people.capabilities`
-  ([Database: roster clearance](database.md#roster-clearance)). Still to do: the roster command sets
+  ([Database: roster clearance](database.md#roster-clearance)). Volunteers > Workload (046) shows each
+  volunteer's open cases and lets an admin assign or reassign; its Hours this week column comes with
+  the Schedule (#140). Still to do: the roster command sets
   that ceiling once; changing it, or deactivating a staff member, is not built.
 - **One person, two workspaces** ([#104](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/104)).
   The screens are chosen by the acting person's capabilities (ruling R55): `admin` gets the office
@@ -142,9 +144,10 @@ To build next:
   follow-up's resolution is where the office learns it, so ask it there and choose the signing-plan
   client text then. Changes `APPROVE_REVIEW`'s validation, `RESOLVE_FOLLOWUP`'s payload and the
   client text. Found on 2026-10-30 rehearsing the demo; PCDC's own practice.
-- **Release and reassignment** (spec §8.5, §13), not built: an admin action to change a case's preparer or
-  reviewer. The participation record must still block self-review after reassignment; the database
-  already enforces that.
+- **Release and reassignment** (spec §8.5, §13), built (046): an admin assigns a case's preparer or
+  reviewer, or hands the case to someone else, from Volunteers > Workload (`ASSIGN_CASE`). The
+  participation record still blocks self-review after reassignment. Still to do: releasing a case
+  back to the pool without naming a new holder.
 - **The fast path** (spec §13): creating a case directly during peak season. The demo's assisted
   intake (`vitally_create_case` with `p_mode = 'assisted'`) is a starting point.
 
