@@ -32,6 +32,9 @@ test("composed closed messages, exact", () => {
   assert.equal(panel("zh-Hans", acceptedState), "您已撤回此申请。您的联邦报税表未递交。您的宾州报税表已递交并被接受。请勿再次递交。");
   assert.equal(panel("zh-Hant", acceptedState), sentence(panel("en", acceptedState), "zh-Hant"));
   assert.notEqual(panel("zh-Hant", acceptedState), panel("zh-Hans", acceptedState));
+  const hantExact = "您已撤回此申請。您的聯邦報稅表未遞交。您的賓州報稅表已遞交並被接受。請勿再次遞交。";
+  assert.equal(panel("zh-Hant", acceptedState), hantExact);
+  assert.equal(sentence(panel("en", acceptedState), "zh-Hant"), hantExact);
   const waiting = { closingReason: "dismissed", federalMethod: "efile", stateMethod: "efile", federalResult: "rejected", stateResult: null };
   assert.equal(panel("en", waiting), "PCDC could not reach you, so this application was closed. Your federal return was not filed. Your Pennsylvania return was e-filed and is waiting for an answer. Do not file it again.");
   const paper = { closingReason: "out_of_scope", federalMethod: "efile", stateMethod: "paper", federalResult: "rejected", stateResult: "given_to_client" };

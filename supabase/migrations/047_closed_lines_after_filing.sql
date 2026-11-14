@@ -211,4 +211,4 @@ grant execute on function public.vitally_close_unsigned(uuid,jsonb,boolean) to a
 -- reason-only rule. Its only callers in a latest definition were the two
 -- functions above (checked with grep over every migration).
 
-drop function vitally_private.closed_line(text);
+drop function if exists vitally_private.closed_line(text);

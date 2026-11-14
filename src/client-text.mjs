@@ -607,6 +607,7 @@ export function closedLine(reason, federal, state, lang = "en") {
     t(`closed.return.state.${state}`, {}, hans),
   ];
   const line = parts.join(!isLang(lang) || lang === "en" ? " " : "");
+  // toHant on the composed line works only because closedLines() registers every composition as a SENTENCES value, so build:hant collects it (src/hant.mjs warns against converting assembled text).
   return lang === "zh-Hant" ? toHant(line) : line;
 }
 
