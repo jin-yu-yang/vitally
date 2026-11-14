@@ -403,9 +403,33 @@ begin
   raise sqlstate 'VT005' using message='SELF_REVIEW';
  end if;
  -- ------------------------------------------------------------------------
- -- Effects (design D5): added by the next task of this change. Until then an
- -- accepted assignment changes nothing and is refused.
- raise sqlstate 'VT004' using message='INVALID_TRANSITION';
+ -- Effects (design D5, D6). An Assign has the effects of the person's own
+ -- claim, with the claim's client line; a Reassign keeps the stage, hands over
+ -- the work in progress and adds no client line.
+ if v_slot='preparer' then
+  if v_holder is null then
+   update public.cases set stage='preparing',preparer_id=v_assignee.id where id=p_case.id;
+  else
+   update public.cases set preparer_id=v_assignee.id where id=p_case.id;
+  end if;
+  -- The previous preparer stays a participant, so never this case's reviewer.
+  insert into public.preparation_participants(workspace_id,case_id,person_id)
+  values(p_case.workspace_id,p_case.id,v_assignee.id) on conflict do nothing;
+ elsif v_holder is null then
+  update public.cases set stage='reviewing',reviewer_id=v_assignee.id where id=p_case.id;
+  insert into public.reviews(workspace_id,case_id,preparation_version,reviewer_person_id,status)
+  values(p_case.workspace_id,p_case.id,p_case.preparation_version,v_assignee.id,'active');
+ else
+  -- The same active review passes to the new reviewer: its id, start time and
+  -- preparation version are kept.
+  update public.cases set reviewer_id=v_assignee.id where id=p_case.id;
+  update public.reviews set reviewer_person_id=v_assignee.id
+   where workspace_id=p_case.workspace_id and case_id=p_case.id and status='active';
+ end if;
+ return jsonb_build_object('detail',jsonb_build_object('slot',v_slot,'personId',v_assignee.id,'previousPersonId',v_holder))
+  || case when v_holder is not null then '{}'::jsonb
+     when v_slot='preparer' then jsonb_build_object('message','A volunteer has started preparing your return.')
+     else jsonb_build_object('message','An independent reviewer is checking your return.') end;
 end;
 $$;
 revoke all on function vitally_private.act_assign_case(public.memberships,public.cases,public.people,jsonb) from public,anon,authenticated,service_role;
