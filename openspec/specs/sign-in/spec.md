@@ -85,7 +85,11 @@ For a `staff` member, every public RPC that acts on the workspace SHALL act as t
 - `vitally_log_contact(p_action_id uuid, p_case_id uuid, p_followup_id uuid, p_entry jsonb)`;
 - `vitally_edit_contact(p_action_id uuid, p_contact_id uuid, p_expected_revision bigint, p_entry jsonb)`;
 - `vitally_save_volunteer(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_volunteer jsonb)`, whose volunteer argument names the volunteer being edited, never the actor;
-- `vitally_my_clearance()`.
+- `vitally_my_clearance()`;
+- `vitally_prepare_account(p_action_id uuid, p_op text, p_target jsonb)`;
+- `vitally_record_account(p_action_id uuid, p_op text, p_target jsonb, p_user_id uuid)`, whose user argument names the auth user being given an account, never the actor;
+- `vitally_deactivate_account(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)` and `vitally_reactivate_account(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)`, whose volunteer argument names the volunteer whose account changes, never the actor;
+- `vitally_client_invitations()`.
 
 None of them SHALL take a person parameter. Each SHALL be executable by `authenticated` and by no other client role.
 
@@ -113,7 +117,7 @@ The acting person SHALL be resolved before the request digest and the receipt, s
 
 #### Scenario: The old signatures are gone
 - **WHEN** the database catalog is read
-- **THEN** no public function takes `p_person_id`, and `public` holds exactly these eight RPCs, each with execute granted to `authenticated` only
+- **THEN** no public function takes `p_person_id`, and `public` holds exactly these thirteen RPCs, each with execute granted to `authenticated` only
 
 ### Requirement: A client acts with no person
 An `applicant` SHALL act with no person. The RPCs take no person parameter, so a client's request SHALL have no way to name one. Clients' behaviour SHALL NOT otherwise change.
