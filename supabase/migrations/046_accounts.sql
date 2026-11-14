@@ -496,7 +496,7 @@ revoke all on function vitally_private.reactivate_account(uuid,uuid) from public
 -- reserve_receipt keys it: the caller's workspace, user and action id.
 -- p_action_id may be null (resend).
 create function public.vitally_prepare_account(p_action_id uuid,p_op text,p_target jsonb)
-returns jsonb language plpgsql security definer set search_path='' as $
+returns jsonb language plpgsql security definer set search_path='' as $$
 declare v_member public.memberships;
  v_person public.people;
  v_stored jsonb;
