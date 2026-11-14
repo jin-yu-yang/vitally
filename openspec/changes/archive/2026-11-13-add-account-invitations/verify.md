@@ -1,5 +1,54 @@
 # Verification Report
 
+## Review round (PR #197), 2026-11-14
+
+**Verified at**: `2026-11-14` on `9bda122`, after merging `main` (#195) and renumbering the migration to `047_accounts.sql`.
+
+What changed in this round is in design.md, "Review round" (D10 to D14), with the calls made without the user in brainstorm.md (16 to 30). The sections below the line are the original verification of apply, kept as it was.
+
+Checks run, and why:
+- **Local:** `npm test` (1794 pass; the one failure is the Windows-only "mode 600" test in `tests/write-test-env.test.mjs`, which fails on `main` too and passes on CI), `npm run build:hant -- --check` (no client text changed), `npx openspec validate --all` (16 items, all valid).
+- **Local, on a stack that already has main's migrations and data** (CLAUDE.md, for a migration that changes existing rows): the user's stack held 001 to 045 with 61 memberships (46 staff, 15 clients), 75 people and 28 cases. A `pg_dump` backup was taken first (`C:\Users\hezal\vitally-stacks\backups\before-046-047-2026-11-14.dump`), and the stack was restarted with the edge runtime and the `accounts` function, without `--no-backup`, so its data was kept. Then:
+  - `npm run db:migrate:test` applied `046_volunteer_workload.sql` and `047_accounts.sql`;
+  - the backfill gave all 61 memberships an `active` account: every staff account names its person, every client account names none, and no membership was left without one;
+  - `npm run test:database`: **627 tests, 627 pass, 0 fail, 0 skipped**, on `5750312`. The commits after it change only `tests/auth-browser.mjs`.
+- **CI, in place of the local sign-in and browser runs:** run [43584019381](https://github.com/jin-yu-yang/vitally/actions/runs/43584019381) on `9bda122` passed every job: `checks`, `database`, `sign-in`, `story (chrome-client)`, `story (firefox-client)`.
+  - Story screenshots reviewed from that run's artifacts: the office screen's Invite a client panel (`office-resolve-help-720`, both browser orders) is unchanged in layout; the story has no invited client, so no Cancel button shows, and no Roster screenshot.
+  - Earlier runs of this round failed and were fixed, not re-run: [43580682778](https://github.com/jin-yu-yang/vitally/actions/runs/43580682778) (`database`: the catalog's no-digest list and `vitally_my_clearance`'s key lists did not know the new RPCs and `siteCheck`), [43581880873](https://github.com/jin-yu-yang/vitally/actions/runs/43581880873) and [43582942189](https://github.com/jin-yu-yang/vitally/actions/runs/43582942189) (`sign-in`: the new volunteer test waited for the office heading after a reload, then its cleanup unlinked the person and dropped the membership in two statements). Every new database test passed on the first run.
+
+What the new tests cover (item 7 of the user's instructions):
+- `tests/database-accounts.mjs`:
+  - Cancel invitation: allowed while invited, which unlinks the person, resets the ceiling and makes the email savable again, with the auth user left reusable; by email for a client; refused once active, when deactivated, for an active client, when stale and for a preparer; a cancelled invitee's sign-in reaches no membership, case data or RPC.
+  - Expiry: the sweep; Create account, the office list and a client's or volunteer's sign-in each cancel first; Resend restarts the seven days and refuses an expired invitation.
+  - The site check: the right SIDN activates, stores the name (not on `people`) and clears; a wrong one stays invited with the attempts left, and the fifth cancels; a missing name, a blank SIDN and an unset site number count as no attempt; it is only the invited volunteer's; the number is unreadable by any API role.
+  - An invited volunteer who has not passed the check reads no cases, documents, document requests or client events, and gets `NOT_CLEARED` for a case action.
+- `tests/database-accounts-function.mjs`: the emailed code signs the volunteer in still `invited`, and the site check makes the account active.
+- `tests/auth-browser.mjs`, in both browsers:
+  - Create account is off while the drawer has unsaved changes, and the Send question names the saved email;
+  - the emailed code leads to "Confirm your site": a wrong SIDN is said, and the right one moves on to the setup screen;
+  - the Roster shows "Signed in as";
+  - Cancel invitation from the drawer makes the email editable;
+  - the client invite answers the Send question.
+- Unit tests cover the controller, views and store for each flow, including the replay and `ALREADY_INVITED` wording.
+
+The round's own review (a fresh reviewer, whole round) found 0 Critical, 4 Important and 8 Minor. All four Important and M1, M4, M7 and M8 were fixed in `5750312`:
+- I1: the site check screen dead-ended on a cancelled invitation or a lost answer;
+- I2: the sign-in trigger cancelled expired invitations without the workspace lock;
+- I3: the expiry wording for a refusing call and a client's Resend;
+- I4: no end-to-end test of the new flows.
+
+Parked as minor, recorded here for the next change:
+- M2: the Send question shows the email the drawer read, while the server sends to the email saved at that moment; another admin's save in between would go unconfirmed.
+- M3: a retry after a timeout keeps its action id. If the invitation is cancelled and Create account is pressed again in the same drawer, the server can replay the old answer.
+- M5: an older clearance read can bring the form back after a pass.
+- M6: Send pressed while another request runs closes the question silently.
+
+Follow-ups opened, not fixed here: #198 (cross-workspace email probing through `vitally_prepare_account`) and #199 (a reactivated user with an existing session stays Invited until they sign in again).
+
+**Decision for this round:** ✅ PASS. Every check covering the change passed, including the populated-stack run that the original verification left open.
+
+---
+
 **Change**: `add-account-invitations`
 **Verified at**: `2026-11-14 05:10` (UTC)
 **Verifier**: Claude (controller of subagent-driven development), from CI and local runs
@@ -114,3 +163,5 @@ plan.md has no `[~]` rows. One project check was not run:
 - [ ] ❌ FAIL
 
 **Next step**: retrospective, then merge main, archive, and open the PR.
+
+(Superseded by the review round at the top: the populated-stack run is done.)
