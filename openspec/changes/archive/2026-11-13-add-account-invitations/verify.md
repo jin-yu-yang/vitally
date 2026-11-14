@@ -1,5 +1,13 @@
 # Verification Report
 
+## service_role grants (PR #197 comment), 2026-11-14
+
+**Verified at** `01bc2c5`. 047 had given `service_role` everything on `public.accounts`, which was left over from the brainstorm's `service_role` RPCs. That grant is revoked. Nothing uses it: the Edge Function calls the database with the admin's JWT and uses the service key only for `auth.admin.createUser`; `tools/admin/roster.mjs` uses the service key only for Auth's user list; `workspace-setup` and the tests' SQL connect as `postgres`; and no seed or test touches `accounts` with the service key. Every function this change adds already revoked execute from `service_role`. The new database test, "service_role holds nothing on accounts or the account functions", checks the table's privileges, a refused update, insert, delete and select through the service key, and execute on the account functions.
+
+- **Local:** `npm test` (1795 tests; the only failure is the Windows-only "mode 600" test, which also fails on `main`), `npx openspec validate --all` (16 valid).
+- **CI:** run [43631663372](https://github.com/jin-yu-yang/vitally/actions/runs/43631663372) on `01bc2c5` passed every job on its first run: `checks`, `database` (628/628), `sign-in`, `story (chrome-client)`, `story (firefox-client)`.
+- **Not run locally:** the populated-stack run. Only a grant changed, and no existing rows did.
+
 ## Review round (PR #197), 2026-11-14
 
 **Verified at**: `2026-11-14` on `9bda122`, after merging `main` (#195) and renumbering the migration to `047_accounts.sql`.
