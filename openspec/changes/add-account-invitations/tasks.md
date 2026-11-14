@@ -13,30 +13,30 @@
 - [x] 2.3 Trigger on `auth.users` sign-in: invited -> active
 - [x] 2.4 `add_staff_member` and `initialize_workspace` write active accounts
 - [x] 2.5 `cleared()` requires an active account
-- [ ] 2.6 `account_check` and the refusal reasons; `vitally_prepare_account`, `vitally_record_account`
-- [ ] 2.7 `deactivate_account` / `reactivate_account` internals and their public RPCs (receipts, revision, open work, self, email in use)
-- [ ] 2.8 `vitally_client_invitations`
-- [ ] 2.9 RPC signature list (`tests/support/rpc-signatures.mjs`) and database tests (`tests/database-accounts.mjs`; adjust clearance, roster, seed and staff-identity tests that assumed sign-in-free clearance)
+- [x] 2.6 `account_check` and the refusal reasons; `vitally_prepare_account`, `vitally_record_account`
+- [x] 2.7 `deactivate_account` / `reactivate_account` internals and their public RPCs (receipts, revision, open work, self, email in use)
+- [x] 2.8 `vitally_client_invitations`
+- [x] 2.9 RPC signature list (`tests/support/rpc-signatures.mjs`) and database tests (`tests/database-accounts.mjs`; adjust clearance, roster, seed and staff-identity tests that assumed sign-in-free clearance)
 
 ## 3. Edge Function
 
-- [ ] 3.1 `supabase/functions/accounts/handler.mjs` (create, invite, resend flow, error mapping, CORS) with `npm test` unit tests
-- [ ] 3.2 `supabase/functions/accounts/index.ts` Deno entry
-- [ ] 3.3 `tests/database-accounts-function.mjs`: the function against the stack, reading the mail catcher
+- [x] 3.1 `supabase/functions/accounts/handler.mjs` (create, invite, resend flow, error mapping, CORS) with `npm test` unit tests
+- [x] 3.2 `supabase/functions/accounts/index.ts` Deno entry
+- [x] 3.3 `tests/database-accounts-function.mjs`: the function against the stack, reading the mail catcher
 
 ## 4. Browser
 
-- [ ] 4.1 Store: `createAccount`, `resendAccount`, `inviteClient` (functions.invoke), `deactivateAccount`, `reactivateAccount`, `listClientInvitations`, and accounts in `listVolunteers`; contracts and error mapping
-- [ ] 4.2 `combineVolunteers`: account status, cleared with account, missing reasons; Roster Account column and cleared text
-- [ ] 4.3 Edit drawer Account section and controller actions with result and refusal messages
-- [ ] 4.4 Office screen "Invite a client" panel and controller actions
-- [ ] 4.5 View and controller unit tests
-- [ ] 4.6 `test:auth-browser`: an admin invites a client, the client signs in with the emailed code, the panel shows Active
+- [x] 4.1 Store: `createAccount`, `resendAccount`, `inviteClient` (functions.invoke), `deactivateAccount`, `reactivateAccount`, `listClientInvitations`, and accounts in `listVolunteers`; contracts and error mapping
+- [x] 4.2 `combineVolunteers`: account status, cleared with account, missing reasons; Roster Account column and cleared text
+- [x] 4.3 Edit drawer Account section and controller actions with result and refusal messages
+- [x] 4.4 Office screen "Invite a client" panel and controller actions
+- [x] 4.5 View and controller unit tests
+- [x] 4.6 `test:auth-browser`: an admin invites a client, the client signs in with the emailed code, the panel shows Active
 
 ## 5. Seed and docs
 
-- [ ] 5.1 Seed: no change in behaviour; adjust seed tests and docs that say the fictional volunteers are cleared
-- [ ] 5.2 Developer docs and demo script: Create account, Invite a client, Deactivate/Reactivate
+- [x] 5.1 Seed: no change in behaviour; adjust seed tests and docs that say the fictional volunteers are cleared
+- [x] 5.2 Developer docs and demo script: Create account, Invite a client, Deactivate/Reactivate
 
 ## 6. Verification
 
