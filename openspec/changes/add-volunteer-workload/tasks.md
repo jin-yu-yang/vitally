@@ -1,9 +1,9 @@
 ## 1. Database: the ASSIGN_CASE action
 
-- [ ] 1.1 Write failing database tests (`tests/database-workload.mjs`, own fixture workspace only) for every `ASSIGN_CASE` refusal: `NOT_CLEARED`, `FORBIDDEN` (non-admin caller, unknown person), `INVALID_TRANSITION` (each disallowed stage, same holder), `INELIGIBLE` (uncleared, missing effective capability under a wider ceiling), `SELF_REVIEW` (participant as reviewer, current reviewer as preparer), `CONFLICT`, `VALIDATION` (bad payload); each leaves the case and receipts unchanged
-- [ ] 1.2 Write failing database tests for the effects: Assign preparer and Assign reviewer (stage, slot, participant / active review, client line); Reassign preparer during corrections (participants kept, new preparer resubmits); Reassign reviewer mid-review (same review row moves, new reviewer approves, old reviewer refused); the case event's actor and detail; no client line on Reassign
-- [ ] 1.3 Add the next free migration (046 at the time of writing): `vitally_private.act_assign_case`; `ASSIGN_CASE` in `check_operation_authority` (effective `admin`), `check_payload` (slot, personId, no other keys) and `vitally_apply_action`'s dispatch, each re-created from its latest definition; revokes re-applied
-- [ ] 1.4 Add `act_assign_case` to the guard test's list in `tests/database-clearance.mjs` and add the narrower-role reviewer scenario
+- [x] 1.1 Write failing database tests (`tests/database-workload.mjs`, own fixture workspace only) for every `ASSIGN_CASE` refusal: `NOT_CLEARED`, `FORBIDDEN` (non-admin caller, unknown person), `INVALID_TRANSITION` (each disallowed stage, same holder), `INELIGIBLE` (uncleared, missing effective capability under a wider ceiling), `SELF_REVIEW` (participant as reviewer, current reviewer as preparer), `CONFLICT`, `VALIDATION` (bad payload); each leaves the case and receipts unchanged
+- [x] 1.2 Write failing database tests for the effects: Assign preparer and Assign reviewer (stage, slot, participant / active review, client line); Reassign preparer during corrections (participants kept, new preparer resubmits); Reassign reviewer mid-review (same review row moves, new reviewer approves, old reviewer refused); the case event's actor and detail; no client line on Reassign
+- [x] 1.3 Add the next free migration (046 at the time of writing): `vitally_private.act_assign_case`; `ASSIGN_CASE` in `check_operation_authority` (effective `admin`), `check_payload` (slot, personId, no other keys) and `vitally_apply_action`'s dispatch, each re-created from its latest definition; revokes re-applied
+- [x] 1.4 Add `act_assign_case` to the guard test's list in `tests/database-clearance.mjs` and add the narrower-role reviewer scenario
 
 ## 2. Browser data
 
