@@ -119,6 +119,31 @@ so nothing was deferred.
 
 ---
 
+## 8. Re-verification after the PR #195 review (2026-11-14)
+
+The review found that an Assign drawer opened on an empty slot became a Reassign if a volunteer claimed the
+case before Choose: `assignCase` read `expectedRevision` from the live case list at press time. An earlier
+summary to the user said Assign sent the revision the Workload showed; that was not true until this fix.
+Commit `f965184` fixes it both ways (the drawer captures the revision and holder when it opens; `ASSIGN_CASE`
+carries `expectedHolderId`, refused with `CONFLICT` on a mismatch). It also gives a tagged row to anyone holding an
+open case without the slot's role, and rewords the proposal's "Why". Spec `volunteer-workload` updated (canonical
+and archived delta).
+
+| Check | Where | Result |
+|---|---|---|
+| `npm test` | local | 1699/1700 (+5). The one failure is still `tests/write-test-env.test.mjs` (the local `.env`). |
+| `npm run build:hant -- --check` | local + CI `checks` | pass |
+| `npx openspec validate --all` | local + CI `checks` | 15/15 |
+| `npm run test:database` on a fresh stack with 001–046 | CI `database` | **573/573**, including "claimed while the drawer is open → CONFLICT" |
+| `npm run test:auth-browser` | CI `sign-in` | pass (regression) |
+| `npm run test:browser`, both orders | CI `story (chrome-client)`, `story (firefox-client)` | pass (regression; the story is unchanged) |
+
+**CI run (passing, on `f965184`)**: https://github.com/jin-yu-yang/vitally/actions/runs/43556886323
+(the PR's own run, every job passed on the first attempt). Screenshots reviewed: the case pool still shows no
+taxpayer names, and a volunteer's work board has no Volunteers link.
+
+---
+
 ## Overall Decision
 
 - [x] ⚠️ PASS WITH WARNINGS. The warnings are non-blocking:

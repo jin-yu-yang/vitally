@@ -69,6 +69,17 @@ b3bd27e Workload: controller, wiring and styles
 - 🟡 [painful | evidence: `668847e`] **Neither the design nor the plan traced the Realtime path for `contact_log`.**
   Design D3 said "Realtime keeps it live", but only `cases`/`workspaces` changes re-read the list. No task-level
   reviewer could see it; only the whole-branch review could.
+- 🔴 [painful | evidence: PR #195 review, `f965184`] **Assign could silently become a Reassign.** `assignCase`
+  read `expectedRevision` from the live case list when Choose was pressed, and that list is re-read on every
+  Realtime change, so the revision was always current and could not catch a case claimed while the drawer was
+  open; the claimant lost the case. Ruling R2 described it as sending "the listed revision", and my summary to
+  the user said Assign sent "the revision the Workload showed": both were wrong. No task review or the final
+  review caught it; two human reviewers did. Fixed both ways: the drawer captures the revision and holder when
+  it opens, and `ASSIGN_CASE` carries `expectedHolderId`, refused with `CONFLICT` on a mismatch.
+- 🟡 [painful | evidence: PR #195 review, `f965184`] **Rows hid cases held without the role.** Rows were only for
+  people with effective `prepare`/`review`, so unticking a role by mistake made that person's cases vanish from
+  the Workload. Now such a holder keeps a tagged row. The proposal's "Why" also cited a preparer leaving
+  mid-season, which doesn't happen in practice; reworded to illness, schedule conflicts and uneven load.
 - 📌 [nit | evidence: `855e8c5` → `23ddd1c`] **The docs task had to be redone once.** The first pass said
   `NOT_CLEARED` for an uncleared assignee (it is `INELIGIBLE`) and left three stale roadmap lines.
 - 📌 [nit | evidence: ledger] **Session confusion.** A message meant for another session (the accounts change) arrived
@@ -118,7 +129,7 @@ b3bd27e Workload: controller, wiring and styles
 
 **Rulings:**
 - **R1.** Database tests are written without a local run; the first CI run comes right after Task 2. Cost if wrong: one CI cycle.
-- **R2.** `assignCase` sends through `dispatch` with the listed revision and no open case. Cost if wrong: a review round.
+- **R2.** `assignCase` sends through `dispatch` with the listed revision and no open case. Cost if wrong: a review round. *Wrong as built: "the listed revision" was read live at press time. Corrected after the PR #195 review (see Misses).*
 - **R3.** `logged_at` is the contact time; the artifacts were corrected. Cost if wrong: none.
 - **R4.** The preparer-slot hidden-note wording. Cost if wrong: a wording change.
 - **R5.** Inline width styles on the bar (there is no CSP). Cost if wrong: restyle.
@@ -160,6 +171,10 @@ b3bd27e Workload: controller, wiring and styles
 - [ ] 🟡 **Any "live" claim in a design must name the Realtime table that triggers the refresh.** → **Promote to memory** (type: feedback)
   > **Why**: Design D3 said the counts stay live, but a logged contact changes `contact_log`, not `cases`. Only the final whole-branch review caught it (`668847e`).
   > **How to apply**: for each derived value on a staff screen, list its source tables and check `handleChange`'s `touchesList`/`touchesOpen` for each one.
+
+- [ ] 🔴 **An optimistic-concurrency token must be captured when the user sees the state, never read at press time from a live list.** → **Promote to memory** (type: feedback)
+  > **Why**: add-volunteer-workload's drawer read `expectedRevision` from the Realtime-refreshed case list at Choose, so the CONFLICT check could never fire; PR #195's reviewers caught it.
+  > **How to apply**: for any action sent from a dialog over live data, store the revision (and the state the action depends on) in the dialog context when it opens, and test "changed while the dialog is open".
 
 - [ ] 📌 **When local database runs are off-limits, the first CI database run is the RED/GREEN gate.** → **One-off** (recorded here)
   > **Why**: this cycle worked: the database tests passed their first CI run, after careful reviews of fixture use.
