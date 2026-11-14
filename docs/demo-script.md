@@ -164,14 +164,14 @@ no such link). The seed's eight fictional volunteers are there, with no account 
 
 | Volunteer | Works | Languages | Roles | Certificates | Cleared |
 | --- | --- | --- | --- | --- | --- |
-| Maya Lindgren | On site | English | Preparer | VSC, IT&QR, Basic | Cleared |
-| Tomas Abara | Remote | English, Spanish | Reviewer | VSC, IT&QR, Advanced | Cleared |
-| Wen Tao Liu | On site | Mandarin, English | Preparer, Reviewer | VSC, IT&QR, Basic, Advanced | Cleared |
-| Priya Venkat | On site and remote, no phone | English | Intaker | VSC, IT&QR | Cleared (new, photo ID check recorded) |
-| Jordan Reyes | On site | English | Greeter | VSC | Not cleared: Photo ID check missing (new) |
-| Hana Moretti | Remote | Cantonese, Mandarin | Preparer | VSC, IT&QR, Basic | Cleared |
-| Samir Haddad | On site, no phone | English, Arabic | Admin | VSC, IT&QR, SC | Cleared |
-| Lucy Fong | On site and remote | Cantonese, English | No roles recorded | None recorded | Not cleared: Form 13615 missing |
+| Maya Lindgren | On site | English | Preparer | VSC, IT&QR, Basic | Not cleared: No account yet |
+| Tomas Abara | Remote | English, Spanish | Reviewer | VSC, IT&QR, Advanced | Not cleared: No account yet |
+| Wen Tao Liu | On site | Mandarin, English | Preparer, Reviewer | VSC, IT&QR, Basic, Advanced | Not cleared: No account yet |
+| Priya Venkat | On site and remote, no phone | English | Intaker | VSC, IT&QR | Not cleared: No account yet (new, photo ID check recorded) |
+| Jordan Reyes | On site | English | Greeter | VSC | Not cleared: Photo ID check missing, No account yet (new) |
+| Hana Moretti | Remote | Cantonese, Mandarin | Preparer | VSC, IT&QR, Basic | Not cleared: No account yet |
+| Samir Haddad | On site, no phone | English, Arabic | Admin | VSC, IT&QR, SC | Not cleared: No account yet |
+| Lucy Fong | On site and remote | Cantonese, English | No roles recorded | None recorded | Not cleared: Form 13615 missing, No account yet |
 
 Each staff account also has a row. The seed clears the four role accounts first, so they show as
 **Cleared**: Sky Chen as Admin (VSC, IT&QR), Rowan Diaz as Preparer (VSC, IT&QR, Basic), Ari Novak
@@ -188,9 +188,11 @@ What to show:
    **Cancel** unless you want the new row to stay: a re-seed removes only the eight seeded
    volunteers, never one added by hand.
 4. **Say how clearance works.** A person is **Cleared** when they have at least one role this
-   season, and, if they are new, their photo ID check is recorded. Each role needs its confirmed
+   season, if they are new, their photo ID check is recorded, and their account is active (they have
+   signed in at least once). Each role needs its confirmed
    certificates. Staff who are not cleared (no role yet, or a new volunteer without the photo ID
-   check) get no staff actions until an admin clears them. Lucy Fong has no roles, so she is waiting
+   check, or no active account) get no staff actions until an admin clears them. None of the eight
+   seeded volunteers has an account, so none is cleared. Lucy Fong has no roles, so she is waiting
    for her Form 13615. Jordan Reyes is new and his photo ID check is missing. Samir Haddad is
    recorded as Admin and has no sign-in, so he can do nothing in ViTally.
 
@@ -206,7 +208,8 @@ every email the stack would have sent.
    `@example.org` address.
 2. **The code email.** In the mail catcher, open the new message to that address: "Your ViTally
    code is" followed by six digits. Type the address on the sign-in screen in a second window,
-   then the code. The volunteer lands on the staff screen, and the account turns **Active**.
+   then the code. The account turns **Active**, and because Maya has her Preparer role and certificates and is not
+   new, she is now **Cleared** and lands on the staff screen.
    (The sign-in screen also sends a code of its own; use the newest one.)
 3. **Invite a client.** On the office screen, under **Invite a client**, type a fictional client
    address and press **Invite**. The list shows it as **Invited**, with **Resend** while it is.
