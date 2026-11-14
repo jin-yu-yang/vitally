@@ -308,6 +308,12 @@ export function createController({
     volunteerFormError: null,
     // The last account action's result in the drawer: {kind: "ok" | "error", text}.
     volunteerAccountNotice: null,
+    // The office screen's Invite a client panel (admin only): the client
+    // accounts (null until read), the email as typed, and the last result.
+    invitations: null,
+    invitationsFailed: false,
+    inviteEmail: "",
+    inviteNotice: null,
     // The caller's own workspace row, read only for a staff window: the
     // office's defaults.
     workspace: null,
@@ -397,6 +403,7 @@ export function createController({
   // An account action whose answer never came, kept with the revision it was
   // sent at, so pressing the same button again sends the same action id.
   let pendingAccountAction = null;
+  let pendingInviteAction = null;
   // The screening start for the open case, if one is due or held:
   // `{ action, inFlight, gaveUp }` (`startScreeningIfDue`).
   let screeningStart = null;
@@ -971,6 +978,7 @@ export function createController({
       await loadWorkspace();
       // The Roster is read only where it is shown (a restored window on it).
       if (state.screen === "office-volunteers") await readVolunteers();
+      await readInvitations();
     } else {
       state.lists.assistance = "ready";
     }
@@ -992,6 +1000,20 @@ export function createController({
       if (state.lists.volunteers !== "ready") state.lists.volunteers = "failed";
       throw error;
     }
+  }
+
+  // The office screen's client list. Only an admin's window asks. A failed
+  // read never fails the load around it: the panel says so and keeps what it
+  // had. It never throws.
+  async function readInvitations() {
+    if (!staffWindow() || !ceilingAdmin(state.principal)) return;
+    try {
+      state.invitations = await store.listClientInvitations();
+    } catch {
+      state.invitationsFailed = true;
+      return;
+    }
+    state.invitationsFailed = false;
   }
 
   // Opening the Roster: read its list, and say a failure with its own Try
@@ -1382,8 +1404,13 @@ export function createController({
     state.volunteerFilters = { search: "", role: "all" };
     state.volunteerFormError = null;
     state.volunteerAccountNotice = null;
+    state.invitations = null;
+    state.invitationsFailed = false;
+    state.inviteEmail = "";
+    state.inviteNotice = null;
     pendingVolunteerSave = null;
     pendingAccountAction = null;
+    pendingInviteAction = null;
     state.assistance = [];
     state.workspace = null;
     state.openPanels = [];
@@ -3021,6 +3048,64 @@ export function createController({
     return true;
   }
 
+  // Invite a client / Resend (the office screen's panel). The action id is
+  // kept across an OFFLINE or SERVER_ERROR retry of the same email, like the
+  // drawer's. A refusal is said in the panel, and what was typed stays.
+  async function runClientInvite(kind, rawEmail) {
+    if (state.busy) return false;
+    const email = String(rawEmail ?? "");
+    const key = `${kind}:${email.trim().toLowerCase()}`;
+    const request = {
+      actionId: pendingInviteAction?.key === key ? pendingInviteAction.actionId : newActionId(),
+      email,
+    };
+    pendingInviteAction = null;
+    state.inviteNotice = null;
+    if (kind === "invite") state.inviteEmail = email;
+    state.busy = true;
+    state.error = null;
+    show();
+    let result;
+    try {
+      result = await (kind === "invite" ? store.inviteClient(request) : store.resendClient(request));
+    } catch (error) {
+      state.busy = false;
+      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingInviteAction = { key, actionId: request.actionId };
+      const sentence = error?.code === "CONFLICT" ? null : accountMessage(error?.cause?.details);
+      if (sentence) {
+        state.inviteNotice = { kind: "error", text: sentence };
+        await readInvitations();
+        show();
+        return false;
+      }
+      noteFailure(error);
+      await readInvitations();
+      show();
+      throw error;
+    }
+    state.busy = false;
+    noteConnected();
+    const sent = result?.emailSent === true && result?.replay !== true;
+    state.inviteNotice = {
+      kind: "ok",
+      text:
+        kind === "invite"
+          ? sent
+            ? "Account created and sign-in code sent"
+            : "Account created; the email wasn't sent. Use Resend in a minute."
+          : sent
+            ? "Sign-in code sent"
+            : EMAIL_NOT_SENT,
+    };
+    if (kind === "invite") state.inviteEmail = "";
+    await readInvitations();
+    show();
+    return true;
+  }
+
+  const inviteClient = (email) => runClientInvite("invite", email);
+  const resendClient = (email) => runClientInvite("resend", email);
+
   const createAccount = () => runAccountAction("create");
   const resendAccount = () => runAccountAction("resend");
   const deactivateAccount = () => runAccountAction("deactivate");
@@ -3162,6 +3247,8 @@ export function createController({
     runAssistanceAction,
     logContact,
     loadVolunteers,
+    inviteClient,
+    resendClient,
     setVolunteerFilter,
     saveVolunteer,
     createAccount,

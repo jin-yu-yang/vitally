@@ -451,7 +451,51 @@ export function renderFollowups(cases = [], assistance = [], ui = {}) {
   return `<section class="panel office-queue" aria-labelledby="office-queue-title"><div class="section-head"><div><h2 id="office-queue-title" tabindex="-1">Office queue</h2> <span class="muted small">most urgent first</span></div><span class="muted small">${esc(counts.all)} open · ${esc(over3)} over 3 days</span></div>${seasonEnd}${toggles}${chips}${when(
     !person,
     `<p class="staff-reason" role="note">${icon("user")} ${esc(NO_LINKED_VOLUNTEER)} Until then this queue is read-only.</p>`,
-  )}${shown.length ? table : empty}<p class="field-note board-note">Waiting turns amber at 3 days and red at 5. This queue shows workflow only: no taxpayer names, no addresses and no document contents.</p></section>`;
+  )}${shown.length ? table : empty}<p class="field-note board-note">Waiting turns amber at 3 days and red at 5. This queue shows workflow only: no taxpayer names, no addresses and no document contents.</p></section>${
+    isAdminPerson(person) && view.invitations !== undefined ? inviteClientPanel({ invitations: view.invitations, ui: view }) : ""
+  }`;
+}
+
+const INVITE_LABELS = Object.freeze({ invited: "Invited", active: "Active" });
+
+/**
+ * The admin's "Invite a client" panel: an email field, Invite, and the
+ * workspace's client accounts, newest first, with Resend while Invited.
+ *
+ * @param {object} args `{invitations, ui}`: `invitations` is the list from
+ *   `listClientInvitations()` (null while unread); `ui` is `{busy, inviteEmail,
+ *   inviteNotice: {kind, text}, invitationsFailed}`.
+ */
+export function inviteClientPanel({ invitations = null, ui = {} } = {}) {
+  const view = ui ?? {};
+  const notice = view.inviteNotice?.text
+    ? `<p class="notice ${view.inviteNotice.kind === "error" ? "error" : "info"}" role="${
+        view.inviteNotice.kind === "error" ? "alert" : "status"
+      }" id="invite-client-notice">${icon(view.inviteNotice.kind === "error" ? "help" : "check")}<span>${esc(
+        view.inviteNotice.text,
+      )}</span></p>`
+    : "";
+  const busy = view.busy === true ? "disabled" : "";
+  const rows = (invitations ?? [])
+    .map(
+      (entry) =>
+        `<tr><th scope="row">${esc(entry.email)}</th><td>${esc(INVITE_LABELS[entry.status] ?? entry.status)}</td><td>${
+          entry.status === "invited"
+            ? button("Resend", "client-resend", "secondary", `data-email="${esc(entry.email)}" ${busy}`)
+            : ""
+        }</td></tr>`,
+    )
+    .join("");
+  const list = Array.isArray(invitations)
+    ? invitations.length
+      ? `<div class="board-table-wrap"><table class="board-table invite-table"><thead><tr><th scope="col">Email</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead><tbody>${rows}</tbody></table></div>`
+      : emptyLine("No clients invited yet")
+    : view.invitationsFailed
+      ? unloadedLine("The client list couldn't load.")
+      : loadingLine("Loading clients…");
+  return `<section class="panel invite-client" aria-labelledby="invite-client-title"><div class="section-head"><div><h2 id="invite-client-title">Invite a client</h2></div></div><form id="invite-client-form" class="staff-form" novalidate><label class="field" for="invite-client-email"><span>Client email</span><input id="invite-client-email" name="email" type="email" value="${esc(
+    view.inviteEmail ?? "",
+  )}" autocomplete="off" required></label><button type="submit" class="btn primary" ${busy}>Invite</button></form>${notice}${list}</section>`;
 }
 
 // ---------------------------------------------------------------------------

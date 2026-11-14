@@ -1913,6 +1913,11 @@ if (!config) {
           { "account-create": "createAccount", "account-resend": "resendAccount", "account-reactivate": "reactivateAccount" }[action]
         ]();
         break;
+      case "client-resend":
+        // The office screen's Invite a client list: said in the panel, or
+        // thrown to the safety net.
+        await controller.resendClient(target.dataset.email ?? "");
+        break;
       case "account-deactivate":
         // Asks first: nothing is sent until the dialog's confirm.
         openDialog("deactivate-account", { volunteerId: target.dataset.volunteerId }, describeFocus(target));
@@ -2526,6 +2531,8 @@ if (!config) {
         await runCaseAction(caseControl, form, by);
       } else if (assistControl) {
         await runAssistanceAction(assistControl, form, by);
+      } else if (form.id === "invite-client-form") {
+        await controller.inviteClient(String(values.get("email") ?? ""));
       } else if (form.id === "close-unsigned-form") {
         await submitCloseUnsigned(form, by);
       } else if (form.id === "email-form") {

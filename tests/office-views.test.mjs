@@ -1302,3 +1302,46 @@ test("closeUnsignedListKey changes with the listed cases and their revisions", (
   assert.notEqual(closeUnsignedListKey([a, b, waitingCase("c", "review_approved", daysAgo(3))]), key);
   assert.equal(closeUnsignedListKey([b, a, waitingCase("z", "received", daysAgo(1))]), key);
 });
+
+// ---- Invite a client (change add-account-invitations) ---------------------
+
+const INVITATIONS = [
+  { email: "newer@example.org", status: "invited", invitedAt: "2026-11-10T10:00:00Z", activatedAt: null, accountRevision: 1 },
+  { email: "older@example.org", status: "active", invitedAt: "2026-11-01T10:00:00Z", activatedAt: "2026-11-02T10:00:00Z", accountRevision: 2 },
+];
+const followupsWith = (person, ui = {}) =>
+  renderFollowups([], [], { person, now: NOW, list: "ready", invitations: INVITATIONS, ...ui });
+
+test("invite panel has an email field and Invite button", () => {
+  const html = followupsWith(sam);
+  assert.match(html, /Invite a client/);
+  assert.match(html, /<form id="invite-client-form"/);
+  assert.match(html, /<input[^>]*name="email"[^>]*type="email"/);
+  assert.match(html, /<button type="submit"[^>]*>[^<]*Invite<\/button>/);
+});
+
+test("lists clients newest first with status and Resend only while Invited", () => {
+  const html = followupsWith(sam);
+  assert.ok(html.indexOf("newer@example.org") < html.indexOf("older@example.org"));
+  assert.match(html, /newer@example\.org[\s\S]*Invited/);
+  assert.match(html, /older@example\.org[\s\S]*Active/);
+  const resends = html.match(/data-action="client-resend"[^>]*>/g) ?? [];
+  assert.equal(resends.length, 1);
+  assert.match(resends[0], /data-email="newer@example\.org"/);
+});
+
+test("empty list says No clients invited yet", () => {
+  assert.match(followupsWith(sam, { invitations: [] }), /No clients invited yet/);
+});
+
+test("the panel shows the typed email and the last result", () => {
+  const html = followupsWith(sam, { inviteEmail: "kept@example.org", inviteNotice: { kind: "error", text: "That email belongs to a volunteer. Use another email." } });
+  assert.match(html, /value="kept@example\.org"/);
+  assert.match(html, /role="alert"[\s\S]*That email belongs to a volunteer/);
+});
+
+test("the panel is not rendered for a non-admin office state", () => {
+  const helper = { id: "p-h", name: "Hal", capabilities: ["followup"] };
+  assert.doesNotMatch(followupsWith(helper), /Invite a client|invite-client-form/);
+  assert.doesNotMatch(followupsWith(null), /Invite a client/);
+});

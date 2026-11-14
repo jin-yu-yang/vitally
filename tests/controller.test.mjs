@@ -7366,3 +7366,94 @@ test("an account action whose answer never came is sent again with the same acti
   assert.notEqual(store.writes.at(-1).actionId, sent[0].actionId);
   controller.stop();
 });
+
+// ---- the office screen's Invite a client panel (change add-account-invitations)
+
+const INVITATION_ROW = { email: "ana@example.org", status: "invited", invitedAt: "2026-11-10T10:00:00Z", activatedAt: null, accountRevision: 1 };
+const inviteStore = () => {
+  const store = rosterStore();
+  store.invitations = [];
+  store.failInvite = null;
+  store.inviteAnswer = { status: "invited", emailSent: true, accountRevision: 1 };
+  store.listClientInvitations = async () => {
+    store.calls.push("listClientInvitations");
+    return store.invitations.map((entry) => ({ ...entry }));
+  };
+  for (const [method, type] of [["inviteClient", "invite"], ["resendClient", "resend-client"]])
+    store[method] = async (request) => {
+      store.calls.push(method);
+      store.writes.push({ type, ...request });
+      if (store.failInvite) {
+        const error = store.failInvite;
+        store.failInvite = null;
+        throw error;
+      }
+      return { ...store.inviteAnswer };
+    };
+  return store;
+};
+const inviteReads = (store) => store.calls.filter((entry) => entry === "listClientInvitations").length;
+
+test("an admin's start reads the client list", async () => {
+  const store = inviteStore();
+  store.invitations = [INVITATION_ROW];
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(inviteReads(store), 1);
+  assert.deepEqual(controller.getState().invitations, [INVITATION_ROW]);
+  controller.stop();
+});
+
+test("invite refused EMAIL_ON_ROSTER shows its sentence", async () => {
+  const store = inviteStore();
+  const { controller } = build({ store, newActionId: () => "action-1" });
+  await controller.start();
+  store.failInvite = accountRefusal("VALIDATION", "VALIDATION", "EMAIL_ON_ROSTER");
+  assert.equal(await controller.inviteClient(" Mira@Example.org "), false);
+  const state = controller.getState();
+  assert.deepEqual(state.inviteNotice, { kind: "error", text: "That email belongs to a volunteer. Use another email." });
+  assert.equal(state.inviteEmail, " Mira@Example.org ", "what was typed stays");
+  assert.equal(state.error, null);
+  assert.equal(state.busy, false);
+  controller.stop();
+});
+
+test("invite success clears the field, shows the sent message and re-reads the list", async () => {
+  const store = inviteStore();
+  const { controller } = build({ store, newActionId: () => "action-1" });
+  await controller.start();
+  const reads = inviteReads(store);
+  store.invitations = [INVITATION_ROW];
+  assert.equal(await controller.inviteClient("ana@example.org"), true);
+  assert.deepEqual(store.writes.at(-1), { type: "invite", actionId: "action-1", email: "ana@example.org" });
+  const state = controller.getState();
+  assert.deepEqual(state.inviteNotice, { kind: "ok", text: "Account created and sign-in code sent" });
+  assert.equal(state.inviteEmail, "");
+  assert.equal(inviteReads(store), reads + 1);
+  assert.deepEqual(state.invitations, [INVITATION_ROW]);
+  controller.stop();
+});
+
+test("invite with the email not sent says to use Resend; a retry after OFFLINE keeps the action id", async () => {
+  const store = inviteStore();
+  let n = 0;
+  const { controller } = build({ store, newActionId: () => `action-${++n}` });
+  await controller.start();
+  store.failInvite = Object.assign(new Error("OFFLINE"), { code: "OFFLINE" });
+  await assert.rejects(() => controller.inviteClient("ana@example.org"), (error) => error.code === "OFFLINE");
+  store.inviteAnswer = { status: "invited", emailSent: false, accountRevision: 1 };
+  assert.equal(await controller.inviteClient("ana@example.org"), true);
+  assert.deepEqual(store.writes.map((entry) => entry.actionId), ["action-1", "action-1"]);
+  assert.equal(controller.getState().inviteNotice.text, "Account created; the email wasn't sent. Use Resend in a minute.");
+  controller.stop();
+});
+
+test("resend a client sends the email and says so", async () => {
+  const store = inviteStore();
+  const { controller } = build({ store, newActionId: () => "action-9" });
+  await controller.start();
+  assert.equal(await controller.resendClient("ana@example.org"), true);
+  assert.deepEqual(store.writes.at(-1), { type: "resend-client", actionId: "action-9", email: "ana@example.org" });
+  assert.equal(controller.getState().inviteNotice.text, "Sign-in code sent");
+  controller.stop();
+});
