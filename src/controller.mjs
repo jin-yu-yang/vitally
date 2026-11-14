@@ -3144,6 +3144,10 @@ export function createController({
   const ALREADY_SENT = "This invitation was already sent. If it didn't arrive, use Resend.";
   const INVITATION_CANCELLED = "Invitation cancelled.";
   const NOT_CANCELLABLE = "This invitation can no longer be cancelled.";
+  // IN_USE (design D15): the account was already used, so it is not cancelled.
+  const IN_USE_NOT_CANCELLABLE = "This account is already in use, so the invitation can't be cancelled.";
+  const cancelRefusal = (error) =>
+    error?.cause?.details === "IN_USE" ? IN_USE_NOT_CANCELLABLE : NOT_CANCELLABLE;
 
   async function runAccountAction(kind) {
     const action = ACCOUNT_ACTIONS[kind];
@@ -3188,7 +3192,7 @@ export function createController({
           : error?.code === "CONFLICT"
             ? null
             : kind === "cancel" && error?.code === "INVALID_TRANSITION"
-              ? NOT_CANCELLABLE
+              ? cancelRefusal(error)
               : accountMessage(cause?.details);
       if (sentence) {
         state.volunteerAccountNotice = { kind: "error", text: sentence };
@@ -3356,7 +3360,7 @@ export function createController({
       state.busy = false;
       if (UNKNOWN_OUTCOME.includes(error?.code)) pendingInviteAction = { key, actionId: request.actionId };
       if (error?.code === "INVALID_TRANSITION") {
-        state.inviteNotice = { kind: "error", text: NOT_CANCELLABLE };
+        state.inviteNotice = { kind: "error", text: cancelRefusal(error) };
         await readInvitations();
         show();
         return false;

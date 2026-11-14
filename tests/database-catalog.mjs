@@ -197,6 +197,44 @@ test("the catalog after the sample-case tools and presenter access are removed",
       }
     });
 
+    // 047 (review round 2, design D15): membership_in_use and the first-use
+    // trigger name the foreign keys to memberships by hand, so a new table that
+    // refers to a membership must be added to both. The person's link and the
+    // account are the two that an unclaimed invitation may have. Schemas named
+    // test_hold_ are the accounts test's own, dropped when it ends.
+    await t.test("membership_in_use and the first-use trigger cover every foreign key to memberships", async () => {
+      const keys = await sql(
+        `select c.conrelid::regclass::text as rel, a.attname as col
+           from pg_constraint c
+           join pg_class r on r.oid=c.conrelid
+           join pg_namespace n on n.oid=r.relnamespace
+           cross join lateral unnest(c.conkey) k(attnum)
+           join pg_attribute a on a.attrelid=c.conrelid and a.attnum=k.attnum
+          where c.contype='f' and c.confrelid='public.memberships'::regclass
+            and a.attname<>'workspace_id' and n.nspname not like 'test\\_hold\\_%'`,
+      );
+      const keyed = keys.rows.map((row) => `${row.rel}.${row.col}`).sort(byText);
+      const unclaimed = ["accounts.user_id", "people.user_id"];
+      for (const key of unclaimed) assert.ok(keyed.includes(key), key);
+      const inUse = keyed.filter((key) => !unclaimed.includes(key));
+      assert.equal(inUse.length, new Set(inUse).size, "one key per column");
+
+      const source = await sql(
+        "select prosrc from pg_proc where oid='vitally_private.membership_in_use(uuid,uuid)'::regprocedure",
+      );
+      const checked = [
+        ...source.rows[0].prosrc.matchAll(/from public\.(\w+) where workspace_id=p_workspace_id and (\w+)=p_user_id/g),
+      ].map(([, rel, col]) => `${rel}.${col}`);
+      assert.deepEqual(checked.sort(byText), inUse, "membership_in_use");
+
+      const triggers = await sql(
+        `select tgrelid::regclass::text as rel, pg_get_triggerdef(oid) as def
+           from pg_trigger where tgname='vitally_client_account_used'`,
+      );
+      const used = triggers.rows.map((row) => `${row.rel}.${row.def.match(/client_account_used\('(\w+)'\)/)?.[1]}`);
+      assert.deepEqual(used.sort(byText), inUse, "vitally_client_account_used");
+    });
+
     await t.test("private entry points are not callable by clients", async () => {
       for (const signature of [
         "vitally_private.acting_person(public.memberships)",

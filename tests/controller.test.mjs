@@ -7627,6 +7627,15 @@ test("Cancel invitation refused INVALID_TRANSITION says it can no longer be canc
   assert.deepEqual(state.volunteerAccountNotice, { kind: "error", text: "This invitation can no longer be cancelled." });
   assert.equal(state.error, null);
   assert.equal(state.dialog, "volunteer");
+  // IN_USE (design D15) has its own sentence.
+  controller.openDialog("cancel-invitation", { volunteerId: "v-1" });
+  store.failAccount = accountRefusal("INVALID_TRANSITION", "INVALID_TRANSITION", "IN_USE");
+  assert.equal(await controller.cancelInvitation(), false);
+  assert.deepEqual(controller.getState().volunteerAccountNotice, {
+    kind: "error",
+    text: "This account is already in use, so the invitation can't be cancelled.",
+  });
+  assert.equal(controller.getState().error, null);
   controller.stop();
 });
 
@@ -7801,6 +7810,15 @@ test("the office list's Cancel asks, cancels by email at the row's revision and 
   store.failInvite = accountRefusal("INVALID_TRANSITION", "INVALID_TRANSITION", null);
   assert.equal(await controller.cancelInvitation(), false);
   assert.deepEqual(controller.getState().inviteNotice, { kind: "error", text: "This invitation can no longer be cancelled." });
+  assert.equal(controller.getState().error, null);
+  // IN_USE (design D15): its own sentence, in the panel.
+  controller.openDialog("cancel-invitation", { email: "ana@example.org", revision: 1 });
+  store.failInvite = accountRefusal("INVALID_TRANSITION", "INVALID_TRANSITION", "IN_USE");
+  assert.equal(await controller.cancelInvitation(), false);
+  assert.deepEqual(controller.getState().inviteNotice, {
+    kind: "error",
+    text: "This account is already in use, so the invitation can't be cancelled.",
+  });
   assert.equal(controller.getState().error, null);
   controller.stop();
 });

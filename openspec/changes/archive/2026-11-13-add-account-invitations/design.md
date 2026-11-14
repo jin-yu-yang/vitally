@@ -196,6 +196,11 @@ The user's decisions after a reviewer found a blocker in the round above. The ca
    - `vitally_expire_invitations()` answers `{cancelled, inUse, failed}`.
    - The Roster, the office list, the account RPCs and the sign-in keep working.
 
+### After the approval (non-blocking notes)
+- A catalog test compares the foreign keys to `memberships` with the tables `membership_in_use` checks and the tables that carry the first-use trigger, so a new table that refers to a membership cannot be missed.
+- `IN_USE` has its own sentence in the drawer and the office panel: "This account is already in use, so the invitation can't be cancelled."
+- The sweep's `failed` count reaches only the database log (#201, opened, not fixed here).
+
 ## Risks / Trade-offs
 
 - [Risk] A trigger on `auth.users` could fail if the migration role can't create triggers on the auth schema. → Mitigation: Supabase's documented pattern; the migration runs as `postgres`. CI's `database` job proves it.
