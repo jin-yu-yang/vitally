@@ -13,12 +13,12 @@
 
 ## 3. Views and controller
 
-- [ ] 3.1 Volunteers tabs: Roster and Workload, the Workload only for a cleared effective admin; an uncleared ceiling admin keeps the Roster alone (unit tests of the views and the sidebar)
-- [ ] 3.2 The Workload table: rows, the breakdown bar with screen-reader text, the Not cleared tag, sortable headers, search, the Unassigned row first, expandable rows listing cases (case #, full name, stage, slot, Stalled, Open, Reassign/Assign); the footnote that names show only to admins
-- [ ] 3.3 The Assign/Reassign drawer: heading with case # and name, search, the ordered candidates with languages, roles and Open count, Current marked, the hidden-for-independence note, Choose sends `ASSIGN_CASE`; refusals shown with the existing dialog error handling
-- [ ] 3.4 Controller and `app.mjs`: the tab state, loading the Roster's volunteers for the Workload, opening and closing the drawer, sending the action with the case's revision, Realtime refresh of the counts
-- [ ] 3.5 History sentence for `ASSIGN_CASE` ("<admin> assigned <person> as preparer|reviewer (was <previous>)"), names resolved from people, with unit tests
-- [ ] 3.6 Styles for the tabs, table, bar and drawer in `src/styles.css`
+- [x] 3.1 Volunteers tabs: Roster and Workload, the Workload only for a cleared effective admin; an uncleared ceiling admin keeps the Roster alone (unit tests of the views and the sidebar)
+- [x] 3.2 The Workload table: rows, the breakdown bar with screen-reader text, the Not cleared tag, sortable headers, search, the Unassigned row first, expandable rows listing cases (case #, full name, stage, slot, Stalled, Open, Reassign/Assign); the footnote that names show only to admins
+- [x] 3.3 The Assign/Reassign drawer: heading with case # and name, search, the ordered candidates with languages, roles and Open count, Current marked, the hidden-for-independence note, Choose sends `ASSIGN_CASE`; refusals shown with the existing dialog error handling
+- [x] 3.4 Controller and `app.mjs`: the tab state, loading the Roster's volunteers for the Workload, opening and closing the drawer, sending the action with the case's revision, Realtime refresh of the counts
+- [x] 3.5 History sentence for `ASSIGN_CASE` ("<admin> assigned <person> as preparer|reviewer (was <previous>)"), names resolved from people, with unit tests
+- [x] 3.6 Styles for the tabs, table, bar and drawer in `src/styles.css`
 
 ## 4. Checks and docs
 
