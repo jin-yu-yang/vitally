@@ -49,14 +49,14 @@
 
 ## 4. Controller
 
-- [ ] 4.1 The feed in `src/controller.mjs`, with tests:
+- [x] 4.1 The feed in `src/controller.mjs`, with tests:
   - state;
   - load with the work and on clearance checks;
   - `posted_updates` changes;
   - `openNotifications` marks the unread shown items;
   - `confirmUpdate`;
   - reset on sign-out.
-- [ ] 4.2 The admin side, with tests:
+- [x] 4.2 The admin side, with tests:
   - the `office-updates` screen for a ceiling admin, cleared or not;
   - `loadPostedUpdates` on open, refresh and after actions;
   - `saveUpdate` (draft or post, local validation, offline retry, CONFLICT);
