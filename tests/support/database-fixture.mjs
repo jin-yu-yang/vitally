@@ -676,7 +676,8 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
     clients.push(client);
     const auth = await client.auth.signInWithPassword({ email, password });
     if (auth.error) throw new Error("Synthetic Auth sign-in failed.");
-    return { client, userId: data.user.id, email };
+    // The password lets a test sign in again (046: the first sign-in trigger).
+    return { client, userId: data.user.id, email, password };
   };
   // A staff member of this run's workspace (OpenSpec change add-staff-identity):
   // a new account, a `staff` membership and a new linked person, made through
@@ -722,7 +723,7 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
     workspaceId = f.workspaceId,
     cleared = true,
   }) => {
-    const { client, userId, email } = await provision();
+    const { client, userId, email, password } = await provision();
     await f.withSetupLock(() =>
       f.sql("select vitally_private.add_staff_member($1,$2,$3,$4,$5::text[])", [
         workspaceId,
@@ -737,7 +738,7 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
       [workspaceId, key],
     );
     if (cleared !== false) await f.clearStaff(rows[0].id, capabilities, workspaceId);
-    return { client, userId, personId: rows[0].id, email };
+    return { client, userId, personId: rows[0].id, email, password };
   };
   try {
     // Schema preflight provides the intended RED before any Auth provisioning.

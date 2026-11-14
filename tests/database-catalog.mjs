@@ -10,10 +10,11 @@ import { openDatabase } from "../tools/admin/database.mjs";
 // reach. Every check reads the catalog over a plain connection; the refused
 // inserts run in a transaction that is rolled back.
 
-// The row-security policies at 044, one per table, by table and name. 043
+// The row-security policies at 046, one per table, by table and name. 043
 // renames the sixteen staff-only policies and drops or adds none; 044 adds the
-// three admin-only Roster policies.
+// three admin-only Roster policies; 046 adds the admin-only accounts policy.
 const POLICIES = Object.freeze([
+  ["accounts", "admin_accounts"],
   ["admin_followups", "staff_admin_followups"],
   ["assistance_items", "staff_assistance_items"],
   ["case_contacts", "visible_case_contacts"],

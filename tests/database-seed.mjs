@@ -417,6 +417,8 @@ test("seed command against real Supabase", async (t) => {
             await f.sql(
               `select v.email, e.roles, e.is_new, e.photo_id_checked_at is not null as photo,
                       vitally_private.cleared(p.workspace_id, p.id) as cleared,
+                      exists(select 1 from public.accounts a
+                              where a.workspace_id=p.workspace_id and a.person_id=p.id) as has_account,
                       (select count(*)::int from public.certificates c
                         where c.person_id=p.id and c.season=e.season) as certs
                  from public.people p
@@ -432,8 +434,14 @@ test("seed command against real Supabase", async (t) => {
           assert.equal(empty.length, 1);
           assert.equal(empty[0].certs, 0);
           assert.equal(empty[0].cleared, false);
-          assert.ok(volunteers.some((v) => v.is_new && v.photo && v.cleared));
+          // 046 (add-account-invitations, design D6): the seed volunteers have
+          // no sign-in and so no account, and none is cleared, not even the new
+          // one whose photo ID is checked. The role accounts above, which have
+          // active accounts, are the cleared counterpart.
+          assert.ok(volunteers.every((v) => !v.has_account), "no seed volunteer has an account");
+          assert.ok(volunteers.some((v) => v.is_new && v.photo && v.roles.length > 0 && !v.cleared));
           assert.ok(volunteers.some((v) => v.is_new && !v.photo && !v.cleared));
+          assert.ok(volunteers.every((v) => !v.cleared), "no seed volunteer is cleared");
         } finally {
           await rm(runDir, { recursive: true, force: true });
         }
