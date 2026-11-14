@@ -782,6 +782,8 @@ tables the principal may read (`SUBSCRIBED_TABLES`). Each event is reduced to
 re-reads it:
 
 - a `cases` event: the list;
+- a `contact_log` event: the list too, since a new entry moves the case's `lastContactAt` (the
+  Workload's Stalled count) without touching the case row;
 - any event about the open case (its requests, documents, history, reviews): that case;
 - an `assistance_items` event: the assistance list;
 - a `workspaces` event (a change to the workspace row, such as its intake
@@ -789,7 +791,8 @@ re-reads it:
 
 `case_contacts`, `case_materials`, `contact_log` and `contact_log_versions` events carry a case id
 like the other child tables, so they re-read the open case. That is how a contact logged in one
-window shows in another.
+window shows in another. A contact logged in this window re-reads the list as well as the case
+once the write lands; an edit keeps the logged time, so it re-reads only the case.
 
 Connection status (`online`, `reconnecting`, `offline`) comes from the channel and shows in the
 page header. On reconnect, window focus and the browser's `online` event, the
