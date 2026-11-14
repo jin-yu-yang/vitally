@@ -97,5 +97,5 @@
 
 ## 7. Verification
 
-- [ ] 7.1 Locally: `npm test`, `npm run build:hant -- --check` and `npx openspec validate --all`.
-- [ ] 7.2 Push, and run `gh workflow run ci.yml --ref add-posted-updates`. Iterate until the `checks`, `database`, `sign-in` and `story` jobs pass. Review the story screenshots from the artifacts.
+- [x] 7.1 Locally: `npm test`, `npm run build:hant -- --check` and `npx openspec validate --all`.
+- [x] 7.2 Push, and run `gh workflow run ci.yml --ref add-posted-updates`. Iterate until the `checks`, `database`, `sign-in` and `story` jobs pass. Review the story screenshots from the artifacts.
