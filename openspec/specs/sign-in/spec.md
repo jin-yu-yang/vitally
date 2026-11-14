@@ -89,7 +89,10 @@ For a `staff` member, every public RPC that acts on the workspace SHALL act as t
 - `vitally_prepare_account(p_action_id uuid, p_op text, p_target jsonb)`;
 - `vitally_record_account(p_action_id uuid, p_op text, p_target jsonb, p_user_id uuid)`, whose user argument names the auth user being given an account, never the actor;
 - `vitally_deactivate_account(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)` and `vitally_reactivate_account(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)`, whose volunteer argument names the volunteer whose account changes, never the actor;
-- `vitally_client_invitations()`.
+- `vitally_client_invitations()`;
+- `vitally_cancel_invitation(p_action_id uuid, p_target jsonb, p_expected_revision bigint)`, whose target names the volunteer or client whose invitation is cancelled, never the actor;
+- `vitally_expire_invitations()`;
+- `vitally_complete_site_check(p_name text, p_sidn text)`, which acts on the caller's own account.
 
 None of them SHALL take a person parameter. Each SHALL be executable by `authenticated` and by no other client role.
 
@@ -194,7 +197,7 @@ The roster command SHALL never print an email address.
 - **THEN** the workspace's people are exactly its staff members; it has no Alex, Morgan or Sam
 
 ### Requirement: A roster needs staff and a default follow-up person
-A roster SHALL list at least one staff member and SHALL name a `defaultFollowup`. A roster that still has a `presenters` list SHALL be accepted, and the command SHALL print "presenters is no longer used and was ignored; those addresses get no access." It SHALL create no account and no membership for those addresses. A workspace SHALL work for its staff and clients.
+A roster SHALL list at least one staff member and SHALL name a `defaultFollowup`. A roster MAY give the site's SIDN as `siteNumber` (`S` and eight digits; spaces, hyphens and letter case ignored), which the command stores as the workspace's site number for the volunteer site check (capability `sign-in-accounts`); any other value SHALL stop the command with "siteNumber must be the site's SIDN: S followed by eight digits." A roster that still has a `presenters` list SHALL be accepted, and the command SHALL print "presenters is no longer used and was ignored; those addresses get no access." It SHALL create no account and no membership for those addresses. A workspace SHALL work for its staff and clients.
 
 #### Scenario: A staff roster
 - **WHEN** a roster lists staff members and clients and a `defaultFollowup` naming a staff member with `followup`

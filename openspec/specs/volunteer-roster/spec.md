@@ -143,6 +143,7 @@ Edit SHALL open the same drawer filled in with the volunteer's values, and savin
 - The save SHALL change only the certificates the drawer manages. It SHALL NOT delete or change an `uploaded` certificate that it is not sent. Ticking a certificate whose row is `uploaded` SHALL confirm it, by that admin, now, and roles that need it MAY be granted in the same save.
 - A photo ID check that stays ticked SHALL keep its original time.
 - The email of a volunteer who has a sign-in SHALL be read-only in the drawer, and SHALL be refused by the database if changed.
+- Cancel invitation (sign-in-accounts) SHALL remove the sign-in of a volunteer whose invitation was never completed, after which the email SHALL be editable again. An account that was ever active SHALL keep its email locked.
 - A save based on values someone else has since changed SHALL be refused with a conflict, and the drawer SHALL say so.
 
 #### Scenario: Editing fields
@@ -172,6 +173,10 @@ Edit SHALL open the same drawer filled in with the volunteer's values, and savin
 #### Scenario: A volunteer with a sign-in
 - **WHEN** an admin opens Edit for a volunteer who has a sign-in
 - **THEN** the email field is read-only
+
+#### Scenario: After Cancel invitation
+- **WHEN** an admin cancels the invitation of a volunteer who never completed it, and opens Edit
+- **THEN** the email field can be changed, and the save lands
 
 #### Scenario: Changing a locked email anyway
 - **WHEN** a call changes the email of a volunteer who has a sign-in

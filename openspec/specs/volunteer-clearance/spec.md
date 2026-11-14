@@ -63,9 +63,9 @@ A person SHALL NOT be cleared if they have no roster entry for the current seaso
 - **WHEN** a volunteer with no sign-in has Preparer with its certificates and is not marked new
 - **THEN** they are not cleared
 
-#### Scenario: Invited but not signed in
-- **WHEN** a volunteer with Preparer and its certificates has an `invited` account, and then signs in for the first time
-- **THEN** they are not cleared before the sign-in, and are cleared after it
+#### Scenario: Invited but not through the site check
+- **WHEN** a volunteer with Preparer and its certificates has an `invited` account, signs in for the first time, and then passes the site check
+- **THEN** they are not cleared before the site check, including after the sign-in, and are cleared after it
 
 #### Scenario: Deactivated
 - **WHEN** a cleared staff member's account is deactivated

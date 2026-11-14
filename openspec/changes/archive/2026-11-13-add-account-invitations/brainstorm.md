@@ -197,3 +197,24 @@ The user also confirmed working autonomously for this change: smaller calls are 
 13. **(During apply) `vitally_prepare_account` takes the action id, and answers an already-recorded action with its stored result.** Otherwise a retried Create or Invite through the function would be refused ALREADY_INVITED at the check step, and the spec's "a repeated request gets the same answer" would fail end to end. The function then answers `emailSent: false`, so the screen offers Resend instead of claiming a second email. The alternative was to put receipt lookups in the function, which would duplicate the database's receipt logic.
 14. **(During apply) "Signed in before", for Reactivate, means the account's own `activated_at`, not the auth user's last sign-in.** An auth user reused from elsewhere who never signed in under this account reactivates as Invited. The alternative was reading `auth.users.last_sign_in_at`, which counts sign-ins from before this account existed.
 15. **(During apply) The office client list leaves out deactivated client accounts** (only backfilled rows can be deactivated), because the panel shows only Invited and Active.
+
+### Review round (PR #197, 2026-11-14)
+
+The user decided Cancel invitation, the seven-day expiry, the site check, sending safely and the message wording (design.md, "Review round", D10 to D14). These are the smaller calls made without them:
+
+16. **Cancel invitation resets the person's capabilities to none** (`'{}'`), as a Roster-added person starts, and **keeps the auth user**, which then has no account row and is reused by a later Create account or Invite (D5). Deleting the auth user would also end a session the invitee might hold, but needs the service key in the database path.
+17. **Expiry is applied when the account is next looked at, not by a timer.** Every account RPC, the office list, the Roster read (a new admin RPC, `vitally_expire_invitations()`), the site check and the sign-in trigger cancel expired invitations first. An expired invitee was never cleared, so nothing can act as them in between. The alternative, pg_cron, adds an extension to enable on the hosted project.
+18. **The SIDN is stored in `vitally_private.site_numbers`,** unreadable by any API role, and set by the roster command's optional `siteNumber` (S and eight digits; spaces, hyphens and case ignored). A column on `workspaces` would be readable by staff, and so by the invitee before the check.
+19. **A Reactivate that gives `invited` starts a new seven days and a new five attempts.** Otherwise a volunteer reactivated after a week would be cancelled at once.
+20. **A Resend of an expired invitation is refused** (`INVALID_TRANSITION`): it is cancelled first, and the admin creates the account again.
+21. **Each wrong site number bumps the account revision,** so a drawer read before it gets `CONFLICT` on Deactivate or Cancel invitation and re-reads.
+22. **The site check answers writes as results** (`{status:'invited', reason:'WRONG_SITE', attemptsLeft}`, `{status:'cancelled', reason}`), because a raised error would roll back the attempt count or the cancellation.
+23. **A missing name and an unset site number count as no attempt.** Neither says anything about whether the person knows the site.
+24. **`vitally_my_clearance` gains `siteCheck`** (true while the caller's own account is invited). This replaces call 11: a signed-in volunteer can now be invited.
+25. **The "unsaved changes" rule applies to the drawer.** The Invite panel's only field is the email it sends, so its safeguard is the confirmation with that exact email.
+26. **Only Create account and Invite ask for confirmation,** not Resend, which goes to an address already confirmed once.
+27. **The office list's Cancel names the client by email,** as Resend does, with the revision the list read.
+28. **The site check is refused with `FORBIDDEN` to anyone without an invited volunteer account of their own** (a client, a cancelled invitee), and with `INVALID_TRANSITION` once the account is not invited (an active admin).
+29. **The site number in the repository is the fictional `S00000000`:** the roster example, the test fixture and the docs.
+30. **The migration stays 047 and was edited in place for this round.** It had not been applied to any stack yet (CI builds a fresh one); it was applied to the user's local stack only after the round's SQL was final, with a backup taken first.
+

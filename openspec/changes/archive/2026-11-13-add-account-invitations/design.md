@@ -130,13 +130,13 @@ The roster command keeps its own checks.
 - **Roster:**
   - An Account column: "Not created", "Invited", "Active", "Deactivated".
   - The Edit drawer gains an Account section after the season section, with the status and one of:
-    - Create account (no row; the email is required and saved first);
+    - Create account (no row; the email is required and saved first; see D13);
     - Resend (Invited);
     - Deactivate (Invited or Active, with a confirm dialog);
     - Reactivate (Deactivated).
   - Results show in the drawer: "Account created and sign-in code sent", "Account created; the email wasn't sent. Use Resend in a minute.", the refusal sentences, and the open-work sentence through `openWorkMessage`.
   - The drawer re-reads the list after each action.
-  - The email field is read-only once there is a sign-in, as now: `people.user_id` stays set through deactivation.
+  - The email field is read-only once there is a sign-in, as now: `people.user_id` stays set through deactivation. Cancel invitation (D10) is the one way back to an editable email.
 - **Office screen** (Follow-ups, "Office queue"): an "Invite a client" panel, admin-only, with an email field, an Invite button, and the client list from `vitally_client_invitations` (email, status, Resend while Invited).
 - English only (staff screens). No `src/client-text.mjs` change.
 
@@ -148,6 +148,35 @@ The roster command keeps its own checks.
 - `docs/setup.md`: the same steps for a hand-built stack, plus a note that a running stack must be restarted after pulling.
 - Mail catcher: CLI 2.117.0's API (Mailpit `/api/v1/search` or Inbucket `/api/v1/mailbox/<name>`) is confirmed in the first plan task. A small `tests/support/mail-catcher.mjs` reads the code from the newest message to an address. Its URL comes from `supabase status` (`INBUCKET_URL` or `MAILPIT_URL`), written to `.env.test` by `write-test-env.mjs`.
 
+## Review round (PR #197, 2026-11-14)
+
+The user's decisions after the PR review (a reviewer's locked-email finding and the user's own review). They change the agreed behaviour above where they say so; the delta specs as archived show the behaviour before this round, and the canonical specs (`sign-in-accounts`, `volunteer-clearance`, `volunteer-roster`, `sign-in`) were edited in the same PR to match. The calls made without the user are in brainstorm.md, "Decided without the user (review)", 16 to 30.
+
+**Why.** After Create account the email is read-only, Deactivate keeps the link, Create account again says `USE_REACTIVATE`, and Reactivate brings back the same address. A typo, or Create account pressed before the drawer's new email was saved, sent the invitation to the wrong person, and the only way out was a second Roster entry. Worse, if the volunteer already had roles, whoever held that address could sign in and be cleared at once.
+
+### D10: Cancel invitation
+For an account that is `invited` and was never `active` (`activated_at` is null), an admin can cancel from the drawer (target `{volunteerId}`) or the office list (`{email}`): `vitally_cancel_invitation(p_action_id, p_target, p_expected_revision)`, with a receipt and `CONFLICT` for a stale revision. In one transaction it clears `people.user_id`, resets the person's capabilities to none, bumps the profile revision, and deletes the membership (the account row goes with it). The auth user stays and becomes the reusable kind (D5). It is refused with `INVALID_TRANSITION` once the account was ever active. This changes "the email is locked once there is a sign-in" only for invitations never completed.
+
+### D11: Seven-day expiry
+Create account, Invite, Resend and a Reactivate that gives `invited` set `expires_at` seven days on. An invitation past it is cancelled exactly as D10 does. Expiry is applied when the account is next looked at, not by a timer: every account RPC, `vitally_client_invitations`, the Roster read (it first calls the admin RPC `vitally_expire_invitations()`), the site check and the sign-in trigger. Resend now writes: `vitally_record_account` with `p_op='resend'` restarts the seven days and bumps the revision before the function sends the code.
+
+### D12: Site check at a volunteer's first sign-in
+- The sign-in trigger activates only client invitations. A volunteer's `invited` account stays invited, and `vitally_my_clearance` answers `siteCheck: true`, so the window shows "Confirm your site" (name, required, and the site's SIDN).
+- `vitally_complete_site_check(p_name, p_sidn)` acts on the caller's own account. The right SIDN makes the account active and stores the name in `volunteer_profiles.signed_in_name` (admin-only; never on `people`). A wrong one keeps it invited ("That isn't this site's number.") and counts an attempt; the fifth cancels the invitation (D10). Results that write are answers, not errors, since an error would roll the write back.
+- The SIDN lives in `vitally_private.site_numbers`, which no API role can read, set by `vitally_private.set_site_number` through the roster command's optional `siteNumber` (S and eight digits). Season settings will own it later. The repository, seed, tests and screenshots use the fictional `S00000000`.
+- Until the check passes the volunteer is not cleared, so the 045 policies already give them no case data; a database test proves it.
+- The Roster row and drawer show "Signed in as <name>".
+
+### D13: Sending safely
+Create account is disabled, with "Save your changes first.", while the drawer has unsaved changes, so the invitation goes to the saved email. Create account and Invite both ask "Send a sign-in invitation to <email>?" first, and only the confirmation sends.
+
+### D14: Messages
+A replayed Create or Invite says "This invitation was already sent. If it didn't arrive, use Resend.", never that the email was not sent. `ALREADY_INVITED` reads "This person is already invited or signed in.", which fits volunteers and clients.
+
+### Follow-ups opened, not fixed here
+- Cross-workspace email probing through `vitally_prepare_account`: any workspace admin can learn whether an email belongs to staff, a volunteer or a client of another workspace.
+- A reactivated user with an existing session stays Invited until they sign in again.
+
 ## Risks / Trade-offs
 
 - [Risk] A trigger on `auth.users` could fail if the migration role can't create triggers on the auth schema. → Mitigation: Supabase's documented pattern; the migration runs as `postgres`. CI's `database` job proves it.
@@ -155,12 +184,14 @@ The roster command keeps its own checks.
 - [Risk] Other local stacks without the edge runtime fail the new function test after this merges. → Mitigation: setup.md restart note; the test's failure message names the fix. It never silently skips.
 - [Risk] The mail catcher's API differs from the assumption. → Mitigation: the first plan task checks it before anything is built on it.
 - [Trade-off] The invitation reuses the "Your ViTally code" email. → Accepted for now; custom wording is later work.
+- [Trade-off] Expiry waits for the next look (D11) rather than a timer, so an expired row can sit in the table until someone opens the Roster or the office list, or the invitee signs in. → The invitee was never cleared and every reader cancels it first; no pg_cron dependency on the hosted project.
+- [Risk] A workspace with no site number leaves every new volunteer at "This site isn't set up for sign-in yet." → The roster example and docs/setup.md name `siteNumber`; the screen tells the volunteer to ask their site coordinator.
 - [Trade-off] An invited volunteer becomes visible to all staff (`people.user_id` set) and has a four-capability ceiling before being cleared. → They can do nothing until cleared, and assignment pickers list only cleared people.
 - [Risk] Concurrent PRs (#139, #150) may take 046, or modify the sign-in RPC list. → Mitigation: merge `main` before the PR, renumber, and re-run CI. Spec conflicts are surfaced at archive. (Done: renumbered to 047 when #195 took 046.)
 
 ## Migration Plan
 
-- `046_accounts.sql` (renumbered if needed), in one transaction:
+- `047_accounts.sql` (renumbered from 046 when #195 took it), in one transaction:
   1. the table and its constraints and RLS;
   2. the backfill;
   3. the trigger;

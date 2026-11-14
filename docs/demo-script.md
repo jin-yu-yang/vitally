@@ -203,16 +203,23 @@ status output prints as `MAILPIT_URL` (`http://127.0.0.1:54324` with the default
 every email the stack would have sent.
 
 1. **Create account.** On the Roster, open Maya Lindgren, whose Account section says **Status:
-   Not created**, and press **Create account**. The result reads "Account created and sign-in code sent",
-   and the Account column now reads **Invited**. The volunteer's email is a fictional
-   `@example.org` address.
-2. **The code email.** In the mail catcher, open the new message to that address: "Your ViTally
-   code is" followed by six digits. Type the address on the sign-in screen in a second window,
-   then the code. The account turns **Active**, and because Maya has her Preparer role and certificates and is not
+   Not created**, and press **Create account** (it is disabled while the drawer has unsaved
+   changes). Confirm "Send a sign-in invitation to <email>?". The result reads "Account created and
+   sign-in code sent", and the Account column now reads **Invited**. The volunteer's email is a
+   fictional `@example.org` address. A wrong address can be undone with **Cancel invitation**
+   until Maya completes her sign-in; an invitation not completed in seven days is cancelled by
+   itself.
+2. **The code email and the site check.** In the mail catcher, open the new message to that
+   address: "Your ViTally code is" followed by six digits. Type the address on the sign-in screen
+   in a second window, then the code. Maya sees **Confirm your site**: enter a name and the
+   roster file's fictional `siteNumber` (`S00000000`). A wrong number says "That isn't this site's
+   number."; the fifth cancels the invitation. The account turns **Active**, the Roster shows
+   "Signed in as" the name, and because Maya has her Preparer role and certificates and is not
    new, she is now **Cleared** and lands on the staff screen.
    (The sign-in screen also sends a code of its own; use the newest one.)
 3. **Invite a client.** On the office screen, under **Invite a client**, type a fictional client
-   address and press **Invite**. The list shows it as **Invited**, with **Resend** while it is.
+   address, press **Invite** and confirm. The list shows it as **Invited**, with **Resend** and
+   **Cancel** while it is. A client has no site check.
    The client signs in with the emailed code and sees **My applications**; the list then shows
    **Active**. If the email didn't go out, the notice says to use Resend in a minute.
 4. **Deactivate and Reactivate.** In Maya's drawer, press **Deactivate** and confirm: her open window loses
