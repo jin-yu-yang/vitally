@@ -447,6 +447,14 @@ export function createStore(client) {
       // has no access, and nothing about the workspace is revealed.
       if (!user) throw createAppError({ code: "VT001" });
       const row = await membership();
+      // A client's first read makes an invitation they never signed in for
+      // active (migration 047): a client re-invited while their session was
+      // open never signs in again. An expired, unused one is cancelled
+      // instead, and that is no access.
+      if (row.access === "applicant") {
+        const claimed = await call("vitally_activate_client_account", {});
+        if (claimed?.status === "cancelled") throw createAppError({ code: "VT001" });
+      }
       // A staff member is one person of the roster, linked through their
       // account; the screens act as, and show, that person.
       let person = null;

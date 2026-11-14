@@ -218,3 +218,12 @@ The user decided Cancel invitation, the seven-day expiry, the site check, sendin
 29. **The site number in the repository is the fictional `S00000000`:** the roster example, the test fixture and the docs.
 30. **The migration stays 047 and was edited in place for this round.** It had not been applied to any stack yet (CI builds a fresh one); it was applied to the user's local stack only after the round's SQL was final, with a backup taken first.
 
+### Decided without the user (review round 2)
+
+31. **The first read is a new public RPC, `vitally_activate_client_account()`.** PostgREST runs every table read in a read-only transaction, so a read cannot activate anything. The browser calls the RPC in `getPrincipal` for a client only, right after the membership read. Its answer is a result, never an error, so a cancellation it makes is kept.
+32. **The first action is a `before insert` trigger on the six tables that refer to a membership,** not a change to each client RPC. That catches every path that writes such a row. `before` means it waits on the account row before the insert takes its foreign-key lock on the membership, so a concurrent sweep cannot deadlock with it.
+33. **An action activates even an expired invitation; the first read cancels an expired, unused one.** An action can only come from a window that already passed the first read, so its membership is in use. The first read after expiry matches what a sign-in after expiry does: the invitation is cancelled.
+34. **The sweep leaves an in-use invitation `invited` instead of activating it.** The user's rule was to leave it alone. With D15.1, such a row can only come from before this fix or from a path the triggers do not cover, and the client's next read activates it.
+35. **A sign-in whose sweep could not cancel a client's expired invitation still activates it,** as every client sign-in does. Deferred constraints (038's staff-member check, the person link) are checked at commit, so the subtransaction cannot catch them. Cancelling a client invitation touches neither.
+36. **047 was edited in place again** for the `service_role` grant and for D15, because the PR is unmerged. The user's local stack had the earlier 047 with a backup taken first. The grant was revoked there by hand, and the D15 functions and triggers are not on that stack until it is restored and migrated again.
+

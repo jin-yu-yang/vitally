@@ -43,7 +43,7 @@ const POLICIES = Object.freeze([
   ["volunteer_profiles", "admin_volunteer_profiles"],
   ["workspaces", "member_workspace"],
 ]);
-// The sixteen public RPCs after 047, by name and identity arguments.
+// The seventeen public RPCs after 047, by name and identity arguments.
 const RPCS = Object.freeze([
   "vitally_apply_action(p_action_id uuid, p_case_id uuid, p_expected_revision bigint, p_type text, p_payload jsonb)",
   "vitally_assistance_action(p_action_id uuid, p_item_id uuid, p_expected_revision bigint, p_type text, p_note text)",
@@ -61,12 +61,14 @@ const RPCS = Object.freeze([
   "vitally_cancel_invitation(p_action_id uuid, p_target jsonb, p_expected_revision bigint)",
   "vitally_expire_invitations()",
   "vitally_complete_site_check(p_name text, p_sidn text)",
+  "vitally_activate_client_account()",
 ]);
 // The public RPCs that only read: no action id, no digest.
 // The RPCs that take no action id and store no digest: the reads, and (047,
-// design D11, D12) the expiry sweep and the caller's own site check, whose
-// repeat is harmless or judged afresh.
+// design D11, D12, D15) the expiry sweep, the caller's own site check and a
+// client's first-read activation, whose repeat is harmless or judged afresh.
 const READ_ONLY_RPCS = Object.freeze([
+  "vitally_activate_client_account",
   "vitally_client_invitations",
   "vitally_complete_site_check",
   "vitally_expire_invitations",
@@ -166,7 +168,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
     });
 
-    await t.test("the public API is exactly sixteen RPCs", async () => {
+    await t.test("the public API is exactly seventeen RPCs", async () => {
       const { rows } = await sql(
         `select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as signature
            from pg_proc p where p.pronamespace='public'::regnamespace`,

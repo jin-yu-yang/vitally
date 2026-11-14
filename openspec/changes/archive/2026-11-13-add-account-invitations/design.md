@@ -175,8 +175,26 @@ Create account is disabled, with "Save your changes first.", while the drawer ha
 A replayed Create or Invite says "This invitation was already sent. If it didn't arrive, use Resend.", never that the email was not sent. `ALREADY_INVITED` reads "This person is already invited or signed in.", which fits volunteers and clients.
 
 ### Follow-ups opened, not fixed here
-- Cross-workspace email probing through `vitally_prepare_account`: any workspace admin can learn whether an email belongs to staff, a volunteer or a client of another workspace.
-- A reactivated user with an existing session stays Invited until they sign in again.
+- Cross-workspace email probing through `vitally_prepare_account`: any workspace admin can learn whether an email belongs to staff, a volunteer or a client of another workspace (#198).
+- A reactivated user with an existing session stays Invited until they sign in again (#199). Its client half is fixed by D15, and the site check already covers the volunteer half, so #199 is closed by this PR.
+
+## Review round 2 (PR #197, 2026-11-14)
+
+The user's decisions after a reviewer found a blocker in the round above. The calls made without the user are in brainstorm.md, 31 to 36.
+
+**Why.** A client whose invitation expired and was cancelled kept their auth user and could still get a code, so they signed in and saw no access. An admin then invited them again, and the client just reloaded the tab. No new sign-in meant the sign-in trigger never fired, so the account stayed `invited` while the membership was active and in use: they started a case. Seven days later `expire_invitations` called `cancel_invitation`, and deleting the membership failed on `cases.owner_user_id`'s foreign key. Expiry runs first in every account RPC, the Roster read and the office list, so all of them failed for the whole workspace.
+
+### D15: A client is active at first use, and expiry never breaks a read
+1. **A client's account becomes active the first time they act as a member,** not only at sign-in:
+   - **The first read:** once the browser finds a client's membership, before it reads anything else, it calls `vitally_activate_client_account()`. That makes the caller's own `invited` client account `active`. If the invitation is past its seven days and the membership is not in use, it cancels the invitation instead, as expiry would, and the window shows no access. An account that is not `invited` answers its status with no lock and no write.
+   - **The first action:** a `before insert` trigger on the six tables with a foreign key to `memberships` (`cases`, `case_events`, `documents`, `contact_attempts`, `contact_log`, `contact_log_versions`) makes an `invited` client account `active` when the new row names that client's membership.
+   - A volunteer's account is never activated by use; only the site check activates it.
+   - This also fixes the client half of #199.
+2. **Expiry never cancels an invitation whose membership is in use.** `membership_in_use` checks the same six foreign keys. The sweep leaves such a row as it is, and Cancel invitation refuses it with `INVALID_TRANSITION` and the reason `IN_USE`.
+3. **Expiry can never break a read path.**
+   - Each cancellation in the sweep runs in its own subtransaction. If one fails anyway, it is undone, logged with `raise warning` (user, workspace, SQLSTATE and message), counted, and skipped.
+   - `vitally_expire_invitations()` answers `{cancelled, inUse, failed}`.
+   - The Roster, the office list, the account RPCs and the sign-in keep working.
 
 ## Risks / Trade-offs
 

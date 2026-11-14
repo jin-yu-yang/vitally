@@ -1937,7 +1937,18 @@ test("a staff principal carries the clearance from vitally_my_clearance; an appl
   const applicant = fakeClient({ access: "applicant" });
   const principal = await createStore(applicant).getPrincipal();
   assert.equal(Object.hasOwn(principal, "clearance"), false);
-  assert.deepEqual(applicant.rpcCalls, []);
+  assert.deepEqual(applicant.rpcCalls, [{ name: "vitally_activate_client_account", args: {} }]);
+});
+
+test("a client's principal makes their invitation active; a cancelled one is no access", async () => {
+  const active = fakeClient({ access: "applicant", rpc: async () => ({ data: { status: "active" }, error: null }) });
+  assert.equal((await createStore(active).getPrincipal()).access, "applicant");
+  assert.deepEqual(active.rpcCalls, [{ name: "vitally_activate_client_account", args: {} }]);
+  const cancelled = fakeClient({ access: "applicant", rpc: async () => ({ data: { status: "cancelled" }, error: null }) });
+  await assert.rejects(() => createStore(cancelled).getPrincipal(), { code: "FORBIDDEN" });
+  const staff = fakeClient({ access: "staff", rows: { people: [STAFF_PERSON] }, rpc: async () => ({ data: { cleared: false }, error: null }) });
+  await createStore(staff).getPrincipal();
+  assert.ok(!staff.rpcCalls.some((call) => call.name === "vitally_activate_client_account"), "staff never call it");
 });
 
 test("an error from vitally_my_clearance surfaces from getPrincipal", async () => {

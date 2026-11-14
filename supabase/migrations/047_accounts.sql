@@ -560,7 +560,25 @@ revoke all on function vitally_private.reactivate_account(uuid,uuid) from public
 -- The auth user stays: with no account row it is the reusable kind (design
 -- D5), so a later Create account or Invite for the email links it again, and
 -- its sign-in code reaches nothing meanwhile. Refused (INVALID_TRANSITION)
--- unless the account is invited and was never activated.
+-- unless the account is invited and was never activated, and (detail IN_USE)
+-- when the membership is in use after all (membership_in_use, below).
+--
+-- In use: a row other than the person's link and the account refers to the
+-- membership; every foreign key to memberships is named here. A client
+-- re-invited while their session was still open could act before their
+-- account became active; such a membership cannot be deleted, and is not an
+-- unclaimed invitation (review round 2, design D15).
+create function vitally_private.membership_in_use(p_workspace_id uuid,p_user_id uuid)
+returns boolean language sql stable security definer set search_path='' as $$
+ select exists(select 1 from public.cases where workspace_id=p_workspace_id and owner_user_id=p_user_id)
+  or exists(select 1 from public.case_events where workspace_id=p_workspace_id and actor_user_id=p_user_id)
+  or exists(select 1 from public.documents where workspace_id=p_workspace_id and submitted_by_user_id=p_user_id)
+  or exists(select 1 from public.contact_attempts where workspace_id=p_workspace_id and actor_user_id=p_user_id)
+  or exists(select 1 from public.contact_log where workspace_id=p_workspace_id and logged_by_user_id=p_user_id)
+  or exists(select 1 from public.contact_log_versions where workspace_id=p_workspace_id and edited_by_user_id=p_user_id);
+$$;
+revoke all on function vitally_private.membership_in_use(uuid,uuid) from public,anon,authenticated,service_role;
+
 create function vitally_private.cancel_invitation(p_workspace_id uuid,p_user_id uuid)
 returns void language plpgsql security definer set search_path='' as $$
 declare v_account public.accounts;
@@ -572,6 +590,9 @@ begin
  end if;
  if v_account.status<>'invited' or v_account.activated_at is not null then
   raise sqlstate 'VT004' using message='INVALID_TRANSITION';
+ end if;
+ if vitally_private.membership_in_use(p_workspace_id,p_user_id) then
+  raise sqlstate 'VT004' using message='INVALID_TRANSITION',detail='IN_USE';
  end if;
  if v_account.person_id is not null then
   -- First the link: people(workspace_id,user_id) refers to the membership.
@@ -586,29 +607,98 @@ end;
 $$;
 revoke all on function vitally_private.cancel_invitation(uuid,uuid) from public,anon,authenticated,service_role;
 
--- Every invitation of the workspace past its expiry, cancelled; returns how
--- many. Expiry is applied when it is next looked at, not by a timer (brainstorm,
--- "Decided without the user" 17): every account RPC, the office list, the
--- Roster's read and the first sign-in call this first, and an expired invitee
--- was never cleared, so nothing could act as them in between. A caller that
--- then refuses (a Resend of the expired invitation, say) rolls the
--- cancellation back with everything else; the next reader that commits applies
--- it again, and until then every reader treats the row as gone.
+-- Every invitation of the workspace past its expiry, cancelled. Expiry is
+-- applied when it is next looked at, not by a timer (brainstorm, "Decided
+-- without the user" 17): every account RPC, the office list, the Roster's read
+-- and the first sign-in call this first, and an expired invitee was never
+-- cleared, so nothing could act as them in between. A caller that then
+-- refuses (a Resend of the expired invitation, say) rolls the cancellation
+-- back with everything else; the next reader that commits applies it again,
+-- and until then every reader treats the row as gone.
+--
+-- It never breaks its caller (review round 2, design D15), since the Roster,
+-- the office list, the account RPCs and the sign-in all run it first:
+--   - an invitation whose membership is in use is left as it is (inUse);
+--   - a cancellation that fails anyway is undone on its own, logged as a
+--     warning and counted (failed), and the sweep goes on.
+-- Answers {cancelled, inUse, failed}.
 create function vitally_private.expire_invitations(p_workspace_id uuid)
-returns integer language plpgsql security definer set search_path='' as $$
+returns jsonb language plpgsql security definer set search_path='' as $$
 declare v_user uuid;
- v_count integer=0;
+ v_cancelled integer=0;
+ v_in_use integer=0;
+ v_failed integer=0;
+ v_state text;
+ v_message text;
 begin
  for v_user in select a.user_id from public.accounts a
   where a.workspace_id=p_workspace_id and a.status='invited' and a.activated_at is null and a.expires_at<now()
   order by a.user_id for update loop
-  perform vitally_private.cancel_invitation(p_workspace_id,v_user);
-  v_count=v_count+1;
+  if vitally_private.membership_in_use(p_workspace_id,v_user) then
+   v_in_use=v_in_use+1;
+   continue;
+  end if;
+  begin
+   perform vitally_private.cancel_invitation(p_workspace_id,v_user);
+   v_cancelled=v_cancelled+1;
+  exception when others then
+   get stacked diagnostics v_state=returned_sqlstate,v_message=message_text;
+   raise warning 'expire_invitations: invitation of user % in workspace % not cancelled (%: %)',
+    v_user,p_workspace_id,v_state,v_message;
+   v_failed=v_failed+1;
+  end;
  end loop;
- return v_count;
+ return jsonb_build_object('cancelled',v_cancelled,'inUse',v_in_use,'failed',v_failed);
 end;
 $$;
 revoke all on function vitally_private.expire_invitations(uuid) from public,anon,authenticated,service_role;
+
+-- A client's account becomes active the first time they act as a member, not
+-- only at sign-in (review round 2, design D15). A client re-invited while
+-- their session was open never signs in again, so the sign-in trigger (§3)
+-- never fires for them. Their first read calls vitally_activate_client_account
+-- (§9); any row that refers to their membership, inserted by any path,
+-- activates it here first. A volunteer's account is never activated here:
+-- only the site check does that. The row lock on the account orders this
+-- against a sweep that is cancelling it; once the sweep commits, nothing is
+-- left to activate and the insert's own foreign key refuses it.
+create function vitally_private.activate_client_account(p_workspace_id uuid,p_user_id uuid)
+returns boolean language plpgsql security definer set search_path='' as $$
+begin
+ update public.accounts set status='active',activated_at=now(),expires_at=null,
+   revision=revision+1,updated_at=now()
+  where workspace_id=p_workspace_id and user_id=p_user_id and status='invited' and person_id is null;
+ return found;
+end;
+$$;
+revoke all on function vitally_private.activate_client_account(uuid,uuid) from public,anon,authenticated,service_role;
+
+-- tg_argv[0] names the column that refers to the membership's user.
+create function vitally_private.client_account_used()
+returns trigger language plpgsql security definer set search_path='' as $$
+declare v_user uuid=(pg_catalog.to_jsonb(new)->>tg_argv[0])::uuid;
+begin
+ if v_user is not null and exists(select 1 from public.accounts a
+  where a.workspace_id=new.workspace_id and a.user_id=v_user and a.status='invited' and a.person_id is null) then
+  perform vitally_private.activate_client_account(new.workspace_id,v_user);
+ end if;
+ return new;
+end;
+$$;
+revoke all on function vitally_private.client_account_used() from public,anon,authenticated,service_role;
+
+create trigger vitally_client_account_used before insert on public.cases
+ for each row execute function vitally_private.client_account_used('owner_user_id');
+create trigger vitally_client_account_used before insert on public.case_events
+ for each row execute function vitally_private.client_account_used('actor_user_id');
+create trigger vitally_client_account_used before insert on public.documents
+ for each row execute function vitally_private.client_account_used('submitted_by_user_id');
+create trigger vitally_client_account_used before insert on public.contact_attempts
+ for each row execute function vitally_private.client_account_used('actor_user_id');
+create trigger vitally_client_account_used before insert on public.contact_log
+ for each row execute function vitally_private.client_account_used('logged_by_user_id');
+create trigger vitally_client_account_used before insert on public.contact_log_versions
+ for each row execute function vitally_private.client_account_used('edited_by_user_id');
 
 -- ---------------------------------------------------------------------------
 -- §8. The public RPCs (design D3). Each resolves the caller as
@@ -954,7 +1044,7 @@ revoke all on function public.vitally_cancel_invitation(uuid,jsonb,bigint) from 
 grant execute on function public.vitally_cancel_invitation(uuid,jsonb,bigint) to authenticated;
 
 -- The Roster's read calls this first (design D11): the workspace's expired
--- invitations, cancelled. Answers {cancelled: <how many>}.
+-- invitations, cancelled. Answers the sweep's {cancelled, inUse, failed}.
 create function public.vitally_expire_invitations()
 returns jsonb language plpgsql security definer set search_path='' as $$
 declare v_member public.memberships;
@@ -966,11 +1056,51 @@ begin
   raise sqlstate 'VT001' using message='FORBIDDEN';
  end if;
  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_member.workspace_id::text,0));
- return jsonb_build_object('cancelled',vitally_private.expire_invitations(v_member.workspace_id));
+ return vitally_private.expire_invitations(v_member.workspace_id);
 end;
 $$;
 revoke all on function public.vitally_expire_invitations() from public,anon,authenticated,service_role;
 grant execute on function public.vitally_expire_invitations() to authenticated;
+
+-- A client's first read (review round 2, design D15): the window calls this
+-- once it finds the client's membership, before it reads anything else. The
+-- caller is a client with an active membership (FORBIDDEN for staff). Their
+-- invitation, if it is still one:
+--   - past its expiry and unused: cancelled, as the sweep would,
+--     {status:'cancelled'}, so the window shows no access;
+--   - otherwise: active, {status:'active'}.
+-- An account that is not invited answers its status without the lock or a write.
+create function public.vitally_activate_client_account()
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_account public.accounts;
+begin
+ v_member=vitally_private.require_membership();
+ if v_member.access<>'applicant' then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ select * into v_account from public.accounts
+  where workspace_id=v_member.workspace_id and user_id=v_member.user_id;
+ if not found or v_account.status<>'invited' then
+  return jsonb_build_object('status',coalesce(v_account.status,'active'));
+ end if;
+ perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_member.workspace_id::text,0));
+ select * into v_account from public.accounts
+  where workspace_id=v_member.workspace_id and user_id=v_member.user_id for update;
+ if not found then
+  return jsonb_build_object('status','cancelled');
+ end if;
+ if v_account.status='invited' and v_account.activated_at is null and v_account.expires_at<now()
+  and not vitally_private.membership_in_use(v_member.workspace_id,v_member.user_id) then
+  perform vitally_private.cancel_invitation(v_member.workspace_id,v_member.user_id);
+  return jsonb_build_object('status','cancelled');
+ end if;
+ perform vitally_private.activate_client_account(v_member.workspace_id,v_member.user_id);
+ return jsonb_build_object('status',case when v_account.status='invited' then 'active' else v_account.status end);
+end;
+$$;
+revoke all on function public.vitally_activate_client_account() from public,anon,authenticated,service_role;
+grant execute on function public.vitally_activate_client_account() to authenticated;
 
 -- The site check (design D12): a volunteer at their first sign-in gives their
 -- name and the site's number. The caller is the signed-in volunteer whose

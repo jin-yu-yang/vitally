@@ -59,13 +59,19 @@ Every staff member and client created by the roster command SHALL get an `active
 - **WHEN** the same roster runs again
 - **THEN** each membership still has exactly one account
 
-### Requirement: A client's account becomes active at first sign-in, a volunteer's after the site check
+### Requirement: A client's account becomes active at first sign-in or first use, a volunteer's after the site check
 When a user signs in, before the session's first request reaches the database:
 - every `invited` account of that user past its `expires_at` SHALL be cancelled, as Cancel invitation does;
 - every other `invited` client account of that user SHALL become `active`, with `activated_at` set to that time, `expires_at` cleared and its revision increased;
 - an `invited` volunteer account SHALL stay `invited` until the volunteer passes the site check.
 
 `deactivated` accounts SHALL NOT change on sign-in.
+
+A client who already holds a session when they are invited (or reactivated) does not sign in again, so a client's `invited` account SHALL also become `active` the first time they act as a member:
+- **their first read:** once the window finds the client's membership, and before it reads anything else, it SHALL call `vitally_activate_client_account()`. That RPC SHALL make the caller's own `invited` client account `active`, unless the invitation is past its seven days and its membership is not in use, in which case it SHALL cancel it, as expiry does, and the window SHALL show no access;
+- **their first action:** any row written that refers to the client's membership (a case they own, a case event, document or contact entry they made) SHALL first make that client's `invited` account `active`.
+
+A volunteer's account SHALL NOT become `active` by use; only the site check makes it `active`.
 
 #### Scenario: A client's first sign-in
 - **WHEN** an invited client signs in with their emailed code
@@ -82,6 +88,14 @@ When a user signs in, before the session's first request reaches the database:
 #### Scenario: An expired invitation signs in
 - **WHEN** a client whose invitation is past its seven days signs in with a code
 - **THEN** the invitation is cancelled, and the client has no access
+
+#### Scenario: Re-invited client who never signed in again
+- **WHEN** a client whose invitation was cancelled still holds a session, an admin invites them again, and the client reloads the window without signing in
+- **THEN** their account becomes `active` at that first read, and a case they start keeps it `active`
+
+#### Scenario: A client acts before their first read
+- **WHEN** a row referring to an invited client's membership is written, such as a case they start
+- **THEN** their account becomes `active` first
 
 ### Requirement: A volunteer confirms the site at first sign-in
 A signed-in volunteer whose account is `invited` SHALL see "Confirm your site" instead of the setup screen or the work, and SHALL enter their name (required, at most 80 characters) and the site's SIDN. Client invitations SHALL have no site check.
@@ -287,7 +301,7 @@ A Reactivate that gives `invited` SHALL start a new seven days and a new five si
 - **THEN** the second is refused with `CONFLICT`
 
 ### Requirement: An admin can cancel an invitation that was never completed
-The drawer SHALL offer Cancel invitation, after a confirmation, for a volunteer whose account is `invited` and was never `active`; the office panel SHALL offer Cancel for such a client. It SHALL be a database RPC that takes an action id, the target (the volunteer, or the client's email) and the account revision the window read. It SHALL refuse a stale revision with `CONFLICT`, and an account that is not `invited`, or was ever `active`, with `INVALID_TRANSITION`. It SHALL store a receipt, and a replay SHALL return it.
+The drawer SHALL offer Cancel invitation, after a confirmation, for a volunteer whose account is `invited` and was never `active`; the office panel SHALL offer Cancel for such a client. It SHALL be a database RPC that takes an action id, the target (the volunteer, or the client's email) and the account revision the window read. It SHALL refuse a stale revision with `CONFLICT`, an account that is not `invited`, or was ever `active`, with `INVALID_TRANSITION`, and a membership that is in use (anything other than the person's link and the account refers to it) with `INVALID_TRANSITION` and the reason `IN_USE`. It SHALL store a receipt, and a replay SHALL return it.
 
 In one transaction, Cancel invitation SHALL:
 - delete the account row and the membership;
@@ -315,6 +329,11 @@ A cancelled invitee's sign-in code SHALL give no access. The window SHALL say "I
 ### Requirement: An invitation not completed in seven days is cancelled
 An `invited` account that was never `active` and is past its `expires_at` SHALL be cancelled with the same effect as Cancel invitation. Expiry SHALL be applied whenever the account is next looked at: by every account RPC, the office panel's list, the Roster's read (through an admin RPC that cancels the workspace's expired invitations), the site check and the person's sign-in. An expired invitee SHALL never have been cleared, so nothing SHALL be able to act as them before the cancellation is applied.
 
+Expiry SHALL never break the read or action that applies it:
+- an invitation whose membership is in use (anything other than the person's link and the account refers to it) SHALL NOT be cancelled; it SHALL be left as it is;
+- a cancellation that fails anyway SHALL be undone on its own, logged as a database warning and skipped, and the rest SHALL go on;
+- the admin RPC SHALL answer how many invitations it cancelled, left in use and failed to cancel: `{cancelled, inUse, failed}`.
+
 #### Scenario: Seven days pass
 - **WHEN** a volunteer's invitation is past its seven days and an admin opens the Roster
 - **THEN** the invitation is cancelled, and the Roster shows "Not created"
@@ -322,6 +341,14 @@ An `invited` account that was never `active` and is past its `expires_at` SHALL 
 #### Scenario: Creating the account again
 - **WHEN** an admin presses Create account for that volunteer
 - **THEN** it is not refused as already invited, and the old auth user is reused
+
+#### Scenario: An expired invitation already in use
+- **WHEN** a client's invitation is past its seven days, but they own a case, and an admin opens the Roster or the office panel
+- **THEN** the invitation is left as it is, the client keeps their access, and the Roster and the office panel load
+
+#### Scenario: A cancellation fails
+- **WHEN** cancelling an expired invitation fails for a reason the database did not foresee
+- **THEN** that invitation is skipped and logged, the others are cancelled, and the Roster, the office panel, the account RPCs and the sign-in keep working
 
 ### Requirement: The Roster shows each volunteer's account
 Each Roster row SHALL show an Account column with "Not created", "Invited", "Active" or "Deactivated", and, once the volunteer has passed the site check, "Signed in as <name>" with the name they entered. The drawer's Account section SHALL show the same line.

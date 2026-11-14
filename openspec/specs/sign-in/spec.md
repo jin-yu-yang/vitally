@@ -92,7 +92,8 @@ For a `staff` member, every public RPC that acts on the workspace SHALL act as t
 - `vitally_client_invitations()`;
 - `vitally_cancel_invitation(p_action_id uuid, p_target jsonb, p_expected_revision bigint)`, whose target names the volunteer or client whose invitation is cancelled, never the actor;
 - `vitally_expire_invitations()`;
-- `vitally_complete_site_check(p_name text, p_sidn text)`, which acts on the caller's own account.
+- `vitally_complete_site_check(p_name text, p_sidn text)`, which acts on the caller's own account;
+- `vitally_activate_client_account()`, which acts on a client caller's own account.
 
 None of them SHALL take a person parameter. Each SHALL be executable by `authenticated` and by no other client role.
 

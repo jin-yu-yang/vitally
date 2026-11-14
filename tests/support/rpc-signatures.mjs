@@ -221,7 +221,7 @@ export const RPC_SIGNATURES = Object.freeze([
     name: "vitally_expire_invitations",
     signature: "vitally_expire_invitations()",
     authorized: (f) => f.siteCoordinator,
-    receiptKeys: Object.freeze(["cancelled"]),
+    receiptKeys: Object.freeze(["cancelled", "failed", "inUse"]),
     args: () => ({}),
   }),
   // The site check (design D12): only a volunteer whose account is invited may
@@ -255,6 +255,15 @@ export const RPC_SIGNATURES = Object.freeze([
       return {};
     },
     args: () => ({ p_name: "Sample Volunteer", p_sidn: "S99999999" }),
+  }),
+  // A client's first read (review round 2, design D15): the fixture's client,
+  // whose account is already active, answers its status.
+  Object.freeze({
+    name: "vitally_activate_client_account",
+    signature: "vitally_activate_client_account()",
+    authorized: (f) => f.applicantA,
+    receiptKeys: Object.freeze(["status"]),
+    args: () => ({}),
   }),
 ]);
 

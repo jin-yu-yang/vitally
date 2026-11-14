@@ -16,7 +16,7 @@ What changed in this round is in design.md, "Review round" (D10 to D14), with th
 
 Checks run, and why:
 - **Local:** `npm test` (1794 pass; the one failure is the Windows-only "mode 600" test in `tests/write-test-env.test.mjs`, which fails on `main` too and passes on CI), `npm run build:hant -- --check` (no client text changed), `npx openspec validate --all` (16 items, all valid).
-- **Local, on a stack that already has main's migrations and data** (CLAUDE.md, for a migration that changes existing rows): the user's stack held 001 to 045 with 61 memberships (46 staff, 15 clients), 75 people and 28 cases. A `pg_dump` backup was taken first (`C:\Users\hezal\vitally-stacks\backups\before-046-047-2026-11-14.dump`), and the stack was restarted with the edge runtime and the `accounts` function, without `--no-backup`, so its data was kept. Then:
+- **Local, on a stack that already has main's migrations and data** (CLAUDE.md, for a migration that changes existing rows): the user's stack held 001 to 045 with 61 memberships (46 staff, 15 clients), 75 people and 28 cases. A `pg_dump` backup was taken first (kept outside the repository), and the stack was restarted with the edge runtime and the `accounts` function, without `--no-backup`, so its data was kept. Then:
   - `npm run db:migrate:test` applied `046_volunteer_workload.sql` and `047_accounts.sql`;
   - the backfill gave all 61 memberships an `active` account: every staff account names its person, every client account names none, and no membership was left without one;
   - `npm run test:database`: **627 tests, 627 pass, 0 fail, 0 skipped**, on `5750312`. The commits after it change only `tests/auth-browser.mjs`.

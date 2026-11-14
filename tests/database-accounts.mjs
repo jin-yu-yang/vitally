@@ -1036,7 +1036,7 @@ test("sign-in accounts against real Supabase", async (t) => {
       assert.equal(await membershipOf(volunteer.userId), undefined);
       assert.equal((await one(f, "select user_id from public.people where id=$1", [volunteer.personId])).user_id, null);
       assert.equal(await accountOf(f, client.userId), undefined);
-      assert.deepEqual(await rpc(admin, "vitally_expire_invitations"), { cancelled: 0 }, "nothing left");
+      assert.deepEqual(await rpc(admin, "vitally_expire_invitations"), { cancelled: 0, inUse: 0, failed: 0 }, "nothing left");
       await refusedWith(f.preparer, "vitally_expire_invitations", undefined, FORBIDDEN);
       // Not yet expired, or active: left alone.
       const fresher = await invitedVolunteer();
@@ -1074,6 +1074,126 @@ test("sign-in accounts against real Supabase", async (t) => {
       assert.equal(again.error, null);
       assert.equal(await accountOfPerson(lateVolunteer.personId), undefined, "a volunteer's too");
       assert.equal((await one(f, "select user_id from public.people where id=$1", [lateVolunteer.personId])).user_id, null);
+    });
+
+    // ---- Review round 2 (design D15): a client re-invited with an open session
+
+    // Zeye's case: a cancelled client still holds a session, an admin invites
+    // them again, and they reload instead of signing in, so the sign-in trigger
+    // never fires. f.provision() signs the user in before the invitation, as
+    // that open session did.
+    await t.test("re-invited client who never signed in again", async (tt) => {
+      const invite = async () => {
+        const client = await f.provision();
+        await rpc(admin, "vitally_record_account", recordArgs("invite", { email: client.email }, client.userId));
+        assert.equal((await accountOf(f, client.userId)).status, "invited");
+        return client;
+      };
+      await tt.test("their first read makes the account active", async () => {
+        const client = await invite();
+        const invited = await accountOf(f, client.userId);
+        assert.deepEqual(await rpc(client.client, "vitally_activate_client_account"), { status: "active" });
+        const after = await accountOf(f, client.userId);
+        assert.equal(after.status, "active");
+        assert.ok(after.activated_at, "activated_at");
+        assert.equal(after.expires_at, null, "no expiry once active");
+        assert.equal(after.revision, invited.revision + 1);
+        // Again: nothing more changes.
+        assert.deepEqual(await rpc(client.client, "vitally_activate_client_account"), { status: "active" });
+        assert.equal((await accountOf(f, client.userId)).revision, after.revision);
+        // Staff never call it.
+        await refusedWith(f.preparer, "vitally_activate_client_account", undefined, FORBIDDEN);
+      });
+      await tt.test("their first action makes the account active", async () => {
+        const client = await invite();
+        await f.createCase(client.client, randomUUID());
+        const after = await accountOf(f, client.userId);
+        assert.equal(after.status, "active");
+        assert.equal(after.expires_at, null);
+        // A volunteer's invited account is never activated by use.
+        const volunteer = await invitedVolunteer();
+        await f.sql("select vitally_private.activate_client_account($1,$2)", [f.workspaceId, volunteer.userId]);
+        assert.equal((await accountOfPerson(volunteer.personId)).status, "invited");
+      });
+      await tt.test("expiry leaves an invitation whose membership is in use alone", async () => {
+        const client = await invite();
+        await f.createCase(client.client, randomUUID());
+        // As it stood before this fix: still invited, now past its expiry.
+        await f.sql(
+          `update public.accounts set status='invited',activated_at=null,expires_at=now()-interval '1 minute'
+            where workspace_id=$1 and user_id=$2`,
+          [f.workspaceId, client.userId],
+        );
+        const swept = await rpc(admin, "vitally_expire_invitations");
+        assert.ok(swept.inUse >= 1, `inUse ${swept.inUse}`);
+        assert.equal(swept.failed, 0);
+        assert.equal((await accountOf(f, client.userId)).status, "invited", "left alone");
+        assert.deepEqual(await membershipOf(client.userId), { access: "applicant", active: true });
+        assert.equal((await readable(client.client, "cases")).length, 1, "the client still reads their case");
+        // The office list and an account RPC still work.
+        await rpc(admin, "vitally_client_invitations");
+        await rpc(admin, "vitally_prepare_account", prepare("invite", { email: fresh() }));
+        // Cancel invitation is refused for it.
+        const revision = (await accountOf(f, client.userId)).revision;
+        await refusedWith(admin, "vitally_cancel_invitation", cancelArgs({ email: client.email }, revision), INVALID_TRANSITION, "IN_USE");
+        // Their next read makes it active.
+        assert.deepEqual(await rpc(client.client, "vitally_activate_client_account"), { status: "active" });
+        assert.equal((await accountOf(f, client.userId)).status, "active");
+      });
+      await tt.test("an expired, unused invitation is cancelled at the first read", async () => {
+        const client = await invite();
+        await expire(client.userId);
+        assert.deepEqual(await rpc(client.client, "vitally_activate_client_account"), { status: "cancelled" });
+        assert.equal(await accountOf(f, client.userId), undefined);
+        assert.deepEqual(await readable(client.client, "memberships"), []);
+      });
+    });
+
+    // A cancellation that fails for a reason nothing foresaw: a test-only table
+    // whose foreign key to memberships membership_in_use does not know about.
+    await t.test("a cancellation that fails does not break the Roster read", async () => {
+      const invitedExpired = async () => {
+        const client = await f.provision();
+        await rpc(admin, "vitally_record_account", recordArgs("invite", { email: client.email }, client.userId));
+        await expire(client.userId);
+        return client;
+      };
+      const client = await invitedExpired();
+      const signer = await invitedExpired();
+      const schema = `test_hold_${randomUUID().replaceAll("-", "")}`;
+      await f.sql(
+        `create schema ${schema};
+         create table ${schema}.hold(workspace_id uuid not null,user_id uuid not null,
+          foreign key (workspace_id,user_id) references public.memberships(workspace_id,user_id))`,
+      );
+      try {
+        for (const held of [client, signer])
+          await f.sql(`insert into ${schema}.hold values($1,$2)`, [f.workspaceId, held.userId]);
+        // The Roster read: the sweep, then the tables, as listVolunteers does.
+        const swept = await rpc(admin, "vitally_expire_invitations");
+        assert.ok(swept.failed >= 1, `failed ${swept.failed}`);
+        for (const table of ["volunteer_profiles", "roster_entries", "certificates", "people", "accounts"])
+          await readable(admin, table);
+        assert.equal((await accountOf(f, client.userId)).status, "invited", "the row is skipped, not lost");
+        assert.deepEqual(await membershipOf(client.userId), { access: "applicant", active: true });
+        // The office list, the account RPCs and the sign-in keep working.
+        await rpc(admin, "vitally_client_invitations");
+        await rpc(admin, "vitally_prepare_account", prepare("invite", { email: fresh() }));
+        const volunteer = await invitedVolunteer();
+        await rpc(admin, "vitally_record_account", { p_action_id: null, p_op: "resend", p_target: { volunteerId: volunteer.personId }, p_user_id: null });
+        // A sign-in whose sweep fails still signs in; the client's invitation it
+        // could not cancel becomes active, as any client's does at sign-in.
+        const signedIn = await signer.client.auth.signInWithPassword({ email: signer.email, password: signer.password });
+        assert.equal(signedIn.error, null, "sign-in");
+        assert.equal((await accountOf(f, signer.userId)).status, "active");
+        // Once the hold is gone the next sweep cancels the other.
+        await f.sql(`delete from ${schema}.hold`);
+        const after = await rpc(admin, "vitally_expire_invitations");
+        assert.ok(after.cancelled >= 1, `cancelled ${after.cancelled}`);
+        assert.equal(await accountOf(f, client.userId), undefined);
+      } finally {
+        await f.sql(`drop schema ${schema} cascade`);
+      }
     });
 
     await t.test("resend starts the seven days again", async () => {
