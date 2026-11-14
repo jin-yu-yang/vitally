@@ -69,31 +69,48 @@ export async function handleAccountRequest(request, deps) {
     const target = op === "create" || (op === "resend" && volunteerId) ? { volunteerId } : { email };
 
     const user = deps.userClient(jwt);
-    const prepared = await user.rpc("vitally_prepare_account", {
-      p_action_id: op === "resend" ? null : actionId,
-      p_op: op,
-      p_target: target,
-    });
-    if (prepared.error) return refusal(prepared.error);
-    const checked = prepared.data;
+    // Verify the caller first: a valid JWT that is not a user (the anon key) stops here.
+    const who = await user.auth.getUser(jwt);
+    if (who.error || !who.data?.user) return reply(401, { code: "FORBIDDEN" });
 
+    const prepare = () =>
+      user.rpc("vitally_prepare_account", {
+        p_action_id: op === "resend" ? null : actionId,
+        p_op: op,
+        p_target: target,
+      });
     // A repeated action: answer its stored result and do nothing else.
-    if (checked?.replay) {
-      return reply(200, {
+    const replayed = (checked) =>
+      reply(200, {
         status: checked.replay.status,
         emailSent: false,
         accountRevision: checked.replay.accountRevision,
         replay: true,
       });
-    }
+
+    let prepared = await prepare();
+    if (prepared.error) return refusal(prepared.error);
+    let checked = prepared.data;
+    if (checked?.replay) return replayed(checked);
 
     let accountRevision = checked.accountRevision;
     if (op !== "resend") {
       let userId = checked.reusableUserId;
       if (!userId) {
         const created = await deps.adminClient.auth.admin.createUser({ email: checked.email, email_confirm: true });
-        if (created.error || !created.data?.user?.id) return reply(500, { code: "SERVER_ERROR" });
-        userId = created.data.user.id;
+        if (created.error?.code === "email_exists" || created.error?.status === 422) {
+          // Another request just created the user: check again, once.
+          prepared = await prepare();
+          if (prepared.error) return refusal(prepared.error);
+          checked = prepared.data;
+          if (checked?.replay) return replayed(checked);
+          userId = checked.reusableUserId;
+          if (!userId) return reply(500, { code: "SERVER_ERROR" });
+        } else if (created.error || !created.data?.user?.id) {
+          return reply(500, { code: "SERVER_ERROR" });
+        } else {
+          userId = created.data.user.id;
+        }
       }
       const recorded = await user.rpc("vitally_record_account", {
         p_action_id: actionId,

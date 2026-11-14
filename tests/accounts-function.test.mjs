@@ -10,20 +10,28 @@ const ACTION = "11111111-1111-4111-8111-111111111111";
 const VOLUNTEER = "22222222-2222-4222-8222-222222222222";
 const USER = "33333333-3333-4333-8333-333333333333";
 
-function fakes({ prepare, record, createUser, otp } = {}) {
+function fakes({ prepare, record, createUser, otp, getUser } = {}) {
   const calls = [];
   const userClient = (jwt) => {
     calls.push(`userClient:${jwt}`);
     return {
+      auth: {
+        getUser: async (token) => {
+          calls.push({ getUser: token });
+          return getUser ?? { data: { user: { id: "44444444-4444-4444-8444-444444444444" } }, error: null };
+        },
+      },
       rpc: async (fn, args) => {
         calls.push({ rpc: fn, args });
-        if (fn === "vitally_prepare_account")
+        if (fn === "vitally_prepare_account") {
+          const next = Array.isArray(prepare) ? prepare.shift() : prepare;
           return (
-            prepare ?? {
+            next ?? {
               data: { op: args.p_op, email: "ada@example.org", reusableUserId: null, volunteerId: VOLUNTEER, accountRevision: 0 },
               error: null,
             }
           );
+        }
         return (
           record ?? {
             data: { actionId: ACTION, status: "invited", email: "ada@example.org", accountRevision: 1 },
@@ -88,7 +96,7 @@ test("create runs prepare, createUser, record, then signInWithOtp with shouldCre
   const response = await handleAccountRequest(post({ op: "create", actionId: ACTION, volunteerId: VOLUNTEER }), deps);
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { status: "invited", emailSent: true, accountRevision: 1 });
-  assert.deepEqual(names(calls), ["vitally_prepare_account", "createUser", "vitally_record_account", "signInWithOtp"]);
+  assert.deepEqual(names(calls), ["getUser", "vitally_prepare_account", "createUser", "vitally_record_account", "signInWithOtp"]);
   const rpc = (fn) => calls.find((c) => c.rpc === fn).args;
   assert.deepEqual(rpc("vitally_prepare_account"), { p_action_id: ACTION, p_op: "create", p_target: { volunteerId: VOLUNTEER } });
   assert.deepEqual(calls.find((c) => c.createUser).createUser, { email: "ada@example.org", email_confirm: true });
@@ -121,7 +129,7 @@ test("a reusable user id skips createUser", async () => {
   });
   const response = await handleAccountRequest(post({ op: "create", actionId: ACTION, volunteerId: VOLUNTEER }), deps);
   assert.equal(response.status, 200);
-  assert.deepEqual(names(calls), ["vitally_prepare_account", "vitally_record_account", "signInWithOtp"]);
+  assert.deepEqual(names(calls), ["getUser", "vitally_prepare_account", "vitally_record_account", "signInWithOtp"]);
   assert.equal(calls.find((c) => c.rpc === "vitally_record_account").args.p_user_id, USER);
 });
 
@@ -134,7 +142,7 @@ test("resend runs prepare and signInWithOtp only", async () => {
   });
   const response = await handleAccountRequest(post({ op: "resend", volunteerId: VOLUNTEER }), deps);
   assert.deepEqual(await response.json(), { status: "invited", emailSent: true, accountRevision: 4 });
-  assert.deepEqual(names(calls), ["vitally_prepare_account", "signInWithOtp"]);
+  assert.deepEqual(names(calls), ["getUser", "vitally_prepare_account", "signInWithOtp"]);
   assert.deepEqual(calls.find((c) => c.rpc === "vitally_prepare_account").args, {
     p_action_id: null,
     p_op: "resend",
@@ -205,7 +213,7 @@ test("a replayed action answers its stored result without side effects", async (
   const response = await handleAccountRequest(post({ op: "create", actionId: ACTION, volunteerId: VOLUNTEER }), deps);
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { status: "invited", emailSent: false, accountRevision: 1, replay: true });
-  assert.deepEqual(names(calls), ["vitally_prepare_account"]);
+  assert.deepEqual(names(calls), ["getUser", "vitally_prepare_account"]);
 });
 
 test("a bad body is 400 VALIDATION", async () => {
@@ -218,4 +226,41 @@ test("a bad body is 400 VALIDATION", async () => {
 
 test("the handler's SQLSTATE map equals the one in contracts.mjs", () => {
   assert.deepEqual({ ...SQLSTATE_ERROR_CODES }, { ...CONTRACT_CODES });
+});
+
+test("a token getUser rejects is 401 and no rpc runs", async () => {
+  for (const getUser of [{ data: { user: null }, error: { status: 401, message: "bad jwt" } }, { data: { user: null }, error: null }]) {
+    const { deps, calls } = fakes({ getUser });
+    const response = await handleAccountRequest(post({ op: "create", actionId: ACTION, volunteerId: VOLUNTEER }), deps);
+    assert.equal(response.status, 401);
+    assert.deepEqual(await response.json(), { code: "FORBIDDEN" });
+    assert.deepEqual(names(calls), ["getUser"]);
+  }
+});
+
+test("email_exists from createUser re-checks and continues with the reusable user", async () => {
+  const first = { data: { op: "create", email: "ada@example.org", reusableUserId: null, volunteerId: VOLUNTEER, accountRevision: 0 }, error: null };
+  const second = { data: { op: "create", email: "ada@example.org", reusableUserId: USER, volunteerId: VOLUNTEER, accountRevision: 0 }, error: null };
+  const { deps, calls } = fakes({
+    prepare: [first, second],
+    createUser: { data: null, error: { code: "email_exists", status: 422, message: "exists" } },
+  });
+  const response = await handleAccountRequest(post({ op: "create", actionId: ACTION, volunteerId: VOLUNTEER }), deps);
+  assert.equal(response.status, 200);
+  assert.deepEqual(names(calls), ["getUser", "vitally_prepare_account", "createUser", "vitally_prepare_account", "vitally_record_account", "signInWithOtp"]);
+  assert.equal(calls.find((c) => c.rpc === "vitally_record_account").args.p_user_id, USER);
+});
+
+test("email_exists then a replay answers the replay", async () => {
+  const first = { data: { op: "create", email: "ada@example.org", reusableUserId: null, volunteerId: VOLUNTEER, accountRevision: 0 }, error: null };
+  const replay = { data: { replay: { actionId: ACTION, status: "invited", email: "ada@example.org", accountRevision: 1 } }, error: null };
+  const { deps, calls } = fakes({
+    prepare: [first, replay],
+    createUser: { data: null, error: { code: "email_exists", status: 422, message: "exists" } },
+  });
+  const response = await handleAccountRequest(post({ op: "create", actionId: ACTION, volunteerId: VOLUNTEER }), deps);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { status: "invited", emailSent: false, accountRevision: 1, replay: true });
+  assert.ok(!names(calls).includes("vitally_record_account"));
+  assert.ok(!names(calls).includes("signInWithOtp"));
 });
