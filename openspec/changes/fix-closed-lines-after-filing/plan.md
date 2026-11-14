@@ -175,6 +175,7 @@ git commit -m "Closed messages say what was filed (#170): shared rule and status
     - For each pair, run `select vitally_private.closed_line($1,$2,$3,$4,$5) as line`.
     - Assert `line === describeStage("closed","en",record).clientMessage`.
     - Assert `Object.hasOwn`-style translation: `sentence(line,"zh-Hans") !== line` and `sentence(line,"zh-Hans") === describeStage("closed","zh-Hans",record).clientMessage`.
+    - For reason `other` and null, instead assert `line` equals 036's generic history line ("Your application was closed by the office. This does not change any return filed elsewhere. Contact PCDC if you have questions.") and has a `SENTENCES` entry: the history line and the panel already differ for those two (ruling, pre-flight).
     - Count 119 calls.
 
 - [ ] **Step 2: Confirm the new tests fail (CI)**
