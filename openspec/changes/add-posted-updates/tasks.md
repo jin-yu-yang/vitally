@@ -1,11 +1,11 @@
 ## 1. Migration 046: tables, audience, policies, publication
 
-- [ ] 1.1 Write failing database tests (`tests/database-posted-updates.mjs`, own fixture workspace only):
+- [x] 1.1 Write failing database tests (`tests/database-posted-updates.mjs`, own fixture workspace only):
   - the audience rules: live, roles, uncleared with an entry, no current-season entry, inactive membership;
   - the two SELECT policies: draft hidden, another role hidden, clients none, unpublished still readable to the audience;
   - `update_reads` refused directly;
   - no direct insert into either table.
-- [ ] 1.2 Write `supabase/migrations/046_posted_updates.sql`, part 1:
+- [x] 1.2 Write `supabase/migrations/046_posted_updates.sql`, part 1:
   - the tables, checks and foreign keys from design D1;
   - row security, revokes and the select grant on `posted_updates` only;
   - `vitally_private.audience_member` and `vitally_policy.in_update_audience`, with their grants;
@@ -14,7 +14,7 @@
 
 ## 2. Migration 046: the five RPCs
 
-- [ ] 2.1 Write failing tests for `vitally_save_update` and `vitally_update_action`:
+- [x] 2.1 Write failing tests for `vitally_save_update` and `vitally_update_action`:
   - ceiling admin only (an uncleared admin is allowed; preparer and client get FORBIDDEN);
   - validation per field;
   - draft, post, unpublish and delete-draft;
@@ -22,14 +22,14 @@
   - receipts and replay;
   - edit keeps reads, `askAgain` clears them; `edited_at`.
   Make them pass.
-- [ ] 2.2 Write failing tests for `vitally_mark_updates`, `vitally_my_updates` and `vitally_posted_updates`:
+- [x] 2.2 Write failing tests for `vitally_mark_updates`, `vitally_my_updates` and `vitally_posted_updates`:
   - feed contents and order, including pinned in New York time and a past pin;
   - item fields exactly;
   - badge count;
   - marking keeps the first time, confirm only where asked, others' ids ignored, more than 200 refused;
   - admin counts follow the live audience, the people list, and FORBIDDEN for non-admins.
   Make them pass.
-- [ ] 2.3 Update the catalogue tests:
+- [x] 2.3 Update the catalogue tests:
   - `tests/database-catalog.mjs`: `POLICIES`, `RPCS` (13), the digest exemptions, the `vitally_policy` list;
   - `tests/support/rpc-signatures.mjs`;
   - `tests/database-store.mjs` (published tables);
