@@ -7,7 +7,7 @@
 
 ## 2. Browser data
 
-- [ ] 2.1 `listCases`: add one grouped read of each case's newest `contact_log.created_at` (`lastContactAt`), with a unit test of the mapping
+- [ ] 2.1 `listCases`: add one grouped read of each case's newest `contact_log.logged_at` (`lastContactAt`), with a unit test of the mapping
 - [ ] 2.2 Add `ASSIGN_CASE` to `src/contracts.mjs` and `src/case-actions.mjs` (payload builder), with unit tests
 - [ ] 2.3 New module `src/volunteer-workload.mjs` (pure): effective capabilities of a volunteer, rows, the counts and Stalled (last activity, 5 calendar days), sorting and search, the Unassigned list, drawer candidates (eligibility, the independence-hidden count, Current) and the language ordering; unit tests for every spec scenario of counts, sorting and ordering
 

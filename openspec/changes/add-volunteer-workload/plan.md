@@ -210,7 +210,7 @@ is `brainstorm.md`. Read them before each task.
 
 **Interfaces:**
 - Produces: each staff `listCases()` record gains `lastContactAt: string|null` (the newest
-  `contact_log.created_at` for the case). `CASE_ACTIONS` includes `"ASSIGN_CASE"`. The
+  `contact_log.logged_at` for the case). `CASE_ACTIONS` includes `"ASSIGN_CASE"`. The
   payload builder `ASSIGN_CASE: ({slot, personId}) => ({slot, personId})`.
 
 - [ ] **Step 1: Write failing tests.**

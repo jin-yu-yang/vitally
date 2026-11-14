@@ -78,7 +78,7 @@ board, the pool and the office queue deliberately show none.
   - **Open** = Preparing + Review.
   - **Waiting on client** = their Preparing cases with at least one open document request.
   - **Stalled** = their Open cases whose last activity is 5 or more calendar days ago. Last
-    activity = the later of `cases.updated_at` and the case's newest `contact_log.created_at`.
+    activity = the later of `cases.updated_at` and the case's newest `contact_log.logged_at` (when it was logged; `contacted_at` is when the contact happened).
     Editing an existing contact does not count.
 - **Breakdown**: a bar split into Preparing and Review, with the numbers in text for screen
   readers.
