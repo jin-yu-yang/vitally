@@ -264,3 +264,23 @@ test("email_exists then a replay answers the replay", async () => {
   assert.ok(!names(calls).includes("vitally_record_account"));
   assert.ok(!names(calls).includes("signInWithOtp"));
 });
+
+test("a malformed actionId is 400 and no rpc runs", async () => {
+  for (const actionId of ["not-a-uuid", "11111111-1111-4111-8111-11111111111", "11111111111141118111111111111111"]) {
+    const { deps, calls } = fakes();
+    const response = await handleAccountRequest(post({ op: "create", actionId, volunteerId: VOLUNTEER }), deps);
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { code: "VALIDATION", reason: "BAD_REQUEST" });
+    assert.deepEqual(names(calls), []);
+  }
+});
+
+test("a createUser 422 that is not email_exists is 500 without a re-check", async () => {
+  const { deps, calls } = fakes({
+    createUser: { data: null, error: { code: "weak_password", status: 422, message: "nope" } },
+  });
+  const response = await handleAccountRequest(post({ op: "create", actionId: ACTION, volunteerId: VOLUNTEER }), deps);
+  assert.equal(response.status, 500);
+  assert.deepEqual(await response.json(), { code: "SERVER_ERROR" });
+  assert.deepEqual(names(calls), ["getUser", "vitally_prepare_account", "createUser"]);
+});

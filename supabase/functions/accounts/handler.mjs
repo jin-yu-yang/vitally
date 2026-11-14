@@ -43,6 +43,7 @@ function refusal(error) {
   return reply(STATUS_FOR[code] ?? 500, body);
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const text = (value) => (typeof value === "string" ? value.trim() : "");
 
 export async function handleAccountRequest(request, deps) {
@@ -62,7 +63,7 @@ export async function handleAccountRequest(request, deps) {
     const actionId = text(body?.actionId);
     const volunteerId = text(body?.volunteerId);
     const email = text(body?.email);
-    if (!OPS.includes(op) || (op !== "resend" && !actionId)) {
+    if (!OPS.includes(op) || (op !== "resend" && !UUID.test(actionId))) {
       return reply(400, { code: "VALIDATION", reason: "BAD_REQUEST" });
     }
     // create and a volunteer's resend name the volunteer; invite and a client's resend, the email.
@@ -98,7 +99,7 @@ export async function handleAccountRequest(request, deps) {
       let userId = checked.reusableUserId;
       if (!userId) {
         const created = await deps.adminClient.auth.admin.createUser({ email: checked.email, email_confirm: true });
-        if (created.error?.code === "email_exists" || created.error?.status === 422) {
+        if (created.error?.code === "email_exists") {
           // Another request just created the user: check again, once.
           prepared = await prepare();
           if (prepared.error) return refusal(prepared.error);

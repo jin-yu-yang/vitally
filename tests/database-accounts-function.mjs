@@ -20,6 +20,7 @@ test("accounts Edge Function against real Supabase", async (t) => {
   const f = await createDatabaseFixture();
   const service = createClient(target.apiUrl, target.adminKey, clientOptions);
   const createdEmails = [];
+  let passed = false;
   try {
     const endpoint = `${target.apiUrl}/functions/v1/accounts`;
     const tokenOf = async (client) => (await client.auth.getSession()).data.session.access_token;
@@ -121,12 +122,19 @@ test("accounts Edge Function against real Supabase", async (t) => {
       assert.equal(result.body.code, "FORBIDDEN");
       assert.equal(await authUserExists(email), false);
     });
+    passed = true;
   } finally {
     // The function creates Auth users the fixture does not track: remove them by address.
+    // Their memberships go first (memberships.user_id has no ON DELETE).
+    const failures = [];
     for (const email of createdEmails) {
       const row = (await f.sql("select id from auth.users where lower(email)=$1", [email])).rows[0];
-      if (row) await service.auth.admin.deleteUser(row.id);
+      if (!row) continue;
+      await f.sql("delete from public.memberships where user_id=$1", [row.id]);
+      const { error } = await service.auth.admin.deleteUser(row.id);
+      if (error) failures.push(`${email}: ${error.message}`);
     }
     await f.close();
+    if (failures.length && passed) throw new Error(`Cleanup failed: ${failures.join("; ")}`);
   }
 });
