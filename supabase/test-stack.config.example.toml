@@ -15,10 +15,11 @@
 #      inline comment the installed CLI version knows about.
 #   2. Edit the generated file so every setting below matches. Sections/keys not
 #      listed here (storage buckets, SMS providers, external OAuth providers, MFA,
-#      edge functions, analytics, experimental features) are left at the generated
-#      defaults; this project's tooling never exercises them, and the stack is
-#      started with `--exclude storage-api,imgproxy,postgres-meta,studio,edge-runtime,
-#      logflare,vector,supavisor` (Realtime stays enabled).
+#      analytics, experimental features) are left at the generated defaults; this
+#      project's tooling never exercises them. The Edge Runtime runs, because the
+#      `accounts` function needs it (copy supabase/functions/ into the stack's
+#      supabase/ folder), and the stack is started with `--exclude storage-api,imgproxy,
+#      postgres-meta,studio,logflare,vector,supavisor` (Realtime stays enabled).
 #   3. Set `project_id` to the *actual* unique instance id you chose (the directory's
 #      own basename is a reasonable choice, and `supabase init` already fills this in
 #      correctly for you) — never the literal placeholder below.
@@ -100,8 +101,9 @@ api_url = "http://127.0.0.1"
 
 # Inbucket, the local mail catcher. No external SMTP is configured for the isolated
 # test stack: Task 5A/10A intercept only the outbound `/auth/v1/otp` request in the
-# browser automation, and the one-time codes used in tests come from
-# `auth.admin.generateLink`, never from reading mail out of this catcher.
+# browser automation, and most one-time codes used in tests come from
+# `auth.admin.generateLink`. The account-invitation tests read the emailed code from
+# this catcher (tests/support/mail-catcher.mjs; its URL is VITALLY_TEST_MAIL_URL).
 [local_smtp]
 enabled = true
 port = 57324
@@ -131,7 +133,11 @@ minimum_password_length = 6
 password_requirements = ""
 
 [auth.rate_limit]
-email_sent = 2
+# TEST-ONLY OVERRIDE — do not copy this value to a classroom/hosted project. The
+# default (2 emails per hour) is far too low for the account-invitation tests, which
+# send many sign-in codes from one stack in one run. Classroom setup keeps the
+# CLI/hosted default and never raises this.
+email_sent = 1000
 sms_sent = 30
 anonymous_users = 30
 token_refresh = 150
@@ -172,7 +178,13 @@ content_path = "./supabase/templates/magic_link.html"
 enable_signup = false
 
 [edge_runtime]
-enabled = false
+enabled = true
+
+# The accounts function checks the caller's JWT itself (it must answer an expired or
+# missing token with a clear refusal, not the gateway's), so the gateway check is
+# off. See design D4 of the add-account-invitations change.
+[functions.accounts]
+verify_jwt = false
 
 [analytics]
 enabled = false

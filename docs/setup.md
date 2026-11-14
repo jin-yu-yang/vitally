@@ -311,6 +311,13 @@ no code, so the sign-in form, which asks for a code, cannot be used, and only th
 it names next to it: copy this repository's
 [`supabase/templates/magic_link.html`](../supabase/templates/magic_link.html) (one line,
 `<p>Your ViTally code is {{ .Token }}</p>`) to `$VITALLY_STACK/supabase/templates/magic_link.html`.
+Also copy this repository's `supabase/functions/` folder (the `accounts` Edge Function) to
+`$VITALLY_STACK/supabase/functions/` (`mkdir -p "$VITALLY_STACK/supabase/functions" && cp -R
+supabase/functions/. "$VITALLY_STACK/supabase/functions/"`), and keep the example's
+`[edge_runtime] enabled = true` and `[functions.accounts] verify_jwt = false`. After pulling a
+change to `supabase/functions/`, copy it again and restart the stack. The example also sets
+`[auth.rate_limit] email_sent = 1000` for this stack only, so the tests can send many sign-in
+codes (never copy it to a hosted project).
 A stack that is already running picks the template up after `supabase stop` (without
 `--no-backup`, which would delete its accounts) and `supabase start`. The hosted project needs the
 same template, set in its dashboard ([section 6](#6-classroom-and-hosted-setup-pending)).
@@ -351,7 +358,7 @@ retry, token bypass, or timing delay is used instead. See the
 ```sh
 SUPABASE_HOME="$VITALLY_STACK/cli-home" PATH="$VITALLY_NODE_BIN:$PATH" \
   ./node_modules/.bin/supabase start --workdir "$VITALLY_STACK" \
-  --exclude storage-api,imgproxy,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
+  --exclude storage-api,imgproxy,postgres-meta,studio,logflare,vector,supavisor
 SUPABASE_HOME="$VITALLY_STACK/cli-home" PATH="$VITALLY_NODE_BIN:$PATH" \
   ./node_modules/.bin/supabase status --workdir "$VITALLY_STACK" --output json \
   > "$VITALLY_STACK/status.private.json"
@@ -805,6 +812,11 @@ a changed file.
   story asserts this directly at the point where the client's own screen says "Ready to sign."
 
 ## 6. Classroom and hosted setup (pending)
+
+**Deployment prerequisite (blocking for the December test).** The hosted project needs custom
+SMTP (see below), and the `accounts` Edge Function deployed with `verify_jwt = false`, before
+testers can receive invitations or sign-in codes. Without them, Create account and Invite create
+the account but no email arrives.
 
 Nothing in this section has happened. It is Task 10B (setup) and Task 10D (publication) —
 user-owned steps, not implementation work, and this document does not claim otherwise. What the
