@@ -71,7 +71,7 @@ An IRS link SHALL be optional, allowed only on an `irs_policy` update, at most 5
 
 #### Scenario: A role audience with no roles
 - **WHEN** an admin saves an update with audience `roles` and no roles chosen
-- **THEN** it is refused with `VALIDATION` naming the audience
+- **THEN** it is refused with `VALIDATION` naming the roles
 
 ### Requirement: Updates move from draft to posted to unpublished, and only drafts are deleted
 An update SHALL be a draft, posted or unpublished.
@@ -123,7 +123,7 @@ Saving changes to a posted update SHALL keep it posted and record that it was ed
 - **THEN** it has no reads or confirmations, and it is unread in every audience member's feed
 
 ### Requirement: The feed returns the caller's posted updates in one item shape
-`vitally_my_updates()` SHALL return, for a `staff` caller (cleared or not), the posted updates whose audience includes the caller, and the badge count. A client or an anonymous caller SHALL be refused with `FORBIDDEN`.
+`vitally_my_updates()` SHALL return, for a `staff` caller (cleared or not), the posted updates whose audience includes the caller, and the badge count. A client SHALL be refused with `FORBIDDEN`; an anonymous caller SHALL have no execute grant.
 
 Each item SHALL have exactly these fields, so later system notifications can join the same feed with their own `source`:
 - `source` (`posted_update`), `id`, `kind`, `title`, `message`, `irsLink`;
