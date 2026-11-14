@@ -1,7 +1,7 @@
 // The admin-only Roster (change add-volunteer-roster-records, design D9): the
 // Volunteers page and its Add / Edit drawer. Staff screens stay English. Each
 // row says whether the volunteer is cleared (change add-volunteer-clearance).
-import { esc, button, icon, loadingLine, unloadedLine, emptyLine } from "./ui.mjs";
+import { esc, button, icon, loadingLine, unloadedLine, emptyLine, confirmBody } from "./ui.mjs";
 import { drawerError } from "./office-views.mjs";
 import { ROLES, CERTIFICATES, WORKS, LANGUAGES, filterVolunteers } from "./volunteer-roster.mjs";
 
@@ -26,7 +26,25 @@ export const languagesText = (volunteer) => {
   return names.length ? names.join(", ") : "—";
 };
 
-const MISSING_TEXT = Object.freeze({ form13615: "Form 13615 missing", photoId: "Photo ID check missing" });
+const MISSING_TEXT = Object.freeze({
+  form13615: "Form 13615 missing",
+  photoId: "Photo ID check missing",
+  noAccount: "No account yet",
+  notSignedIn: "Hasn't signed in yet",
+  deactivated: "Account deactivated",
+});
+
+const ACCOUNT_LABELS = Object.freeze({
+  none: "Not created",
+  invited: "Invited",
+  active: "Active",
+  deactivated: "Deactivated",
+});
+const accountLabel = (volunteer) => ACCOUNT_LABELS[volunteer?.account?.status ?? "none"] ?? "Not created";
+
+// The name the volunteer gave at their site check, under the account status.
+const signedInAs = (volunteer, className) =>
+  volunteer?.signedInName ? `<span class="${className}">Signed in as ${esc(volunteer.signedInName)}</span>` : "";
 
 const clearedCell = (volunteer) =>
   volunteer.cleared === true
@@ -46,7 +64,7 @@ function volunteerRow(volunteer) {
     "No roles recorded",
   )}</td><td>${chips(volunteer.certificates, CERTIFICATES, "None recorded")}</td><td>${esc(
     languagesText(volunteer),
-  )}</td><td>${clearedCell(volunteer)}</td><td>${button(
+  )}</td><td>${esc(accountLabel(volunteer))}${signedInAs(volunteer, "volunteer-signed-in")}</td><td>${clearedCell(volunteer)}</td><td>${button(
     "Edit",
     "open-edit-volunteer",
     "secondary",
@@ -81,7 +99,7 @@ export function renderRoster(volunteers, { list = "ready", filters = {} } = {}) 
   const chosen = { search: filters.search ?? "", role: filters.role || "all" };
   const shown = filterVolunteers(all, chosen);
   const body = shown.length
-    ? `<div class="board-table-wrap"><table class="board-table people-table"><thead><tr><th scope="col">Volunteer</th><th scope="col">Roles</th><th scope="col">Certificates</th><th scope="col">Languages</th><th scope="col">Cleared</th><th scope="col">Edit</th></tr></thead><tbody>${shown
+    ? `<div class="board-table-wrap"><table class="board-table people-table"><thead><tr><th scope="col">Volunteer</th><th scope="col">Roles</th><th scope="col">Certificates</th><th scope="col">Languages</th><th scope="col">Account</th><th scope="col">Cleared</th><th scope="col">Edit</th></tr></thead><tbody>${shown
         .map(volunteerRow)
         .join("")}</tbody></table></div>`
     : emptyLine(all.length ? "Nobody matches." : "No volunteers yet.");
@@ -103,6 +121,88 @@ const tickRow = (name, text, on) =>
   `<label class="checkbox-row small" for="volunteer-${name}"><input type="checkbox" name="${name}" id="volunteer-${name}"${
     on ? " checked" : ""
   }><span>${esc(text)}</span></label>`;
+
+// The drawer's Account section: the status and the one or two actions it
+// allows. A volunteer who is not saved yet has none. `notice` is the last
+// result, `{kind: "ok" | "error", text}`.
+// Create account sends the saved profile, so it waits while the form has
+// unsaved changes: the page turns it off and shows the hint as the form is
+// edited (`volunteerFormChanged`).
+function accountSection(volunteer, notice) {
+  const status = volunteer?.account?.status ?? "none";
+  const id = `data-volunteer-id="${esc(volunteer.id)}"`;
+  // An invitation nobody has used yet can be taken back; one that was ever
+  // active cannot.
+  const cancellable = volunteer?.account?.activatedAt == null;
+  const actions = {
+    none: `${button(
+      "Create account",
+      "account-create",
+      "secondary",
+      `${id} aria-describedby="volunteer-account-hint"`,
+    )}<p class="field-note" id="volunteer-account-hint" hidden>Save your changes first.</p>`,
+    invited: `${button("Resend", "account-resend", "secondary", id)}${when(
+      cancellable,
+      button("Cancel invitation", "account-cancel-invitation", "secondary", id),
+    )}${button("Deactivate", "account-deactivate", "secondary", id)}`,
+    active: button("Deactivate", "account-deactivate", "secondary", id),
+    deactivated: button("Reactivate", "account-reactivate", "secondary", id),
+  }[status];
+  const said = notice?.text
+    ? `<p class="notice ${notice.kind === "error" ? "error" : "info"}" role="${notice.kind === "error" ? "alert" : "status"}" id="volunteer-account-notice">${icon(
+        notice.kind === "error" ? "help" : "check",
+      )}<span>${esc(notice.text)}</span></p>`
+    : "";
+  return `<fieldset class="check-group volunteer-account"><legend>Account</legend><p>Status: <strong>${esc(
+    ACCOUNT_LABELS[status] ?? "Not created",
+  )}</strong></p>${when(
+    volunteer?.signedInName,
+    `<p class="volunteer-signed-in">Signed in as ${esc(volunteer?.signedInName ?? "")}</p>`,
+  )}${said}<div class="drawer-actions">${actions}</div></fieldset>`;
+}
+
+/**
+ * The deactivate confirmation: shown from the drawer, it changes nothing
+ * until its confirm button is pressed.
+ */
+export function deactivateAccountDialogBody({ volunteer = null } = {}) {
+  const name = volunteer?.name ?? "this volunteer";
+  return confirmBody({
+    lead: `${esc(name)} will no longer be able to open ViTally. Their roster entry and their work stay as they are, and you can reactivate the account later.`,
+    confirm: button("Deactivate account", "confirm-deactivate-account", "primary full"),
+    keep: "Keep account",
+  });
+}
+
+/**
+ * The question before an invitation is sent (Create account, Invite). The
+ * question itself, naming the email, is the dialog's title
+ * (`sendInvitationTitle`); nothing is sent until Send is pressed.
+ */
+export const sendInvitationTitle = (email) => `Send a sign-in invitation to ${email}?`;
+
+export function sendInvitationDialogBody() {
+  return confirmBody({
+    confirm: button("Send", "confirm-send-invitation", "primary full"),
+    keep: "Cancel",
+  });
+}
+
+/**
+ * The cancel-invitation confirmation, from the drawer (`volunteer`) or the
+ * office list (`email` only). Nothing changes until its confirm is pressed.
+ */
+export function cancelInvitationDialogBody({ volunteer = null, email = "" } = {}) {
+  const address = volunteer?.email ?? email;
+  const who = volunteer ? `${esc(volunteer.name)} (${esc(address)})` : esc(address);
+  return confirmBody({
+    lead: `The invitation for ${who} will be cancelled and its sign-in code will no longer work. ${
+      volunteer ? "The email can be edited again, and you" : "You"
+    } can invite them again later.`,
+    confirm: button("Cancel invitation", "confirm-cancel-invitation", "primary full"),
+    keep: "Keep invitation",
+  });
+}
 
 /**
  * The Add / Edit drawer's body. Add has no volunteer; an Edit whose volunteer
@@ -159,7 +259,7 @@ export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {} }
     "isNew",
     "New volunteer",
     isNew ? true : v.isNew === true,
-  )}${tickRow("photoIdChecked", "Photo ID checked", v.photoIdChecked === true)}</fieldset>`;
+  )}${tickRow("photoIdChecked", "Photo ID checked", v.photoIdChecked === true)}</fieldset>${when(!isNew && volunteer, accountSection(v, ui?.accountNotice))}`;
   const formError = ui?.formError
     ? `<p class="notice error" role="alert" id="volunteer-form-error">${icon("help")}<span>${esc(ui.formError)}</span></p>`
     : "";

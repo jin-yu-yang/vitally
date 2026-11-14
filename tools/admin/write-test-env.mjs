@@ -69,6 +69,15 @@ export function testConfigFromStatus(status, { instanceId, manifestPath }) {
   if (!publishableKey) throw invalid("PUBLISHABLE_KEY and ANON_KEY are missing");
   if (!adminKey) throw invalid("SECRET_KEY and SERVICE_ROLE_KEY are missing");
 
+  // The local mail catcher (Mailpit; CLI 2.117.0 reports it as MAILPIT_URL and
+  // INBUCKET_URL). Optional: a status without either simply has no catcher.
+  const mailUrl = firstString(status, ["MAILPIT_URL", "INBUCKET_URL"]);
+  if (mailUrl !== undefined) {
+    const mail = parseUrl(mailUrl, "the mail catcher URL is not a URL");
+    if (mail.protocol !== "http:" || !isLoopback(mail.hostname))
+      throw invalid("the mail catcher URL is not a plain loopback address");
+  }
+
   const env = {
     VITALLY_TEST_MODE: "local",
     VITALLY_TEST_SUPABASE_URL: status.API_URL,
@@ -77,6 +86,7 @@ export function testConfigFromStatus(status, { instanceId, manifestPath }) {
     VITALLY_TEST_DATABASE_URL: status.DB_URL,
     VITALLY_TARGET_MANIFEST: manifestPath,
     VITALLY_TEST_LOCAL_INSTANCE_ID: instanceId,
+    ...(mailUrl === undefined ? {} : { VITALLY_TEST_MAIL_URL: mailUrl }),
   };
   const manifest = {
     version: 1,

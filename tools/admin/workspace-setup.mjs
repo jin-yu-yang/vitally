@@ -19,6 +19,7 @@ export async function initializeWorkspace(
     applicantUserIds = [],
     staff = [],
     defaultFollowup = null,
+    siteNumber = null,
     target = { kind: "test" },
   },
   { afterInitialize } = {},
@@ -51,6 +52,10 @@ export async function initializeWorkspace(
           workspaceId,
           defaultFollowup,
         ]);
+      // The site's number for the volunteer site check (change
+      // add-account-invitations, design D12). Fictional outside a real roster file.
+      if (siteNumber)
+        await connection.query("select vitally_private.set_site_number($1,$2)", [workspaceId, siteNumber]);
       // Trusted tooling hook: SQL-only, atomic with setup, safe to rerun on serialization failure.
       if (afterInitialize) await afterInitialize(connection, result);
       return { ...result, linked };

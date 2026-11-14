@@ -109,7 +109,160 @@ export const RPC_SIGNATURES = Object.freeze([
     name: "vitally_my_clearance",
     signature: "vitally_my_clearance()",
     authorized: (f) => f.siteCoordinator,
-    receiptKeys: Object.freeze(["capabilities", "cleared", "isAdmin", "missing", "siteCoordinatorName"]),
+    receiptKeys: Object.freeze(["capabilities", "cleared", "isAdmin", "missing", "siteCheck", "siteCoordinatorName"]),
+    args: () => ({}),
+  }),
+  // Sign-in accounts (OpenSpec change add-account-invitations). An entry's
+  // optional `context(f)` adds the targets its arguments name; the suite calls
+  // it before the anonymous call.
+  // The read-only check: inviting an address nobody holds.
+  Object.freeze({
+    name: "vitally_prepare_account",
+    signature: "vitally_prepare_account(uuid,text,jsonb)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["accountRevision", "email", "op", "reusableUserId", "volunteerId"]),
+    args: () => ({
+      p_action_id: crypto.randomUUID(),
+      p_op: "invite",
+      p_target: { email: `invite-${crypto.randomUUID()}@example.org` },
+    }),
+  }),
+  // Inviting a client: a confirmed auth user with no account, as the Edge
+  // Function would have created it.
+  Object.freeze({
+    name: "vitally_record_account",
+    signature: "vitally_record_account(uuid,text,jsonb,uuid)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["accountRevision", "actionId", "email", "status"]),
+    context: async (f) => {
+      const { userId, email } = await f.provision();
+      return { inviteUserId: userId, inviteEmail: email };
+    },
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_op: "invite",
+      p_target: { email: context.inviteEmail },
+      p_user_id: context.inviteUserId,
+    }),
+  }),
+  // Deactivating a staff member with no open work, at their account revision.
+  Object.freeze({
+    name: "vitally_deactivate_account",
+    signature: "vitally_deactivate_account(uuid,uuid,bigint)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["accountRevision", "actionId", "status"]),
+    context: async (f) => {
+      const key = `sig_off_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+      const { personId } = await f.staff({ key, name: "Morgan Hale", capabilities: ["prepare"], cleared: false });
+      return { accountVolunteerId: personId, accountRevision: 1 };
+    },
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_volunteer_id: context.accountVolunteerId,
+      p_expected_revision: context.accountRevision,
+    }),
+  }),
+  // Reactivating a staff member whose account is deactivated.
+  Object.freeze({
+    name: "vitally_reactivate_account",
+    signature: "vitally_reactivate_account(uuid,uuid,bigint)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["accountRevision", "actionId", "status"]),
+    context: async (f) => {
+      const key = `sig_on_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+      const { personId } = await f.staff({ key, name: "Quinn Darby", capabilities: ["prepare"], cleared: false });
+      const { data, error } = await f.siteCoordinator.rpc("vitally_deactivate_account", {
+        p_action_id: crypto.randomUUID(),
+        p_volunteer_id: personId,
+        p_expected_revision: 1,
+      });
+      if (error) throw new Error(`deactivate for the reactivate shape: ${error.code}`);
+      return { accountVolunteerId: personId, accountRevision: data.accountRevision };
+    },
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_volunteer_id: context.accountVolunteerId,
+      p_expected_revision: context.accountRevision,
+    }),
+  }),
+  // The office panel's client list: an array, each element of this shape.
+  Object.freeze({
+    name: "vitally_client_invitations",
+    signature: "vitally_client_invitations()",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["accountRevision", "activatedAt", "email", "expiresAt", "invitedAt", "status"]),
+    args: () => ({}),
+  }),
+  // Cancelling a client's invitation by email, at its revision (design D10).
+  Object.freeze({
+    name: "vitally_cancel_invitation",
+    signature: "vitally_cancel_invitation(uuid,jsonb,bigint)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["actionId", "status"]),
+    context: async (f) => {
+      const { userId, email } = await f.provision();
+      const { error } = await f.siteCoordinator.rpc("vitally_record_account", {
+        p_action_id: crypto.randomUUID(),
+        p_op: "invite",
+        p_target: { email },
+        p_user_id: userId,
+      });
+      if (error) throw new Error(`invite for the cancel shape: ${error.code}`);
+      return { cancelEmail: email };
+    },
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_target: { email: context.cancelEmail },
+      p_expected_revision: 1,
+    }),
+  }),
+  // The Roster read's expiry sweep (design D11).
+  Object.freeze({
+    name: "vitally_expire_invitations",
+    signature: "vitally_expire_invitations()",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["cancelled", "failed", "inUse"]),
+    args: () => ({}),
+  }),
+  // The site check (design D12): only a volunteer whose account is invited may
+  // call it, so the context makes one with Create account's record and keeps
+  // their client on the fixture for `authorized`. A wrong number is a result.
+  Object.freeze({
+    name: "vitally_complete_site_check",
+    signature: "vitally_complete_site_check(text,text)",
+    authorized: (f) => f.siteCheckVolunteer,
+    receiptKeys: Object.freeze(["attemptsLeft", "reason", "status"]),
+    context: async (f) => {
+      const { client, userId, email } = await f.provision();
+      const saved = await f.siteCoordinator.rpc("vitally_save_volunteer", {
+        p_action_id: crypto.randomUUID(),
+        p_volunteer_id: null,
+        p_expected_revision: null,
+        p_volunteer: {
+          name: "Sample Volunteer", email, phone: null, works: "on_site", languages: ["english"],
+          otherLanguage: null, roles: [], certificates: [], isNew: false, photoIdChecked: false,
+        },
+      });
+      if (saved.error) throw new Error(`volunteer for the site check shape: ${saved.error.code}`);
+      const { error } = await f.siteCoordinator.rpc("vitally_record_account", {
+        p_action_id: crypto.randomUUID(),
+        p_op: "create",
+        p_target: { volunteerId: saved.data.personId },
+        p_user_id: userId,
+      });
+      if (error) throw new Error(`create account for the site check shape: ${error.code}`);
+      f.siteCheckVolunteer = client;
+      return {};
+    },
+    args: () => ({ p_name: "Sample Volunteer", p_sidn: "S99999999" }),
+  }),
+  // A client's first read (review round 2, design D15): the fixture's client,
+  // whose account is already active, answers its status.
+  Object.freeze({
+    name: "vitally_activate_client_account",
+    signature: "vitally_activate_client_account()",
+    authorized: (f) => f.applicantA,
+    receiptKeys: Object.freeze(["status"]),
     args: () => ({}),
   }),
 ]);
@@ -141,6 +294,15 @@ export const PRIVATE_SETUP_FUNCTIONS = Object.freeze([
     args: (context) => ({
       p_workspace_id: context.workspaceId,
       p_person_key: context.personKey,
+    }),
+  }),
+  // The site number (change add-account-invitations, design D12). Fictional.
+  Object.freeze({
+    name: "set_site_number",
+    signature: "set_site_number(uuid,text)",
+    args: (context) => ({
+      p_workspace_id: context.workspaceId,
+      p_sidn: "S99999999",
     }),
   }),
 ]);

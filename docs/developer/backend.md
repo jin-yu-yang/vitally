@@ -105,14 +105,34 @@ Sign-in is Supabase Auth email one-time codes. The configuration that makes it s
 | Email template | The **Magic Link** template contains `{{ .Token }}` | Existing users get that template; the app asks for the code, not a link |
 | Rate limits | Supabase defaults | The local test stack raises `sign_in_sign_ups` to 1000 for automated tests only. Never copy that to a real project |
 
-**Accounts are created only by the roster command** (below), already confirmed and with no
-password. The sign-in form shows the same message for any address, so it cannot reveal who is on
-the roster.
+**Accounts are created only by the roster command** (below) or, since change
+`add-account-invitations`, by an admin: **Create account** in the Roster drawer (a volunteer) and
+**Invite a client** on the office screen. Both go through the `accounts` Edge Function, which
+creates the confirmed, password-free Auth user and sends the sign-in code email. The sign-in form
+shows the same message for any address, so it cannot reveal who has an account.
+
+An invitation lasts seven days (Resend starts them again) and can be cancelled while it was never
+completed, which rolls the volunteer back to no sign-in and makes the email editable again. A
+client is active at first sign-in, or at their first read or action if they already held a session
+when invited (`vitally_activate_client_account`). Expiry never cancels an invitation whose
+membership is in use, and a cancellation that fails is skipped and logged instead of breaking the
+read. A volunteer stays invited until they pass the **site check**:
+they enter their name and the site's SIDN, which the roster command sets as `siteNumber`; five
+wrong numbers cancel the invitation. Until then they are not cleared and read no case data. The
+RPCs are `vitally_cancel_invitation`, `vitally_expire_invitations`,
+`vitally_complete_site_check` and `vitally_activate_client_account` (migration 047; design D10 to
+D12 and D15 of the archived change).
 
 **Email delivery.** The local stack sends nothing: every email is caught by its local mailbox
 (Mailpit, `http://127.0.0.1:54324` with default ports). A hosted project needs custom SMTP (Gmail
 with an app password, or Resend with a verified domain); setup is in
 [`docs/setup.md`, classroom section](../setup.md#6-classroom-and-hosted-setup-pending).
+
+**Deployment prerequisite.** Create account and Invite a client send the code email themselves, so
+the hosted project needs custom SMTP and the `accounts` function deployed with `verify_jwt = false`
+before testers can use them. Without SMTP the account is recorded but no email arrives, and the
+admin sees "Account created; the email wasn't sent. Use Resend in a minute." The checklist is in
+[`docs/setup.md` section 6](../setup.md#6-classroom-and-hosted-setup-pending).
 
 ## Privileged tooling
 
@@ -153,6 +173,7 @@ The roster is a JSON file (a `.vitally-roster*.json` file, ignored by version co
     { "email": "intaker@example.org", "name": "Kai Mensah (intaker)", "personKey": "intaker", "capabilities": ["receive_documents", "assist"] }
   ],
   "defaultFollowup": "site_coordinator",
+  "siteNumber": "S00000000",
   "applicants": ["client-a@example.org"]
 }
 ```
@@ -161,6 +182,7 @@ The roster is a JSON file (a `.vitally-roster*.json` file, ignored by version co
 | --- | --- |
 | `staff` | Required, at least one entry. Each entry has `email`, `name`, `personKey` and `capabilities`. `capabilities` is non-empty, from `prepare`, `review`, `admin`, `followup`, `receive_documents`, `assist`; an entry with `followup` must also have `admin` (042). `personKey` is lower-case letters, digits and underscores, and unique on the roster (the keys `alex`, `morgan` and `sam` are no longer reserved) |
 | `defaultFollowup` | Required: the `personKey` of a `staff` entry that has `followup`. It becomes the workspace's default follow-up person (who new follow-ups and withdrawal notices go to) |
+| `siteNumber` | Optional: the site's SIDN, `S` and eight digits (spaces, hyphens and case ignored). A volunteer types it at their first sign-in (the site check). Stored where no signed-in user can read it. Only a roster file kept out of the repository holds the real one; the example's `S00000000` is fictional |
 | `presenters` | Removed in #136. An old roster that still has it runs, and the command prints "presenters is no longer used and was ignored; those addresses get no access." A former presenter address cannot sign in; an open window shows "This account has no access" |
 
 For each staff entry the command creates the Auth account as it does for any address, then, inside

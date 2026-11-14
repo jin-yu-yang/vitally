@@ -128,6 +128,8 @@ Each role account's effective capabilities SHALL then equal its roster capabilit
 
 Every fictional volunteer's roles SHALL be backed by confirmed certificates. Between them the volunteers SHALL cover every role, every certificate, every language and every way of working. Exactly one volunteer SHALL have no roles and no certificates, waiting for their Form 13615. At least one SHALL be new with the photo ID check recorded, and one new without it. Every name, email and phone SHALL be fictional.
 
+The fictional volunteers SHALL have no account, so none of them is cleared. The Roster SHALL show each of them as "Not created" in the Account column, with "No account yet" among what is missing.
+
 A re-run SHALL first delete the people with no sign-in whose email is on the seed's list, so the same 8 volunteers exist afterwards. It SHALL NOT change any staff member with a sign-in other than by clearing the role accounts. The browser story's use of the seed module SHALL NOT add volunteers.
 
 #### Scenario: The seed runs
@@ -144,7 +146,7 @@ A re-run SHALL first delete the people with no sign-in whose email is on the see
 
 #### Scenario: A volunteer waiting for their form
 - **WHEN** the seed has run
-- **THEN** exactly one fictional volunteer shows no roles and not cleared
+- **THEN** exactly one fictional volunteer shows no roles, and every fictional volunteer shows not cleared with "No account yet"
 
 #### Scenario: The browser story
 - **WHEN** the browser story seeds its workspace

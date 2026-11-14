@@ -1,4 +1,5 @@
 import { createAppError } from "./errors.mjs";
+import { SQLSTATE_ERROR_CODES } from "./contracts.mjs";
 import { isAuthTransportError } from "./auth.mjs";
 import { combineVolunteers } from "./volunteer-roster.mjs";
 
@@ -349,6 +350,41 @@ export function createStore(client) {
 
   const call = (name, args) => settled(client.rpc(name, args));
 
+  // The `accounts` Edge Function. A non-2xx answer is a FunctionsHttpError
+  // whose `context` is the Response; its `{code, reason}` body is mapped to
+  // the database's own SQLSTATE shape so one mapper serves both. A transport
+  // failure carries no code and so becomes OFFLINE.
+  const FUNCTION_CODES = Object.fromEntries(
+    Object.entries(SQLSTATE_ERROR_CODES).map(([sqlstate, name]) => [name, sqlstate]),
+  );
+  const invokeAccounts = async (body) => {
+    let result;
+    try {
+      result = await client.functions.invoke("accounts", { body });
+    } catch (cause) {
+      throw createAppError(cause);
+    }
+    if (result?.error) {
+      const response = result.error.context;
+      if (response && typeof response.json === "function") {
+        let payload = null;
+        try {
+          payload = await response.json();
+        } catch {
+          payload = null;
+        }
+        const sqlstate = FUNCTION_CODES[payload?.code];
+        throw createAppError(
+          sqlstate
+            ? { code: sqlstate, message: payload.code, details: payload.reason ?? null }
+            : { code: "XX000", message: payload?.code ?? "SERVER_ERROR" },
+        );
+      }
+      throw createAppError({ message: result.error.message });
+    }
+    return result?.data;
+  };
+
   // Rows of one case-scoped table, in the order the history and lists are
   // shown: oldest first, with a stable tiebreak.
   const relatedRows = (table, caseId, tiebreak = "id", columns = "*") =>
@@ -411,6 +447,14 @@ export function createStore(client) {
       // has no access, and nothing about the workspace is revealed.
       if (!user) throw createAppError({ code: "VT001" });
       const row = await membership();
+      // A client's first read makes an invitation they never signed in for
+      // active (migration 047): a client re-invited while their session was
+      // open never signs in again. An expired, unused one is cancelled
+      // instead, and that is no access.
+      if (row.access === "applicant") {
+        const claimed = await call("vitally_activate_client_account", {});
+        if (claimed?.status === "cancelled") throw createAppError({ code: "VT001" });
+      }
       // A staff member is one person of the roster, linked through their
       // account; the screens act as, and show, that person.
       let person = null;
@@ -697,19 +741,27 @@ export function createStore(client) {
     // current season. The tables are admin-only under RLS and are not watched.
     async listVolunteers() {
       await requireStaffAccess();
+      // Expired invitations are cancelled when next looked at (migration 047),
+      // so the list never shows one as Invited.
+      await call("vitally_expire_invitations", {});
       const season = (await read(client.from("workspaces").select("current_season")))[0]
         ?.current_season;
       const bySeason = (table) =>
         season == null
           ? []
           : read(client.from(table).select("*").eq("season", season));
-      const [profiles, entries, certificates, people] = await Promise.all([
+      const [profiles, entries, certificates, people, accounts] = await Promise.all([
         read(client.from("volunteer_profiles").select("*")),
         bySeason("roster_entries"),
         bySeason("certificates"),
         read(client.from("people").select("id,name,user_id")),
+        read(
+          client
+            .from("accounts")
+            .select("workspace_id,user_id,person_id,status,revision,activated_at,expires_at"),
+        ),
       ]);
-      return combineVolunteers({ profiles, entries, certificates, people });
+      return combineVolunteers({ profiles, entries, certificates, people, accounts });
     },
 
     async saveVolunteer(request) {
@@ -719,6 +771,63 @@ export function createStore(client) {
         p_expected_revision: request.expectedRevision ?? null,
         p_volunteer: request.volunteer,
       });
+    },
+
+    // Accounts (migration 047). Create, invite and resend go through the
+    // `accounts` Edge Function; a refusal is its `{code, reason}` body, mapped
+    // like an RPC refusal (`cause.message` is the code, `cause.details` the reason).
+    async createAccount(request) {
+      return await invokeAccounts({ op: "create", actionId: actionId(request), volunteerId: request.volunteerId });
+    },
+
+    async resendAccount(request) {
+      return await invokeAccounts({ op: "resend", actionId: actionId(request), volunteerId: request.volunteerId });
+    },
+
+    async inviteClient(request) {
+      return await invokeAccounts({ op: "invite", actionId: actionId(request), email: request.email });
+    },
+
+    async resendClient(request) {
+      return await invokeAccounts({ op: "resend", actionId: actionId(request), email: request.email });
+    },
+
+    async deactivateAccount(request) {
+      return await call("vitally_deactivate_account", {
+        p_action_id: actionId(request),
+        p_volunteer_id: request.volunteerId,
+        p_expected_revision: request.expectedRevision,
+      });
+    },
+
+    // Cancel an invitation nobody has used (migration 047): `target` is
+    // `{volunteerId}` from the drawer or `{email}` from the office list, at
+    // the account revision the window read.
+    async cancelInvitation(request) {
+      return await call("vitally_cancel_invitation", {
+        p_action_id: actionId(request),
+        p_target: request.target,
+        p_expected_revision: request.expectedRevision,
+      });
+    },
+
+    // The signed-in volunteer's site check (migration 047). WRONG_SITE and a
+    // cancellation are answers, not errors.
+    async completeSiteCheck(name, sidn) {
+      return await call("vitally_complete_site_check", { p_name: name, p_sidn: sidn });
+    },
+
+    async reactivateAccount(request) {
+      return await call("vitally_reactivate_account", {
+        p_action_id: actionId(request),
+        p_volunteer_id: request.volunteerId,
+        p_expected_revision: request.expectedRevision,
+      });
+    },
+
+    async listClientInvitations() {
+      await requireStaffAccess();
+      return (await call("vitally_client_invitations")) ?? [];
     },
 
     async logContact(request) {

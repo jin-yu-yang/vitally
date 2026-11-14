@@ -25,6 +25,8 @@ runs:
         fi
         # The sign-in email carries the code, as on every team stack.
         cp supabase/templates/magic_link.html "$stack/supabase/templates/magic_link.html"
+        # The edge functions the stack serves (the accounts function).
+        mkdir -p "$stack/supabase/functions" && cp -R supabase/functions/. "$stack/supabase/functions/"
         # PostgREST 16.3, not the CLI's 16.2 (docs/setup.md, "Pin PostgREST to 16.3").
         printf %s v16.3 > "$stack/supabase/.temp/rest-version"
         echo "VITALLY_STACK=$stack" >> "$GITHUB_ENV"
@@ -34,7 +36,7 @@ runs:
       run: |
         if ! SUPABASE_HOME="$VITALLY_STACK/cli-home" ./node_modules/.bin/supabase start \
           --workdir "$VITALLY_STACK" \
-          --exclude storage-api,imgproxy,postgres-meta,studio,edge-runtime,logflare,vector,supavisor \
+          --exclude storage-api,imgproxy,postgres-meta,studio,logflare,vector,supavisor \
           > "$VITALLY_STACK/start.private.log" 2>&1; then
           echo "::error::supabase start failed."
           docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}'

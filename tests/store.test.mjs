@@ -335,6 +335,7 @@ function fakeClient({
   user = { id: "user-1", email: "student@example.com" },
   rows = {},
   rpc,
+  invoke,
   readError,
   authError,
   authThrows,
@@ -350,6 +351,7 @@ function fakeClient({
   const client = {
     reads: [],
     rpcCalls: [],
+    invokeCalls: [],
     channels: [],
     removed: [],
     auth: {
@@ -410,6 +412,12 @@ function fakeClient({
             .then(onFulfilled, onRejected),
       };
       return builder;
+    },
+    functions: {
+      invoke: async (name, options) => {
+        client.invokeCalls.push({ name, options });
+        return invoke ? invoke(name, options) : { data: { status: "invited", emailSent: true, accountRevision: 1 }, error: null };
+      },
     },
     async rpc(name, args) {
       client.rpcCalls.push({ name, args });
@@ -1762,6 +1770,160 @@ test("saveVolunteer sends the RPC parameters, nulls for an Add", async () => {
   });
 });
 
+test("listVolunteers reads the accounts and puts each on its volunteer", async () => {
+  const client = fakeClient({
+    access: "staff",
+    rows: { ...ROSTER_ROWS, accounts: [{ workspace_id: "workspace-1", user_id: "u", person_id: "person-ana", status: "invited", revision: 2 }] },
+  });
+  const list = await createStore(client).listVolunteers();
+  assert.deepEqual(list[0].account, { status: "invited", revision: 2, activatedAt: null, expiresAt: null });
+  assert.equal(
+    client.reads.find((read) => read.table === "accounts").columns,
+    "workspace_id,user_id,person_id,status,revision,activated_at,expires_at",
+  );
+});
+
+test("listVolunteers cancels expired invitations before it reads the Roster", async () => {
+  const client = fakeClient({ access: "staff", rows: ROSTER_ROWS });
+  // One log of what was asked, in order: the RPCs and the table reads.
+  const order = [];
+  const rpc = client.rpc.bind(client);
+  client.rpc = (name, args) => {
+    order.push(`rpc:${name}`);
+    return rpc(name, args);
+  };
+  const from = client.from.bind(client);
+  client.from = (name) => {
+    order.push(`read:${name}`);
+    return from(name);
+  };
+  await createStore(client).listVolunteers();
+  const expire = order.indexOf("rpc:vitally_expire_invitations");
+  assert.notEqual(expire, -1);
+  for (const table of ["workspaces", "volunteer_profiles", "roster_entries", "certificates", "people", "accounts"])
+    assert.ok(order.indexOf(`read:${table}`) > expire, table);
+  assert.deepEqual(client.rpcCalls.find((call) => call.name === "vitally_expire_invitations").args, {});
+});
+
+test("a failed expiry fails the Roster read like any other", async () => {
+  const client = fakeClient({
+    access: "staff",
+    rows: ROSTER_ROWS,
+    rpc: async () => ({ data: null, error: { code: "VT001", message: "FORBIDDEN" } }),
+  });
+  await assert.rejects(() => createStore(client).listVolunteers(), { code: "FORBIDDEN" });
+  assert.equal(client.reads.some((read) => read.table === "volunteer_profiles"), false);
+});
+
+test("cancelInvitation sends the target and the expected revision", async () => {
+  const client = fakeClient({ access: "staff" });
+  const store = createStore(client);
+  await store.cancelInvitation({ actionId: "a-1", target: { volunteerId: "person-ana" }, expectedRevision: 2 });
+  await store.cancelInvitation({ actionId: "a-2", target: { email: "c@example.org" }, expectedRevision: 5 });
+  assert.deepEqual(client.rpcCalls, [
+    {
+      name: "vitally_cancel_invitation",
+      args: { p_action_id: "a-1", p_target: { volunteerId: "person-ana" }, p_expected_revision: 2 },
+    },
+    {
+      name: "vitally_cancel_invitation",
+      args: { p_action_id: "a-2", p_target: { email: "c@example.org" }, p_expected_revision: 5 },
+    },
+  ]);
+  // No action id given: one is minted and kept on the request.
+  const request = { target: { volunteerId: "person-ana" }, expectedRevision: 2 };
+  await store.cancelInvitation(request);
+  assert.ok(request.actionId);
+  assert.equal(client.rpcCalls[2].args.p_action_id, request.actionId);
+});
+
+test("completeSiteCheck sends the name and the SIDN and returns the answer", async () => {
+  const answer = { status: "invited", reason: "WRONG_SITE", attemptsLeft: 3 };
+  const client = fakeClient({ access: "staff", rpc: async () => ({ data: answer, error: null }) });
+  assert.deepEqual(await createStore(client).completeSiteCheck("Ana Example", "S12345"), answer);
+  assert.deepEqual(client.rpcCalls, [
+    { name: "vitally_complete_site_check", args: { p_name: "Ana Example", p_sidn: "S12345" } },
+  ]);
+});
+
+test("createAccount invokes the accounts function with op create", async () => {
+  const client = fakeClient({ access: "staff" });
+  const store = createStore(client);
+  const answer = await store.createAccount({ actionId: "a-1", volunteerId: "person-ana" });
+  assert.deepEqual(client.invokeCalls, [
+    { name: "accounts", options: { body: { op: "create", actionId: "a-1", volunteerId: "person-ana" } } },
+  ]);
+  assert.deepEqual(answer, { status: "invited", emailSent: true, accountRevision: 1 });
+  await store.resendAccount({ actionId: "a-2", volunteerId: "person-ana" });
+  await store.inviteClient({ actionId: "a-3", email: "c@example.org" });
+  await store.resendClient({ actionId: "a-4", email: "c@example.org" });
+  assert.deepEqual(client.invokeCalls.slice(1).map((call) => call.options.body), [
+    { op: "resend", actionId: "a-2", volunteerId: "person-ana" },
+    { op: "invite", actionId: "a-3", email: "c@example.org" },
+    { op: "resend", actionId: "a-4", email: "c@example.org" },
+  ]);
+});
+
+const httpError = (status, body) => ({
+  data: null,
+  error: Object.assign(new Error("Edge Function returned a non-2xx status code"), {
+    context: { status, json: async () => body },
+  }),
+});
+
+test("a 400 response becomes VALIDATION with the reason", async () => {
+  const store = createStore(
+    fakeClient({ access: "staff", invoke: async () => httpError(400, { code: "VALIDATION", reason: "NO_EMAIL" }) }),
+  );
+  await assert.rejects(
+    () => store.createAccount({ actionId: "a-1", volunteerId: "p" }),
+    (error) => error.code === "VALIDATION" && error.cause.details === "NO_EMAIL" && error.cause.message === "VALIDATION",
+  );
+});
+
+test("the accounts function's other answers map like RPC errors", async () => {
+  const failing = (invoke) => createStore(fakeClient({ access: "staff", invoke }));
+  await assert.rejects(
+    () => failing(async () => httpError(409, { code: "CONFLICT" })).createAccount({ actionId: "a" }),
+    { code: "CONFLICT" },
+  );
+  await assert.rejects(
+    () => failing(async () => httpError(500, { code: "SERVER_ERROR" })).createAccount({ actionId: "a" }),
+    { code: "SERVER_ERROR" },
+  );
+  await assert.rejects(
+    () => failing(async () => httpError(502, null)).createAccount({ actionId: "a" }),
+    { code: "SERVER_ERROR" },
+  );
+  // A network failure (FunctionsFetchError) has no response and no code.
+  await assert.rejects(
+    () => failing(async () => ({ data: null, error: new Error("Failed to send a request") })).createAccount({ actionId: "a" }),
+    { code: "OFFLINE" },
+  );
+  await assert.rejects(
+    () => failing(async () => { throw new TypeError("fetch failed"); }).createAccount({ actionId: "a" }),
+    { code: "OFFLINE" },
+  );
+});
+
+test("deactivateAccount calls vitally_deactivate_account with the expected revision", async () => {
+  const client = fakeClient({ access: "staff" });
+  const store = createStore(client);
+  await store.deactivateAccount({ actionId: "a-1", volunteerId: "person-ana", expectedRevision: 4 });
+  await store.reactivateAccount({ actionId: "a-2", volunteerId: "person-ana", expectedRevision: 5 });
+  assert.deepEqual(client.rpcCalls, [
+    { name: "vitally_deactivate_account", args: { p_action_id: "a-1", p_volunteer_id: "person-ana", p_expected_revision: 4 } },
+    { name: "vitally_reactivate_account", args: { p_action_id: "a-2", p_volunteer_id: "person-ana", p_expected_revision: 5 } },
+  ]);
+});
+
+test("listClientInvitations calls vitally_client_invitations and returns its array", async () => {
+  const rows = [{ email: "c@example.org", status: "invited", invitedAt: "2026-11-01T00:00:00Z", activatedAt: null, accountRevision: 1 }];
+  const client = fakeClient({ access: "staff", rpc: async () => ({ data: rows, error: null }) });
+  assert.deepEqual(await createStore(client).listClientInvitations(), rows);
+  assert.equal(client.rpcCalls[0].name, "vitally_client_invitations");
+});
+
 test("the Roster tables are not in the subscribed staff tables", () => {
   for (const name of ["volunteer_profiles", "roster_entries", "certificates"])
     assert.ok(!SUBSCRIBED_TABLES.staff.includes(name), name);
@@ -1775,7 +1937,18 @@ test("a staff principal carries the clearance from vitally_my_clearance; an appl
   const applicant = fakeClient({ access: "applicant" });
   const principal = await createStore(applicant).getPrincipal();
   assert.equal(Object.hasOwn(principal, "clearance"), false);
-  assert.deepEqual(applicant.rpcCalls, []);
+  assert.deepEqual(applicant.rpcCalls, [{ name: "vitally_activate_client_account", args: {} }]);
+});
+
+test("a client's principal makes their invitation active; a cancelled one is no access", async () => {
+  const active = fakeClient({ access: "applicant", rpc: async () => ({ data: { status: "active" }, error: null }) });
+  assert.equal((await createStore(active).getPrincipal()).access, "applicant");
+  assert.deepEqual(active.rpcCalls, [{ name: "vitally_activate_client_account", args: {} }]);
+  const cancelled = fakeClient({ access: "applicant", rpc: async () => ({ data: { status: "cancelled" }, error: null }) });
+  await assert.rejects(() => createStore(cancelled).getPrincipal(), { code: "FORBIDDEN" });
+  const staff = fakeClient({ access: "staff", rows: { people: [STAFF_PERSON] }, rpc: async () => ({ data: { cleared: false }, error: null }) });
+  await createStore(staff).getPrincipal();
+  assert.ok(!staff.rpcCalls.some((call) => call.name === "vitally_activate_client_account"), "staff never call it");
 });
 
 test("an error from vitally_my_clearance surfaces from getPrincipal", async () => {

@@ -217,6 +217,8 @@ its root. The stack must already be running ([Start and stop](#start-and-stop)).
      `preparer` (`prepare`) and `reviewer` (`review`) entries of
      [`tools/admin/roster.example.json`](../tools/admin/roster.example.json); `intaker` is optional;
    - `"defaultFollowup": "site_coordinator"`;
+   - `"siteNumber": "S00000000"` (fictional), so a volunteer you give an account can pass the
+     site check at their first sign-in;
    - `client-a@example.org` as the first entry of `applicants`;
    - no `presenters` and no `sampleCaseOwners` (both are ignored with a note, but they belong to
      the old roster).
@@ -311,6 +313,13 @@ no code, so the sign-in form, which asks for a code, cannot be used, and only th
 it names next to it: copy this repository's
 [`supabase/templates/magic_link.html`](../supabase/templates/magic_link.html) (one line,
 `<p>Your ViTally code is {{ .Token }}</p>`) to `$VITALLY_STACK/supabase/templates/magic_link.html`.
+Also copy this repository's `supabase/functions/` folder (the `accounts` Edge Function) to
+`$VITALLY_STACK/supabase/functions/` (`mkdir -p "$VITALLY_STACK/supabase/functions" && cp -R
+supabase/functions/. "$VITALLY_STACK/supabase/functions/"`), and keep the example's
+`[edge_runtime] enabled = true` and `[functions.accounts] verify_jwt = false`. After pulling a
+change to `supabase/functions/`, copy it again and restart the stack. The example also sets
+`[auth.rate_limit] email_sent = 1000` for this stack only, so the tests can send many sign-in
+codes (never copy it to a hosted project).
 A stack that is already running picks the template up after `supabase stop` (without
 `--no-backup`, which would delete its accounts) and `supabase start`. The hosted project needs the
 same template, set in its dashboard ([section 6](#6-classroom-and-hosted-setup-pending)).
@@ -351,7 +360,7 @@ retry, token bypass, or timing delay is used instead. See the
 ```sh
 SUPABASE_HOME="$VITALLY_STACK/cli-home" PATH="$VITALLY_NODE_BIN:$PATH" \
   ./node_modules/.bin/supabase start --workdir "$VITALLY_STACK" \
-  --exclude storage-api,imgproxy,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
+  --exclude storage-api,imgproxy,postgres-meta,studio,logflare,vector,supavisor
 SUPABASE_HOME="$VITALLY_STACK/cli-home" PATH="$VITALLY_NODE_BIN:$PATH" \
   ./node_modules/.bin/supabase status --workdir "$VITALLY_STACK" --output json \
   > "$VITALLY_STACK/status.private.json"
@@ -806,6 +815,11 @@ a changed file.
 
 ## 6. Classroom and hosted setup (pending)
 
+**Deployment prerequisite (blocking for the December test).** The hosted project needs custom
+SMTP (see below), and the `accounts` Edge Function deployed with `verify_jwt = false`, before
+testers can receive invitations or sign-in codes. Without them, Create account and Invite create
+the account but no email arrives.
+
 Nothing in this section has happened. It is Task 10B (setup) and Task 10D (publication) —
 user-owned steps, not implementation work, and this document does not claim otherwise. What the
 user needs to provide before either can proceed.
@@ -904,6 +918,7 @@ matching `.vitally-roster*.json` and are never committed.
 | `workspaceId` | A lower-case UUID. Generate it once and keep it: re-running the same roster with more addresses adds them to the same workspace. |
 | `staff` | Required, at least one entry. Real staff members, each `{ "email", "name", "personKey", "capabilities" }`. Each gets a `staff` account linked to its own new person, which it always acts as, with the staff screens and no demo tools. `capabilities` is non-empty, from `prepare`, `review`, `admin`, `followup`, `receive_documents`, `assist`; an entry with `followup` must also have `admin`; `personKey` is unique. Re-running is harmless, but an existing member's values cannot be changed. For a rehearsal, use fictional names and addresses. |
 | `defaultFollowup` | Required: the `personKey` of a `staff` entry with `followup`, who then gets new follow-ups. See [Back end: the roster](developer/backend.md#the-roster). |
+| `siteNumber` | Optional: the site's SIDN, `S` and eight digits. A volunteer given an account in the app types it at their first sign-in; without it they see "This site isn't set up for sign-in yet." The real number goes only in your roster file, never in the repository. |
 | `applicants` | Classmates who play clients. Each sees only their own applications. |
 | `sampleCaseOwners` | Removed in #135. A roster that still has it runs, and the command prints a note that it was ignored. |
 | `presenters` | Removed in #136. A roster that still has it runs, and the command prints "presenters is no longer used and was ignored; those addresses get no access." A former presenter address cannot sign in; an open window shows "This account has no access". |

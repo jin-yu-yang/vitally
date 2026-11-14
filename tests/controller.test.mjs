@@ -6451,6 +6451,7 @@ const ROSTER_VOLUNTEER = Object.freeze({
   certificates: [],
   revision: 4,
   hasSignIn: false,
+  account: { status: "none", revision: null },
 });
 
 const VOLUNTEER_PAYLOAD = Object.freeze({
@@ -6492,6 +6493,27 @@ const rosterStore = (overrides = {}) => {
     }
     return { actionId: request.actionId, personId: request.volunteerId ?? "v-new", revision: 1 };
   };
+  // The account calls: `accountAnswer` is what the next call resolves to,
+  // `failAccount` makes the next call reject.
+  store.accountAnswer = { status: "invited", emailSent: true, accountRevision: 1 };
+  store.failAccount = null;
+  for (const [method, type] of [
+    ["createAccount", "create"],
+    ["resendAccount", "resend"],
+    ["deactivateAccount", "deactivate"],
+    ["reactivateAccount", "reactivate"],
+    ["cancelInvitation", "cancel"],
+  ])
+    store[method] = async (request) => {
+      store.calls.push(method);
+      store.writes.push({ type, ...request });
+      if (store.failAccount) {
+        const error = store.failAccount;
+        store.failAccount = null;
+        throw error;
+      }
+      return { ...store.accountAnswer };
+    };
   return store;
 };
 const volunteerReads = (store) => store.calls.filter((entry) => entry === "listVolunteers").length;
@@ -7215,6 +7237,611 @@ test("the window's focus re-checks the clearance only while the setup screen sho
   assert.equal(store.calls.filter((entry) => entry === "listCases").length, caseReads + 1);
   state = controller.getState();
   assert.equal(state.error, null);
+  controller.stop();
+});
+
+// ---- the site check (change add-account-invitations, decision 4) ----------
+
+const SITE_CHECK = Object.freeze({ ...UNCLEARED, siteCheck: true });
+// An invited volunteer's store: `siteAnswer` is what the next site check
+// answers (a value or an Error to reject with).
+const siteCheckStore = () => {
+  const store = staffStore({ clearance: { ...SITE_CHECK } });
+  store.siteAnswer = { status: "active" };
+  store.siteCalls = [];
+  store.completeSiteCheck = async (name, sidn) => {
+    store.calls.push("completeSiteCheck");
+    store.siteCalls.push([name, sidn]);
+    if (store.siteAnswer instanceof Error) throw store.siteAnswer;
+    return store.siteAnswer;
+  };
+  return store;
+};
+const siteRefusal = (details) =>
+  Object.assign(new Error("VALIDATION"), { code: "VALIDATION", cause: { message: "VALIDATION", details } });
+
+test("an invited volunteer's window shows the site check, not the setup screen", async () => {
+  const store = siteCheckStore();
+  const { controller } = build({ store });
+  await controller.start();
+  const html = staffScreen(controller.getState());
+  assert.match(html, /<h1>Confirm your site<\/h1>/);
+  assert.doesNotMatch(html, /Finish your setup for this season/);
+  for (const call of ["listCases", "listAssistance"]) assert.equal(store.calls.includes(call), false, call);
+  controller.stop();
+});
+
+test("the right SIDN reads the clearance again and moves on to the setup screen", async () => {
+  const store = siteCheckStore();
+  const { controller } = build({ store });
+  await controller.start();
+  const before = clearanceCalls(store);
+  store.nextClearance = { ...UNCLEARED, siteCheck: false };
+  assert.equal(await controller.completeSiteCheck("  Kim Novak ", "S12345"), "active");
+  assert.deepEqual(store.siteCalls, [["Kim Novak", "S12345"]]);
+  assert.equal(clearanceCalls(store) - before, 1);
+  const state = controller.getState();
+  assert.equal(state.siteCheck, null);
+  assert.equal(state.busy, false);
+  assert.match(staffScreen(state), /Finish your setup for this season/);
+  controller.stop();
+});
+
+test("a wrong SIDN keeps the name and says so exactly", async () => {
+  const store = siteCheckStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.siteAnswer = { status: "invited", reason: "WRONG_SITE", attemptsLeft: 3 };
+  assert.equal(await controller.completeSiteCheck("Kim Novak", "S99999"), "wrong-site");
+  const state = controller.getState();
+  assert.deepEqual(state.siteCheck, { name: "Kim Novak", error: "That isn't this site's number.", cancelled: false });
+  const html = staffScreen(state);
+  assert.match(html, /value="Kim Novak"/);
+  assert.match(html, /id="site-check-sidn" name="sidn" type="text" value=""/);
+  assert.match(html, /That isn&#39;t this site&#39;s number\./);
+  assert.equal(state.error, null);
+  controller.stop();
+});
+
+test("a cancelled invitation replaces the form, and the window stops asking about the clearance", async () => {
+  for (const reason of ["EXPIRED", "TOO_MANY_ATTEMPTS"]) {
+    const store = siteCheckStore();
+    const { controller, events } = build({ store });
+    await controller.start();
+    store.siteAnswer = { status: "cancelled", reason };
+    assert.equal(await controller.completeSiteCheck("Kim Novak", "S99999"), "cancelled");
+    const html = staffScreen(controller.getState());
+    assert.match(html, /This invitation was cancelled\. Ask your site coordinator to invite you again\./);
+    assert.doesNotMatch(html, /site-check-form/);
+    assert.match(html, /data-action="sign-out"/);
+    // No membership is left: the window's focus asks nothing more.
+    const before = clearanceCalls(store);
+    await events.emit("focus");
+    assert.equal(clearanceCalls(store), before, reason);
+    assert.equal(controller.getState().error, null);
+    controller.stop();
+  }
+});
+
+test("an empty name is refused without asking the server", async () => {
+  const store = siteCheckStore();
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(await controller.completeSiteCheck("   ", "S12345"), "invalid");
+  assert.equal(store.calls.includes("completeSiteCheck"), false);
+  assert.equal(controller.getState().siteCheck.error, "Enter your name.");
+  controller.stop();
+});
+
+test("the server's NO_NAME and SITE_NOT_SET are said on the screen; anything else is the safety net", async () => {
+  const store = siteCheckStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.siteAnswer = siteRefusal("NO_NAME");
+  assert.equal(await controller.completeSiteCheck("K", "S1"), "invalid");
+  assert.equal(controller.getState().siteCheck.error, "Enter your name.");
+  store.siteAnswer = siteRefusal("SITE_NOT_SET");
+  assert.equal(await controller.completeSiteCheck("Kim Novak", "S1"), "invalid");
+  assert.deepEqual(controller.getState().siteCheck, {
+    name: "Kim Novak",
+    error: "This site isn't set up for sign-in yet. Ask your site coordinator.",
+    cancelled: false,
+  });
+  assert.equal(controller.getState().error, null);
+  store.siteAnswer = siteRefusal("NO_SIDN");
+  assert.equal(await controller.completeSiteCheck("Kim Novak", ""), "invalid");
+  assert.equal(controller.getState().siteCheck.error, "Enter this site's SIDN.");
+  store.siteAnswer = Object.assign(new Error("SERVER_ERROR"), { code: "SERVER_ERROR" });
+  await assert.rejects(() => controller.completeSiteCheck("Kim Novak", "S1"), (error) => error.code === "SERVER_ERROR");
+  assert.equal(controller.getState().busy, false);
+  controller.stop();
+});
+
+// Review round finding I1: the invitation went away before the press, or an
+// earlier press landed and its answer was lost.
+test("a site check refused as FORBIDDEN says the invitation was cancelled", async () => {
+  const store = siteCheckStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.siteAnswer = Object.assign(new Error("FORBIDDEN"), { code: "FORBIDDEN" });
+  assert.equal(await controller.completeSiteCheck("Kim Novak", "S1"), "cancelled");
+  const state = controller.getState();
+  assert.match(staffScreen(state), /This invitation was cancelled\. Ask your site coordinator to invite you again\./);
+  assert.equal(state.error, null);
+  controller.stop();
+});
+
+test("a site check refused as INVALID_TRANSITION reads the clearance again", async () => {
+  const store = siteCheckStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.siteAnswer = Object.assign(new Error("INVALID_TRANSITION"), { code: "INVALID_TRANSITION" });
+  store.nextClearance = { ...UNCLEARED, siteCheck: false };
+  const before = clearanceCalls(store);
+  assert.equal(await controller.completeSiteCheck("Kim Novak", "S1"), "active");
+  assert.equal(clearanceCalls(store) - before, 1);
+  const state = controller.getState();
+  assert.equal(state.siteCheck, null);
+  assert.equal(state.error, null);
+  assert.match(staffScreen(state), /Finish your setup for this season/);
+  controller.stop();
+});
+
+test("a window with no site check sends nothing", async () => {
+  const store = siteCheckStore();
+  store.nextClearance = { ...UNCLEARED, siteCheck: false };
+  const { controller } = build({ store });
+  await controller.start();
+  // The re-check says this account is past its site check.
+  await controller.checkClearance();
+  assert.equal(await controller.completeSiteCheck("Kim Novak", "S1"), null);
+  assert.deepEqual(store.siteCalls, []);
+  assert.doesNotMatch(staffScreen(controller.getState()), /Confirm your site/);
+  controller.stop();
+});
+
+// ---- the drawer's Account section (change add-account-invitations) --------
+
+const accountRefusal = (code, message, details) =>
+  Object.assign(new Error(code), { code, cause: { message, details } });
+
+async function accountDrawer(store, options = {}) {
+  let n = 0;
+  const built = build({ store, newActionId: () => `action-${++n}`, ...options });
+  await built.controller.start();
+  built.controller.navigate("office-volunteers");
+  await built.controller.loadVolunteers();
+  built.controller.openDialog("volunteer", { volunteerId: "v-1" });
+  return built;
+}
+
+test("create account shows the sent message and re-reads the roster", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  const reads = volunteerReads(store);
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "invited", revision: 1 } }];
+  controller.openDialog("send-invitation", { volunteerId: "v-1" });
+  assert.equal(await controller.createAccount(), true);
+  assert.deepEqual(store.writes.at(-1), { type: "create", actionId: "action-1", volunteerId: "v-1" });
+  const state = controller.getState();
+  assert.deepEqual(state.volunteerAccountNotice, { kind: "ok", text: "Account created and sign-in code sent" });
+  assert.equal(volunteerReads(store), reads + 1);
+  assert.equal(state.volunteers[0].account.status, "invited");
+  assert.equal(state.dialog, "volunteer");
+  assert.equal(state.busy, false);
+  controller.stop();
+});
+
+test("email not sent shows the Resend message", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  store.accountAnswer = { status: "invited", emailSent: false, accountRevision: 1 };
+  controller.openDialog("send-invitation", { volunteerId: "v-1" });
+  assert.equal(await controller.createAccount(), true);
+  assert.equal(
+    controller.getState().volunteerAccountNotice.text,
+    "Account created; the email wasn't sent. Use Resend in a minute.",
+  );
+  // A replayed Resend says the same: nothing was sent this time.
+  store.accountAnswer = { status: "invited", emailSent: false, accountRevision: 1, replay: true };
+  assert.equal(await controller.resendAccount(), true);
+  assert.equal(controller.getState().volunteerAccountNotice.text, "The email wasn't sent. Use Resend in a minute.");
+  controller.stop();
+});
+
+test("a refusal with a sentence is said in the drawer and returns false", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  store.failAccount = accountRefusal("VALIDATION", "VALIDATION", "NO_EMAIL");
+  controller.openDialog("send-invitation", { volunteerId: "v-1" });
+  assert.equal(await controller.createAccount(), false);
+  const state = controller.getState();
+  assert.deepEqual(state.volunteerAccountNotice, { kind: "error", text: "Add an email first" });
+  assert.equal(state.dialog, "volunteer", "back in the drawer, which says it");
+  assert.equal(state.error, null);
+  assert.equal(state.busy, false);
+  controller.stop();
+});
+
+test("OPEN_WORK on deactivate shows the open-work sentence", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "active", revision: 3 } }];
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("deactivate-account", { volunteerId: "v-1" });
+  store.failAccount = accountRefusal("INVALID_TRANSITION", "OPEN_WORK", JSON.stringify(["Pat Doe (preparing)"]));
+  assert.equal(await controller.deactivateAccount(), false);
+  const state = controller.getState();
+  assert.equal(
+    state.volunteerAccountNotice.text,
+    "Mira Patel still has open work: Pat Doe (preparing). Finish it or hand it over first.",
+  );
+  assert.equal(state.dialog, "volunteer", "back in the drawer, which says it");
+  assert.deepEqual(store.writes.at(-1), { type: "deactivate", actionId: "action-1", volunteerId: "v-1", expectedRevision: 3 });
+  controller.stop();
+});
+
+test("CONFLICT on deactivate says someone else changed this volunteer", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "active", revision: 3 } }];
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("deactivate-account", { volunteerId: "v-1" });
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "deactivated", revision: 4 } }];
+  store.failAccount = Object.assign(new Error("stale"), { code: "CONFLICT" });
+  const reads = volunteerReads(store);
+  await assert.rejects(() => controller.deactivateAccount(), (error) => error.code === "CONFLICT");
+  const state = controller.getState();
+  assert.equal(state.error.message, VOLUNTEER_CONFLICT_MESSAGE);
+  assert.equal(volunteerReads(store), reads + 1);
+  assert.equal(state.volunteers[0].account.revision, 4);
+  assert.equal(state.dialog, "volunteer");
+  controller.stop();
+});
+
+test("deactivate asks for confirmation first", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "active", revision: 3 } }];
+  const { controller } = await accountDrawer(store);
+  // From the drawer alone, nothing is sent.
+  assert.equal(await controller.deactivateAccount(), false);
+  assert.equal(store.calls.includes("deactivateAccount"), false);
+  controller.openDialog("deactivate-account", { volunteerId: "v-1" });
+  assert.equal(store.calls.includes("deactivateAccount"), false, "asking sends nothing");
+  // Keeping the account returns to the drawer.
+  controller.closeDialog();
+  assert.equal(controller.getState().dialog, "volunteer");
+  assert.equal(controller.getState().dialogContext.volunteerId, "v-1");
+  controller.openDialog("deactivate-account", { volunteerId: "v-1" });
+  assert.equal(await controller.deactivateAccount(), true);
+  assert.equal(store.calls.filter((entry) => entry === "deactivateAccount").length, 1);
+  assert.equal(controller.getState().volunteerAccountNotice.text, "Account deactivated");
+  assert.equal(controller.getState().dialog, "volunteer");
+  controller.stop();
+});
+
+test("an account action whose answer never came is sent again with the same action id", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  store.failAccount = Object.assign(new Error("offline"), { code: "OFFLINE" });
+  controller.openDialog("send-invitation", { volunteerId: "v-1" });
+  await assert.rejects(() => controller.createAccount(), (error) => error.code === "OFFLINE");
+  // Pressed again: asked again, then sent with the same action id.
+  controller.openDialog("send-invitation", { volunteerId: "v-1" });
+  assert.equal(await controller.createAccount(), true);
+  const sent = store.writes.filter((entry) => entry.type === "create");
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].actionId, sent[0].actionId);
+  assert.equal(await controller.resendAccount(), true);
+  assert.notEqual(store.writes.at(-1).actionId, sent[0].actionId);
+  controller.stop();
+});
+
+test("Create account asks first with the saved email, and nothing is sent before Send", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, email: "ada@example.org" }];
+  const { controller } = await accountDrawer(store);
+  // From the drawer alone, nothing is sent.
+  assert.equal(await controller.createAccount(), false);
+  controller.openDialog("send-invitation", { volunteerId: "v-1" });
+  const asked = controller.getState();
+  assert.match(dialog(asked), /<h2 id="modal-title">Send a sign-in invitation to ada@example\.org\?<\/h2>/);
+  assert.equal(store.calls.includes("createAccount"), false, "asking sends nothing");
+  // Cancel goes back to the drawer, still sending nothing.
+  controller.closeDialog();
+  assert.equal(controller.getState().dialog, "volunteer");
+  assert.equal(controller.getState().dialogContext.volunteerId, "v-1");
+  assert.equal(store.calls.includes("createAccount"), false);
+  controller.openDialog("send-invitation", { volunteerId: "v-1" });
+  assert.equal(await controller.createAccount(), true);
+  assert.equal(store.calls.filter((entry) => entry === "createAccount").length, 1);
+  assert.equal(controller.getState().dialog, "volunteer");
+  controller.stop();
+});
+
+test("a replayed Create account says it was already sent", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  store.accountAnswer = { status: "invited", emailSent: false, accountRevision: 1, replay: true };
+  controller.openDialog("send-invitation", { volunteerId: "v-1" });
+  assert.equal(await controller.createAccount(), true);
+  assert.deepEqual(controller.getState().volunteerAccountNotice, {
+    kind: "ok",
+    text: "This invitation was already sent. If it didn't arrive, use Resend.",
+  });
+  controller.stop();
+});
+
+test("ALREADY_INVITED on Create account fits a volunteer", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  store.failAccount = accountRefusal("INVALID_TRANSITION", "INVALID_TRANSITION", "ALREADY_INVITED");
+  controller.openDialog("send-invitation", { volunteerId: "v-1" });
+  assert.equal(await controller.createAccount(), false);
+  assert.deepEqual(controller.getState().volunteerAccountNotice, {
+    kind: "error",
+    text: "This person is already invited or signed in.",
+  });
+  controller.stop();
+});
+
+test("Cancel invitation asks first, then cancels at the account revision and says so", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, hasSignIn: true, account: { status: "invited", revision: 2, activatedAt: null } }];
+  const { controller } = await accountDrawer(store);
+  // From the drawer alone, nothing is sent.
+  assert.equal(await controller.cancelInvitation(), false);
+  controller.openDialog("cancel-invitation", { volunteerId: "v-1" });
+  assert.equal(store.calls.includes("cancelInvitation"), false, "asking sends nothing");
+  // Keeping it returns to the drawer.
+  controller.closeDialog();
+  assert.equal(controller.getState().dialog, "volunteer");
+  controller.openDialog("cancel-invitation", { volunteerId: "v-1" });
+  const reads = volunteerReads(store);
+  // What the re-read finds: no account, and the email editable again.
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, hasSignIn: false, revision: 5, account: { status: "none", revision: null } }];
+  assert.equal(await controller.cancelInvitation(), true);
+  assert.deepEqual(store.writes.at(-1), {
+    type: "cancel",
+    actionId: "action-1",
+    target: { volunteerId: "v-1" },
+    expectedRevision: 2,
+  });
+  const state = controller.getState();
+  assert.deepEqual(state.volunteerAccountNotice, { kind: "ok", text: "Invitation cancelled." });
+  assert.equal(state.dialog, "volunteer");
+  assert.equal(volunteerReads(store), reads + 1);
+  const drawer = dialog(state);
+  assert.match(drawer, /Status: <strong>Not created<\/strong>/);
+  assert.match(drawer, /data-action="account-create"/);
+  assert.doesNotMatch(drawer, /id="volunteer-email"[^>]*readonly/, "the email can be edited again");
+  controller.stop();
+});
+
+test("Cancel invitation refused INVALID_TRANSITION says it can no longer be cancelled", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "invited", revision: 2, activatedAt: null } }];
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("cancel-invitation", { volunteerId: "v-1" });
+  store.failAccount = accountRefusal("INVALID_TRANSITION", "INVALID_TRANSITION", null);
+  assert.equal(await controller.cancelInvitation(), false);
+  const state = controller.getState();
+  assert.deepEqual(state.volunteerAccountNotice, { kind: "error", text: "This invitation can no longer be cancelled." });
+  assert.equal(state.error, null);
+  assert.equal(state.dialog, "volunteer");
+  controller.stop();
+});
+
+test("Cancel invitation on a stale drawer says someone else changed this volunteer", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "invited", revision: 2, activatedAt: null } }];
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("cancel-invitation", { volunteerId: "v-1" });
+  store.failAccount = Object.assign(new Error("stale"), { code: "CONFLICT" });
+  await assert.rejects(() => controller.cancelInvitation(), (error) => error.code === "CONFLICT");
+  const state = controller.getState();
+  assert.equal(state.error.message, VOLUNTEER_CONFLICT_MESSAGE);
+  assert.equal(state.dialog, "volunteer");
+  controller.stop();
+});
+
+// ---- the office screen's Invite a client panel (change add-account-invitations)
+
+const INVITATION_ROW = { email: "ana@example.org", status: "invited", invitedAt: "2026-11-10T10:00:00Z", activatedAt: null, accountRevision: 1 };
+const inviteStore = () => {
+  const store = rosterStore();
+  store.invitations = [];
+  store.failInvite = null;
+  store.inviteAnswer = { status: "invited", emailSent: true, accountRevision: 1 };
+  store.listClientInvitations = async () => {
+    store.calls.push("listClientInvitations");
+    return store.invitations.map((entry) => ({ ...entry }));
+  };
+  for (const [method, type] of [
+    ["inviteClient", "invite"],
+    ["resendClient", "resend-client"],
+    ["cancelInvitation", "cancel-client"],
+  ])
+    store[method] = async (request) => {
+      store.calls.push(method);
+      store.writes.push({ type, ...request });
+      if (store.failInvite) {
+        const error = store.failInvite;
+        store.failInvite = null;
+        throw error;
+      }
+      return { ...store.inviteAnswer };
+    };
+  return store;
+};
+const inviteReads = (store) => store.calls.filter((entry) => entry === "listClientInvitations").length;
+
+test("an admin's start reads the client list", async () => {
+  const store = inviteStore();
+  store.invitations = [INVITATION_ROW];
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(inviteReads(store), 1);
+  assert.deepEqual(controller.getState().invitations, [INVITATION_ROW]);
+  controller.stop();
+});
+
+test("invite refused EMAIL_ON_ROSTER shows its sentence", async () => {
+  const store = inviteStore();
+  const { controller } = build({ store, newActionId: () => "action-1" });
+  await controller.start();
+  store.failInvite = accountRefusal("VALIDATION", "VALIDATION", "EMAIL_ON_ROSTER");
+  assert.equal(controller.askInviteClient(" Mira@Example.org "), true);
+  assert.equal(await controller.inviteClient(), false);
+  // The question names the trimmed email, and that is what is sent.
+  assert.equal(store.writes.at(-1).email, "Mira@Example.org");
+  const state = controller.getState();
+  assert.deepEqual(state.inviteNotice, { kind: "error", text: "That email belongs to a volunteer. Use another email." });
+  assert.equal(state.inviteEmail, " Mira@Example.org ", "what was typed stays");
+  assert.equal(state.error, null);
+  assert.equal(state.busy, false);
+  controller.stop();
+});
+
+test("invite success clears the field, shows the sent message and re-reads the list", async () => {
+  const store = inviteStore();
+  const { controller } = build({ store, newActionId: () => "action-1" });
+  await controller.start();
+  const reads = inviteReads(store);
+  store.invitations = [INVITATION_ROW];
+  controller.askInviteClient("ana@example.org");
+  assert.equal(await controller.inviteClient(), true);
+  assert.deepEqual(store.writes.at(-1), { type: "invite", actionId: "action-1", email: "ana@example.org" });
+  const state = controller.getState();
+  assert.equal(state.dialog, null, "the question closed; the panel says the result");
+  assert.deepEqual(state.inviteNotice, { kind: "ok", text: "Account created and sign-in code sent" });
+  assert.equal(state.inviteEmail, "");
+  assert.equal(inviteReads(store), reads + 1);
+  assert.deepEqual(state.invitations, [INVITATION_ROW]);
+  controller.stop();
+});
+
+test("invite with the email not sent says to use Resend; a retry after OFFLINE keeps the action id", async () => {
+  const store = inviteStore();
+  let n = 0;
+  const { controller } = build({ store, newActionId: () => `action-${++n}` });
+  await controller.start();
+  store.failInvite = Object.assign(new Error("OFFLINE"), { code: "OFFLINE" });
+  controller.askInviteClient("ana@example.org");
+  await assert.rejects(() => controller.inviteClient(), (error) => error.code === "OFFLINE");
+  store.inviteAnswer = { status: "invited", emailSent: false, accountRevision: 1 };
+  controller.askInviteClient("ana@example.org");
+  assert.equal(await controller.inviteClient(), true);
+  assert.deepEqual(store.writes.map((entry) => entry.actionId), ["action-1", "action-1"]);
+  assert.equal(controller.getState().inviteNotice.text, "Account created; the email wasn't sent. Use Resend in a minute.");
+  controller.stop();
+});
+
+test("Invite asks first with the typed, trimmed email; nothing is sent before Send", async () => {
+  const store = inviteStore();
+  const { controller } = build({ store, newActionId: () => "action-1" });
+  await controller.start();
+  assert.equal(await controller.inviteClient(), false, "no question, nothing sent");
+  assert.equal(controller.askInviteClient("  ada@example.org "), true);
+  const state = controller.getState();
+  assert.equal(state.dialog, "send-invitation");
+  assert.match(dialog(state), /<h2 id="modal-title">Send a sign-in invitation to ada@example\.org\?<\/h2>/);
+  assert.equal(state.inviteEmail, "  ada@example.org ", "what was typed stays");
+  assert.equal(store.calls.includes("inviteClient"), false, "asking sends nothing");
+  // Cancel closes the question; nothing was sent.
+  controller.closeDialog();
+  assert.equal(controller.getState().dialog, null);
+  assert.equal(await controller.inviteClient(), false);
+  assert.equal(store.calls.includes("inviteClient"), false);
+  controller.stop();
+});
+
+test("a replayed invite says it was already sent; ALREADY_INVITED fits a client", async () => {
+  const store = inviteStore();
+  let n = 0;
+  const { controller } = build({ store, newActionId: () => `action-${++n}` });
+  await controller.start();
+  store.inviteAnswer = { status: "invited", emailSent: false, accountRevision: 1, replay: true };
+  controller.askInviteClient("ana@example.org");
+  assert.equal(await controller.inviteClient(), true);
+  assert.deepEqual(controller.getState().inviteNotice, {
+    kind: "ok",
+    text: "This invitation was already sent. If it didn't arrive, use Resend.",
+  });
+  store.failInvite = accountRefusal("INVALID_TRANSITION", "INVALID_TRANSITION", "ALREADY_INVITED");
+  controller.askInviteClient("ana@example.org");
+  assert.equal(await controller.inviteClient(), false);
+  assert.deepEqual(controller.getState().inviteNotice, { kind: "error", text: "This person is already invited or signed in." });
+  controller.stop();
+});
+
+test("the office list's Cancel asks, cancels by email at the row's revision and re-reads the list", async () => {
+  const store = inviteStore();
+  store.invitations = [INVITATION_ROW];
+  const { controller } = build({ store, newActionId: () => "action-7" });
+  await controller.start();
+  controller.openDialog("cancel-invitation", { email: "ana@example.org", revision: 1 });
+  assert.match(dialog(controller.getState()), /Cancel this invitation\?/);
+  assert.equal(store.calls.includes("cancelInvitation"), false, "asking sends nothing");
+  const reads = inviteReads(store);
+  store.invitations = [];
+  assert.equal(await controller.cancelInvitation(), true);
+  assert.deepEqual(store.writes.at(-1), {
+    type: "cancel-client",
+    actionId: "action-7",
+    target: { email: "ana@example.org" },
+    expectedRevision: 1,
+  });
+  const state = controller.getState();
+  assert.equal(state.dialog, null);
+  assert.deepEqual(state.inviteNotice, { kind: "ok", text: "Invitation cancelled." });
+  assert.equal(inviteReads(store), reads + 1);
+  assert.deepEqual(state.invitations, []);
+  // Refused INVALID_TRANSITION: said in the panel.
+  store.invitations = [INVITATION_ROW];
+  controller.openDialog("cancel-invitation", { email: "ana@example.org", revision: 1 });
+  store.failInvite = accountRefusal("INVALID_TRANSITION", "INVALID_TRANSITION", null);
+  assert.equal(await controller.cancelInvitation(), false);
+  assert.deepEqual(controller.getState().inviteNotice, { kind: "error", text: "This invitation can no longer be cancelled." });
+  assert.equal(controller.getState().error, null);
+  controller.stop();
+});
+
+test("resend a client sends the email and says so", async () => {
+  const store = inviteStore();
+  const { controller } = build({ store, newActionId: () => "action-9" });
+  await controller.start();
+  assert.equal(await controller.resendClient("ana@example.org"), true);
+  assert.deepEqual(store.writes.at(-1), { type: "resend-client", actionId: "action-9", email: "ana@example.org" });
+  assert.equal(controller.getState().inviteNotice.text, "Sign-in code sent");
+  controller.stop();
+});
+
+test("a focus refresh re-reads the client invitations", async () => {
+  const store = inviteStore();
+  const { controller, events } = build({ store });
+  await controller.start();
+  const reads = inviteReads(store);
+  store.invitations = [{ ...INVITATION_ROW, status: "active" }];
+  await events.emit("focus");
+  assert.equal(inviteReads(store), reads + 1);
+  assert.equal(controller.getState().invitations[0].status, "active");
+  // A failed read never fails the refresh.
+  store.listClientInvitations = async () => {
+    throw new Error("down");
+  };
+  await events.emit("focus");
+  assert.equal(controller.getState().error, null);
+  controller.stop();
+});
+
+test("an empty email sends no invite and asks nothing", async () => {
+  const store = inviteStore();
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(controller.askInviteClient("   "), false);
+  assert.equal(controller.getState().dialog, null, "no question");
+  assert.equal(await controller.inviteClient(), false);
+  assert.equal(store.calls.includes("inviteClient"), false);
+  assert.deepEqual(controller.getState().inviteNotice, { kind: "error", text: "Add an email first" });
   controller.stop();
 });
 

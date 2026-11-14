@@ -611,6 +611,9 @@ test("volunteer roster records against real Supabase", async (t) => {
       );
     });
 
+    // 047 (add-account-invitations, design D6): this volunteer has no sign-in
+    // and so no account, and is never cleared. The test below is its
+    // counterpart with an active account.
     await t.test("photo ID check is kept while ticked", async () => {
       const email = `photo-${randomUUID()}@example.org`;
       const { personId } = await save(admin, addArgs(volunteer({ email, isNew: true })));
@@ -623,7 +626,7 @@ test("volunteer roster records against real Supabase", async (t) => {
         (await one(f, "select photo_id_checked_at::text as at from public.roster_entries where person_id=$1", [personId])).at;
       const checkedAt = await checkedAtOf();
       assert.ok(checkedAt, "the check time is stored");
-      assert.equal(await clearedOf(f, personId), true);
+      assert.equal(await clearedOf(f, personId), false, "no account");
       await save(admin, editArgs(personId, 2, volunteer({ email, name: "Casey Vale", isNew: true, photoIdChecked: true })));
       assert.equal(await checkedAtOf(), checkedAt, "kept while ticked");
       await save(admin, editArgs(personId, 3, volunteer({ email, isNew: true, photoIdChecked: false })));
@@ -631,7 +634,19 @@ test("volunteer roster records against real Supabase", async (t) => {
       assert.equal(await clearedOf(f, personId), false);
       await save(admin, editArgs(personId, 4, volunteer({ email, isNew: false, photoIdChecked: false })));
       assert.equal((await entryOf(f, personId)).is_new, false);
-      assert.equal(await clearedOf(f, personId), true, "not new");
+      assert.equal(await clearedOf(f, personId), false, "not new, but no account");
+    });
+
+    await t.test("photo ID check clears a volunteer with an active account", async () => {
+      const member = await f.staff({ key: "pia_photo", name: "Pia Lund", capabilities: [], cleared: false });
+      await save(admin, await editOf(f, member.personId, { isNew: true }));
+      assert.equal(await clearedOf(f, member.personId), false, "new without a photo ID check");
+      await save(admin, await editOf(f, member.personId, { isNew: true, photoIdChecked: true }));
+      assert.equal(await clearedOf(f, member.personId), true);
+      await save(admin, await editOf(f, member.personId, { isNew: true, photoIdChecked: false }));
+      assert.equal(await clearedOf(f, member.personId), false);
+      await save(admin, await editOf(f, member.personId, { isNew: false, photoIdChecked: false }));
+      assert.equal(await clearedOf(f, member.personId), true, "not new");
     });
 
     await t.test("an uncleared admin saves their own Admin role", async () => {

@@ -10,10 +10,11 @@ import { openDatabase } from "../tools/admin/database.mjs";
 // reach. Every check reads the catalog over a plain connection; the refused
 // inserts run in a transaction that is rolled back.
 
-// The row-security policies at 044, one per table, by table and name. 043
+// The row-security policies at 047, one per table, by table and name. 043
 // renames the sixteen staff-only policies and drops or adds none; 044 adds the
-// three admin-only Roster policies.
+// three admin-only Roster policies; 047 adds the admin-only accounts policy.
 const POLICIES = Object.freeze([
+  ["accounts", "admin_accounts"],
   ["admin_followups", "staff_admin_followups"],
   ["assistance_items", "staff_assistance_items"],
   ["case_contacts", "visible_case_contacts"],
@@ -42,7 +43,7 @@ const POLICIES = Object.freeze([
   ["volunteer_profiles", "admin_volunteer_profiles"],
   ["workspaces", "member_workspace"],
 ]);
-// The eight public RPCs after 045, by name and identity arguments.
+// The seventeen public RPCs after 047, by name and identity arguments.
 const RPCS = Object.freeze([
   "vitally_apply_action(p_action_id uuid, p_case_id uuid, p_expected_revision bigint, p_type text, p_payload jsonb)",
   "vitally_assistance_action(p_action_id uuid, p_item_id uuid, p_expected_revision bigint, p_type text, p_note text)",
@@ -52,6 +53,27 @@ const RPCS = Object.freeze([
   "vitally_edit_contact(p_action_id uuid, p_contact_id uuid, p_expected_revision bigint, p_entry jsonb)",
   "vitally_save_volunteer(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_volunteer jsonb)",
   "vitally_my_clearance()",
+  "vitally_prepare_account(p_action_id uuid, p_op text, p_target jsonb)",
+  "vitally_record_account(p_action_id uuid, p_op text, p_target jsonb, p_user_id uuid)",
+  "vitally_deactivate_account(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)",
+  "vitally_reactivate_account(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)",
+  "vitally_client_invitations()",
+  "vitally_cancel_invitation(p_action_id uuid, p_target jsonb, p_expected_revision bigint)",
+  "vitally_expire_invitations()",
+  "vitally_complete_site_check(p_name text, p_sidn text)",
+  "vitally_activate_client_account()",
+]);
+// The public RPCs that only read: no action id, no digest.
+// The RPCs that take no action id and store no digest: the reads, and (047,
+// design D11, D12, D15) the expiry sweep, the caller's own site check and a
+// client's first-read activation, whose repeat is harmless or judged afresh.
+const READ_ONLY_RPCS = Object.freeze([
+  "vitally_activate_client_account",
+  "vitally_client_invitations",
+  "vitally_complete_site_check",
+  "vitally_expire_invitations",
+  "vitally_my_clearance",
+  "vitally_prepare_account",
 ]);
 // The signatures 043 drops by name.
 const OLD_SIGNATURES = Object.freeze([
@@ -146,7 +168,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
     });
 
-    await t.test("the public API is exactly eight RPCs", async () => {
+    await t.test("the public API is exactly seventeen RPCs", async () => {
       const { rows } = await sql(
         `select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as signature
            from pg_proc p where p.pronamespace='public'::regnamespace`,
@@ -194,8 +216,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
         "select p.proname, p.prosrc from pg_proc p where p.pronamespace='public'::regnamespace order by 1",
       );
       assert.equal(rows.length, RPCS.length);
-      // vitally_my_clearance only reads: it takes no action id and stores no digest.
-      for (const row of rows.filter((entry) => entry.proname !== "vitally_my_clearance"))
+      for (const row of rows.filter((entry) => !READ_ONLY_RPCS.includes(entry.proname)))
         assert.match(row.prosrc, /'personId',\s*v_person\.id/, row.proname);
     });
 
