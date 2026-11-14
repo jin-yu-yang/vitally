@@ -7427,3 +7427,40 @@ test("a Realtime case change redraws the Workload from the new case list", async
   assert.equal(preparing(staffScreen(controller.getState())), "2");
   controller.stop();
 });
+
+// A logged contact touches only contact_log, never the cases row, so the case
+// list (and each case's lastContactAt) is re-read for it explicitly.
+test("a Realtime contact log change re-reads the case list, so a logged contact clears Stalled", async () => {
+  const daysAgo = (days) => new Date(Date.now() - days * 86_400_000).toISOString();
+  const store = workloadStore();
+  store.records.set("case-w2", { ...store.records.get("case-w2"), updatedAt: daysAgo(8), lastContactAt: null });
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.setVolunteerTab("workload");
+  const stalled = (html) => html.match(/data-row-id="v-1"[\s\S]*?data-col="stalled">(\d+)</)[1];
+  assert.equal(stalled(staffScreen(controller.getState())), "1");
+  // Another window logs a contact on Mira's case.
+  const contactAt = daysAgo(0);
+  store.records.set("case-w2", { ...store.records.get("case-w2"), lastContactAt: contactAt });
+  const reads = caseListReads(store);
+  await store.handlers.onChange({ table: "contact_log", eventType: "INSERT", id: "x", caseId: "case-w2" });
+  assert.equal(caseListReads(store), reads + 1, "the list is re-read once");
+  const listed = controller.getState().cases.find((record) => record.id === "case-w2");
+  assert.equal(listed.lastContactAt, contactAt);
+  assert.equal(stalled(staffScreen(controller.getState())), "0");
+  controller.stop();
+});
+
+test("a contact logged in this window re-reads the case list as well as the case", async () => {
+  const store = contactStore();
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.selectCase("case-a");
+  const lists = caseListReads(store);
+  const reads = readsOf(store);
+  await controller.logContact("case-a", CONTACT_ENTRY);
+  assert.equal(caseListReads(store), lists + 1, "the list is re-read once");
+  assert.equal(readsOf(store), reads + 1, "the case is re-read once");
+  controller.stop();
+});

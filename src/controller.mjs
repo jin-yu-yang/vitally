@@ -935,7 +935,10 @@ export function createController({
     // everything this window holds may have changed: all of it is re-read
     // through the same access-scoped paths.
     const touchesWorkspace = change.table === "workspaces";
-    const touchesList = touchesWorkspace || change.table === "cases";
+    // A logged contact never touches the cases row, but it moves the case's
+    // lastContactAt, which the Workload's Stalled count reads from the list.
+    const touchesList =
+      touchesWorkspace || change.table === "cases" || change.table === "contact_log";
     const touchesOpen =
       Boolean(state.selectedCaseId) &&
       (touchesWorkspace || change.caseId === state.selectedCaseId);
@@ -2901,7 +2904,7 @@ export function createController({
   // CONFLICT re-reads the case before it is shown, and a landed write whose
   // re-read fails is a stale view, never a failed write. Not retryable: the
   // form keeps what was typed and the person presses the button again.
-  async function runContactWrite(request, write) {
+  async function runContactWrite(request, write, { rereadList = false } = {}) {
     state.busy = true;
     state.error = null;
     show();
@@ -2910,6 +2913,9 @@ export function createController({
       state.busy = false;
       noteConnected();
       try {
+        // A new entry moves the case's lastContactAt in the list (Workload's
+        // Stalled count); an edit keeps the logged time, so it does not.
+        if (rereadList) await loadList();
         await loadSelected();
         state.error = null;
       } catch (error) {
@@ -2941,6 +2947,7 @@ export function createController({
         entry,
       },
       (request) => store.logContact(request),
+      { rereadList: true },
     );
   }
 
