@@ -10,12 +10,12 @@
 
 ## 2. The database
 
-- [ ] 2.1 Add the both-rejected pin (today's line, exactly) and the staff-notice tests (after-filing text on path 6 with Dismissed; today's text with no filed return) to `tests/database-closed-after-filing.mjs`
-- [ ] 2.2 Add the exhaustive parity test to `tests/database-closed-after-filing.mjs`: 7 reasons × 17 filing states, SQL `closed_line` equals `describeStage` English, `sentence(line, "zh-Hans")` has an entry and equals `describeStage` 简体
-- [ ] 2.3 Write the migration `supabase/migrations/047_closed_lines_after_filing.sql` (number provisional, design D7): the five-argument `closed_line`, `act_close_case` from 043 and `vitally_close_unsigned` from 045 verbatim except the marked lines, then drop `closed_line(text)` after a grep shows no other caller
-- [ ] 2.4 Run `npm test` locally; push, and run CI (`gh workflow run ci.yml --ref fix-closed-lines-after-filing`) for the database, story and checks jobs; read failures before re-running
+- [x] 2.1 Add the both-rejected pin (today's line, exactly) and the staff-notice tests (after-filing text on path 6 with Dismissed; today's text with no filed return) to `tests/database-closed-after-filing.mjs`
+- [x] 2.2 Add the exhaustive parity test to `tests/database-closed-after-filing.mjs`: 7 reasons × 17 filing states, SQL `closed_line` equals `describeStage` English, `sentence(line, "zh-Hans")` has an entry and equals `describeStage` 简体
+- [x] 2.3 Write the migration `supabase/migrations/047_closed_lines_after_filing.sql` (number provisional, design D7): the five-argument `closed_line`, `act_close_case` from 043 and `vitally_close_unsigned` from 045 verbatim except the marked lines, then drop `closed_line(text)` after a grep shows no other caller
+- [x] 2.4 Run `npm test` locally; push, and run CI (`gh workflow run ci.yml --ref fix-closed-lines-after-filing`) for the database, story and checks jobs; read failures before re-running
 
 ## 3. Spec and docs
 
-- [ ] 3.1 Check that no existing test or doc states the old line for a filed case; update `docs/developer/` only if it describes `closed_line`'s signature
-- [ ] 3.2 Run `npx openspec validate --all`
+- [x] 3.1 Check that no existing test or doc states the old line for a filed case; update `docs/developer/` only if it describes `closed_line`'s signature
+- [x] 3.2 Run `npx openspec validate --all`
