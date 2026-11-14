@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createDatabaseFixture } from "./support/database-fixture.mjs";
+import { describeStage, CLOSED_AFTER_FILING_NOTICE_REASON } from "../src/domain.mjs";
+import { sentence, SENTENCES } from "../src/client-text.mjs";
 
 // Issue #170: a case closed after a return was filed must not tell the client
 // that the return was not filed. One subtest per close path that can reach a
@@ -8,7 +10,7 @@ import { createDatabaseFixture } from "./support/database-fixture.mjs";
 // the client on paper). Each asserts only the negative, so it holds whatever
 // wording the fix chooses.
 
-const NOT_FILED = /was not filed|未递交/;
+const NOT_FILED = /Your return was not filed|您的报税表未递交/;
 const NOT_FILED_REASONS = ["dismissed", "withdrawn", "out_of_scope"];
 
 test("closing after a filed return (issue #170)", async (t) => {
@@ -103,6 +105,61 @@ test("closing after a filed return (issue #170)", async (t) => {
       await act(caseId, "PUT_ON_HOLD", { confirmed: true });
       await f.closeUnsigned(f.siteCoordinator, [{ caseId, revision: await revision(caseId) }]);
       await assertFiledLine(caseId, "season-end from Hold");
+    });
+
+    const noticeReason = async (caseId) =>
+      (await f.sql("select reason from public.admin_followups where case_id=$1 and purpose='withdrawal_notice' and status='open'", [caseId])).rows[0]?.reason;
+
+    await t.test("9. Both returns rejected keep today's line", async () => {
+      const caseId = await answeredCase({ federal: "efile", state: "efile" }, { federal: "rejected", state: "rejected" });
+      await act(caseId, "CLOSE_CASE", { confirmed: true, reason: "dismissed" });
+      assert.equal(await lastMessage(caseId), "PCDC could not reach you, so this application was closed. Your return was not filed.");
+    });
+
+    await t.test("10. The staff notice after a filing", async () => {
+      const caseId = await returnedToSigning();
+      await act(caseId, "PUT_ON_HOLD", { confirmed: true });
+      await act(caseId, "CLOSE_CASE", { confirmed: true, reason: "dismissed" });
+      assert.equal(await noticeReason(caseId), CLOSED_AFTER_FILING_NOTICE_REASON);
+    });
+
+    await t.test("11. The staff notice with nothing filed", async () => {
+      const caseId = await f.approvedCase();
+      await act(caseId, "PUT_ON_HOLD", { confirmed: true });
+      await act(caseId, "CLOSE_CASE", { confirmed: true, reason: "dismissed" });
+      assert.equal(await noticeReason(caseId), "The case was closed before filing; make sure the return is not transmitted in TaxSlayer.");
+    });
+
+    await t.test("12. The withdrawn notice after a filing is unchanged", async () => {
+      const caseId = await returnedToSigning();
+      await act(caseId, "CLOSE_CASE", { confirmed: true, reason: "withdrawn" });
+      assert.equal(await noticeReason(caseId), "The client withdrew; make sure the return is not transmitted in TaxSlayer.");
+    });
+
+    await t.test("13. Every combination matches the status panel", async () => {
+      const GENERIC = "Your application was closed by the office. This does not change any return filed elsewhere. Contact PCDC if you have questions.";
+      const reasons = ["out_of_scope", "no_need_to_file", "duplicate", "dismissed", "withdrawn", "other", null];
+      const returns = [["efile", "accepted"], ["efile", null], ["paper", "given_to_client"], ["efile", "rejected"]];
+      const states = [[[null, null], [null, null]]];
+      for (const fed of returns) for (const st of returns) states.push([fed, st]);
+      let calls = 0;
+      for (const reason of reasons)
+        for (const [[fm, fr], [sm, sr]] of states) {
+          const line = (await f.sql("select vitally_private.closed_line($1,$2,$3,$4,$5) as line", [reason, fm, fr, sm, sr])).rows[0].line;
+          calls += 1;
+          const label = `${reason} federal ${fm}/${fr} state ${sm}/${sr}`;
+          if (reason === "other" || reason === null) {
+            assert.equal(line, GENERIC, label);
+            assert.ok(Object.hasOwn(SENTENCES, line), `${label}: no SENTENCES entry`);
+            continue;
+          }
+          const record = { closingReason: reason, federalMethod: fm, federalResult: fr, stateMethod: sm, stateResult: sr };
+          assert.equal(line, describeStage("closed", "en", record).clientMessage, label);
+          const hans = sentence(line, "zh-Hans");
+          assert.notEqual(hans, line, `${label}: not translated`);
+          assert.equal(hans, describeStage("closed", "zh-Hans", record).clientMessage, label);
+        }
+      assert.equal(calls, 119);
     });
   } finally {
     await f.close();
