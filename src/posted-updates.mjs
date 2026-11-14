@@ -41,7 +41,11 @@ function isIrsLink(text) {
   return text.length <= LINK_MAX && IRS_LINK.test(text);
 }
 
-export function validateUpdate(form = {}) {
+// `today` (YYYY-MM-DD, New York) refuses a keep-at-the-top date before it,
+// except the saved date of the update being edited (`savedKeepTopUntil`),
+// so an update kept since an earlier day still saves. The database has no
+// such check: this is the form's.
+export function validateUpdate(form = {}, { today = null, savedKeepTopUntil = null } = {}) {
   const errors = {};
   const title = String(form.title ?? "").trim();
   const message = String(form.message ?? "").trim();
@@ -56,6 +60,8 @@ export function validateUpdate(form = {}) {
   if (form.audience === "roles" && orderedRoles(form.roles).length === 0) errors.roles = "Choose at least one role.";
   const keep = String(form.keepTopUntil ?? "").trim();
   if (keep && !/^\d{4}-\d{2}-\d{2}$/.test(keep)) errors.keepTopUntil = "Enter a valid date.";
+  else if (keep && today && keep < String(today) && keep !== String(savedKeepTopUntil ?? ""))
+    errors.keepTopUntil = "Choose today or a later date.";
   return Object.keys(errors).length ? errors : null;
 }
 

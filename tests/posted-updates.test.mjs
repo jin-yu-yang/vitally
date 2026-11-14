@@ -60,6 +60,21 @@ test("validateUpdate messages", () => {
   assert.deepEqual(Object.keys(many).sort(), ["kind", "message", "title"]);
 });
 
+test("validateUpdate refuses a keep-at-the-top date before today", () => {
+  const past = "Choose today or a later date.";
+  const today = "2026-11-25";
+  assert.deepEqual(validateUpdate({ ...good(), keepTopUntil: "2026-11-24" }, { today }), { keepTopUntil: past });
+  assert.equal(validateUpdate({ ...good(), keepTopUntil: "2026-11-25" }, { today }), null);
+  assert.equal(validateUpdate({ ...good(), keepTopUntil: "2026-12-01" }, { today }), null);
+  assert.equal(validateUpdate({ ...good(), keepTopUntil: "" }, { today }), null);
+  // An edit keeps the update's saved date, even when it has passed.
+  assert.equal(validateUpdate({ ...good(), keepTopUntil: "2026-11-20" }, { today, savedKeepTopUntil: "2026-11-20" }), null);
+  assert.deepEqual(
+    validateUpdate({ ...good(), keepTopUntil: "2026-11-19" }, { today, savedKeepTopUntil: "2026-11-20" }),
+    { keepTopUntil: past }
+  );
+});
+
 test("toUpdateRequest has exactly the ten keys the database expects", () => {
   const r = toUpdateRequest(good(), {});
   assert.deepEqual(Object.keys(r).sort(), [
