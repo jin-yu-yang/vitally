@@ -10,6 +10,7 @@ import {
   submitVerificationCode,
   APP_COOLDOWN_SECONDS,
 } from "./support/browser-fixture.mjs";
+import { latestCode } from "./support/mail-catcher.mjs";
 import { redactAddresses, WORK_BOARD_HEADING } from "./support/story-pages.mjs";
 import { NEUTRAL_SEND_MESSAGE } from "../src/auth.mjs";
 
@@ -628,6 +629,72 @@ async function runEngineGate(t, engineName) {
           await win.context.close();
         }
       });
+
+      // Client invitations (change add-account-invitations): the admin invites
+      // an address on the office screen; the function emails the real code; the
+      // client signs in with it, and the admin's list turns Active.
+      await t.test(
+        "an admin invites a client who signs in with the emailed code",
+        async () => {
+          const mailUrl = process.env.VITALLY_TEST_MAIL_URL;
+          assert.ok(
+            mailUrl,
+            "VITALLY_TEST_MAIL_URL is required (tools/admin/write-test-env.mjs writes it).",
+          );
+          const email = `invited-${randomUUID()}@example.org`;
+          const admin = await engine.newPage();
+          const client = await engine.newPage();
+          try {
+            await loginTestUser({
+              page: admin.page,
+              actor: fixture.actor("siteCoordinator"),
+              fixture,
+              heading: "Office queue",
+            });
+            const panel = admin.page.locator("section.invite-client");
+            await panel.waitFor();
+            await panel.getByLabel("Client email", { exact: true }).fill(email);
+            const after = new Date(Date.now() - 2_000);
+            await panel.getByRole("button", { name: "Invite", exact: true }).click();
+            const row = panel.locator("tbody tr", { hasText: email });
+            await row.getByText("Invited", { exact: true }).waitFor();
+
+            const code = await latestCode(mailUrl, email, { after, timeoutMs: 30_000 });
+            const { rows } = await fixture.database.sql(
+              "select id from auth.users where lower(email)=$1",
+              [email],
+            );
+            assert.equal(rows.length, 1, "the invitation created no single Auth user");
+            const userId = rows[0].id;
+            try {
+              // The real form with /auth/v1/otp answered by automation, so no
+              // second email goes out and the invitation's code stays valid.
+              await loginTestUser({
+                page: client.page,
+                actor: { key: "invited_client", email, userId },
+                fixture,
+                otp: code,
+              });
+              await admin.page.reload();
+              const panelAfter = admin.page.locator("section.invite-client");
+              await panelAfter
+                .locator("tbody tr", { hasText: email })
+                .getByText("Active", { exact: true })
+                .waitFor();
+              assert.deepEqual(admin.pageErrors, []);
+              assert.deepEqual(client.pageErrors, []);
+            } finally {
+              // The function's Auth user is not the fixture's: remove it.
+              await fixture.database
+                .service((adminApi) => adminApi.auth.admin.deleteUser(userId))
+                .catch(() => {});
+            }
+          } finally {
+            await client.context.close();
+            await admin.context.close();
+          }
+        },
+      );
 
       if (engineName === "chrome")
         await t.test(

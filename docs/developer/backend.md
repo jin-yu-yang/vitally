@@ -105,14 +105,22 @@ Sign-in is Supabase Auth email one-time codes. The configuration that makes it s
 | Email template | The **Magic Link** template contains `{{ .Token }}` | Existing users get that template; the app asks for the code, not a link |
 | Rate limits | Supabase defaults | The local test stack raises `sign_in_sign_ups` to 1000 for automated tests only. Never copy that to a real project |
 
-**Accounts are created only by the roster command** (below), already confirmed and with no
-password. The sign-in form shows the same message for any address, so it cannot reveal who is on
-the roster.
+**Accounts are created only by the roster command** (below) or, since change
+`add-account-invitations`, by an admin: **Create account** in the Roster drawer (a volunteer) and
+**Invite a client** on the office screen. Both go through the `accounts` Edge Function, which
+creates the confirmed, password-free Auth user and sends the sign-in code email. The sign-in form
+shows the same message for any address, so it cannot reveal who has an account.
 
 **Email delivery.** The local stack sends nothing: every email is caught by its local mailbox
 (Mailpit, `http://127.0.0.1:54324` with default ports). A hosted project needs custom SMTP (Gmail
 with an app password, or Resend with a verified domain); setup is in
 [`docs/setup.md`, classroom section](../setup.md#6-classroom-and-hosted-setup-pending).
+
+**Deployment prerequisite.** Create account and Invite a client send the code email themselves, so
+the hosted project needs custom SMTP and the `accounts` function deployed with `verify_jwt = false`
+before testers can use them. Without SMTP the account is recorded but no email arrives, and the
+admin sees "Account created; the email wasn't sent. Use Resend in a minute." The checklist is in
+[`docs/setup.md` section 6](../setup.md#6-classroom-and-hosted-setup-pending).
 
 ## Privileged tooling
 

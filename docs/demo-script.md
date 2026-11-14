@@ -160,7 +160,7 @@ When there's no time for the whole case, use the seeded cases directly:
 ## The Roster
 
 Admins only. In the office window, choose **Volunteers** in the sidebar (a preparer or reviewer has
-no such link). The seed's eight fictional volunteers are there, with no sign-in:
+no such link). The seed's eight fictional volunteers are there, with no account (the Account column reads **Not created**, and the drawer says **No account yet**):
 
 | Volunteer | Works | Languages | Roles | Certificates | Cleared |
 | --- | --- | --- | --- | --- | --- |
@@ -193,6 +193,29 @@ What to show:
    check) get no staff actions until an admin clears them. Lucy Fong has no roles, so she is waiting
    for her Form 13615. Jordan Reyes is new and his photo ID check is missing. Samir Haddad is
    recorded as Admin and has no sign-in, so he can do nothing in ViTally.
+
+## Accounts
+
+Admins only, on the local stack. Open the local mail catcher (Mailpit) at the URL the stack's
+status output prints as `MAILPIT_URL` (`http://127.0.0.1:54324` with the default ports). It shows
+every email the stack would have sent.
+
+1. **Create account.** On the Roster, open Maya Lindgren, whose Account section says **No account
+   yet**, and press **Create account**. The result reads "Account created and sign-in code sent",
+   and the Account column now reads **Invited**. The volunteer's email is a fictional
+   `@example.org` address.
+2. **The code email.** In the mail catcher, open the new message to that address: "Your ViTally
+   code is" followed by six digits. Type the address on the sign-in screen in a second window,
+   then the code. The volunteer lands on the staff screen, and the account turns **Active**.
+   (The sign-in screen also sends a code of its own; use the newest one.)
+3. **Invite a client.** On the office screen, under **Invite a client**, type a fictional client
+   address and press **Invite**. The list shows it as **Invited**, with **Resend** while it is.
+   The client signs in with the emailed code and sees **My applications**; the list then shows
+   **Active**. If the email didn't go out, the notice says to use Resend in a minute.
+4. **Deactivate and Reactivate.** In Maya's drawer, press **Deactivate** and confirm: her open window loses
+   access (the no-access screen), and the Account column reads **Deactivated**. Signing in again
+   doesn't bring her back. **Reactivate** restores the account. An admin can't deactivate their
+   own account.
 
 ## What the browser test covers
 
