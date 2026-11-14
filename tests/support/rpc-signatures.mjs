@@ -112,6 +112,86 @@ export const RPC_SIGNATURES = Object.freeze([
     receiptKeys: Object.freeze(["capabilities", "cleared", "isAdmin", "missing", "siteCoordinatorName"]),
     args: () => ({}),
   }),
+  // Sign-in accounts (OpenSpec change add-account-invitations). An entry's
+  // optional `context(f)` adds the targets its arguments name; the suite calls
+  // it before the anonymous call.
+  // The read-only check: inviting an address nobody holds.
+  Object.freeze({
+    name: "vitally_prepare_account",
+    signature: "vitally_prepare_account(text,jsonb)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["accountRevision", "email", "op", "reusableUserId", "volunteerId"]),
+    args: () => ({
+      p_op: "invite",
+      p_target: { email: `invite-${crypto.randomUUID()}@example.org` },
+    }),
+  }),
+  // Inviting a client: a confirmed auth user with no account, as the Edge
+  // Function would have created it.
+  Object.freeze({
+    name: "vitally_record_account",
+    signature: "vitally_record_account(uuid,text,jsonb,uuid)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["accountRevision", "actionId", "email", "status"]),
+    context: async (f) => {
+      const { userId, email } = await f.provision();
+      return { inviteUserId: userId, inviteEmail: email };
+    },
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_op: "invite",
+      p_target: { email: context.inviteEmail },
+      p_user_id: context.inviteUserId,
+    }),
+  }),
+  // Deactivating a staff member with no open work, at their account revision.
+  Object.freeze({
+    name: "vitally_deactivate_account",
+    signature: "vitally_deactivate_account(uuid,uuid,bigint)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["accountRevision", "actionId", "status"]),
+    context: async (f) => {
+      const key = `sig_off_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+      const { personId } = await f.staff({ key, name: "Morgan Hale", capabilities: ["prepare"], cleared: false });
+      return { accountVolunteerId: personId, accountRevision: 1 };
+    },
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_volunteer_id: context.accountVolunteerId,
+      p_expected_revision: context.accountRevision,
+    }),
+  }),
+  // Reactivating a staff member whose account is deactivated.
+  Object.freeze({
+    name: "vitally_reactivate_account",
+    signature: "vitally_reactivate_account(uuid,uuid,bigint)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["accountRevision", "actionId", "status"]),
+    context: async (f) => {
+      const key = `sig_on_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+      const { personId } = await f.staff({ key, name: "Quinn Darby", capabilities: ["prepare"], cleared: false });
+      const { data, error } = await f.siteCoordinator.rpc("vitally_deactivate_account", {
+        p_action_id: crypto.randomUUID(),
+        p_volunteer_id: personId,
+        p_expected_revision: 1,
+      });
+      if (error) throw new Error(`deactivate for the reactivate shape: ${error.code}`);
+      return { accountVolunteerId: personId, accountRevision: data.accountRevision };
+    },
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_volunteer_id: context.accountVolunteerId,
+      p_expected_revision: context.accountRevision,
+    }),
+  }),
+  // The office panel's client list: an array, each element of this shape.
+  Object.freeze({
+    name: "vitally_client_invitations",
+    signature: "vitally_client_invitations()",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["accountRevision", "activatedAt", "email", "invitedAt", "status"]),
+    args: () => ({}),
+  }),
 ]);
 
 // The private roster functions (OpenSpec change add-staff-identity, design D6).

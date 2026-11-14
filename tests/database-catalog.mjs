@@ -43,7 +43,7 @@ const POLICIES = Object.freeze([
   ["volunteer_profiles", "admin_volunteer_profiles"],
   ["workspaces", "member_workspace"],
 ]);
-// The eight public RPCs after 045, by name and identity arguments.
+// The thirteen public RPCs after 046, by name and identity arguments.
 const RPCS = Object.freeze([
   "vitally_apply_action(p_action_id uuid, p_case_id uuid, p_expected_revision bigint, p_type text, p_payload jsonb)",
   "vitally_assistance_action(p_action_id uuid, p_item_id uuid, p_expected_revision bigint, p_type text, p_note text)",
@@ -53,7 +53,14 @@ const RPCS = Object.freeze([
   "vitally_edit_contact(p_action_id uuid, p_contact_id uuid, p_expected_revision bigint, p_entry jsonb)",
   "vitally_save_volunteer(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_volunteer jsonb)",
   "vitally_my_clearance()",
+  "vitally_prepare_account(p_op text, p_target jsonb)",
+  "vitally_record_account(p_action_id uuid, p_op text, p_target jsonb, p_user_id uuid)",
+  "vitally_deactivate_account(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)",
+  "vitally_reactivate_account(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)",
+  "vitally_client_invitations()",
 ]);
+// The public RPCs that only read: no action id, no digest.
+const READ_ONLY_RPCS = Object.freeze(["vitally_client_invitations", "vitally_my_clearance", "vitally_prepare_account"]);
 // The signatures 043 drops by name.
 const OLD_SIGNATURES = Object.freeze([
   "public.vitally_apply_action(uuid,uuid,bigint,uuid,text,jsonb)",
@@ -147,7 +154,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
     });
 
-    await t.test("the public API is exactly eight RPCs", async () => {
+    await t.test("the public API is exactly thirteen RPCs", async () => {
       const { rows } = await sql(
         `select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as signature
            from pg_proc p where p.pronamespace='public'::regnamespace`,
@@ -195,8 +202,8 @@ test("the catalog after the sample-case tools and presenter access are removed",
         "select p.proname, p.prosrc from pg_proc p where p.pronamespace='public'::regnamespace order by 1",
       );
       assert.equal(rows.length, RPCS.length);
-      // vitally_my_clearance only reads: it takes no action id and stores no digest.
-      for (const row of rows.filter((entry) => entry.proname !== "vitally_my_clearance"))
+      // The read-only RPCs take no action id and store no digest.
+      for (const row of rows.filter((entry) => !READ_ONLY_RPCS.includes(entry.proname)))
         assert.match(row.prosrc, /'personId',\s*v_person\.id/, row.proname);
     });
 
