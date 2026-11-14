@@ -49,7 +49,7 @@ test("validateUpdate messages", () => {
   assert.deepEqual(validateUpdate({ ...good(), audience: "roles", roles: [] }), { roles: "Choose at least one role." });
   assert.equal(validateUpdate({ ...good(), audience: "roles", roles: ["admin"] }), null);
   const link = "Use an https link on irs.gov.";
-  for (const bad of ["http://www.irs.gov/x", "https://evilirs.gov/x", "https://irs.gov.evil.com/", "https://example.com", "not a url", "https://www.irs.gov/a b", "https://www.irs.gov/" + "a".repeat(500)]) {
+  for (const bad of ["http://www.irs.gov/x", "https://evilirs.gov/x", "https://irs.gov.evil.com/", "https://example.com", "not a url", "https://www.irs.gov/a b", "https://irs.gov:8080/", "https://user@irs.gov/", "https://irs.gov?x=1", "https://irs.gov#f", "https://www.irs.gov\\x", "https:irs.gov", "https://%69rs.gov/", "https://a_b.irs.gov/", "https://.irs.gov/","https://www.irs.gov/" + "a".repeat(500)]) {
     assert.deepEqual(validateUpdate({ ...good(), irsLink: bad }), { irsLink: link }, bad);
   }
   assert.deepEqual(
