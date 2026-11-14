@@ -144,6 +144,55 @@ test("sign-in accounts against real Supabase", async (t) => {
       assert.equal(await accountCount(f, f.unapprovedUserId), 0);
     });
 
+    // The Edge Function reaches the database with the admin's own JWT and uses
+    // the service key only for Auth's createUser, so service_role holds no
+    // grant on the table or on any function this change adds.
+    await t.test("service_role holds nothing on accounts or the account functions", async () => {
+      const grants = await f.sql(
+        `select p, has_table_privilege('service_role', 'public.accounts', p) as granted
+           from unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p`,
+      );
+      assert.deepEqual(grants.rows.filter((row) => row.granted).map((row) => row.p), []);
+      const before = await accountOf(f, f.preparerUserId);
+      const updated = await f.service((service) =>
+        service.from("accounts").update({ status: "deactivated" }).eq("user_id", f.preparerUserId).select(),
+      );
+      assert.ok(updated.error, "update");
+      const inserted = await f.service((service) =>
+        service.from("accounts").insert({ workspace_id: f.workspaceId, user_id: f.unapprovedUserId, status: "active" }),
+      );
+      assert.ok(inserted.error, "insert");
+      const deleted = await f.service((service) => service.from("accounts").delete().eq("user_id", f.preparerUserId));
+      assert.ok(deleted.error, "delete");
+      const read = await f.service((service) => service.from("accounts").select("*"));
+      assert.ok(read.error, "select");
+      assert.deepEqual(await accountOf(f, f.preparerUserId), before);
+      assert.equal(await accountCount(f, f.unapprovedUserId), 0);
+      const functions = await f.sql(
+        `select p.oid::regprocedure::text as signature from pg_proc p
+          where p.oid = any (array[
+            'public.vitally_prepare_account(uuid,text,jsonb)',
+            'public.vitally_record_account(uuid,text,jsonb,uuid)',
+            'public.vitally_deactivate_account(uuid,uuid,bigint)',
+            'public.vitally_reactivate_account(uuid,uuid,bigint)',
+            'public.vitally_client_invitations()',
+            'public.vitally_cancel_invitation(uuid,jsonb,bigint)',
+            'public.vitally_expire_invitations()',
+            'public.vitally_complete_site_check(text,text)',
+            'public.vitally_my_clearance()',
+            'vitally_private.set_site_number(uuid,text)',
+            'vitally_private.cancel_invitation(uuid,uuid)',
+            'vitally_private.expire_invitations(uuid)',
+            'vitally_private.account_check(uuid,text,jsonb)',
+            'vitally_private.insert_active_account(uuid,uuid,uuid)'
+          ]::regprocedure[])
+            and has_function_privilege('service_role', p.oid, 'EXECUTE')`,
+      );
+      assert.deepEqual(functions.rows, []);
+      const rpc = await f.service((service) => service.rpc("vitally_client_invitations"));
+      assert.ok(rpc.error, "an account RPC refuses the service key");
+    });
+
     await t.test("a client account naming a person is refused at commit", async () => {
       await refusedAtCommit(
         f,

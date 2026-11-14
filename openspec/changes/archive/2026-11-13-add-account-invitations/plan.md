@@ -102,7 +102,7 @@
 - [ ] **Step 3: Write `046_accounts.sql` part 1:**
   - the table and its check `status in ('invited','active','deactivated')`;
   - a deferred constraint trigger `accounts_person_matches_access`: `person_id is not null` exactly when the membership's access is `staff`, else VT007;
-  - RLS: select policy `admin_accounts` using `vitally_policy.is_workspace_admin(workspace_id)`; grant select to `authenticated`, everything to `service_role`;
+  - RLS: select policy `admin_accounts` using `vitally_policy.is_workspace_admin(workspace_id)`; grant select to `authenticated` and nothing to `service_role` (corrected in review: the function reaches the database with the caller's JWT, so `service_role` needs no grant);
   - `insert_active_account`;
   - `backfill_accounts()`, called once;
   - `vitally_private.account_signed_in()`, an `after update of last_sign_in_at on auth.users` trigger: `invited` rows of `new.id` become `active`, with `activated_at = new.last_sign_in_at`, `revision + 1` and `updated_at = now()`;

@@ -38,6 +38,7 @@ Nothing uses Edge Functions yet. The test stack (local and CI) excludes `edge-ru
   - Check: `person_id` is set exactly when the membership is `staff`. A deferred constraint trigger compares it with `memberships.access`.
   - Unique `(workspace_id, person_id)`.
   - RLS: select only by a workspace admin (`vitally_policy.is_workspace_admin`). No writes for `authenticated`; every write goes through the functions below. Not in the realtime publication, like the roster tables.
+  - Grants: `select` to `authenticated`; nothing to `anon` or `service_role`, on the table or on any function this change adds. The Edge Function calls the database with the admin's own JWT and uses the service key only for `auth.admin.createUser` (D4). (Review round: 047 first granted `service_role` everything on the table, left over from the brainstorm's `service_role` RPCs; revoked.)
 - **Why:** clients are not people, and the membership is what ties a sign-in to a workspace and an access type (Q1). `is_site_coordinator` can be added to this row later.
 - **Alternatives:** one row per person (excludes clients); one row per auth user (deactivation ends the workspace link, not the user).
 

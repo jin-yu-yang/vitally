@@ -79,11 +79,12 @@ create constraint trigger accounts_person_matches_access after insert or update 
 
 -- Only a workspace admin reads the rows; no signed-in user writes them. Every
 -- write goes through the functions in this file. Not in the realtime
--- publication, like the Roster tables.
+-- publication, like the Roster tables. service_role holds nothing, as on the
+-- Roster tables: the accounts Edge Function reaches the database with the
+-- admin's own JWT and uses the service key only for Auth's createUser.
 alter table public.accounts enable row level security;
 revoke all on public.accounts from public,anon,authenticated,service_role;
 grant select on public.accounts to authenticated;
-grant all on public.accounts to service_role;
 create policy admin_accounts on public.accounts for select to authenticated
  using (vitally_policy.is_workspace_admin(workspace_id));
 
