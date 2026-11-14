@@ -79,7 +79,7 @@
 
 ## 6. Browser test and docs
 
-- [ ] 6.1 A new top-level test in `tests/browser.mjs`: "An admin posts an update and volunteers read and confirm it".
+- [x] 6.1 A new top-level test in `tests/browser.mjs`: "An admin posts an update and volunteers read and confirm it".
   - Chrome, its own fixture and timeout.
   - Flow:
     - the admin posts an IRS update to All volunteers asking for confirmation;
@@ -91,7 +91,7 @@
     - unpublish with confirmation leaves the panel live;
     - an uncleared volunteer sees the update on the setup screen.
   - Screenshots of the page and the panel. The main story is untouched.
-- [ ] 6.2 Docs:
+- [x] 6.2 Docs:
   - `docs/developer/database.md`: migrations, tables, RPC list and count, visibility, the realtime section;
   - `README.md`, `architecture.md`, `backend.md`, `frontend.md`: wherever they count or list RPCs or watched tables.
 
