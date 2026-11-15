@@ -831,7 +831,7 @@ export function createStore(client) {
       return (await call("vitally_client_invitations")) ?? [];
     },
 
-    // Posted updates (migration 046). The RPCs enforce who may call them.
+    // Posted updates (migration 049). The RPCs enforce who may call them.
     // The signed-in staff member's feed: {items, unread}.
     async getUpdates() {
       return await call("vitally_my_updates");

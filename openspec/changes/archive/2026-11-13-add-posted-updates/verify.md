@@ -17,7 +17,7 @@
 
 - CI run 43553004881 ran on `3242f76`, the head of the implementation. No job was skipped or cancelled, and none passed only on a re-run.
 - Earlier green runs on intermediate commits: 43540446753 (`a435b2a`, migration) and 43549139004 (`53dded2`, browser test).
-- **Migration data:** 046 only creates objects and adds one table to the publication. It changes no existing rows, so the CLAUDE.md rule about running a local migration against a stack with `main`'s data does not apply.
+- **Migration data:** 049 (046 when verified) only creates objects and adds one table to the publication. It changes no existing rows, so the CLAUDE.md rule about running a local migration against a stack with `main`'s data does not apply.
 
 **Screenshots reviewed** (artifacts of runs 43549139004 and 43553004881):
 - `posted-updates-admin-720`: the form, the preview ("Shown to: All volunteers") and the Posted updates table with the read bar.

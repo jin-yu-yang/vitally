@@ -1,4 +1,4 @@
--- 046: posted updates (OpenSpec change add-posted-updates, design D1-D4).
+-- 049: posted updates (OpenSpec change add-posted-updates, design D1-D4).
 --
 -- Ceiling admins post IRS policy updates and office notices; every staff
 -- member, cleared or not, reads the ones addressed to them. Announcements

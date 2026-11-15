@@ -1,18 +1,18 @@
-## 1. Migration 046: tables, audience, policies, publication
+## 1. Migration 049: tables, audience, policies, publication
 
 - [x] 1.1 Write failing database tests (`tests/database-posted-updates.mjs`, own fixture workspace only):
   - the audience rules: live, roles, uncleared with an entry, no current-season entry, inactive membership;
   - the two SELECT policies: draft hidden, another role hidden, clients none, unpublished still readable to the audience;
   - `update_reads` refused directly;
   - no direct insert into either table.
-- [x] 1.2 Write `supabase/migrations/046_posted_updates.sql`, part 1:
+- [x] 1.2 Write `supabase/migrations/049_posted_updates.sql`, part 1:
   - the tables, checks and foreign keys from design D1;
   - row security, revokes and the select grant on `posted_updates` only;
   - `vitally_private.audience_member` and `vitally_policy.in_update_audience`, with their grants;
   - the two policies;
   - the guarded publication block for `posted_updates`.
 
-## 2. Migration 046: the five RPCs
+## 2. Migration 049: the five RPCs
 
 - [x] 2.1 Write failing tests for `vitally_save_update` and `vitally_update_action`:
   - ceiling admin only (an uncleared admin is allowed; preparer and client get FORBIDDEN);

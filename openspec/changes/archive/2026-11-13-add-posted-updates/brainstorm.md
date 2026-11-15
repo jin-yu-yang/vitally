@@ -193,7 +193,7 @@ The user asked me to make these calls and list them here, each with its alternat
     - `INVALID_TRANSITION` (editing an unpublished update, unpublishing a draft, deleting a posted one);
     - `VALIDATION`.
 
-16. **Migration number 046** (`046_posted_updates.sql`). Before the PR: merge `main` and renumber it if 046 is taken (the user's instruction).
+16. **Migration number 049** (`049_posted_updates.sql`). Before the PR: merge `main` and renumber it if the number is taken (the user's instruction). The PR opened with 046; in review round 1 `main` had taken 046 (the Workload, #195), and the agreed merge order (#197 = 047, #200 = 048, #196 = 049) gave this change 049.
 
 ## Out of scope
 - System notifications (`person_notices`).

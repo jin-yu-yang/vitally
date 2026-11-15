@@ -183,11 +183,11 @@ Each RPC:
 - [Trade-off] **Admin counts are not live.** → Acceptable: they refresh on screen open, focus and the admin's own actions, and the alternative wakes every admin window on each read.
 - [Trade-off] **The read count means "shown in an open panel".** → Confirmation is the stronger signal, and the copy says so.
 - [Risk] **The catalogue tests break in several files at once.** → Mitigation: each update is listed in the plan, and CI's database job is the check.
-- [Risk] **Migration number collision with parallel changes (#138 accounts, #139 Workload).** → Mitigation: merge `main` before the PR, and renumber if 046 is taken.
+- [Risk] **Migration number collision with parallel changes (#138 accounts, #139 Workload).** → Mitigation: merge `main` before the PR, and renumber if the number is taken. Resolved in review round 1: 046 went to the Workload (#195), and the agreed merge order gives accounts (#197) 047, #200 048 and this change 049. The migrator applies files in name order and has no gap check, so 049 applies cleanly on a stack without 047 and 048.
 
 ## Migration Plan
 
-- **Forward:** `046_posted_updates.sql` only creates objects. Nothing existing changes except the publication, which gains one table. No backfill.
+- **Forward:** `049_posted_updates.sql` only creates objects. Nothing existing changes except the publication, which gains one table. No backfill.
 - **Rollback:** a new migration that drops the five RPCs, the policy helper, both tables, and removes the table from the publication. Applied migrations are never edited.
 - **Acceptance:**
   - `npm test`, `npm run build:hant -- --check` and `npx openspec validate --all` pass locally.

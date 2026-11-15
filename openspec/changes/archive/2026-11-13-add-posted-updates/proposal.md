@@ -33,7 +33,7 @@ The PCDC office posts announcements and reminders in Slack: IRS policy changes, 
 - People added to the roster later see earlier updates, and the counts' denominators follow the roster.
 
 **Database**
-- Migration `046_posted_updates.sql`:
+- Migration `049_posted_updates.sql`:
   - tables `posted_updates` and `update_reads`;
   - policy helper `vitally_policy.in_update_audience`;
   - five public RPCs: `vitally_save_update`, `vitally_update_action`, `vitally_mark_updates`, `vitally_my_updates`, `vitally_posted_updates`.
@@ -62,7 +62,7 @@ The PCDC office posts announcements and reminders in Slack: IRS policy changes, 
 
 ## Impact
 
-- **Database:** `supabase/migrations/046_posted_updates.sql`; tests `tests/database-posted-updates.mjs` (new), `tests/database-catalog.mjs`, `tests/support/rpc-signatures.mjs`, `tests/database-clearance.mjs`, `tests/database-store.mjs`, `tests/database-staff-identity.mjs`.
+- **Database:** `supabase/migrations/049_posted_updates.sql`; tests `tests/database-posted-updates.mjs` (new), `tests/database-catalog.mjs`, `tests/support/rpc-signatures.mjs`, `tests/database-clearance.mjs`, `tests/database-store.mjs`, `tests/database-staff-identity.mjs`.
 - **Browser:** `src/posted-updates.mjs` (new; rules and helpers), `src/update-views.mjs` (new), `src/supabase-store.mjs`, `src/controller.mjs`, `src/app.mjs`, `src/views.mjs` (sidebar and routing), `src/styles.css`; unit tests beside them; a new top-level test in `tests/browser.mjs`.
 - **Docs:** `docs/developer/database.md`, `README.md`, `architecture.md`, `backend.md` and `frontend.md`, where they list RPCs, tables or realtime.
 - **No change to:** client screens, client text, the intake catalogue, the seed, Supabase or library versions.

@@ -431,7 +431,7 @@ test("volunteer clearance against real Supabase", async (t) => {
 // The read gate (design D3): the 21 case-data policies read only for a cleared
 // staff member, through the no-argument InitPlan helper
 // `vitally_policy.cleared_workspace_id()`. `people` is not gated, and neither
-// is `posted_updates` (046): it holds no case data, and its audience policy
+// is `posted_updates` (049): it holds no case data, and its audience policy
 // lets an uncleared staff member read the updates addressed to them.
 
 const CASE_TABLES = Object.freeze([

@@ -5,7 +5,7 @@
 **Goal:** Ceiling admins post updates (IRS policy or office notice) to All volunteers or chosen roles. Every staff member, cleared or not, reads them in a Notifications panel with an unread badge and confirms when asked. Admins see live read and confirmed counts.
 
 **Architecture:**
-- **Database:** one hand-written migration, `046_posted_updates.sql`, adds:
+- **Database:** one hand-written migration, `049_posted_updates.sql` (written as 046, renumbered in review round 1), adds:
   - `posted_updates` (SELECT for realtime through an admin policy and an audience policy) and `update_reads` (RPC-only);
   - a live-audience helper;
   - five RPCs.
@@ -24,7 +24,7 @@
 ## Global Constraints
 
 - **Fictional data only** in code, tests and fixtures.
-- **Migrations:** never edit 001–045. Everything goes in `supabase/migrations/046_posted_updates.sql`.
+- **Migrations:** never edit 001–046 (047 and 048 belong to other changes). Everything goes in `supabase/migrations/049_posted_updates.sql`.
 - **No local database or browser runs.** Other sessions share the local Supabase stack. Do NOT run `npm run db:migrate:test`, `npm run test:database`, `npm run test:auth-browser`, `npm run test:browser`, `supabase start`, `supabase stop` or `supabase db reset`.
   - Database and browser tests are proven in CI: push the branch, then run `gh workflow run ci.yml --ref add-posted-updates`.
   - Locally run only `npm test`, `npm run build:hant -- --check` and `npx openspec validate --all`.
@@ -101,10 +101,10 @@
 
 ---
 
-### Task 1: Migration 046 and database tests
+### Task 1: Migration 049 and database tests
 
 **Files:**
-- Create: `supabase/migrations/046_posted_updates.sql`
+- Create: `supabase/migrations/049_posted_updates.sql`
 - Create: `tests/database-posted-updates.mjs`
 - Modify: `tests/database-catalog.mjs` (`POLICIES`, `RPCS`, digest exemptions, the `vitally_policy` list)
 - Modify: `tests/support/rpc-signatures.mjs` (five entries)
@@ -170,7 +170,7 @@
   - Expected: PASS. The unit suite includes `store.test.mjs`, which reads `STAFF_TABLES`.
 - [ ] **Step 5: Commit, push and run CI.**
   ```bash
-  git add supabase/migrations/046_posted_updates.sql tests/database-posted-updates.mjs tests/database-catalog.mjs tests/support/rpc-signatures.mjs tests/database-store.mjs tests/database-staff-identity.mjs tests/database-clearance.mjs src/supabase-store.mjs
+  git add supabase/migrations/049_posted_updates.sql tests/database-posted-updates.mjs tests/database-catalog.mjs tests/support/rpc-signatures.mjs tests/database-store.mjs tests/database-staff-identity.mjs tests/database-clearance.mjs src/supabase-store.mjs
   git commit -m "Posted updates: migration 046, tables, audience, RPCs and database tests"
   git push -u origin add-posted-updates
   gh workflow run ci.yml --ref add-posted-updates
@@ -378,7 +378,7 @@
   - The RPC count becomes thirteen, listing the five.
   - The tables `posted_updates` and `update_reads` with their visibility.
   - The Realtime section: twenty tables, `posted_updates` added, `update_reads` deliberately not.
-  - Migration 046 in the migration table.
+  - Migration 049 in the migration table.
   - A frontend note on `update-views.mjs` and `posted-updates.mjs`.
 - [ ] **Step 3: Local checks.** `timeout 600 npm test`, `timeout 300 npm run build:hant -- --check`, `timeout 300 npx openspec validate --all` → all pass.
 - [ ] **Step 4: Commit, push and run CI.**
