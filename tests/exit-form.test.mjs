@@ -285,3 +285,16 @@ test("the template has no document info, and a filled form is titled Exit Form",
   const bytes = await buildExitFormPdf({ PDFLib, fontkit: PDFLib.fontkit, formBytes: await readFile(EXIT_FORM_FILE), fontFiles, marks });
   assert.equal((await PDFLib.PDFDocument.load(bytes, { updateMetadata: false })).getTitle(), "Exit Form");
 });
+
+test("the reduced questionnaire draws the header and method ticks only", () => {
+  const marks = exitFormMarks({ exitForm: { federal: null, state: { method: "efile" }, local: [] }, remarks: "" }, CASE, "2026-11-03");
+  assert.ok(ticked(marks, L.groups.state.boxes.efile));
+  assert.equal(marks.checks.length, 1);
+  for (const place of [L.groups.state.amount, L.groups.state.debitOn, L.groups.federal.amount, L.remarks]) {
+    assert.equal(valueAt(marks, place), undefined);
+  }
+  assert.equal(valueAt(marks, L.taxYear), "2025");
+  assert.equal(valueAt(marks, L.date), "11/03/2026");
+  assert.equal(valueAt(marks, L.clientNumber), "31");
+  assert.equal(valueAt(marks, L.taxpayer), "Mei Chen");
+});
