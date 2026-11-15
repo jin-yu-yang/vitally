@@ -1,11 +1,11 @@
 ## 1. Database: tables, starter labels, visibility (migration 051)
 
-- [ ] 1.1 Check the open branches again for migration numbers. Then create `supabase/migrations/051_case_labels.sql` with a header comment that describes the change and names its merge points (design D7, Risks).
-- [ ] 1.2 Add `public.case_labels` and `public.case_label_links`, with their columns, checks, unique indexes and composite foreign keys (D1), RLS enabled, and `grant select` to `authenticated` only.
-- [ ] 1.3 Add the staff-only SELECT policies: labels by staff membership, and links by the inline case-visibility rule. Both are gated by `(select vitally_policy.cleared_workspace_id())`, and neither has an applicant branch (D6).
-- [ ] 1.4 Add the `after insert` trigger on `public.workspaces` for the three starter labels, and the one-time insert into existing workspaces (D7).
-- [ ] 1.5 Add both tables to the `supabase_realtime` publication.
-- [ ] 1.6 Write database tests (new `tests/database-labels.mjs`) for:
+- [x] 1.1 Check the open branches again for migration numbers. Then create `supabase/migrations/051_case_labels.sql` with a header comment that describes the change and names its merge points (design D7, Risks).
+- [x] 1.2 Add `public.case_labels` and `public.case_label_links`, with their columns, checks, unique indexes and composite foreign keys (D1), RLS enabled, and `grant select` to `authenticated` only.
+- [x] 1.3 Add the staff-only SELECT policies: labels by staff membership, and links by the inline case-visibility rule. Both are gated by `(select vitally_policy.cleared_workspace_id())`, and neither has an applicant branch (D6).
+- [x] 1.4 Add the `after insert` trigger on `public.workspaces` for the three starter labels, and the one-time insert into existing workspaces (D7).
+- [x] 1.5 Add both tables to the `supabase_realtime` publication.
+- [x] 1.6 Write database tests (new `tests/database-labels.mjs`) for:
   - the tables' checks;
   - starter labels in new and existing workspaces;
   - client and other-workspace invisibility;
