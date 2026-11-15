@@ -28,6 +28,8 @@ const STAFF_ONLY_TABLES = [
   "filing_attempts",
   "filing_returns",
   "filing_notes",
+  "case_labels",
+  "case_label_links",
 ];
 
 const CASE_ROW = Object.freeze({
@@ -1420,6 +1422,8 @@ test("a subscription watches only the tables its principal may read", async () =
     "preparer_questionnaires",
     "reviewer_questionnaires",
     "preparer_shaded_fields",
+    "case_labels",
+    "case_label_links",
   ]);
   // The applicant's channel never names a staff-only table.
   for (const staffTable of STAFF_ONLY_TABLES)
