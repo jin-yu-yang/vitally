@@ -70,10 +70,14 @@ create policy staff_read_case_labels on public.case_labels for select to authent
 drop policy if exists staff_read_case_label_links on public.case_label_links;
 create policy staff_read_case_label_links on public.case_label_links for select to authenticated using(exists(select 1 from public.memberships m join public.cases c on c.workspace_id=m.workspace_id and c.id=case_label_links.case_id where m.workspace_id=case_label_links.workspace_id and m.user_id=(select auth.uid()) and m.active and m.access='staff' and (c.origin<>'client' or c.stage<>'draft') and case_label_links.workspace_id=(select vitally_policy.cleared_workspace_id())));
 
-revoke all on public.case_labels from public, anon, authenticated;
-revoke all on public.case_label_links from public, anon, authenticated;
+revoke all on public.case_labels from public, anon, authenticated, service_role;
+revoke all on public.case_label_links from public, anon, authenticated, service_role;
 grant select on public.case_labels to authenticated;
 grant select on public.case_label_links to authenticated;
+-- service_role keeps the full workflow-table grant (031's style), so tooling
+-- and the shared privilege test treat these tables like their neighbours.
+grant select, insert, update, delete on public.case_labels to service_role;
+grant select, insert, update, delete on public.case_label_links to service_role;
 
 -- ---------------------------------------------------------------------------
 -- 3. Starter labels (D6). Every new workspace gets City Tax, MFS and

@@ -21,6 +21,7 @@ const STAFF_ONLY_TABLES = [
   "reviews",
   "assistance_items",
   "case_materials",
+  "case_label_links",
 ];
 const WORKFLOW_TABLES = [...CLIENT_VISIBLE_TABLES, ...STAFF_ONLY_TABLES];
 async function rows(client, table, filter = {}) {
@@ -168,6 +169,17 @@ async function seedWorkflow(f, caseId) {
   await f.sql(
     "insert into public.case_materials(workspace_id,case_id,item,recorded_by_person_id) values($1,$2,$3,$4)",
     [f.workspaceId, caseId, "w2", f.siteCoordinatorId],
+  );
+  // The workspace's starter labels (051) give the link a label to point at.
+  seeded.labelId = (
+    await f.sql(
+      "select id from public.case_labels where workspace_id=$1 order by name limit 1",
+      [f.workspaceId],
+    )
+  ).rows[0].id;
+  await f.sql(
+    "insert into public.case_label_links(workspace_id,case_id,label_id,active,changed_by_person_id) values($1,$2,$3,true,$4)",
+    [f.workspaceId, caseId, seeded.labelId, f.siteCoordinatorId],
   );
   await f.sql(
     "insert into public.assistance_items(id,workspace_id,case_id,title,language,contact_preference) values($1,$2,$3,$4,$5,$6)",
@@ -1042,6 +1054,17 @@ test("workflow records stay owner-visible, staff-only, and write-protected", asy
               title: "Direct assistance item",
             },
             update: { status: "resolved" },
+          },
+          case_label_links: {
+            filter: ["case_id", submitted.caseId],
+            insert: {
+              workspace_id: f.workspaceId,
+              case_id: submitted.caseId,
+              label_id: seeded.labelId,
+              active: true,
+              changed_by_person_id: f.siteCoordinatorId,
+            },
+            update: { active: false },
           },
         };
         assert.deepEqual(
