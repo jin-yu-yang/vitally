@@ -74,4 +74,4 @@
   - the testing table.
 
   Update `docs/developer/frontend.md` for the label menu and the pool filter.
-- [ ] 5.4 Run `npm test` and `npm run test:browser`, and review the story's screenshots for the chips and the menu. Record which checks ran, and why `build:hant` and `test:auth-browser` were not needed.
+- [x] 5.4 Run `npm test` and `npm run test:browser`, and review the story's screenshots for the chips and the menu. Record which checks ran, and why `build:hant` and `test:auth-browser` were not needed.
