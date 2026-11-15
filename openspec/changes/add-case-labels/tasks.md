@@ -57,7 +57,7 @@
 
 ## 5. Seed data, story and docs
 
-- [ ] 5.1 `tools/admin/seed-cases.mjs`: label rehearsal cases through `vitally_set_case_label` as an admin. Each starter label goes on at least one case, and one case gets two. Update `tests/seed.test.mjs` and `tests/database-seed.mjs` as needed.
+- [x] 5.1 `tools/admin/seed-cases.mjs`: label rehearsal cases through `vitally_set_case_label` as an admin. Each starter label goes on at least one case, and one case gets two. Update `tests/seed.test.mjs` and `tests/database-seed.mjs` as needed.
 - [ ] 5.2 Browser story (`tests/browser.mjs`):
   - a volunteer adds and removes a label on their case, and a second window sees it live;
   - an admin creates and renames a label from the menu;
