@@ -113,3 +113,22 @@ Syncing is archive's job (lifecycle step 8). Nothing was synced early.
 - [ ] ❌ FAIL
 
 **Next**: retrospective (lifecycle step 7), then merge `main`, archive and open the PR.
+
+---
+
+## Review round 1 (2026-11-15)
+
+The PR was rebased onto `main` (the Workload, #195, took 046), the migration became `049_posted_updates.sql` (agreed order: #197 = 047, #200 = 048, #196 = 049), and jin-yu-yang's blocking finding was fixed (design D7: the audience reads an unpublished update for 10 minutes after Unpublish, then only admins; admins can edit an unpublished update, which stays unpublished).
+
+| Check | Where | Result |
+|---|---|---|
+| `npm test` | local | 1791 / 1793. Two failures before the fixture fix: `tests/confirm-dialogs.test.mjs` held the old Unpublish text (the fixture now has the new copy), and the pre-existing Windows-only `tests/write-test-env.test.mjs` failure, which also fails on `main` |
+| `npm run build:hant -- --check` | local | pass |
+| `npx openspec validate --all` | local | 16 / 16 |
+| `npm run build:intake` | local | nothing to write |
+| `checks`, `database`, `sign-in`, `story (chrome-client)`, `story (firefox-client)` | CI [run 43683942127](https://github.com/jin-yu-yang/vitally/actions/runs/43683942127) on `fdf5cc1` | all pass on the first attempt. `database` ran on a fresh stack with 001–046 and 049, so the 047/048 gap is covered |
+
+- **Screenshots reviewed** from the run's artifacts (`posted-updates-admin`, `-panel`, `-setup`, both legs, 720 and 390 px). The setup window's feed holds only the new notice, so the unpublished update edited in step 8b does not come back.
+- **No local database, sign-in or story runs:** the local stack is shared with other sessions, so CI stands in for them.
+- **049 was edited in place, not followed by a new migration:** it is on no shared stack and not on `main`; CI applies it to fresh stacks only.
+
