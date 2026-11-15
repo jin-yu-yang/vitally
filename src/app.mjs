@@ -2486,6 +2486,11 @@ if (!config) {
     } else if (field.name === "workloadSearch") {
       // The Workload and its drawer filter the same way.
       keepTyping(field, "#workload-search", () => controller.setWorkloadView({ search: field.value }));
+    } else if (field.name === "label-name") {
+      // Kept in state, quietly, so a live redraw draws the typed text again.
+      controller.setLabelDraft({ name: field.value });
+    } else if (field.name === "label-color") {
+      controller.setLabelDraft({ color: field.value });
     } else if (field.name === "label-search") {
       keepTyping(field, "#label-search", () => controller.setLabelSearch(field.value));
     } else if (field.name === "assignSearch") {

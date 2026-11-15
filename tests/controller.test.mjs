@@ -7631,3 +7631,32 @@ test("a live refresh keeps the label menu, and closing clears it", async () => {
   assert.equal(controller.getState().labelMenu, null);
   controller.stop();
 });
+
+test("typed label form values stay in state and survive a list refresh", async () => {
+  const store = labelStore();
+  const { controller } = build({ store });
+  await controller.start();
+  controller.openLabelMenu("case-a");
+  controller.startLabelEdit(null, "");
+  controller.setLabelDraft({ name: "Docs ba" });
+  controller.setLabelDraft({ color: "violet" });
+  const typed = controller.getState().labelMenu.editing;
+  assert.deepEqual({ name: typed.name, color: typed.color }, { name: "Docs ba", color: "violet" });
+  await controller.refresh();
+  const editing = controller.getState().labelMenu.editing;
+  assert.deepEqual({ name: editing.name, color: editing.color }, { name: "Docs ba", color: "violet" });
+  controller.stop();
+});
+
+test("the label menu closes when the screen or the selected case changes", async () => {
+  const store = labelStore();
+  const { controller } = build({ store });
+  await controller.start();
+  controller.openLabelMenu("case-a");
+  controller.navigate("office-board");
+  assert.equal(controller.getState().labelMenu, null);
+  controller.openLabelMenu("case-a");
+  await controller.selectCase("case-a");
+  assert.equal(controller.getState().labelMenu, null);
+  controller.stop();
+});

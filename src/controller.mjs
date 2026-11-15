@@ -872,6 +872,7 @@ export function createController({
 
   function clearSelection() {
     opening += 1;
+    state.labelMenu = null;
     state.selectedCaseId = null;
     state.savedCase = null;
     state.draftAnswers = {};
@@ -1588,6 +1589,7 @@ export function createController({
       state.addCaseShowMissing = false;
     }
     state.screen = screen;
+    state.labelMenu = null;
     state.error = null;
     state.dialog = null;
     state.dialogContext = null;
@@ -3046,6 +3048,21 @@ export function createController({
     show();
   }
 
+  // What the form holds as it is typed or picked, kept so a redraw (a live
+  // refresh) draws it again. Quiet: the field already shows it, so no redraw.
+  function setLabelDraft({ name, color } = {}) {
+    const editing = state.labelMenu?.editing;
+    if (!editing) return;
+    state.labelMenu = {
+      ...state.labelMenu,
+      editing: {
+        ...editing,
+        ...(name !== undefined ? { name: String(name) } : {}),
+        ...(color !== undefined ? { color } : {}),
+      },
+    };
+  }
+
   function cancelLabelEdit() {
     if (!state.labelMenu?.editing) return;
     state.labelMenu = { ...state.labelMenu, editing: null };
@@ -3391,6 +3408,7 @@ export function createController({
     setLabelSearch,
     toggleCaseLabel,
     startLabelEdit,
+    setLabelDraft,
     cancelLabelEdit,
     saveLabelEdit,
     loadVolunteers,
