@@ -75,6 +75,7 @@ in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 | `044_volunteer_roster_records.sql` | Hand-written: the admin-only records behind Volunteers > Roster. The new schema `vitally_policy` holds only `is_workspace_admin(workspace)`, a `security definer` check that answers for the caller alone, used by row policies that must read `people` without recursing into its own policy (it is not an API: PostgREST exposes only `public`); the tables `volunteer_profiles`, `roster_entries` and `certificates` (read by admins only, written only by `vitally_save_volunteer`, not published to Realtime); `staff_people` now hides a person with no sign-in and no capabilities from everyone but an admin; `add_staff_member` links a matching volunteer with no sign-in by email; existing staff get a profile and an empty roster entry, with no roles inferred. Roles and certificates grant nothing: `people.capabilities` is untouched (045 changes this) |
 | `045_volunteer_clearance.sql` | Hand-written: volunteer clearance ([roster clearance](#roster-clearance)). A guard refuses with `VT008` if a person with a sign-in holds a current-season role their confirmed certificates don't support ([setup](../setup.md#045s-guard)), and strips such roles from people with no sign-in; `roster_entries.is_new` and `photo_id_checked_at`; the private role helpers (`confirmed_certificates`, `missing_certificates`, `role_capabilities`, `effective_capabilities`, `cleared`); the deferred constraint triggers `roster_entries_role_certificates` and `certificates_role_certificates`; the read gate `vitally_policy.cleared_workspace_id()` on the staff branch of the 21 case-data policies; `require_cleared` (`VT009` `NOT_CLEARED`) in the six case RPCs; `acting_person`, `check_operation_authority` and `contact_person` return the effective capabilities; the RPC `vitally_my_clearance`; `require_cleared_assignee` (no caller yet); `open_work`; and `vitally_save_volunteer` with role needs (`VT007` `ROLE_NEEDS`), the photo ID check and the open-work rule (`VT004` `OPEN_WORK`) |
 | `046_volunteer_workload.sql` | Hand-written: the admin Workload's one write, the case action `ASSIGN_CASE` `{slot, personId, expectedHolderId}` (`vitally_private.act_assign_case`), added to `vitally_apply_action`, `check_operation_authority` (admin-only group) and `check_payload`, each re-created from its latest definition. No new table, column or Realtime change: the page reads what the staff window already holds |
+| `050_hidden_household_rows.sql` | Hand-written: `vitally_private.household_rows(version, answers)`, the number of household rows the case shows, and `act_save_preparer_fields` re-created from 039 to use it (#175). Renamed at merge time if the agreed order (047–049) changes |
 **Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
 never edit an applied one.** The build writes a file only when the hash differs from the newest
 catalogue migration's. The hash covers the catalogue and `LOADER_VERSION` in
@@ -119,7 +120,8 @@ do not copy them from older files:
 
 | Function | Current definition |
 | --- | --- |
-| `vitally_private.check_payload`, `check_preparer_fields`, `act_save_preparer_fields` | `039_preparer_shaded_fields.sql` |
+| `vitally_private.household_rows`, `act_save_preparer_fields` | `050_hidden_household_rows.sql` |
+| `vitally_private.check_payload`, `check_preparer_fields` | `039_preparer_shaded_fields.sql` |
 | `vitally_private.acting_person`, `contact_person`, `check_operation_authority`, `require_cleared`, `open_work`, the role helpers, `role_certificates_check`, `vitally_policy.cleared_workspace_id`, and the RPCs `public.vitally_apply_action`, `vitally_assistance_action`, `vitally_close_unsigned`, `vitally_create_case`, `vitally_log_contact`, `vitally_edit_contact`, `vitally_save_volunteer`, `vitally_my_clearance` | `045_volunteer_clearance.sql` |
 | `vitally_private.add_staff_member`, `vitally_policy.is_workspace_admin` | `044_volunteer_roster_records.sql` |
 | `vitally_private.lock_case`, `lock_assistance_item`, `act_close_case`, `initialize_workspace` | `043_remove_presenter_access.sql` |
@@ -596,11 +598,19 @@ The browser side is in [Front end](frontend.md#the-shaded-section-of-the-13614-c
   note at most 500, counted in characters). A text that is only whitespace is blank and is refused.
   A year must be four digits and at least 2000 here; the season bound and the household rows need the case, so the action checks those.
 - **The action.** `SAVE_PREPARER_FIELDS` (`act_save_preparer_fields`) takes `{basedOnVersion,
-  fields}` and replaces the whole set. The stage must be `preparing` or `corrections_required`
+  fields}` and replaces the visible section. The stage must be `preparing` or `corrections_required`
   (`INVALID_TRANSITION` otherwise), then `require_case_preparer` (the current preparer, as for any
   preparer action), then the version guard, then the two case rules: the disallowed year must be
-  before the case's season, and a `household<n>…` key needs a household member in the answers (at
-  most four rows). Any of those, like a bad shape, is `VALIDATION`.
+  before the case's season, and a `household<n>…` key on a row past the visible count is
+  `VALIDATION`, like a bad shape.
+- **Visible household rows.** `vitally_private.household_rows(version, answers)` (050) is the number
+  of `hh` members in the answers, capped at 4, while the catalogue shows the `hh` group for the
+  case's `intake_version` (through `intake_visible`), else 0. It mirrors `householdRows` in
+  `src/shaded-fields.mjs`, and a parity test in `tests/database-shaded.mjs` keeps them equal.
+  Household cells already stored on hidden rows are carried into the new row unchanged, so they
+  return when the client answers Yes again, and they never appear in `detail.changed`. The browser
+  never shows hidden cells: the draft, the editing copy and the case page's count go through
+  `visibleShaded`. Cells follow row numbers, not members; that limit is tracked in issue #202.
 - **The version guard.** The row is locked, and the stored version (0 when there is no row) must
   equal `basedOnVersion`, else `CONFLICT`. The case revision in the envelope is checked earlier by
   `vitally_apply_action`, so other actions moving the revision (the office recording materials, say)
