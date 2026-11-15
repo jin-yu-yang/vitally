@@ -492,10 +492,13 @@ in the browser from an approval's reviewer questionnaire, and nothing is uploade
   `rejected`) are ticked, and everything else is blank: amounts, payment methods, debit dates, Other
   Tax and Remarks. `exitFormNote` builds the note that says what to fill in by hand. The note is HTML,
   shown in the office panel and beside the volunteer's "Download Exit Form" button, and only when
-  the return was corrected. The PDF itself carries no note, only the blanks. Without staff history, no form is offered. Follow-ups:
-  [#173](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/173) (this fix),
-  [#203](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/203) and
-  [#204](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/204).
+  the return was corrected. The PDF itself carries no note, only the blanks. Without staff history,
+  no form is offered. Fixed in
+  [#173](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/173). Still open:
+  [#203](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/203) (collect the corrected
+  values at Return to signing) and
+  [#204](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/204) (the review-contact
+  line after a Return to signing).
 - **Who may make it.** `viewExitForm` in `app.mjs` returns at once for anything but a staff window
   (`isStaffWindow`). Like the drafts, it opens a new tab and, if the browser blocks the tab,
   offers a link instead (`draftOffers`). A blocked tab's link is drawn on the Intake answers tab, so

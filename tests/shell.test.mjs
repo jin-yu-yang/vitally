@@ -117,6 +117,8 @@ test("app.mjs makes the Exit Form for a staff window only, and records nothing",
   assert.match(body, /spouseShown\(visible\)/);
   // What it prints follows the rule in src/exit-form-source.mjs (#173).
   assert.match(app, /exitFormSource\(record, review\)/);
+  // The PDF is made from the source questionnaire, never the stored one again (#173).
+  assert.match(body, /exitFormMarks\(\s*source\.questionnaire/);
   assert.doesNotMatch(app, /reviewerQuestionnaires \?\? \[\]\)\.find\(\(q\) => q\?\.reviewId === reviewId\)/);
   // The date on the form is today's, never the approval's.
   assert.match(body, /isoToday\(\)/);
