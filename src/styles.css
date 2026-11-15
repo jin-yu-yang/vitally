@@ -6068,6 +6068,12 @@ html:lang(zh-Hant) {
   gap: 8px;
   margin: 14px 0 0;
 }
+.board-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 0;
+}
 .case-label {
   display: inline-flex;
   align-items: center;

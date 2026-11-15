@@ -3333,3 +3333,18 @@ test("the label form has six color radios, the typed name and the error", () => 
   assert.match(html, /data-action="cancel-label-edit"/);
   assert.doesNotMatch(html, /class="staff-form"/);
 });
+
+test("a work board row shows its labels as read-only chips under the reference", () => {
+  const labelled = boardCase({ id: "case-mfs", reference: "VT-MFSS-0001", stage: "preparation_ready", answers: { service: "Online", language: "English" }, labels: [{ id: "l1", name: "MFS", color: "red" }] });
+  const html = renderStaffBoard([labelled, boardCase({ id: "case-plain", reference: "VT-PLAN-0002", stage: "preparation_ready", answers: { service: "Online", language: "English" } })], PEOPLE, { person: ALEX, filters: { status: "available" } });
+  const [, mfsRow, plainRow] = html.split('<tr class="board-row');
+  assert.match(mfsRow, /VT-MFSS-0001<\/button>[\s\S]*class="case-label"[^>]*>MFS</);
+  assert.doesNotMatch(mfsRow, /case-label-remove/);
+  assert.doesNotMatch(plainRow, /case-label/);
+});
+
+test("the staff history says who added or removed a label", () => {
+  const entry = (action) => ({ action, actorName: "Alex", detail: { labelId: "l1", name: "City Tax" } });
+  assert.equal(historySentence(entry("ADD_CASE_LABEL")), "Alex added label City Tax.");
+  assert.equal(historySentence(entry("REMOVE_CASE_LABEL")), "Alex removed label City Tax.");
+});

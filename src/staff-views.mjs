@@ -636,6 +636,10 @@ const who = (id, name, personId) =>
       ? `<strong class="you">You</strong>`
       : esc(name ?? UNKNOWN_PERSON);
 
+// Read-only label chips under a list row's reference; nothing for an unlabelled case.
+export const rowLabels = (record) =>
+  record?.labels?.length ? `<div class="board-labels">${record.labels.map((label) => labelChip(label)).join("")}</div>` : "";
+
 function boardRow(record, person, ui) {
   const rights = staffEligibility(record, person);
   const busy = ui.busy ? "disabled" : "";
@@ -650,7 +654,7 @@ function boardRow(record, person, ui) {
   if (!rights.claimPreparation.allowed && !rights.claimReview.allowed)
     actions.push(button("Open", "open-case", "secondary", `data-case-id="${id}"`));
   const own = mine(record, person?.id);
-  return `<tr class="board-row${own ? " own" : ""}"><th scope="row">${clientNumberTag(record)}<button class="board-reference" data-action="open-case" data-case-id="${id}">${esc(record.reference)}</button></th><td>${stageBadge(record.stage, "en", { record })}</td><td>${listPhone(record, person, "board-phone")}</td><td>${languageCell(languageSummary(clientLanguages(record?.answers)))}</td><td>${esc(serviceLabel(record?.answers?.service) || "—")}</td><td>${who(record.preparerId, record.preparerName, person?.id)}</td><td>${who(record.reviewerId, record.reviewerName, person?.id)}</td><td class="board-updated">${esc(record.updatedAt ? relativeDay(record.updatedAt, ui.now ?? Date.now()) : "No updates yet")}</td><td class="board-actions"><div class="board-row-actions">${actions.join("")}</div></td></tr>`;
+  return `<tr class="board-row${own ? " own" : ""}"><th scope="row">${clientNumberTag(record)}<button class="board-reference" data-action="open-case" data-case-id="${id}">${esc(record.reference)}</button>${rowLabels(record)}</th><td>${stageBadge(record.stage, "en", { record })}</td><td>${listPhone(record, person, "board-phone")}</td><td>${languageCell(languageSummary(clientLanguages(record?.answers)))}</td><td>${esc(serviceLabel(record?.answers?.service) || "—")}</td><td>${who(record.preparerId, record.preparerName, person?.id)}</td><td>${who(record.reviewerId, record.reviewerName, person?.id)}</td><td class="board-updated">${esc(record.updatedAt ? relativeDay(record.updatedAt, ui.now ?? Date.now()) : "No updates yet")}</td><td class="board-actions"><div class="board-row-actions">${actions.join("")}</div></td></tr>`;
 }
 
 // Your own rows first, otherwise in the order the store returned them.
@@ -2241,6 +2245,8 @@ export const EVENT_SENTENCES = Object.freeze({
   // The sentence with the person and the slot is built in historySentence;
   // this is for an entry that does not carry them.
   ASSIGN_CASE: "assigned a volunteer to the case",
+  ADD_CASE_LABEL: "added a label",
+  REMOVE_CASE_LABEL: "removed a label",
 });
 
 const ASSIGN_SLOTS = Object.freeze(["preparer", "reviewer"]);
@@ -2257,7 +2263,13 @@ export function historySentence(entry) {
   // `??` and `||` cannot be mixed without parentheses.
   const seasonEnd = code === "CLOSE_CASE" && entry?.detail?.seasonEnd === true;
   const assignment = code === "ASSIGN_CASE" ? assignWords(entry?.detail) : null;
-  const words = assignment
+  const labelled =
+    (code === "ADD_CASE_LABEL" || code === "REMOVE_CASE_LABEL") && entry?.detail?.name
+      ? `${code === "ADD_CASE_LABEL" ? "added" : "removed"} label ${entry.detail.name}`
+      : null;
+  const words = labelled
+    ? labelled
+    : assignment
     ? assignment
     : seasonEnd
     ? `closed the case at season end${

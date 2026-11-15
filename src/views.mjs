@@ -392,6 +392,7 @@ export function staffScreen(state) {
           list: state.lists?.cases ?? "ready",
           person,
           filters: state.boardFilters,
+          labels: state.labels ?? [],
           now: Date.now(),
         }),
         addCaseAction,
