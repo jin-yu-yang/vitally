@@ -1,6 +1,6 @@
 -- 050: hidden household rows (bug #175). A household row counts only while the
--- catalogue shows the household list, that is, while has_household_members is
--- "yes". After Yes, two members, then No, the stored hh stays but no row counts.
+-- catalogue shows the hh group. After Yes, two members, then No, the stored hh
+-- stays but no row counts.
 -- household_rows gives that count (0 to 4) and act_save_preparer_fields, defined
 -- only in 039, is redefined with exactly two changes: it uses household_rows, and
 -- it keeps the stored cells of rows that are now hidden, so a save never drops

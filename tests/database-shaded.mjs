@@ -292,6 +292,8 @@ test("the season bound and the household rows are the case's", async () => {
 const PARITY = [
   {}, { has_household_members: "no", hh: [{ first_name: "Lin" }, { first_name: "Kai" }] },
   { has_household_members: "yes", hh: [] },
+  { hh: [{ first_name: "Lin" }] },
+  { has_household_members: "yes", hh: "x" },
   ...[1, 3, 4, 6].map((n) => ({ has_household_members: "yes", hh: Array.from({ length: n }, (_, i) => ({ first_name: `Ana${i}` })) })),
 ];
 test("the browser and the database count the same household rows", async () => {
@@ -310,6 +312,53 @@ test("Yes, two members, then No: row 1 is refused", async () => {
     await f.sql(`update public.cases set answers=answers||'{"has_household_members":"no","hh":[{"first_name":"Lin"},{"first_name":"Kai"}]}'::jsonb where id=$1`, [caseId]);
     await assert.rejects(() => save(f, caseId, { household1QualifyingChild: "yes" }, 0), rejected("VALIDATION"));
     assert.equal(await stored(f, caseId), undefined);
+  } finally { await f.close(); }
+});
+
+const setHousehold = (f, caseId, answer, n) =>
+  f.sql(
+    `update public.cases set answers=answers||jsonb_build_object('has_household_members',$2::text,'hh',(select coalesce(jsonb_agg(jsonb_build_object('first_name','Ana'||g)),'[]'::jsonb) from generate_series(1,$3::int) g)) where id=$1`,
+    [caseId, answer, n],
+  );
+const saveEvents = async (f, caseId) =>
+  (await f.sql("select detail from public.case_events where case_id=$1 and action='SAVE_PREPARER_FIELDS' order by created_at, id", [caseId])).rows.map((r) => r.detail);
+
+test("Yes with three members: rows 1 to 3, not 4", async () => {
+  const f = await createDatabaseFixture();
+  try {
+    const caseId = await preparingCase(f);
+    await setHousehold(f, caseId, "yes", 3);
+    await save(f, caseId, { household1QualifyingChild: "yes", household2OwnSupport: "no", household3LowIncome: "na" }, 0);
+    await assert.rejects(() => save(f, caseId, { household4CostOfHome: "na" }, 1), rejected("VALIDATION"));
+    assert.equal(Number((await stored(f, caseId)).version), 1);
+  } finally { await f.close(); }
+});
+test("hidden cells are kept, unnamed, and come back", async () => {
+  const f = await createDatabaseFixture();
+  try {
+    const caseId = await preparingCase(f);
+    await setHousehold(f, caseId, "yes", 2);
+    await save(f, caseId, { household1QualifyingChild: "yes", household2QualifyingChild: "yes" }, 0);
+    await setHousehold(f, caseId, "no", 2);
+    await save(f, caseId, { incomeW2s: true }, 1);
+    assert.deepEqual((await stored(f, caseId)).fields, { household1QualifyingChild: "yes", household2QualifyingChild: "yes", incomeW2s: true });
+    assert.deepEqual((await saveEvents(f, caseId)).at(-1).changed, ["incomeW2s"]);
+    await setHousehold(f, caseId, "yes", 2);
+    await save(f, caseId, { household1QualifyingChild: "no", incomeW2s: true }, 2);
+    assert.equal((await stored(f, caseId)).fields.household1QualifyingChild, "no");
+  } finally { await f.close(); }
+});
+test("only hidden cells stored: an empty save is accepted", async () => {
+  const f = await createDatabaseFixture();
+  try {
+    const caseId = await preparingCase(f);
+    await setHousehold(f, caseId, "yes", 2);
+    await save(f, caseId, { household1QualifyingChild: "yes", household2QualifyingChild: "yes" }, 0);
+    await setHousehold(f, caseId, "no", 2);
+    await save(f, caseId, {}, 1);
+    const row = await stored(f, caseId);
+    assert.deepEqual(row.fields, { household1QualifyingChild: "yes", household2QualifyingChild: "yes" });
+    assert.equal(Number(row.version), 2);
   } finally { await f.close(); }
 });
 
