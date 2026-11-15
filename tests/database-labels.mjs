@@ -359,6 +359,21 @@ test("case labels", async (t) => {
         assert.equal(await f.receiptsFor(actionId), 1);
       });
 
+      await t.test("the assigned reviewer adds and removes", async () => {
+        const caseId = await f.preparedCase();
+        await f.act(f.reviewer, caseId, "CLAIM_REVIEW", {});
+        assert.equal((await f.setCaseLabel(f.reviewer, caseId, multi, true)).error, null);
+        assert.equal((await linksOf(caseId))[0].active, true);
+        assert.equal((await f.setCaseLabel(f.reviewer, caseId, multi, false)).error, null);
+        assert.equal((await linksOf(caseId))[0].active, false);
+        const events = await eventsOf(caseId);
+        assert.deepEqual(
+          events.map((e) => e.action),
+          ["ADD_CASE_LABEL", "REMOVE_CASE_LABEL"],
+        );
+        for (const e of events) assert.equal(e.actor_person_id, f.reviewerId);
+      });
+
       await t.test("the office labels any case", async () => {
         const caseId = await screeningCase();
         assert.equal((await caseRow(caseId)).stage, "screening");
@@ -408,20 +423,22 @@ test("case labels", async (t) => {
         });
         const caseId = await f.preparedCase();
         const before = await allEvents();
-        const { error } = await f.setCaseLabel(staff.client, caseId, multi, true);
+        const actionId = randomUUID();
+        const { error } = await f.setCaseLabel(staff.client, caseId, multi, true, actionId);
         assert.equal(error?.code, "VT002");
+        assert.equal(await f.receiptsFor(actionId), 0);
         assert.equal((await linksOf(caseId)).length, 0);
         assert.equal(await allEvents(), before);
       });
 
       await t.test("unchanged state writes nothing", async () => {
         const caseId = await f.preparedCase();
-        const mfs = await labelId(f, "Spare");
-        const never = await f.setCaseLabel(f.preparer, caseId, mfs, false);
+        const spare = await labelId(f, "Spare");
+        const never = await f.setCaseLabel(f.preparer, caseId, spare, false);
         assert.equal(never.error, null);
         assert.equal((await eventsOf(caseId)).length, 0);
-        assert.equal((await f.setCaseLabel(f.preparer, caseId, mfs, true)).error, null);
-        assert.equal((await f.setCaseLabel(f.siteCoordinator, caseId, mfs, true)).error, null);
+        assert.equal((await f.setCaseLabel(f.preparer, caseId, spare, true)).error, null);
+        assert.equal((await f.setCaseLabel(f.siteCoordinator, caseId, spare, true)).error, null);
         assert.equal((await eventsOf(caseId)).length, 1);
         assert.equal((await linksOf(caseId))[0].changed_by_person_id, f.preparerId);
       });
