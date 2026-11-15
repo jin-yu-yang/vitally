@@ -1,6 +1,7 @@
 import { createAppError } from "./errors.mjs";
 import { isAuthTransportError } from "./auth.mjs";
 import { combineVolunteers } from "./volunteer-roster.mjs";
+import { sortLabels } from "./case-labels.mjs";
 
 // The one data adapter. Everything the browser knows about the database goes
 // through this file: the seven RPCs, the RLS-scoped SELECT reads,
@@ -532,11 +533,27 @@ export function createStore(client) {
           .order("logged_at", { ascending: false })
           .order("id", { ascending: false }),
       );
+      // Case labels: the workspace's labels and the active links, joined here.
+      const labelRows = await read(client.from("case_labels").select("id,name,color"));
+      const labelLinks = await read(
+        client
+          .from("case_label_links")
+          .select("case_id,label_id")
+          .in("case_id", ids)
+          .eq("active", true),
+      );
+      const labelById = new Map(labelRows.map((row) => [row.id, row]));
       const forCase = (rows, id) => rows.filter((row) => row.case_id === id);
       return cases.map((record) => {
         const open = forCase(followups, record.id);
         return {
           ...record,
+          labels: sortLabels(
+            forCase(labelLinks, record.id)
+              .map((link) => labelById.get(link.label_id))
+              .filter(Boolean)
+              .map(({ id, name, color }) => ({ id, name, color })),
+          ),
           participants: forCase(participants, record.id).map((row) => row.person_id),
           openFollowups: open.length,
           // D13: Mark ready to e-file waits while the office's go-over is open.
@@ -729,6 +746,32 @@ export function createStore(client) {
         p_case_id: request.caseId,
         p_followup_id: request.followupId ?? null,
         p_entry: request.entry,
+      });
+    },
+
+    async listLabels() {
+      await requireStaffAccess();
+      const rows = await read(client.from("case_labels").select("id,name,color,revision"));
+      return sortLabels(
+        rows.map(({ id, name, color, revision }) => ({ id, name, color, revision: Number(revision) })),
+      );
+    },
+
+    async saveLabel(request) {
+      return await call("vitally_save_label", {
+        p_action_id: actionId(request),
+        p_label_id: request.labelId ?? null,
+        p_expected_revision: request.expectedRevision ?? null,
+        p_label: request.label,
+      });
+    },
+
+    async setCaseLabel(request) {
+      return await call("vitally_set_case_label", {
+        p_action_id: actionId(request),
+        p_case_id: request.caseId,
+        p_label_id: request.labelId,
+        p_on: request.on === true,
       });
     },
 

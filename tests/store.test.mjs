@@ -637,6 +637,7 @@ test("a staff list carries the summaries a work board reads", async () => {
       ...Object.keys(mapCase(CASE_ROW)),
       "followupAssigneeIds",
       "goOverOpen",
+      "labels",
       "lastContactAt",
       "latestFixNote",
       "openFollowups",
@@ -1785,4 +1786,51 @@ test("a staff principal carries the clearance from vitally_my_clearance; an appl
 test("an error from vitally_my_clearance surfaces from getPrincipal", async () => {
   const client = fakeClient({ access: "staff", rpc: async () => ({ data: null, error: { code: "VT001" } }) });
   await assert.rejects(() => createStore(client).getPrincipal(), { code: "FORBIDDEN" });
+});
+
+test("STAFF_TABLES holds the case label tables", () => {
+  assert.ok(SUBSCRIBED_TABLES.staff.includes("case_labels"));
+  assert.ok(SUBSCRIBED_TABLES.staff.includes("case_label_links"));
+});
+
+test("listCases attaches sorted labels from active links only", async () => {
+  const rows = {
+    case_labels: [
+      { id: "l-b", name: "beta", color: "sky", revision: 1 },
+      { id: "l-a", name: "Alpha", color: "pink", revision: 1 },
+      { id: "l-c", name: "Gone", color: "slate", revision: 1 },
+    ],
+    case_label_links: [
+      { case_id: "case-1", label_id: "l-b", active: true },
+      { case_id: "case-1", label_id: "l-a", active: true },
+      { case_id: "case-1", label_id: "l-c", active: false },
+    ],
+  };
+  const [row] = await createStore(fakeClient({ access: "staff", rows })).listCases();
+  assert.deepEqual(row.labels, [
+    { id: "l-a", name: "Alpha", color: "pink" },
+    { id: "l-b", name: "beta", color: "sky" },
+  ]);
+});
+
+test("listCases gives an empty labels list when the tables are empty", async () => {
+  const [row] = await createStore(fakeClient({ access: "staff" })).listCases();
+  assert.deepEqual(row.labels, []);
+});
+
+test("listLabels returns the workspace's labels", async () => {
+  const rows = { case_labels: [{ id: "l-a", name: "Alpha", color: "pink", revision: 2, workspace_id: "w" }] };
+  const list = await createStore(fakeClient({ access: "staff", rows })).listLabels();
+  assert.deepEqual(list, [{ id: "l-a", name: "Alpha", color: "pink", revision: 2 }]);
+});
+
+test("saveLabel and setCaseLabel call their RPCs", async () => {
+  const client = fakeClient({ access: "staff" });
+  const store = createStore(client);
+  await store.saveLabel({ actionId: "a1", labelId: "l1", expectedRevision: 3, label: { name: "X", color: "sky" } });
+  await store.setCaseLabel({ actionId: "a2", caseId: "c1", labelId: "l1", on: true });
+  assert.deepEqual(client.rpcCalls, [
+    { name: "vitally_save_label", args: { p_action_id: "a1", p_label_id: "l1", p_expected_revision: 3, p_label: { name: "X", color: "sky" } } },
+    { name: "vitally_set_case_label", args: { p_action_id: "a2", p_case_id: "c1", p_label_id: "l1", p_on: true } },
+  ]);
 });
