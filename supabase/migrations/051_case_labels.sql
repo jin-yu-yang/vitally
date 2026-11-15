@@ -121,6 +121,106 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
+-- 5. vitally_save_label: an admin creates, renames or recolors a label.
+-- It writes no case history and changes no case (design D5).
+
+create or replace function vitally_private.check_label(p_label jsonb)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_name text;
+begin
+ if p_label is null or jsonb_typeof(p_label)<>'object'
+  or exists(select 1 from jsonb_object_keys(p_label) k where k not in ('name','color'))
+  or jsonb_typeof(p_label->'name') is distinct from 'string'
+  or jsonb_typeof(p_label->'color') is distinct from 'string' then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ v_name=btrim(p_label->>'name');
+ if char_length(v_name) not between 1 and 24
+  or (p_label->>'color') not in ('sky','amber','pink','green','violet','slate') then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ return jsonb_build_object('name',v_name,'color',p_label->>'color');
+end;
+$$;
+
+create or replace function public.vitally_save_label(p_action_id uuid,p_label_id uuid,p_expected_revision bigint,p_label jsonb)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_receipt public.action_receipts;
+ v_label public.case_labels;
+ v_checked jsonb;
+ v_digest text;
+ v_id uuid;
+ v_revision bigint;
+ v_result jsonb;
+begin
+ v_member=vitally_private.require_membership();
+ v_person=vitally_private.acting_person(v_member);
+ perform vitally_private.require_cleared(v_member);
+ if p_action_id is null then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ -- Staff holding the admin capability only; everyone else is refused first.
+ if v_member.access<>'staff' or v_person.id is null or not ('admin'=any(v_person.capabilities)) then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ v_checked=vitally_private.check_label(p_label);
+ v_digest=encode(extensions.digest(jsonb_build_object('operation','SAVE_LABEL','labelId',p_label_id,
+  'expectedRevision',p_expected_revision,'label',p_label,'personId',v_person.id)::text,'sha256'),'hex');
+ v_receipt=vitally_private.reserve_receipt(v_member,p_action_id,'SAVE_LABEL',v_digest,v_person.id);
+ if v_receipt.receipt is not null then
+  return v_receipt.receipt;
+ end if;
+ if p_label_id is null then
+  if p_expected_revision is not null then
+   raise sqlstate 'VT007' using message='VALIDATION';
+  end if;
+  if exists(select 1 from public.case_labels l
+    where l.workspace_id=v_member.workspace_id and lower(l.name)=lower(v_checked->>'name')) then
+   raise sqlstate 'VT007' using message='VALIDATION';
+  end if;
+  begin
+   insert into public.case_labels(workspace_id,name,color,created_by_person_id,updated_by_person_id)
+   values(v_member.workspace_id,v_checked->>'name',v_checked->>'color',v_person.id,v_person.id)
+   returning id,revision into v_id,v_revision;
+  exception when unique_violation then
+   raise sqlstate 'VT007' using message='VALIDATION';
+  end;
+ else
+  if p_expected_revision is null then
+   raise sqlstate 'VT007' using message='VALIDATION';
+  end if;
+  select * into v_label from public.case_labels l
+   where l.id=p_label_id and l.workspace_id=v_member.workspace_id for update;
+  if not found then
+   raise sqlstate 'VT002' using message='NOT_FOUND';
+  end if;
+  if v_label.revision<>p_expected_revision then
+   raise sqlstate 'VT003' using message='CONFLICT';
+  end if;
+  if exists(select 1 from public.case_labels l
+    where l.workspace_id=v_member.workspace_id and l.id<>v_label.id
+     and lower(l.name)=lower(v_checked->>'name')) then
+   raise sqlstate 'VT007' using message='VALIDATION';
+  end if;
+  begin
+   update public.case_labels set name=v_checked->>'name',color=v_checked->>'color',revision=revision+1,
+    updated_by_person_id=v_person.id,updated_at=now()
+   where id=v_label.id returning id,revision into v_id,v_revision;
+  exception when unique_violation then
+   raise sqlstate 'VT007' using message='VALIDATION';
+  end;
+ end if;
+ v_result=jsonb_build_object('actionId',p_action_id,'labelId',v_id,'revision',v_revision);
+ update public.action_receipts set target_id=v_id,receipt=v_result where id=v_receipt.id;
+ return v_result;
+end;
+$$;
+revoke all on function public.vitally_save_label(uuid,uuid,bigint,jsonb) from public,anon,authenticated,service_role;
+grant execute on function public.vitally_save_label(uuid,uuid,bigint,jsonb) to authenticated;
+
+-- ---------------------------------------------------------------------------
 -- Closing line, kept last as sections are appended: no browser or service
 -- role may call a private function directly.
 

@@ -337,6 +337,17 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
     if (error) throw createAppError(error);
     return data;
   };
+  // A label created or edited by an admin; returns the raw {data, error}.
+  f.saveLabel = (
+    client,
+    { actionId = randomUUID(), labelId = null, expectedRevision = null, name, color, label },
+  ) =>
+    client.rpc("vitally_save_label", {
+      p_action_id: actionId,
+      p_label_id: labelId,
+      p_expected_revision: expectedRevision,
+      p_label: label ?? { name, color },
+    });
   // A contact log entry, linked to a follow-up task when `followupId` is given.
   f.logContact = async (client, caseId, entry, followupId = null) => {
     const { data, error } = await client.rpc(
