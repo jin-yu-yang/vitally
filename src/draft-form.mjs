@@ -12,7 +12,7 @@ import { CATALOGUE, findQuestion, isAnswered, memberNameParts, spouseShown, visi
 import { formatAnswer, formatDate } from "./intake-form.mjs";
 import { sourceText } from "./language.mjs";
 import { t } from "./client-text.mjs";
-import { SHADED_FIELDS, shadedName, shadedPrint } from "./shaded-fields.mjs";
+import { SHADED_FIELDS, shadedName, shadedPrint, visibleShaded } from "./shaded-fields.mjs";
 
 export const FORM_FILES = Object.freeze({
   en: "src/forms/f13614c-2025.pdf",
@@ -386,7 +386,7 @@ function commentsFor(answers, members, lang) {
  * and the `fileName` the builder and the page use. `words.continuedOn` keeps
  * its `{page}` for the builder, which knows the page.
  */
-export function draftFields(answers, { form = "en", reference = "", today, shaded = null } = {}) {
+export function draftFields(answers, { form = "en", reference = "", today, shaded = null, version = 2 } = {}) {
   const names = familyOf(form);
   const visible = visibleAnswers(2, answers ?? {});
   const text = {};
@@ -458,7 +458,7 @@ export function draftFields(answers, { form = "en", reference = "", today, shade
   });
 
   const notes = [];
-  const values = shaded && typeof shaded === "object" ? shaded : {};
+  const values = visibleShaded(shaded && typeof shaded === "object" ? shaded : {}, answers ?? {}, { version });
   let preparerEntries = false;
   for (const field of SHADED_FIELDS) {
     if (!Object.hasOwn(values, field.key)) continue;

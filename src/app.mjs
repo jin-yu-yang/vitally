@@ -42,7 +42,7 @@ import {
   fieldsNeedFont,
   readFilledCopy,
 } from "./draft-pdf.mjs";
-import { readShaded, shadedCaseRules, uploadRefusal } from "./shaded-fields.mjs";
+import { readShaded, shadedCaseRules, uploadRefusal, visibleShaded } from "./shaded-fields.mjs";
 import { OPEN_FAILED, createShadedSave, editorGone, openShadedEditor } from "./shaded-editor.mjs";
 import {
   describeFocus,
@@ -1515,7 +1515,8 @@ if (!config) {
     const reference = record.reference ?? "";
     const row = savedShaded(record);
     const version = Number(row?.version ?? 0);
-    const fields = draftFields(state.draftAnswers ?? {}, { form: "en", reference, today: isoToday() });
+    const caseVersion = state.savedCase?.intakeVersion ?? 2;
+    const fields = draftFields(state.draftAnswers ?? {}, { form: "en", reference, today: isoToday(), version: caseVersion });
     const PDFLib = await import("./vendor/pdf-lib.mjs");
     const [formBytes, fontFiles] = await Promise.all([
       fetchBytes(FORM_FILES.en),
@@ -1523,7 +1524,7 @@ if (!config) {
     ]);
     const bytes = await buildEditingCopy({
       PDFLib, fontkit: PDFLib.fontkit, formBytes, fontFiles, fields,
-      shaded: row?.fields ?? {}, reference, version,
+      shaded: visibleShaded(row?.fields ?? {}, state.draftAnswers ?? {}, { version: caseVersion }), reference, version,
     });
     return { bytes, reference, version };
   }
@@ -1709,6 +1710,7 @@ if (!config) {
         // The 13614-C prints the saved shaded section in every form (design
         // D9); the 14446 has no shaded section and ignores it.
         form, reference, today, shaded: savedShaded(state.savedCase)?.fields ?? null,
+        version: state.savedCase?.intakeVersion ?? 2,
       });
       const PDFLib = await import("./vendor/pdf-lib.mjs");
       const [formBytes, fontFiles] = await Promise.all([
