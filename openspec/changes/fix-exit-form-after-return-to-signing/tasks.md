@@ -60,7 +60,7 @@
 
 ## 5. Checks
 
-- [ ] 5.1 Run `npm test` locally. Database, sign-in and story suites run in CI only: the local stack is
+- [x] 5.1 Run `npm test` locally. Database, sign-in and story suites run in CI only: the local stack is
   shared, and no SQL changed.
-- [ ] 5.2 Push the branch and confirm every CI job is green (`checks`, `database`, `sign-in`, both `story`
+- [x] 5.2 Push the branch and confirm every CI job is green (`checks`, `database`, `sign-in`, both `story`
   legs). Review the story's screenshots for the Exit Form.
