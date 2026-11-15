@@ -487,10 +487,12 @@ in the browser from an approval's reviewer questionnaire, and nothing is uploade
 - **After a Return to signing.** The questionnaire records the return as it stood at approval, so
   `exitFormSource(record, review)` in [`src/exit-form-source.mjs`](../../src/exit-form-source.mjs)
   decides what both places may print. If a `RETURN_TO_SIGNING` entry in the staff history is later
-  than the review's `decidedAt`, only the settled methods (a method is set and its result is not
+  than the review's `decidedAt` (an approval with no `decidedAt`, or one that can't be parsed,
+  counts every Return to signing as later), only the settled methods (a method is set and its result is not
   `rejected`) are ticked, and everything else is blank: amounts, payment methods, debit dates, Other
-  Tax and Remarks. `exitFormNote` builds the note that says what to fill in by hand, and both the
-  panel and the download carry it. Without staff history, no form is offered. Follow-ups:
+  Tax and Remarks. `exitFormNote` builds the note that says what to fill in by hand. The note is HTML,
+  shown in the office panel and beside the volunteer's "Download Exit Form" button, and only when
+  the return was corrected. The PDF itself carries no note, only the blanks. Without staff history, no form is offered. Follow-ups:
   [#173](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/173) (this fix),
   [#203](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/203) and
   [#204](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/204).
