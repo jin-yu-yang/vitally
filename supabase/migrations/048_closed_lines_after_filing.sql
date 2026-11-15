@@ -1,20 +1,20 @@
--- 047: a close after a filing says what was filed (issue #170, OpenSpec change
+-- 048: a close after a filing says what was filed (issue #170, OpenSpec change
 -- fix-closed-lines-after-filing). A case closed after a return was filed was
 -- told "Your return was not filed". The close history line now reads what each
 -- return is, and the staff notice no longer says "closed before filing" for a
 -- return that was filed.
 --
--- THE NUMBER 047 IS PROVISIONAL: it is final only when this change's pull
--- request is merged, and is renumbered if another migration takes it first.
+-- Numbered 048 to follow 047_accounts.sql (pull request #197), which merges
+-- first. Nothing else refers to the number.
 --
 --   * vitally_private.return_outcome (new): one return's outcome (design D1).
 --   * vitally_private.closed_line (new, five arguments): the reason, the filing
 --     method and result of each return. Replaces closed_line(text) from 036,
 --     which is dropped at the end.
---   * act_close_case: verbatim from 043, with the lines marked -- 047 changed
+--   * act_close_case: verbatim from 043, with the lines marked -- 048 changed
 --     (the message, and the staff notice after a filing).
 --   * public.vitally_close_unsigned: verbatim from 045, with the closed_line
---     call marked -- 047 changed.
+--     call marked -- 048 changed.
 -- CREATE OR REPLACE keeps each signature; the revoke and grant of
 -- vitally_close_unsigned are re-applied as in 045.
 
@@ -82,7 +82,7 @@ revoke all on function vitally_private.closed_line(text,text,text,text,text) fro
 
 -- ---------------------------------------------------------------------------
 -- 3. act_close_case, verbatim from 043 with the message and the staff notice
--- after a filing changed (-- 047).
+-- after a filing changed (-- 048).
 
 create or replace function vitally_private.act_close_case(p_member public.memberships,p_case public.cases,p_person public.people,p_payload jsonb)
 returns jsonb language plpgsql security definer set search_path='' as $$
@@ -112,9 +112,9 @@ begin
   values(p_case.workspace_id,p_case.id,null,'withdrawal_notice',v_assignee.id, -- 036
    case when p_payload->>'reason'='withdrawn' -- 036
     then 'The client withdrew; make sure the return is not transmitted in TaxSlayer.' -- 036
-    when vitally_private.return_outcome(p_case.federal_method,p_case.federal_result)<>'not_filed' -- 047
-     or vitally_private.return_outcome(p_case.state_method,p_case.state_result)<>'not_filed' -- 047
-    then 'The case was closed after a return was filed; make sure the rejected return is not transmitted again in TaxSlayer.' -- 047
+    when vitally_private.return_outcome(p_case.federal_method,p_case.federal_result)<>'not_filed' -- 048
+     or vitally_private.return_outcome(p_case.state_method,p_case.state_result)<>'not_filed' -- 048
+    then 'The case was closed after a return was filed; make sure the rejected return is not transmitted again in TaxSlayer.' -- 048
     else 'The case was closed before filing; make sure the return is not transmitted in TaxSlayer.' end, -- 036
    v_assignee.id); -- 036
  end if; -- 036
@@ -122,13 +122,13 @@ begin
  -- message says plainly that an office decision, not a filing, has changed.
  return jsonb_build_object('detail',jsonb_build_object('reason',p_payload->>'reason') -- 036
    ||case when p_payload ? 'note' then jsonb_build_object('note',p_payload->>'note') else '{}'::jsonb end, -- 036
-  'message',vitally_private.closed_line(p_payload->>'reason',p_case.federal_method,p_case.federal_result,p_case.state_method,p_case.state_result)); -- 047
+  'message',vitally_private.closed_line(p_payload->>'reason',p_case.federal_method,p_case.federal_result,p_case.state_method,p_case.state_result)); -- 048
 end;
 $$;
 
 -- ---------------------------------------------------------------------------
 -- 4. vitally_close_unsigned, verbatim from 045 with the closed_line call
--- changed (-- 047).
+-- changed (-- 048).
 
 create or replace function public.vitally_close_unsigned(p_action_id uuid,p_cases jsonb,p_confirmed boolean)
 returns jsonb language plpgsql security definer set search_path='' as $$
@@ -194,7 +194,7 @@ begin
   values(v_case.workspace_id,v_case.id,v_member.user_id,v_person.id,'CLOSE_CASE',
    jsonb_build_object('reason','dismissed','seasonEnd',true));
   insert into public.client_events(workspace_id,case_id,action,message)
-  values(v_case.workspace_id,v_case.id,'CLOSE_CASE',vitally_private.closed_line('dismissed',v_case.federal_method,v_case.federal_result,v_case.state_method,v_case.state_result)); -- 047
+  values(v_case.workspace_id,v_case.id,'CLOSE_CASE',vitally_private.closed_line('dismissed',v_case.federal_method,v_case.federal_result,v_case.state_method,v_case.state_result)); -- 048
   update public.cases set revision=revision+1,updated_at=now() where id=v_id returning revision into v_revision;
   v_cases=v_cases||jsonb_build_array(jsonb_build_object('caseId',v_id,'reference',v_case.reference,'revision',v_revision));
  end loop;
