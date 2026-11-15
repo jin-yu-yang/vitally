@@ -931,6 +931,8 @@ test("a staff case read adds exactly the staff sections", async () => {
       "case_contacts",
       "case_document_cards",
       "case_events",
+      "case_label_links",
+      "case_labels",
       "case_materials",
       "cases",
       "client_events",
@@ -1816,6 +1818,36 @@ test("listCases attaches sorted labels from active links only", async () => {
 test("listCases gives an empty labels list when the tables are empty", async () => {
   const [row] = await createStore(fakeClient({ access: "staff" })).listCases();
   assert.deepEqual(row.labels, []);
+});
+
+test("getCase for staff attaches sorted active labels and drops a link with no label", async () => {
+  const rows = {
+    case_labels: [
+      { id: "l-b", name: "beta", color: "sky" },
+      { id: "l-a", name: "Alpha", color: "pink" },
+      { id: "l-c", name: "Gone", color: "slate" },
+    ],
+    case_label_links: [
+      { case_id: "case-1", label_id: "l-b", active: true },
+      { case_id: "case-1", label_id: "l-a", active: true },
+      { case_id: "case-1", label_id: "l-c", active: false },
+      { case_id: "case-1", label_id: "l-missing", active: true },
+    ],
+  };
+  const record = await createStore(fakeClient({ access: "staff", rows })).getCase("case-1");
+  assert.deepEqual(record.labels, [
+    { id: "l-a", name: "Alpha", color: "pink" },
+    { id: "l-b", name: "beta", color: "sky" },
+  ]);
+});
+
+test("getCase for an applicant reads no label table", async () => {
+  const client = fakeClient({ access: "applicant" });
+  const record = await createStore(client).getCase("case-1");
+  const tables = client.reads.map((read) => read.table);
+  assert.ok(!tables.includes("case_labels"));
+  assert.ok(!tables.includes("case_label_links"));
+  assert.equal(record.labels, undefined);
 });
 
 test("listLabels returns the workspace's labels", async () => {

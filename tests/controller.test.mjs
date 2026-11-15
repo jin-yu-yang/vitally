@@ -7616,6 +7616,28 @@ test("creating from the menu creates the label, then puts it on the case", async
   controller.stop();
 });
 
+for (const change of [
+  { table: "case_label_links", eventType: "INSERT", id: "x", caseId: "case-a" },
+  { table: "case_labels", eventType: "UPDATE", id: "label-a" },
+]) {
+  test(`a ${change.table} change re-reads the lists and the open case, and keeps the menu`, async () => {
+    const store = labelStore();
+    const { controller } = build({ store });
+    await controller.start();
+    await controller.selectCase("case-a");
+    controller.openLabelMenu("case-a");
+    store.labels = [{ id: "label-a", name: "Renamed", color: "sky", revision: 3 }];
+    const lists = caseListReads(store);
+    const reads = readsOf(store);
+    await store.handlers.onChange(change);
+    assert.equal(caseListReads(store), lists + 1, "the list is re-read");
+    assert.equal(readsOf(store), reads + 1, "the open case is re-read");
+    assert.equal(controller.getState().labels[0].name, "Renamed");
+    assert.equal(controller.getState().labelMenu.caseId, "case-a");
+    controller.stop();
+  });
+}
+
 test("a live refresh keeps the label menu, and closing clears it", async () => {
   const store = labelStore();
   const { controller } = build({ store });

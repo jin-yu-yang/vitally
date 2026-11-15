@@ -352,6 +352,29 @@ export function createStore(client) {
 
   const call = (name, args) => settled(client.rpc(name, args));
 
+  // Case labels (staff only): the workspace's labels and the active links of
+  // the given cases, joined here. Returns a function from case id to that
+  // case's sorted `{id, name, color}` list; a link to a missing label is dropped.
+  const readCaseLabels = async (caseIds) => {
+    const labelRows = await read(client.from("case_labels").select("id,name,color"));
+    const links = await read(
+      client
+        .from("case_label_links")
+        .select("case_id,label_id")
+        .in("case_id", caseIds)
+        .eq("active", true),
+    );
+    const byId = new Map(labelRows.map((row) => [row.id, row]));
+    return (caseId) =>
+      sortLabels(
+        links
+          .filter((link) => link.case_id === caseId)
+          .map((link) => byId.get(link.label_id))
+          .filter(Boolean)
+          .map(({ id, name, color }) => ({ id, name, color })),
+      );
+  };
+
   // Rows of one case-scoped table, in the order the history and lists are
   // shown: oldest first, with a stable tiebreak.
   const relatedRows = (table, caseId, tiebreak = "id", columns = "*") =>
@@ -533,27 +556,13 @@ export function createStore(client) {
           .order("logged_at", { ascending: false })
           .order("id", { ascending: false }),
       );
-      // Case labels: the workspace's labels and the active links, joined here.
-      const labelRows = await read(client.from("case_labels").select("id,name,color"));
-      const labelLinks = await read(
-        client
-          .from("case_label_links")
-          .select("case_id,label_id")
-          .in("case_id", ids)
-          .eq("active", true),
-      );
-      const labelById = new Map(labelRows.map((row) => [row.id, row]));
+      const labelsOf = await readCaseLabels(ids);
       const forCase = (rows, id) => rows.filter((row) => row.case_id === id);
       return cases.map((record) => {
         const open = forCase(followups, record.id);
         return {
           ...record,
-          labels: sortLabels(
-            forCase(labelLinks, record.id)
-              .map((link) => labelById.get(link.label_id))
-              .filter(Boolean)
-              .map(({ id, name, color }) => ({ id, name, color })),
-          ),
+          labels: labelsOf(record.id),
           participants: forCase(participants, record.id).map((row) => row.person_id),
           openFollowups: open.length,
           // D13: Mark ready to e-file waits while the office's go-over is open.
@@ -625,7 +634,9 @@ export function createStore(client) {
         ),
       };
       if (!staff) return mapClientCase(client_);
-      return mapStaffCase({
+      const labelsOf = await readCaseLabels([id]);
+      return {
+        ...mapStaffCase({
         ...client_,
         participants: await relatedRows(
           "preparation_participants",
@@ -691,7 +702,9 @@ export function createStore(client) {
             .order("recorded_at")
             .order("id"),
         ),
-      });
+        }),
+        labels: labelsOf(id),
+      };
     },
 
     async createCase(request) {

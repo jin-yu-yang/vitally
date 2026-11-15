@@ -947,11 +947,21 @@ export function createController({
     const touchesWorkspace = change.table === "workspaces";
     // A logged contact never touches the cases row, but it moves the case's
     // lastContactAt, which the Workload's Stalled count reads from the list.
+    // A label change moves the chips on every board row and the label options,
+    // so it re-reads the list (which brings the labels with it) too.
+    const touchesLabels =
+      change.table === "case_labels" || change.table === "case_label_links";
     const touchesList =
-      touchesWorkspace || change.table === "cases" || change.table === "contact_log";
+      touchesWorkspace ||
+      touchesLabels ||
+      change.table === "cases" ||
+      change.table === "contact_log";
+    // A label rename names no case, so it reaches the open case's header too.
     const touchesOpen =
       Boolean(state.selectedCaseId) &&
-      (touchesWorkspace || change.caseId === state.selectedCaseId);
+      (touchesWorkspace ||
+        change.table === "case_labels" ||
+        change.caseId === state.selectedCaseId);
     // An assistance item belongs to no case, so it is named by its own table
     // rather than by a case id: a claim in another window has to reach this one.
     const touchesAssistance =
