@@ -887,11 +887,11 @@ function labelRow(record, person, ui) {
   const editable = canLabelCase(record, person);
   const menu = editable && ui?.labelMenu?.caseId === record.id ? ui.labelMenu : null;
   if (!labels.length && !editable) return "";
-  const chips = labels.map((label) => labelChip(label, editable ? { removeFor: record.id } : {})).join("");
+  const chips = labels.map((label) => labelChip(label, editable ? { removeFor: record.id, disabled: Boolean(ui?.busy) } : {})).join("");
   const add = editable
-    ? `<button type="button" class="btn text label-add" data-action="open-label-menu" data-case-id="${esc(record.id)}" aria-haspopup="true" aria-expanded="${menu ? "true" : "false"}">+ Add a label</button>`
+    ? `<button type="button" class="btn text label-add" data-action="open-label-menu" data-case-id="${esc(record.id)}" aria-expanded="${menu ? "true" : "false"}">+ Add a label</button>`
     : "";
-  return `<div class="case-label-row">${chips}${add}</div>${menu ? labelMenu(record, person, ui.labels ?? [], menu) : ""}`;
+  return `<div class="case-label-row">${chips}${add}</div>${menu ? labelMenu(record, person, ui.labels ?? [], menu, Boolean(ui.busy)) : ""}`;
 }
 
 function labelForm(editing) {
@@ -904,7 +904,7 @@ function labelForm(editing) {
   }<div class="label-form-actions"><button type="button" class="btn primary" data-action="save-label">Save label</button><button type="button" class="btn text" data-action="cancel-label-edit">Cancel</button></div></div>`;
 }
 
-function labelList(record, person, labels, search) {
+function labelList(record, person, labels, search, busy = false) {
   const on = new Set((record.labels ?? []).map((label) => label.id));
   const admin = canManageLabels(person);
   const needle = search.trim().toLowerCase();
@@ -915,7 +915,7 @@ function labelList(record, person, labels, search) {
       const edit = admin
         ? `<button type="button" class="btn text label-edit" data-action="edit-label" data-label-id="${esc(label.id)}" aria-label="Edit label ${esc(label.name)}">Edit</button>`
         : "";
-      return `<li class="label-menu-row"><button type="button" class="label-toggle" data-action="toggle-case-label" data-case-id="${esc(record.id)}" data-label-id="${esc(label.id)}" data-on="${active ? "false" : "true"}" aria-pressed="${active}">${labelChip(label)}<span class="label-toggle-state">${active ? "On this case" : ""}</span></button>${edit}</li>`;
+      return `<li class="label-menu-row"><button type="button" class="label-toggle" data-action="toggle-case-label" data-case-id="${esc(record.id)}" data-label-id="${esc(label.id)}" data-on="${active ? "false" : "true"}" aria-pressed="${active}"${busy ? " disabled" : ""}>${labelChip(label)}<span class="label-toggle-state">${active ? "On this case" : ""}</span></button>${edit}</li>`;
     })
     .join("");
   const typed = search.trim();
@@ -931,8 +931,8 @@ function labelList(record, person, labels, search) {
   }${create}`;
 }
 
-function labelMenu(record, person, labels, menu) {
-  const body = menu.editing ? labelForm(menu.editing) : labelList(record, person, labels, menu.search ?? "");
+function labelMenu(record, person, labels, menu, busy = false) {
+  const body = menu.editing ? labelForm(menu.editing) : labelList(record, person, labels, menu.search ?? "", busy);
   return `<div class="label-menu" role="group" aria-label="Labels"><div class="label-menu-head"><strong>Labels</strong><button type="button" class="btn text" data-action="close-label-menu" aria-label="Close the label menu">×</button></div>${body}</div>`;
 }
 

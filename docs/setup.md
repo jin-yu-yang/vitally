@@ -191,6 +191,9 @@ the eight volunteers, and leaves every other case and volunteer alone. If it sto
 person is not the site coordinator account (this happens on a stack set up from the old example
 roster). In both cases, run the roster command again with the current example roster.
 
+The seed also labels some rehearsal cases with the three starter labels. It stops with `SEED_SETUP` if
+one of those labels was renamed in the workspace, so rename them back (or seed a fresh workspace) first.
+
 The run file belongs to the checkout the seed ran in. A seed run from another checkout or worktree
 does not know that set and leaves it in place, so the workspace ends up with two of every case:
 `removed 0` on a workspace you have seeded before is the sign. To recover, add the `caseIds` and

@@ -642,4 +642,9 @@ test("labelChip adds a remove button only when asked", () => {
   assert.match(html, /data-on="false"/);
   assert.match(html, /data-label-id="l1"/);
   assert.match(html, /aria-label="Remove label City Tax"/);
+  assert.doesNotMatch(html, /<button[^>]*disabled/);
+  assert.match(
+    labelChip({ id: "l1", name: "City Tax", color: "sky" }, { removeFor: "case-a", disabled: true }),
+    /<button[^>]*case-label-remove[^>]*disabled/,
+  );
 });

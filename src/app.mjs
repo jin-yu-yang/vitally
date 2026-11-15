@@ -2091,7 +2091,7 @@ if (!config) {
         break;
       case "toggle-case-label":
         await controller.toggleCaseLabel(
-          controller.getState().labelMenu?.caseId ?? target.dataset.caseId,
+          target.dataset.caseId,
           target.dataset.labelId,
           target.dataset.on === "true",
         );

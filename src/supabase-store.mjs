@@ -4,7 +4,7 @@ import { combineVolunteers } from "./volunteer-roster.mjs";
 import { sortLabels } from "./case-labels.mjs";
 
 // The one data adapter. Everything the browser knows about the database goes
-// through this file: the seven RPCs, the RLS-scoped SELECT reads,
+// through this file: the ten RPCs, the RLS-scoped SELECT reads,
 // the Realtime subscription, and the single snake_case → camelCase mapping
 // that turns rows into the objects `src/contracts.mjs` documents. No DOM, no
 // controller state, no auth. The Supabase client is injected (Ruling R33).

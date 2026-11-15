@@ -3282,6 +3282,21 @@ test("the preparer sees the chip with a remove button and an add button", () => 
   assert.match(html, /aria-label="Remove label City Tax"/);
   assert.match(html, /\+ Add a label/);
   assert.match(html, /data-action="open-label-menu"/);
+  assert.doesNotMatch(html, /aria-haspopup/);
+  assert.match(html, /aria-expanded="false"/);
+});
+
+test("label toggle and remove buttons are disabled while busy, and enabled otherwise", () => {
+  const menu = { caseId: "case-1", search: "", editing: null };
+  const rec = labelled({ id: "case-1" });
+  const busy = caseHeader(rec, ALEX, null, { ...ui(menu), busy: true });
+  const toggles = busy.match(/<button[^>]*data-action="toggle-case-label"[^>]*>/g) ?? [];
+  assert.ok(toggles.length >= 2);
+  for (const t of toggles) assert.match(t, /disabled/);
+  const idle = caseHeader(rec, ALEX, null, { ...ui(menu), busy: false });
+  for (const t of idle.match(/<button[^>]*data-action="toggle-case-label"[^>]*>/g) ?? []) {
+    assert.doesNotMatch(t, /disabled/);
+  }
 });
 
 test("a volunteer who cannot label the case sees the chip only", () => {

@@ -8437,7 +8437,8 @@ async function runPermutation(t, roles) {
           undefined,
           RENDER_MS,
         );
-        await shoot(office, "case-labels-created-green");
+        await office.mouse.move(office.viewportSize().width - 10, 10);
+        await shootWithoutSidebar(office, "case-labels-created-green");
 
         // 4. The site coordinator renames it; the chip updates, and so does
         // the preparer's window.
@@ -8451,7 +8452,19 @@ async function runPermutation(t, roles) {
         await waitHeader(office, "Lena", ["Amended return"]);
         await waitHeader(prep, "Kai", ["Amended return"]);
         assert.deepEqual(await activeLabels(), ["Amended return"]);
+        // The volunteer work board in the other staff window follows the rename.
+        await waitBoard(by, reference, ["Amended return"]);
         await clickAction(office, "close-label-menu");
+
+        // Escape closes the menu and returns the keyboard to + Add a label.
+        await openMenu(office);
+        await office.keyboard.press("Escape");
+        await office.locator(".label-menu").waitFor({ state: "detached", timeout: RENDER_MS });
+        assert.equal(
+          await office.evaluate(() => document.activeElement?.matches('[data-action="open-label-menu"]') ?? false),
+          true,
+          "Escape did not return focus to + Add a label",
+        );
 
         // 5. A volunteer who is neither the preparer nor the reviewer reads
         // the case's chips and has no way to change them.
@@ -8516,7 +8529,8 @@ async function runPermutation(t, roles) {
           [reference, before.total],
           RENDER_MS,
         );
-        await shoot(office, "case-labels-pool-city-tax");
+        await office.mouse.move(office.viewportSize().width - 10, 10);
+        await shootWithoutSidebar(office, "case-labels-pool-city-tax");
         await clickAction(office, "clear-pool-filters");
         await waitFor(
           office,

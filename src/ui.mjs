@@ -440,12 +440,13 @@ export function trapTarget(controls = [], active = null, shift = false) {
 
 // A case label's chip (change add-case-labels). The color is a data attribute
 // the stylesheet maps to tokens: a stored value never reaches a style, and an
-// unknown one reads as slate. With `removeFor` set (a case id), a × removes it.
-export function labelChip({ id = "", name, color }, { removeFor = null } = {}) {
+// unknown one reads as slate. With `removeFor` set (a case id), a × removes it
+// (`disabled` while a write is in flight).
+export function labelChip({ id = "", name, color }, { removeFor = null, disabled = false } = {}) {
   const shown = LABEL_COLORS.includes(color) ? color : "slate";
   const remove =
     removeFor == null
       ? ""
-      : `<button type="button" class="case-label-remove" data-action="toggle-case-label" data-case-id="${esc(removeFor)}" data-label-id="${esc(id)}" data-on="false" aria-label="Remove label ${esc(name)}">×</button>`;
+      : `<button type="button" class="case-label-remove" data-action="toggle-case-label" data-case-id="${esc(removeFor)}" data-label-id="${esc(id)}" data-on="false" aria-label="Remove label ${esc(name)}"${disabled ? " disabled" : ""}>×</button>`;
   return `<span class="case-label" data-color="${shown}">${esc(name)}${remove}</span>`;
 }
