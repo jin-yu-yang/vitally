@@ -41,7 +41,7 @@
 
   Cover these in `tests/store.test.mjs`.
 - [x] 3.2 Add the browser eligibility helpers `canLabelCase(record, person)` (mirrors `works_on_case`, not closed) and `canManageLabels(person)`, with unit tests (D9).
-- [ ] 3.3 Wire the controller: open and close the label menu, the search text, toggling a label, the create and edit forms, and the duplicate-name check; handle refusals and `CONFLICT` by re-reading. Keep the menu state across live redraws. Cover these in `tests/controller.test.mjs`.
+- [x] 3.3 Wire the controller: open and close the label menu, the search text, toggling a label, the create and edit forms, and the duplicate-name check; handle refusals and `CONFLICT` by re-reading. Keep the menu state across live redraws. Cover these in `tests/controller.test.mjs`.
 
 ## 4. Browser: screens and styles
 
