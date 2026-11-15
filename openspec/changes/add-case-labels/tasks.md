@@ -14,9 +14,9 @@
 
 ## 2. Database: the two RPCs
 
-- [ ] 2.1 Add `public.vitally_save_label` with the check order, create and edit paths, the revision guard, the name-clash refusal and the receipt (D5). Finish with revoke/grant, and `revoke all on all functions in schema vitally_private …`.
+- [x] 2.1 Add `public.vitally_save_label` with the check order, create and edit paths, the revision guard, the name-clash refusal and the receipt (D5). Finish with revoke/grant, and `revoke all on all functions in schema vitally_private …`.
 - [ ] 2.2 Add `public.vitally_set_case_label` with the check order of D4, the upsert of the link (status, never delete), the `ADD_CASE_LABEL` and `REMOVE_CASE_LABEL` events (only on an actual change), and no change to `cases.revision` or `updated_at`.
-- [ ] 2.3 Write database tests for `vitally_save_label`: success; every refusal in check order (`NOT_CLEARED`, `FORBIDDEN` for a volunteer and for a client, `VALIDATION` for shape, name and color, `NOT_FOUND`, `CONFLICT`); replay; and a refusal leaving nothing.
+- [x] 2.3 Write database tests for `vitally_save_label`: success; every refusal in check order (`NOT_CLEARED`, `FORBIDDEN` for a volunteer and for a client, `VALIDATION` for shape, name and color, `NOT_FOUND`, `CONFLICT`); replay; and a refusal leaving nothing.
 - [ ] 2.4 Write database tests for `vitally_set_case_label`:
   - adding and removing labels as the preparer, the reviewer and the office;
   - every refusal in check order: `NOT_CLEARED`, `FORBIDDEN` (client), `NOT_FOUND` (draft, other workspace), `FORBIDDEN` (not on the case), `VALIDATION` (foreign label), `INVALID_TRANSITION` (closed);
