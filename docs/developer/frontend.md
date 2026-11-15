@@ -364,18 +364,25 @@ that differs), a `kind` (`box`, `count`, `amount`, `cell`, `vin`, `year`, `reaso
   `[{ key, label, message }]`: a count is 0–99, an amount has at most six digits and two decimals,
   a year is four digits from 2000 to before the season, a reason is at most 120 characters and a
   note at most 500, the Yes/No box pairs (`SHADED_PAIRS`) cannot both be ticked, and a household
-  row past the household's size must be blank.
+  row past the visible count must be blank.
 - `readShaded(raw, { form, householdSize, season })` maps `{ pdfFieldName: value }` to
   `{ values, errors }`: a blank is absent, a checkbox is `true`, a household cell is
   `yes`, `no` or `na`. The same table serves the draft fill, the editing copy, the upload and the
   editor. The database repeats the keys and the shape rules; the browser checks first and names
   the field it refuses, and the database stays the authority.
+- `householdRows(answers, { version })` is the number of visible household rows: the `hh`
+  members, capped at 4, while the catalogue shows `hh` for the case's `intakeVersion`
+  (has_household_members is Yes), else 0. Cells on rows past it stay stored but are never shown,
+  printed or counted. `visibleShaded(values, answers, { version })` drops them, and
+  `shadedCaseRules(record, workspace)` gives `readShaded` the `householdSize` (the same count)
+  and the season.
 
 **The draft fill.** `draftFields(answers, { …, shaded })` in
 [`src/draft-form.mjs`](../../src/draft-form.mjs) puts the saved values on the form: boxes are
 ticked, other values are printed (`shadedPrint`), and the notes come back as
-`notes: [{ name, text, block, page }]` for the builder instead of going into `text`. When any
-value is set, `preparerEntries` is true and the stamp reads "DRAFT – online answers and preparer
+`notes: [{ name, text, block, page }]` for the builder instead of going into `text`. The draft, the editing copy
+and the case page's count all read the values through `visibleShaded`. When a visible value
+prints, `preparerEntries` is true and the stamp reads "DRAFT – online answers and preparer
 entries" instead of "DRAFT – prepared from online answers". All three languages of the 13614-C
 print the saved section (the 14446 has none and ignores it). `buildDraftPdf` in
 [`src/draft-pdf.mjs`](../../src/draft-pdf.mjs) wraps each note in its own box with the wrapping of

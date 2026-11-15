@@ -388,7 +388,7 @@ function commentsFor(answers, members, lang) {
  */
 export function draftFields(answers, { form = "en", reference = "", today, shaded = null, version = 2 } = {}) {
   const names = familyOf(form);
-  const visible = visibleAnswers(2, answers ?? {});
+  const visible = visibleAnswers(version, answers ?? {});
   const text = {};
   const checks = [];
   const put = (box, value) => {

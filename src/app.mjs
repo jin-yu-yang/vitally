@@ -1524,7 +1524,7 @@ if (!config) {
     ]);
     const bytes = await buildEditingCopy({
       PDFLib, fontkit: PDFLib.fontkit, formBytes, fontFiles, fields,
-      shaded: visibleShaded(row?.fields ?? {}, state.draftAnswers ?? {}, { version: caseVersion }), reference, version,
+      shaded: visibleShaded(row?.fields ?? {}, record.answers ?? {}, { version: caseVersion }), reference, version,
     });
     return { bytes, reference, version };
   }

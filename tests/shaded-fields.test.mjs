@@ -218,3 +218,7 @@ test("hidden stored cells never block a Save with no change", () => {
   const raw = Object.fromEntries(Object.entries(shown).map(([k, v]) => [shadedName(k), v === true ? "On" : v]));
   assert.deepEqual(readShaded(raw, shadedCaseRules(record, null)), { values: { incomeW2s: true }, errors: [] });
 });
+test("the case's household size is the visible rows, at most 4, and a record with no version reads as 2", () => {
+  const record = { answers: { has_household_members: "yes", hh: members(6) } };
+  assert.equal(shadedCaseRules(record, null).householdSize, 4);
+});

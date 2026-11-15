@@ -3192,6 +3192,14 @@ test("the case page counts only the cells it can show", () => {
   });
   assert.match(shadedFor({}, record), /1 field filled/);
 });
+test("a Yes case counts its visible household cell with the rest", () => {
+  const record = staffCase({
+    stage: "preparing",
+    answers: { has_household_members: "yes", hh: [{ first_name: "Lin" }] },
+    preparerShadedFields: [{ caseId: staffCase().id, version: 1, fields: { incomeW2s: true, household1QualifyingChild: "yes" } }],
+  });
+  assert.match(shadedFor({}, record), /2 fields filled/);
+});
 test("only hidden cells: 0 fields filled", () => {
   const record = staffCase({
     stage: "preparing",
