@@ -103,6 +103,34 @@ function fakeStore({
       store.calls.push("listCases");
       return [...records.values()];
     },
+    labels: [],
+    async listLabels() {
+      store.calls.push("listLabels");
+      return store.labels.map((label) => ({ ...label }));
+    },
+    async saveLabel(request) {
+      store.calls.push("saveLabel");
+      store.writes.push(request);
+      const failure = store.failNext;
+      if (failure) {
+        store.failNext = null;
+        throw failure;
+      }
+      const id = request.labelId ?? `label-${store.labels.length + 1}`;
+      const next = { id, ...request.label, revision: (request.expectedRevision ?? 0) + 1 };
+      store.labels = [...store.labels.filter((label) => label.id !== id), next];
+      return { actionId: request.actionId, labelId: id, revision: next.revision };
+    },
+    async setCaseLabel(request) {
+      store.calls.push("setCaseLabel");
+      store.writes.push(request);
+      const failure = store.failNext;
+      if (failure) {
+        store.failNext = null;
+        throw failure;
+      }
+      return { ...request };
+    },
     async getCase(id) {
       store.calls.push(`getCase:${id}`);
       const found = records.get(id);
@@ -7508,5 +7536,98 @@ test("a contact logged in this window re-reads the case list as well as the case
   await controller.logContact("case-a", CONTACT_ENTRY);
   assert.equal(caseListReads(store), lists + 1, "the list is re-read once");
   assert.equal(readsOf(store), reads + 1, "the case is re-read once");
+  controller.stop();
+});
+
+// ---------------------------------------------------------------------------
+// Case labels: the menu state and its writes (change add-case-labels).
+// ---------------------------------------------------------------------------
+const labelStore = () => {
+  const store = contactStore();
+  store.labels = [{ id: "label-a", name: "Waiting", color: "sky", revision: 2 }];
+  return store;
+};
+
+test("toggling a label sends one write, and an offline retry reuses its action id", async () => {
+  const store = labelStore();
+  let n = 0;
+  const { controller } = build({ store, newActionId: () => `action-${++n}` });
+  await controller.start();
+  assert.equal(controller.getState().labels.length, 1);
+  controller.openLabelMenu("case-a");
+  store.failNext = Object.assign(new Error("offline"), { code: "OFFLINE" });
+  await assert.rejects(controller.toggleCaseLabel("case-a", "label-a", true));
+  await controller.toggleCaseLabel("case-a", "label-a", true);
+  const sent = store.writes.filter((entry) => "on" in entry);
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0].actionId, sent[1].actionId);
+  assert.deepEqual(sent[1], { actionId: sent[0].actionId, caseId: "case-a", labelId: "label-a", on: true });
+  await controller.toggleCaseLabel("case-a", "label-a", false);
+  assert.notEqual(store.writes.at(-1).actionId, sent[0].actionId);
+  assert.equal(controller.getState().labelMenu.caseId, "case-a");
+  controller.stop();
+});
+
+test("a taken name is said in the form and nothing is sent", async () => {
+  const store = labelStore();
+  const { controller } = build({ store });
+  await controller.start();
+  controller.openLabelMenu("case-a");
+  controller.startLabelEdit(null, "waiting ");
+  await controller.saveLabelEdit({ name: " WAITING ", color: "amber" });
+  assert.equal(controller.getState().labelMenu.editing.error, "A label with this name already exists");
+  assert.equal(store.calls.includes("saveLabel"), false);
+  controller.stop();
+});
+
+test("a conflicting label save re-reads the labels and keeps the form open", async () => {
+  const store = labelStore();
+  const { controller } = build({ store });
+  await controller.start();
+  controller.openLabelMenu("case-a");
+  controller.startLabelEdit("label-a", "Waiting");
+  store.labels = [{ id: "label-a", name: "Waiting", color: "pink", revision: 7 }];
+  store.failNext = Object.assign(new Error("stale"), { code: "CONFLICT" });
+  await assert.rejects(controller.saveLabelEdit({ name: "Waiting 2", color: "amber" }));
+  const state = controller.getState();
+  assert.equal(state.labels[0].revision, 7);
+  assert.equal(state.labelMenu.editing.labelId, "label-a");
+  assert.equal(store.writes.at(-1).expectedRevision, 2);
+  await controller.saveLabelEdit({ name: "Waiting 2", color: "amber" });
+  assert.equal(store.writes.at(-1).expectedRevision, 7);
+  assert.equal(controller.getState().labelMenu.editing, null);
+  controller.stop();
+});
+
+test("creating from the menu creates the label, then puts it on the case", async () => {
+  const store = labelStore();
+  const { controller } = build({ store, newActionId: (() => { let n = 0; return () => `a-${++n}`; })() });
+  await controller.start();
+  controller.openLabelMenu("case-a");
+  controller.startLabelEdit(null, "Docs back");
+  await controller.saveLabelEdit({ name: "Docs back", color: "green" });
+  const [create, attach] = store.writes.slice(-2);
+  assert.deepEqual(create.label, { name: "Docs back", color: "green" });
+  assert.equal(create.labelId, null);
+  assert.deepEqual(attach, { actionId: attach.actionId, caseId: "case-a", labelId: "label-2", on: true });
+  assert.notEqual(create.actionId, attach.actionId);
+  assert.equal(controller.getState().labels.length, 2);
+  assert.equal(controller.getState().labelMenu.editing, null);
+  controller.stop();
+});
+
+test("a live refresh keeps the label menu, and closing clears it", async () => {
+  const store = labelStore();
+  const { controller } = build({ store });
+  await controller.start();
+  controller.openLabelMenu("case-a");
+  controller.setLabelSearch("wa");
+  store.labels = [...store.labels, { id: "label-b", name: "Zed", color: "slate", revision: 1 }];
+  await controller.refresh();
+  const state = controller.getState();
+  assert.equal(state.labels.length, 2);
+  assert.deepEqual({ caseId: state.labelMenu.caseId, search: state.labelMenu.search }, { caseId: "case-a", search: "wa" });
+  controller.closeLabelMenu();
+  assert.equal(controller.getState().labelMenu, null);
   controller.stop();
 });
