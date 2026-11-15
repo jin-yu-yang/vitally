@@ -9553,9 +9553,15 @@ test(
       step("7 roles");
 
       // 8. The admin unpublishes the IRS update. With the Preparer's panel
-      //    still open, it goes from it without a reload.
+      //    still open, it goes from it without a reload. The confirmation
+      //    says that people may have read it, and points to Edit.
       await press(admin, rowOf(admin, IRS_TITLE).locator('[data-action="open-unpublish-update"]'), "Unpublish");
       await waitForText(admin, `Unpublish “${IRS_TITLE}”?`, RENDER_MS);
+      await waitForText(
+        admin,
+        "Some may already have read it: to fix a mistake, such as a client's name, use Edit, before or after you unpublish.",
+        RENDER_MS,
+      );
       const unpublishMark = await alertMark(admin);
       await clickAction(admin, "confirm-unpublish-update");
       await toastSince(admin, "Update unpublished.", unpublishMark);
@@ -9579,8 +9585,45 @@ test(
       );
       assert.equal((await preparer.locator(".modal .feed-empty").textContent()).trim(), "No updates yet.");
       await waitForBell(preparer, "none", "the unpublished update");
-      await closePanel(preparer);
       step("8 unpublished");
+
+      // 8b. The admin edits the unpublished update (a mistake fixed after
+      //     Unpublish): it stays unpublished, and the Preparer's open panel,
+      //     which hears of the edit inside the read window, stays empty.
+      const FIXED_TITLE = `${IRS_TITLE} (corrected)`;
+      await press(admin, rowOf(admin, IRS_TITLE).locator('[data-action="edit-update"]'), "Edit the unpublished update");
+      await waitFor(
+        admin,
+        "the form to edit the unpublished update",
+        () => Boolean(document.querySelector("#update-unpublished-note")),
+        undefined,
+        RENDER_MS,
+      );
+      assert.equal(await admin.locator("#update-ask-again").count(), 0, "an unpublished update offers Ask everyone to read it again");
+      await admin.locator("#update-title").fill(FIXED_TITLE);
+      const fixMark = await alertMark(admin);
+      await press(admin, admin.locator('#update-form button[name="intent"][value="post"]'), "Save changes");
+      await toastSince(admin, "Changes saved.", fixMark);
+      await waitFor(
+        admin,
+        "the corrected row to stay Unpublished",
+        (wanted) =>
+          [...document.querySelectorAll("tr.update-row")].some(
+            (row) => row.textContent.includes(wanted) && row.querySelector(".update-status.unpublished"),
+          ),
+        FIXED_TITLE,
+        ARRIVAL_MS,
+      );
+      const { rows: fixedRows } = await fixture.database.sql(
+        "select status from public.posted_updates where workspace_id=$1 and title=$2",
+        [fixture.database.workspaceId, FIXED_TITLE],
+      );
+      assert.deepEqual(fixedRows, [{ status: "unpublished" }]);
+      await waitForQuiet(preparer);
+      assert.equal(await preparer.locator(".modal article.feed-item").count(), 0, "the edited unpublished update came back");
+      assert.equal(await bell(preparer), "none", "the edited unpublished update lit the bell");
+      await closePanel(preparer);
+      step("8b edited while unpublished");
 
       // 9. The volunteer not yet cleared signs in to Finish your setup, with
       //    nothing to read. The admin posts a notice to all volunteers; the

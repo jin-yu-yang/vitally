@@ -276,6 +276,26 @@ test("editing a posted update offers Ask everyone to read it again, Save changes
   assert.match(html, /data-action="cancel-update-edit"[^>]*>Cancel<\/button>/);
 });
 
+test("editing an unpublished update says it stays unpublished, offers Save changes and Cancel, and no ask-again box", () => {
+  const html = renderPostUpdatePage(
+    adminState({
+      updateForm: { ...emptyUpdateForm(), title: "x", askAgain: true },
+      updateEditing: { id: "r-1", revision: 3, status: "unpublished" },
+    }),
+  );
+  assert.match(html, /<h2 id="update-form-title">Edit update<\/h2>/);
+  assert.match(
+    html,
+    /<p class="notice amber" role="note" id="update-unpublished-note">[\s\S]*?This update is unpublished\. Saving changes keeps it unpublished: volunteers don&#39;t see it, and it doesn&#39;t come back to their feed\.<\/span><\/p>/,
+  );
+  assert.match(html, /<button type="submit" class="btn primary" name="intent" value="post"[^>]*>Save changes<\/button>/);
+  assert.doesNotMatch(html, /Ask everyone to read it again|update-ask-again|>Save draft<|Post update<\/button>/);
+  assert.match(html, /data-action="cancel-update-edit"[^>]*>Cancel<\/button>/);
+  // Editing anything else has no such note.
+  const posted = renderPostUpdatePage(adminState({ updateEditing: { id: "r-1", revision: 2, status: "posted" } }));
+  assert.doesNotMatch(posted, /update-unpublished-note/);
+});
+
 test("editing a draft keeps Save draft and Post update, with Cancel, and no ask-again box", () => {
   const html = renderPostUpdatePage(adminState({ updateEditing: { id: "r-1", revision: 1, status: "draft" } }));
   assert.match(html, /Edit update/);
@@ -413,7 +433,7 @@ test("each status has its own actions", () => {
   const actions = (part) => [...part.matchAll(/data-action="((?:edit|post|open)-[a-z-]+)" data-id="[^"]+"/g)].map((m) => m[1]).filter((a) => a !== "open-update-people");
   assert.deepEqual(actions(posted), ["edit-update", "open-unpublish-update"]);
   assert.deepEqual(actions(draft), ["edit-update", "post-draft", "open-delete-update"]);
-  assert.deepEqual(actions(gone), []);
+  assert.deepEqual(actions(gone), ["edit-update"], "an unpublished update is edited, never re-posted or deleted");
   assert.match(posted, />Edit<\/button>/);
   assert.match(posted, />Unpublish<\/button>/);
   assert.match(draft, />Post<\/button>/);
@@ -442,7 +462,10 @@ test("the who dialog lists every audience member with dates or Not yet", () => {
 test("the confirms name the update and send nothing until confirmed", () => {
   const unpublish = unpublishConfirm(row());
   assert.match(unpublish, /<p>Unpublish “Sign this year&#39;s Volunteer Standards of Conduct”\?<\/p>/);
-  assert.match(unpublish, /Volunteers will no longer see it\. It stays in your table with its counts\./);
+  assert.match(
+    unpublish,
+    /Volunteers will no longer see it\. It stays in your table with its counts\. Some may already have read it: to fix a mistake, such as a client&#39;s name, use Edit, before or after you unpublish\./,
+  );
   assert.match(unpublish, /data-action="confirm-unpublish-update" data-id="r-1"[^>]*>Unpublish<\/button>/);
   assert.match(unpublish, /data-action="close-dialog"[^>]*>Keep it<\/button>/);
   const del = deleteDraftConfirm(row({ status: "draft" }));
@@ -495,6 +518,7 @@ test("the toasts follow what was saved or done", () => {
     deleted: "Draft deleted.",
   });
   assert.equal(saveToast({ status: "posted" }, { id: "x", status: "posted" }), "Changes saved.");
+  assert.equal(saveToast({ status: "unpublished" }, { id: "x", status: "unpublished" }), "Changes saved.");
   assert.equal(saveToast({ status: "posted" }, null), "Update posted.");
   assert.equal(saveToast({ status: "posted" }, { id: "x", status: "draft" }), "Update posted.");
   assert.equal(saveToast({ status: "draft" }, null), "Draft saved.");

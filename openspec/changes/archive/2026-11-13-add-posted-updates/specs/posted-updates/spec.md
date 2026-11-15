@@ -80,7 +80,7 @@ An update SHALL be a draft, posted or unpublished.
   - Post update creates a posted update, or posts a draft. Posting records who posted it and when.
   - A draft SHALL be visible only to ceiling admins.
 - **Delete:** a draft SHALL be deleted with `vitally_update_action` type `DELETE`. Deleting a posted or unpublished update SHALL be refused with `INVALID_TRANSITION`.
-- **Unpublish:** type `UNPUBLISH` SHALL turn a posted update into an unpublished one. Unpublishing a draft or an unpublished update SHALL be refused with `INVALID_TRANSITION`. An unpublished update SHALL NOT be edited or posted again, and SHALL leave every feed.
+- **Unpublish:** type `UNPUBLISH` SHALL turn a posted update into an unpublished one. Unpublishing a draft or an unpublished update SHALL be refused with `INVALID_TRANSITION`. An unpublished update SHALL NOT be posted again or deleted, and SHALL leave every feed. A ceiling admin MAY still edit it, and it stays unpublished (see "An admin can edit an unpublished update, and it stays unpublished").
 - **Revision and replay:** each write SHALL take the update's current revision and SHALL be refused with `CONFLICT` when it is stale. Each write SHALL store a receipt, so a repeated action id returns the first result without a second change.
 
 #### Scenario: Save a draft, then post it
@@ -99,9 +99,9 @@ An update SHALL be a draft, posted or unpublished.
 - **WHEN** an admin unpublishes a posted update
 - **THEN** it is unpublished, it leaves every feed, and it stays in the admin table with its counts
 
-#### Scenario: An unpublished update cannot be edited
-- **WHEN** an admin saves changes to an unpublished update
-- **THEN** it is refused with `INVALID_TRANSITION`
+#### Scenario: An unpublished update cannot be posted again
+- **WHEN** an admin calls `POST` or `DELETE` on an unpublished update
+- **THEN** it is refused with `INVALID_TRANSITION`, and the update is unchanged
 
 #### Scenario: A stale edit
 - **WHEN** two admins open the same update, and the second saves after the first
@@ -117,6 +117,25 @@ Saving changes to a posted update SHALL keep it posted and record that it was ed
 #### Scenario: A typo fix keeps confirmations
 - **WHEN** an update has 6 confirmations, and an admin fixes a typo without ticking the checkbox
 - **THEN** it still has 6 confirmations, and the panel marks it "Edited"
+
+### Requirement: An admin can edit an unpublished update, and it stays unpublished
+A ceiling admin SHALL be able to save changes to an unpublished update, with the same fields as a posted one, so a mistake (for example a client's name) can be fixed after Unpublish. The save SHALL record the edit, keep the update unpublished and keep its unpublished time, its posted time and every read and confirmation. `post` SHALL change nothing, and "Ask everyone to read it again" (`askAgain`) SHALL be refused with `VALIDATION` naming `askAgain`. The revision check and the receipt replay SHALL apply as for any write. The edited update SHALL stay out of every feed.
+
+#### Scenario: A client's name fixed after Unpublish
+- **WHEN** an admin unpublishes an update that named a client, then edits it to remove the name
+- **THEN** it is still unpublished, with the new text, its reads kept and "Edited" recorded, and it is in no feed
+
+#### Scenario: Asking everyone to read an unpublished update again
+- **WHEN** an admin saves changes to an unpublished update with `askAgain`
+- **THEN** it is refused with `VALIDATION` naming `askAgain`, and nothing changes
+
+#### Scenario: A non-admin edit
+- **WHEN** a preparer saves changes to an unpublished update
+- **THEN** it is refused with `FORBIDDEN`
+
+#### Scenario: A stale or replayed edit of an unpublished update
+- **WHEN** an admin saves an unpublished update with a stale revision, and then replays a successful save's action id
+- **THEN** the stale save is refused with `CONFLICT`, and the replay returns the first result without a second change
 
 #### Scenario: Ask everyone to read it again
 - **WHEN** an admin edits that update with "Ask everyone to read it again" ticked
@@ -189,9 +208,17 @@ The browser SHALL:
 ### Requirement: Staff read posted-update rows only as admins or as their audience
 `posted_updates` SHALL be readable by signed-in users only through two policies:
 - a ceiling admin reads every row in their workspace;
-- any staff member reads the non-draft rows whose audience includes them.
+- any staff member reads the posted rows whose audience includes them, and the unpublished ones for 10 minutes after they were unpublished.
 
-Unpublished rows SHALL stay readable to their audience, so realtime can tell an open window that an update was unpublished. The feed SHALL leave them out. A client SHALL read no rows. The audience policy SHALL NOT depend on clearance.
+The 10 minutes SHALL be written in one place (`vitally_policy.unpublished_read_window()`). They let realtime, which checks the policy when it sends a change, tell an open window that an update was unpublished or edited after that. After them only ceiling admins SHALL read an unpublished row. The feed SHALL leave unpublished updates out, and `vitally_mark_updates` SHALL ignore them, inside the 10 minutes and after. A client SHALL read no rows. The audience policy SHALL NOT depend on clearance.
+
+#### Scenario: Just unpublished
+- **WHEN** a preparer in an update's audience selects from `posted_updates` within 10 minutes of its Unpublish
+- **THEN** they get the row, and it is not in their feed
+
+#### Scenario: Unpublished more than 10 minutes ago
+- **WHEN** a preparer in an update's audience selects from `posted_updates` more than 10 minutes after its Unpublish
+- **THEN** they do not get it, and an admin still does
 
 #### Scenario: A draft is hidden
 - **WHEN** a cleared preparer selects from `posted_updates` while a draft exists
@@ -215,6 +242,14 @@ Unpublished rows SHALL stay readable to their audience, so realtime can tell an 
 #### Scenario: Unpublish reaches a volunteer live
 - **WHEN** a cleared volunteer's window is open, and an admin unpublishes an update in their feed
 - **THEN** the update leaves their panel without reloading
+
+#### Scenario: An edit after Unpublish brings nothing back
+- **WHEN** a cleared volunteer's panel is open, and an admin edits an update they unpublished a moment ago
+- **THEN** the panel stays without it, and the badge stays out
+
+#### Scenario: A window that missed the change catches up
+- **WHEN** a cleared volunteer's window was offline while an update was unpublished, and its connection comes back
+- **THEN** it re-reads its feed, and the update is not in it
 
 #### Scenario: An uncleared window catches up on focus
 - **WHEN** an uncleared volunteer's window is in the background, an update is posted, and the window regains focus
@@ -259,7 +294,7 @@ The table SHALL show, for each update:
 - its actions:
   - for posted updates: Edit and Unpublish;
   - for drafts: Edit, Post and Delete;
-  - for unpublished updates: none, with a status of "Unpublished".
+  - for unpublished updates: Edit, with a status of "Unpublished". Editing one SHALL say that saving keeps it unpublished, SHALL offer "Save changes" and "Cancel", and SHALL NOT offer "Ask everyone to read it again".
 
 Pressing a read or confirmed count SHALL open a list of the audience with each person's read and confirmed state.
 
@@ -276,7 +311,7 @@ Pressing a read or confirmed count SHALL open a list of the audience with each p
 - **THEN** it is refused with `FORBIDDEN`
 
 ### Requirement: Unpublish and Delete need a confirmation
-Unpublish SHALL open a confirmation naming the update and saying volunteers will no longer see it, with "Unpublish" and "Keep it" buttons. Delete on a draft SHALL open a confirmation saying the draft will be deleted, with "Delete draft" and "Keep it" buttons. Nothing SHALL change until the admin confirms.
+Unpublish SHALL open a confirmation naming the update and saying that volunteers will no longer see it, that some may already have read it, and that a mistake (such as a client's name) is fixed with Edit, before or after unpublishing, with "Unpublish" and "Keep it" buttons. Delete on a draft SHALL open a confirmation saying the draft will be deleted, with "Delete draft" and "Keep it" buttons. Nothing SHALL change until the admin confirms.
 
 #### Scenario: Keep it
 - **WHEN** an admin presses Unpublish and then Keep it

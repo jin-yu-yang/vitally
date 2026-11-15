@@ -359,14 +359,14 @@ test("posted updates against real Supabase", async (t) => {
       await refusedWith(f, admin, ACTION, actionArgs(posted.updateId, 1, "POST"), INVALID_TRANSITION);
       assert.deepEqual(await rowOf(f, posted.updateId), postedRow, "posted unchanged");
 
-      const gone = await post({ title: "Unpublished, frozen" });
+      // An unpublished update is never deleted, re-posted or unpublished again
+      // (editing it is allowed: see "unpublished: an admin edits it ...").
+      const gone = await post({ title: "Unpublished, never re-posted" });
       await call(admin, ACTION, actionArgs(gone.updateId, 1, "UNPUBLISH"));
       const goneRow = await rowOf(f, gone.updateId);
       await refusedWith(f, admin, ACTION, actionArgs(gone.updateId, 2, "DELETE"), INVALID_TRANSITION);
       await refusedWith(f, admin, ACTION, actionArgs(gone.updateId, 2, "POST"), INVALID_TRANSITION);
       await refusedWith(f, admin, ACTION, actionArgs(gone.updateId, 2, "UNPUBLISH"), INVALID_TRANSITION);
-      await refusedWith(f, admin, SAVE, editArgs(gone.updateId, 2, update({ title: "Edited" })), INVALID_TRANSITION);
-      await refusedWith(f, admin, SAVE, editArgs(gone.updateId, 2, update({ post: true })), INVALID_TRANSITION);
       assert.deepEqual(await rowOf(f, gone.updateId), goneRow, "unpublished unchanged");
 
       const kept = await draft({ title: "Draft, not unpublished" });
@@ -650,7 +650,7 @@ test("posted updates against real Supabase", async (t) => {
       await refusedWith(f, f.preparer, "vitally_posted_updates", {}, FORBIDDEN);
     });
 
-    await t.test("rls: a preparer reads no draft and no other role's row; a client reads none; an unpublished row stays readable", async () => {
+    await t.test("rls: a preparer reads no draft and no other role's row; a client reads none; a just-unpublished row is readable", async () => {
       const hidden = await draft({ title: "RLS draft" });
       const reviewers = await post({ title: "RLS reviewers only", audience: "roles", roles: ["reviewer"] });
       const shown = await post({ title: "RLS everyone" });
@@ -663,6 +663,95 @@ test("posted updates against real Supabase", async (t) => {
       assert.deepEqual(await selectedIds(f.applicantA, ids), []);
       // Another workspace's admin reads none of these.
       assert.deepEqual(await selectedIds(f.foreignStaff, ids), []);
+    });
+
+    // Design D7 (review round 1): the audience reads an unpublished update only
+    // for the window after unpublished_at; admins always do. The tests move
+    // unpublished_at back past the window instead of waiting.
+    const readWindow = async () => (await one(f, "select vitally_policy.unpublished_read_window()::text as w")).w;
+    const pastTheWindow = (id) =>
+      f.sql(
+        `update public.posted_updates
+            set unpublished_at=now()-vitally_policy.unpublished_read_window()-interval '1 minute'
+          where id=$1`,
+        [id],
+      );
+
+    await t.test("unpublished: the audience reads the row only for the 10-minute window; admins always; posted rows unaffected", async () => {
+      assert.equal(await readWindow(), "00:10:00", "the agreed window");
+      const kept = await post({ title: "Window: still posted" });
+      const gone = await post({ title: "Window: unpublished" });
+      await mark(f.preparer, [gone.updateId]);
+      const reads = await readsOf(f, gone.updateId);
+      await call(admin, ACTION, actionArgs(gone.updateId, 1, "UNPUBLISH"));
+      const ids = [kept.updateId, gone.updateId];
+      // Inside the window: what realtime checks when it sends the change.
+      assert.deepEqual(await selectedIds(f.preparer, ids), [...ids].sort(), "inside the window");
+      assert.deepEqual(await selectedIds(f.reviewer, ids), [...ids].sort(), "inside the window, reviewer");
+      // After it: the audience reads nothing of it; admins and posted rows are unaffected.
+      await pastTheWindow(gone.updateId);
+      assert.deepEqual(await selectedIds(f.preparer, ids), [kept.updateId], "after the window");
+      assert.deepEqual(await selectedIds(f.reviewer, ids), [kept.updateId], "after the window, reviewer");
+      assert.deepEqual(await selectedIds(admin, ids), [...ids].sort(), "an admin, after the window");
+      assert.deepEqual(await selectedIds(f.applicantA, ids), [], "a client");
+      // The RPCs show a non-admin nothing of it, inside or after the window.
+      assert.equal((await feedIds(f.preparer)).includes(gone.updateId), false, "not in the feed");
+      assert.deepEqual(await mark(f.preparer, [gone.updateId], true), { marked: 0 }, "mark ignores it");
+      assert.deepEqual(await readsOf(f, gone.updateId), reads, "reads untouched");
+      await refusedWith(f, f.preparer, "vitally_posted_updates", {}, FORBIDDEN);
+      const { error } = await f.preparer.from("update_reads").select("*");
+      assert.ok(error, "update_reads read refused");
+      assert.ok(await listed(admin, gone.updateId), "still in the admin list");
+    });
+
+    await t.test("unpublished: an admin edits it; it stays unpublished, out of the feed, with its reads; refusals and replay", async () => {
+      const gone = await post({ title: "Client name by mistake", askConfirm: true });
+      await mark(f.preparer, [gone.updateId], true);
+      const reads = await readsOf(f, gone.updateId);
+      assert.equal(reads.length, 1, "a read before Unpublish");
+      await call(admin, ACTION, actionArgs(gone.updateId, 1, "UNPUBLISH"));
+      const before = await rowOf(f, gone.updateId);
+      const fixed = update({
+        title: "Name removed",
+        message: "The office notice, without the name.",
+        askConfirm: true,
+        post: true,
+      });
+
+      // A non-admin cannot edit it; a stale revision and askAgain are refused.
+      await refusedWith(f, f.preparer, SAVE, editArgs(gone.updateId, 2, fixed), FORBIDDEN);
+      await refusedWith(f, admin, SAVE, editArgs(gone.updateId, 1, fixed), CONFLICT);
+      await refusedWith(f, admin, SAVE, editArgs(gone.updateId, 2, { ...fixed, askAgain: true }), VALIDATION, "askAgain");
+      assert.deepEqual(await rowOf(f, gone.updateId), before, "refusals change nothing");
+
+      // The edit: `post` changes nothing; the status and unpublished_at stay.
+      const args = editArgs(gone.updateId, 2, fixed);
+      const saved = await call(admin, SAVE, args);
+      assert.deepEqual(saved, { actionId: args.p_action_id, updateId: gone.updateId, revision: 3, status: "unpublished" });
+      const row = await rowOf(f, gone.updateId);
+      assert.equal(row.status, "unpublished");
+      assert.equal(row.title, "Name removed");
+      assert.equal(row.message, "The office notice, without the name.");
+      assert.equal(row.unpublished, before.unpublished, "unpublished_at kept");
+      assert.equal(row.posted, before.posted, "posted_at kept");
+      assert.ok(row.edited, "edited_at set");
+      assert.equal(Number(row.revision), 3);
+      assert.deepEqual(await readsOf(f, gone.updateId), reads, "reads untouched");
+      assert.equal((await feedIds(f.preparer)).includes(gone.updateId), false, "not back in the feed");
+      assert.equal((await listed(admin, gone.updateId)).title, "Name removed");
+
+      // A replay returns the same receipt and edits nothing again.
+      assert.deepEqual(await call(admin, SAVE, args), saved);
+      assert.equal(Number((await rowOf(f, gone.updateId)).revision), 3);
+
+      // After the window an edit still saves, and the audience reads no row.
+      await pastTheWindow(gone.updateId);
+      const later = await call(admin, SAVE, editArgs(gone.updateId, 3, { ...fixed, title: "Name removed again" }));
+      assert.equal(later.status, "unpublished");
+      assert.deepEqual(await selectedIds(f.preparer, [gone.updateId]), [], "no audience row after the window");
+      assert.deepEqual(await selectedIds(admin, [gone.updateId]), [gone.updateId]);
+      // Delete stays drafts only.
+      await refusedWith(f, admin, ACTION, actionArgs(gone.updateId, 4, "DELETE"), INVALID_TRANSITION);
     });
 
     await t.test("rls: select on update_reads is refused for an admin", async () => {

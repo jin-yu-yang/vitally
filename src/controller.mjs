@@ -1394,10 +1394,11 @@ export function createController({
   }
 
   // Edit from the table: the form holds the row, and the save carries its
-  // revision. Only a draft or a posted update is edited.
+  // revision. A draft, a posted update or an unpublished one is edited (an
+  // unpublished one stays unpublished).
   function editUpdate(id) {
     const row = state.postedUpdates.find((entry) => entry?.id === id);
-    if (!row || (row.status !== "draft" && row.status !== "posted")) return false;
+    if (!row || !["draft", "posted", "unpublished"].includes(row.status)) return false;
     state.updateForm = {
       kind: row.kind,
       title: String(row.title ?? ""),
@@ -1499,13 +1500,15 @@ export function createController({
         show();
         return null;
       }
-      // "Ask everyone to read it again" goes only with a posted update.
+      // "Ask everyone to read it again" goes only with a posted update, and
+      // an unpublished update's save never asks to post it.
       const askAgain = editing?.status === "posted" && typed.askAgain === true;
+      const posting = Boolean(post) && editing?.status !== "unpublished";
       request = {
         actionId: newActionId(),
         updateId: editing?.id ?? null,
         expectedRevision: editing ? editing.revision : null,
-        update: toUpdateRequest(typed, { post: Boolean(post), askAgain }),
+        update: toUpdateRequest(typed, { post: posting, askAgain }),
       };
     }
     state.updateFormError = null;

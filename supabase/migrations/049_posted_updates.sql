@@ -6,7 +6,9 @@
 --   (a) posted_updates and update_reads, written only through the RPCs below;
 --   (b) the live audience: vitally_private.audience_member and the policy
 --       helper vitally_policy.in_update_audience;
---   (c) the two SELECT policies on posted_updates (none on update_reads);
+--   (c) the two SELECT policies on posted_updates (none on update_reads), and
+--       vitally_policy.unpublished_read_window, how long an unpublished update
+--       stays readable to its audience;
 --   (d) the RPCs: vitally_save_update and vitally_update_action (ceiling admin,
 --       with receipts), vitally_mark_updates, vitally_my_updates (staff) and
 --       vitally_posted_updates (ceiling admin);
@@ -100,14 +102,30 @@ revoke all on function vitally_policy.in_update_audience(uuid,text,text[]) from 
 grant execute on function vitally_policy.in_update_audience(uuid,text,text[]) to authenticated;
 
 -- ---------------------------------------------------------------------------
--- (c) The policies (design D1). An admin reads every row of their workspace;
--- the audience reads the rows that are not drafts. Unpublished rows stay
--- readable, so realtime can tell an open window an update was unpublished.
+-- (c) The policies (design D1, D7). An admin reads every row of their
+-- workspace. The audience reads a posted update, and an unpublished one only
+-- for a short window after unpublished_at: long enough for realtime, which
+-- checks this policy when it sends the change, to tell open windows the update
+-- was unpublished (or edited after that). After the window only admins read
+-- the row. A window that missed the change (asleep, offline) re-reads its feed
+-- when it reconnects, and the feed holds posted updates only.
+
+-- The window, in this one place. Immutable, so the planner folds it to a
+-- constant. Not security definer: it reads nothing.
+create function vitally_policy.unpublished_read_window()
+returns interval language sql immutable set search_path='' as $$
+ select interval '10 minutes';
+$$;
+revoke all on function vitally_policy.unpublished_read_window() from public,anon,authenticated,service_role;
+grant execute on function vitally_policy.unpublished_read_window() to authenticated;
 
 create policy admin_posted_updates on public.posted_updates for select to authenticated
  using (vitally_policy.is_workspace_admin(workspace_id));
+-- The status test is cheap and runs before the audience check (cost order),
+-- so a draft, or an update unpublished before the window, costs no lookup.
 create policy audience_posted_updates on public.posted_updates for select to authenticated
- using (status<>'draft' and vitally_policy.in_update_audience(workspace_id,audience,audience_roles));
+ using ((status='posted' or (status='unpublished' and unpublished_at>now()-vitally_policy.unpublished_read_window()))
+  and vitally_policy.in_update_audience(workspace_id,audience,audience_roles));
 
 -- ---------------------------------------------------------------------------
 -- (d) The RPCs (design D3). Each resolves the caller's own person, refuses a
@@ -115,13 +133,16 @@ create policy audience_posted_updates on public.posted_updates for select to aut
 -- clearance check. None takes a person parameter. Not `stable`:
 -- require_membership takes a row lock.
 
--- Creates a draft (no id, no revision) or edits a draft or a posted update.
--- The payload has exactly the keys kind, title, message, irsLink, audience,
--- roles, keepTopUntil, askConfirm, post and askAgain. A field that fails its
--- check is refused with VALIDATION, the field name as the detail. `post` posts
--- a new update or a draft; on a posted update it changes nothing. Editing a
--- posted update records the edit, and `askAgain` removes that update's reads
--- and confirmations. An unpublished update is not edited. With audience
+-- Creates a draft (no id, no revision) or edits a draft, a posted update or
+-- an unpublished one. The payload has exactly the keys kind, title, message,
+-- irsLink, audience, roles, keepTopUntil, askConfirm, post and askAgain. A
+-- field that fails its check is refused with VALIDATION, the field name as the
+-- detail. `post` posts a new update or a draft; on a posted or unpublished
+-- update it changes nothing. Editing a posted update records the edit, and
+-- `askAgain` removes that update's reads and confirmations. Editing an
+-- unpublished update (design D7: a mistake, such as a client's name, can be
+-- fixed after Unpublish) records the edit and keeps it unpublished, with its
+-- reads and its unpublished_at; `askAgain` is refused there. With audience
 -- everyone the roles are stored empty.
 create function public.vitally_save_update(p_action_id uuid,p_update_id uuid,p_expected_revision bigint,p_update jsonb)
 returns jsonb language plpgsql security definer set search_path='' as $$
@@ -238,9 +259,6 @@ begin
   if v_row.revision<>p_expected_revision then
    raise sqlstate 'VT003' using message='CONFLICT';
   end if;
-  if v_row.status='unpublished' then
-   raise sqlstate 'VT004' using message='INVALID_TRANSITION';
-  end if;
   v_id=v_row.id;
   v_revision=v_row.revision+1;
   if v_row.status='draft' then
@@ -251,7 +269,11 @@ begin
      revision=v_revision
     where id=v_id;
   else
-   v_status='posted';
+   -- Posted or unpublished: the same fields, and the status stays.
+   if v_row.status='unpublished' and v_again then
+    raise sqlstate 'VT007' using message='VALIDATION',detail='askAgain';
+   end if;
+   v_status=v_row.status;
    update public.posted_updates set kind=v_kind,title=v_title,message=v_message,irs_link=v_link,audience=v_audience,
      audience_roles=v_roles,keep_top_until=v_keep,ask_confirm=v_ask,edited_at=now(),revision=v_revision
     where id=v_id;
@@ -270,7 +292,8 @@ revoke all on function public.vitally_save_update(uuid,uuid,bigint,jsonb) from p
 grant execute on function public.vitally_save_update(uuid,uuid,bigint,jsonb) to authenticated;
 
 -- POST: a draft is posted. UNPUBLISH: a posted update leaves every feed and
--- keeps its reads. DELETE: a draft is deleted, and the receipt answers
+-- keeps its reads; its audience reads the row for the window above, then only
+-- admins do. Nothing re-posts an unpublished update. DELETE: a draft is deleted, and the receipt answers
 -- `deleted`, so a replay after the delete is not NOT_FOUND. Any other state
 -- is INVALID_TRANSITION; an unknown type is VALIDATION.
 create function public.vitally_update_action(p_action_id uuid,p_update_id uuid,p_expected_revision bigint,p_type text)

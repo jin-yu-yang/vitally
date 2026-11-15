@@ -7217,6 +7217,24 @@ test("posted updates: an uncleared window reads the feed on load and with every 
   controller.stop();
 });
 
+test("posted updates: a window whose connection comes back re-reads the feed, so a missed Unpublish is caught up", async () => {
+  const store = staffStore({ feed: [feedItem("f-1")] });
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(controller.getState().updatesUnread, 1);
+  await store.handlers.onConnection("online");
+  await store.handlers.onConnection("offline");
+  // The update was unpublished while the window was away: the feed no longer has it.
+  store.feed = [];
+  const reads = callCount(store, "getUpdates");
+  await store.handlers.onConnection("online");
+  await tick();
+  assert.equal(callCount(store, "getUpdates"), reads + 1);
+  assert.deepEqual(controller.getState().updates, []);
+  assert.equal(controller.getState().updatesUnread, 0);
+  controller.stop();
+});
+
 test("posted updates: a posted_updates change re-reads the feed, and the admin table only on its screen", async () => {
   const { store, controller } = await onUpdatesScreen();
   const feedReads = callCount(store, "getUpdates");
@@ -7730,6 +7748,28 @@ test("posted updates: Edit fills the form from the table, saves with its revisio
   assert.equal(state.updateFormError, null);
   // An update that is not in the table is not opened.
   assert.equal(controller.editUpdate("u-missing"), false);
+  controller.stop();
+});
+
+test("posted updates: an unpublished update is edited with its revision, never posted and never asked to be read again", async () => {
+  const { store, controller } = await onUpdatesScreen({
+    postedUpdates: [postedRow("u-3", { status: "unpublished", revision: 4, unpublishedAt: "2026-11-12T15:00:00Z" })],
+  });
+  assert.equal(controller.editUpdate("u-3"), true);
+  assert.deepEqual(controller.getState().updateEditing, { id: "u-3", revision: 4, status: "unpublished" });
+  // Save changes is the form's post intent; for an unpublished update it sends post: false.
+  const result = await controller.saveUpdate(
+    { ...controller.getState().updateForm, title: "Name removed", askAgain: true },
+    { post: true },
+  );
+  assert.notEqual(result, null);
+  const sent = store.updateRequests.at(-1);
+  assert.equal(sent.updateId, "u-3");
+  assert.equal(sent.expectedRevision, 4);
+  assert.equal(sent.update.title, "Name removed");
+  assert.equal(sent.update.post, false);
+  assert.equal(sent.update.askAgain, false);
+  assert.equal(controller.getState().updateEditing, null);
   controller.stop();
 });
 

@@ -99,3 +99,16 @@
 
 - [x] 7.1 Locally: `npm test`, `npm run build:hant -- --check` and `npx openspec validate --all`.
 - [x] 7.2 Push, and run `gh workflow run ci.yml --ref add-posted-updates`. Iterate until the `checks`, `database`, `sign-in` and `story` jobs pass. Review the story screenshots from the artifacts.
+
+## 8. Review round 1 (jin-yu-yang's review; design D7)
+
+- [x] 8.1 Rebase onto `main` (the Workload, #195, took 046) and renumber the migration to `049_posted_updates.sql`, with every reference (agreed order: #197 = 047, #200 = 048, #196 = 049). The migrator has no gap check.
+- [x] 8.2 The audience policy reads an unpublished update only within `vitally_policy.unpublished_read_window()` (10 minutes) of `unpublished_at`; admins always.
+- [x] 8.3 `vitally_save_update` edits an unpublished update: it stays unpublished with its reads; `post` changes nothing; `askAgain` is refused with `VALIDATION`.
+- [x] 8.4 UI: Edit on unpublished rows; the form's note, Save changes and no ask-again box; the Unpublish confirmation's new text.
+- [x] 8.5 Tests:
+  - database: inside and after the window (moving `unpublished_at` back), admins, posted rows, the RPCs; an unpublished edit and its refusals (`FORBIDDEN`, `CONFLICT`, `askAgain`) and replay; the catalogue's `vitally_policy` list;
+  - unit: the view, the toast and the controller's request;
+  - browser: the Unpublish confirmation's text, and an edit after Unpublish brings nothing back to the open panel.
+- [x] 8.6 Docs: design D7, the spec, `docs/developer/database.md`.
+- [ ] 8.7 Verification: `npm test`, `npm run build:hant -- --check`, `npx openspec validate --all` locally; CI `checks`, `database`, `sign-in` and `story` on the pushed head.

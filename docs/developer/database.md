@@ -77,7 +77,7 @@ in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 | `046_volunteer_workload.sql` | Hand-written: the admin Workload's one write, the case action `ASSIGN_CASE` `{slot, personId, expectedHolderId}` (`vitally_private.act_assign_case`), added to `vitally_apply_action`, `check_operation_authority` (admin-only group) and `check_payload`, each re-created from its latest definition. No new table, column or Realtime change: the page reads what the staff window already holds |
 | `047_accounts.sql` | Hand-written: sign-in accounts (change `add-account-invitations`). The `accounts` table (one row per membership: `invited`, `active` or `deactivated`, with `expires_at` and site-check attempts), admin-only to read; a backfill giving every existing membership a row; a trigger on `auth.users` that activates a client's invitation at first sign-in and cancels an expired one; triggers on the six tables that refer to a membership, activating an invited client's account at first use; an expiry sweep that leaves an invitation in use alone and skips (and logs) one it cannot cancel; `add_staff_member` and `initialize_workspace` writing active accounts; `cleared` requiring an active account; `vitally_private.site_numbers` (the site's SIDN, set by the roster command, unreadable through the API) and `volunteer_profiles.signed_in_name`; the RPCs `vitally_prepare_account`, `vitally_record_account`, `vitally_deactivate_account`, `vitally_reactivate_account`, `vitally_client_invitations`, `vitally_cancel_invitation`, `vitally_expire_invitations`, `vitally_complete_site_check` and `vitally_activate_client_account`; and `vitally_my_clearance` with `siteCheck` |
 | `048_closed_lines_after_filing.sql` | Hand-written: a close after a filing says what was filed (issue #170, change `fix-closed-lines-after-filing`). `vitally_private.return_outcome` (one return: accepted, waiting, on paper or not filed) and a five-argument `vitally_private.closed_line` (the reason and each return's method and result) that replaces 036's `closed_line(text)`, which is dropped; `act_close_case` passes the case's filing columns and words the staff notice for a close after a filing; `vitally_close_unsigned` passes them too. No table, policy, RPC signature or Realtime change ([closing after a filing](#closing-after-a-filing)) |
-| `049_posted_updates.sql` | Hand-written: posted updates ([below](#posted-updates)). The tables `posted_updates` and `update_reads`, written only through the RPCs; the live audience `vitally_private.audience_member` and the policy helper `vitally_policy.in_update_audience`; two SELECT policies on `posted_updates` and none on `update_reads`; the RPCs `vitally_save_update` and `vitally_update_action` (ceiling admins, with receipts), `vitally_mark_updates` and `vitally_my_updates` (every staff member, cleared or not) and `vitally_posted_updates` (ceiling admins); `posted_updates` joins the Realtime publication and `update_reads` does not. No clearance check: an update holds no case data |
+| `049_posted_updates.sql` | Hand-written: posted updates ([below](#posted-updates)). The tables `posted_updates` and `update_reads`, written only through the RPCs; the live audience `vitally_private.audience_member` and the policy helper `vitally_policy.in_update_audience`; two SELECT policies on `posted_updates` (the audience reads an unpublished update only for `vitally_policy.unpublished_read_window()`, 10 minutes, after Unpublish) and none on `update_reads`; the RPCs `vitally_save_update` and `vitally_update_action` (ceiling admins, with receipts), `vitally_mark_updates` and `vitally_my_updates` (every staff member, cleared or not) and `vitally_posted_updates` (ceiling admins); `posted_updates` joins the Realtime publication and `update_reads` does not. No clearance check: an update holds no case data |
 **Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
 never edit an applied one.** The build writes a file only when the hash differs from the newest
 catalogue migration's. The hash covers the catalogue and `LOADER_VERSION` in
@@ -125,7 +125,7 @@ do not copy them from older files:
 | `vitally_private.return_outcome`, `closed_line`, `act_close_case`, `public.vitally_close_unsigned` | `048_closed_lines_after_filing.sql` |
 | `vitally_private.check_payload`, `check_preparer_fields`, `act_save_preparer_fields` | `039_preparer_shaded_fields.sql` |
 | `vitally_private.acting_person`, `contact_person`, `check_operation_authority`, `require_cleared`, `open_work`, the role helpers, `role_certificates_check`, `vitally_policy.cleared_workspace_id`, and the RPCs `public.vitally_apply_action`, `vitally_assistance_action`, `vitally_create_case`, `vitally_log_contact`, `vitally_edit_contact`, `vitally_save_volunteer`, `vitally_my_clearance` | `045_volunteer_clearance.sql` |
-| `vitally_private.audience_member`, `vitally_policy.in_update_audience`, and the RPCs `public.vitally_save_update`, `vitally_update_action`, `vitally_mark_updates`, `vitally_my_updates`, `vitally_posted_updates` | `049_posted_updates.sql` |
+| `vitally_private.audience_member`, `vitally_policy.in_update_audience`, `vitally_policy.unpublished_read_window`, and the RPCs `public.vitally_save_update`, `vitally_update_action`, `vitally_mark_updates`, `vitally_my_updates`, `vitally_posted_updates` | `049_posted_updates.sql` |
 | `vitally_private.add_staff_member`, `vitally_policy.is_workspace_admin` | `044_volunteer_roster_records.sql` |
 | `vitally_private.lock_case`, `lock_assistance_item`, `initialize_workspace` | `043_remove_presenter_access.sql` |
 | `vitally_private.check_staff_links`, `set_default_followup` | `038_staff_identity.sql` |
@@ -263,7 +263,7 @@ claimable cases) is a later change; see the [roadmap](production-roadmap.md#1-st
 | `assistance_items` | Nothing | All unlinked items, and items on visible cases |
 | `people` | Nothing | Everyone in the workspace, except a volunteer with no sign-in and no capabilities, whom only an admin reads (044) |
 | `volunteer_profiles`, `roster_entries`, `certificates` | Nothing | Admins only (044); not published to Realtime |
-| `posted_updates` | Nothing | Admins: every row (049). Everyone else: the rows that are not drafts and whose audience includes them, cleared or not. The browser reads updates through the RPCs; the policy is there for Realtime |
+| `posted_updates` | Nothing | Admins: every row (049). Everyone else, cleared or not, when the audience includes them: a posted update, and an unpublished one for 10 minutes after `unpublished_at` (`vitally_policy.unpublished_read_window()`), so Realtime can tell open windows; after that only admins read it. The browser reads updates through the RPCs; the policy is there for Realtime |
 | `update_reads` | Nothing | Nothing (no policy); read through `vitally_my_updates` and `vitally_posted_updates` (049) |
 | `memberships` | Own active membership | Own active membership |
 | `workspaces` | Own workspace | Own workspace |
@@ -298,7 +298,7 @@ caller itself, and returns a JSON receipt.
 | `vitally_close_unsigned(p_action_id uuid, p_cases jsonb, p_confirmed boolean)` | Season end (037): close the listed signing cases as Dismissed, all or nothing ([below](#season-end-close)) | `{actionId, cases: [{caseId, reference, revision}]}` |
 | `vitally_save_volunteer(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_volunteer jsonb)` | Add or edit a volunteer on the Roster (044; admins, on the ceiling; 045 adds role needs, the photo ID check and the open-work rule) | `{actionId, personId, revision}` |
 | `vitally_my_clearance()` | The caller's own clearance (045, [below](#roster-clearance)) | `{cleared, missing, capabilities, isAdmin, siteCoordinatorName}` |
-| `vitally_save_update(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_update jsonb)` | Save a draft, post it, or edit a draft or a posted update (049; ceiling admins). `askAgain` on a posted update clears every read and confirmation | `{actionId, updateId, revision, status}` |
+| `vitally_save_update(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_update jsonb)` | Save a draft, post it, or edit a draft, a posted update or an unpublished one (049; ceiling admins). An unpublished update stays unpublished, with its reads and `unpublished_at`; `post` changes nothing there and `askAgain` is refused (`VT007`, detail `askAgain`). `askAgain` on a posted update clears every read and confirmation | `{actionId, updateId, revision, status}` |
 | `vitally_update_action(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_type text)` | `POST` a draft, `UNPUBLISH` a posted update, or `DELETE` a draft (049; ceiling admins). A replayed delete answers `deleted` | `{actionId, updateId, revision, status}` |
 | `vitally_mark_updates(p_update_ids uuid[], p_confirm boolean)` | Record that the caller read up to 200 updates in their feed, and with `p_confirm` that they confirmed them (049; any staff member). No receipt: a repeat changes nothing | `{marked}` |
 | `vitally_my_updates()` | The caller's feed, pinned first and then newest first (049; any staff member) | `{items, unread}` |
@@ -379,9 +379,8 @@ and the behaviour in the canonical spec
 ### Posted updates
 
 Since 049 a ceiling admin posts IRS policy updates and office notices, and every staff member reads
-the ones addressed to them. The behaviour is in the change's spec,
-[`openspec/specs/posted-updates/spec.md`](../../openspec/specs/posted-updates/spec.md)
-(`openspec/specs/posted-updates/spec.md` once the change is archived).
+the ones addressed to them. The behaviour is in the spec,
+[`openspec/specs/posted-updates/spec.md`](../../openspec/specs/posted-updates/spec.md).
 
 - **The audience is live.** A person is in an update's audience when they have an active staff
   membership, a sign-in, and a roster entry for the workspace's current season, and the update is
@@ -392,7 +391,22 @@ the ones addressed to them. The behaviour is in the change's spec,
 - **Unread** counts the updates not read, or asking for confirmation and not confirmed. Opening the
   Notifications panel marks what it shows read; I've read this confirms.
 - **Unpublish** takes an update out of every feed and keeps its reads, so the admin's counts stay.
-  Only a draft can be deleted.
+  Only a draft can be deleted, and nothing re-posts an unpublished update.
+- **After Unpublish the text stays readable for 10 minutes, then only to admins.** The audience
+  policy reads an unpublished row only while `unpublished_at` is within
+  `vitally_policy.unpublished_read_window()` (one immutable helper, the only place the value is
+  written). Realtime checks the policy when it sends a change, normally well under a second after
+  the write, so the window only has to outlast Realtime's delay, with plenty to spare. A window
+  that was asleep or offline misses the change either way (Realtime does not replay); when it
+  reconnects, or on focus or `online`, the controller re-reads `vitally_my_updates`, which holds
+  posted updates only. The feed, `vitally_mark_updates` and `update_reads` never show a non-admin an
+  unpublished update, inside the window or after it.
+- **A mistake is fixed with Edit**, before or after Unpublish. An edit of an unpublished update
+  keeps it unpublished; inside the window Realtime sends the corrected row to open audience windows,
+  which re-read their feed and show nothing; after the window it reaches nobody but admins.
+- **What stays exposed:** an update's text is readable to its audience while it is posted, and for
+  10 minutes after Unpublish (through a direct `select` with their own session, which the app never
+  makes). Unpublish can't take back what someone has already read.
 
 ### Calling it
 
@@ -779,7 +793,7 @@ adds twelve: `cases`, `document_requests`, `documents`, `client_events`, `worksp
 `preparation_participants`, `admin_followups`, `contact_attempts`, `case_events`,
 `assistance_items`, `reviews`. `011` adds `case_contacts`, `013` adds `case_materials` and `017` adds `case_document_cards`.
 `031` adds `contact_log` and `contact_log_versions` and removes `contact_attempts`; `033` adds the two questionnaire tables and `039` adds `preparer_shaded_fields`.
-`044` adds nothing: `volunteer_profiles`, `roster_entries` and `certificates` are not published, because Realtime sends whole rows and the records are admin-only; the Roster loads on opening and after each save. `049` adds `posted_updates`, so an open window re-reads its feed when an update is posted, edited or unpublished. `update_reads` is deliberately not published: reads are frequent and would wake every admin window, so the admin's table re-reads on opening, on focus and after each save instead. `action_receipts` is not published. An applicant's window watches seven of them (`CLIENT_TABLES`),
+`044` adds nothing: `volunteer_profiles`, `roster_entries` and `certificates` are not published, because Realtime sends whole rows and the records are admin-only; the Roster loads on opening and after each save. `049` adds `posted_updates`, so an open window re-reads its feed when an update is posted, edited or unpublished (the audience hears of an unpublished update's changes for 10 minutes after Unpublish, the policy's window). `update_reads` is deliberately not published: reads are frequent and would wake every admin window, so the admin's table re-reads on opening, on focus and after each save instead. `action_receipts` is not published. An applicant's window watches seven of them (`CLIENT_TABLES`),
 a staff window's all twenty (`STAFF_TABLES`).
 
 Realtime applies each subscriber's RLS, so the same visibility rules hold for events. Deletes are

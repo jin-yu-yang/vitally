@@ -317,7 +317,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
     });
 
-    await t.test("vitally_policy holds exactly the admin check, the clearance check and the update audience check, with exactly their grants", async () => {
+    await t.test("vitally_policy holds exactly the admin check, the clearance check, the update audience check and the unpublished window, with exactly their grants", async () => {
       const { rows } = await sql(
         `select p.oid, p.oid::regprocedure::text as signature, p.prosecdef, p.provolatile, p.proconfig,
                 p.proargnames, p.pronargs
@@ -326,18 +326,30 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
       assert.deepEqual(
         rows.map((row) => row.signature.replace(/^vitally_policy\./, "")),
-        ["cleared_workspace_id()", "in_update_audience(uuid,text,text[])", "is_workspace_admin(uuid)"],
+        [
+          "cleared_workspace_id()",
+          "in_update_audience(uuid,text,text[])",
+          "is_workspace_admin(uuid)",
+          "unpublished_read_window()",
+        ],
       );
-      const [cleared, audience, admin] = rows;
+      const [cleared, audience, admin, readWindow] = rows;
       assert.equal(cleared.proargnames, null);
       assert.equal(cleared.pronargs, 0);
       assert.deepEqual(admin.proargnames, ["p_workspace_id"]);
       assert.equal(admin.pronargs, 1);
       assert.deepEqual(audience.proargnames, ["p_workspace_id", "p_audience", "p_roles"]);
       assert.equal(audience.pronargs, 3);
+      // The unpublished window (049, design D7) is a constant: immutable, and
+      // not security definer, because it reads nothing.
+      assert.equal(readWindow.pronargs, 0);
+      assert.equal(readWindow.prosecdef, false);
+      assert.equal(readWindow.provolatile, "i");
       for (const helper of rows) {
-        assert.equal(helper.prosecdef, true, helper.signature);
-        assert.equal(helper.provolatile, "s", helper.signature);
+        if (helper !== readWindow) {
+          assert.equal(helper.prosecdef, true, helper.signature);
+          assert.equal(helper.provolatile, "s", helper.signature);
+        }
         assert.deepEqual(helper.proconfig, ['search_path=""'], helper.signature);
         for (const name of helper.proargnames ?? [])
           assert.doesNotMatch(name, /user|account|member|person/i, helper.signature);

@@ -27,11 +27,12 @@ export const UPDATE_TOASTS = Object.freeze({
   deleted: "Draft deleted.",
 });
 
-// A save's toast: an edit of a posted update says Changes saved; otherwise
-// the receipt's status says what the save became. Null when nothing landed.
+// A save's toast: an edit of a posted or unpublished update says Changes
+// saved; otherwise the receipt's status says what the save became. Null when
+// nothing landed.
 export function saveToast(receipt, editing) {
   if (!receipt) return null;
-  if (editing?.status === "posted") return UPDATE_TOASTS.changed;
+  if (editing?.status === "posted" || editing?.status === "unpublished") return UPDATE_TOASTS.changed;
   return receipt.status === "posted" ? UPDATE_TOASTS.posted : UPDATE_TOASTS.draft;
 }
 
@@ -216,17 +217,26 @@ const checkRow = (id, name, on, title, hint) =>
     title,
   )}</strong><small>${esc(hint)}</small></span></label>`;
 
+export const UNPUBLISHED_EDIT_NOTE =
+  "This update is unpublished. Saving changes keeps it unpublished: volunteers don't see it, and it doesn't come back to their feed.";
+
 function updateForm(state) {
   const form = { ...emptyUpdateForm(), ...(state.updateForm ?? {}) };
   const errors = state.updateFormError ?? null;
   const editing = state.updateEditing ?? null;
   const editingPosted = editing?.status === "posted";
+  // An unpublished update is edited in place (a mistake fixed after
+  // Unpublish): it stays unpublished, so nobody is asked to read it again.
+  const editingUnpublished = editing?.status === "unpublished";
   const busy = state.busy ? " disabled" : "";
   const keep = String(form.keepTopUntil ?? "");
   // Never before today, but an update kept since an earlier day still saves.
   const min = keep && keep < today() ? keep : today();
   const formError = errors?.form
     ? `<p class="notice error" role="alert" id="update-form-error">${icon("help")}<span>${esc(errors.form)}</span></p>`
+    : "";
+  const unpublishedNote = editingUnpublished
+    ? `<p class="notice amber" role="note" id="update-unpublished-note">${icon("help")}<span>${esc(UNPUBLISHED_EDIT_NOTE)}</span></p>`
     : "";
   const fields = `${kindChoices(form, errors)}<label class="field" for="update-title"><span>Title</span><input type="text" id="update-title" name="title" maxlength="120" autocomplete="off" value="${esc(
     form.title,
@@ -260,7 +270,7 @@ function updateForm(state) {
       "Clears every read and confirmation, so everyone sees it as new.",
     ),
   )}`;
-  const submits = editingPosted
+  const submits = editingPosted || editingUnpublished
     ? `<button type="submit" class="btn primary" name="intent" value="post"${busy}>Save changes</button>`
     : `<button type="submit" class="btn text" name="intent" value="draft"${busy}>Save draft</button><button type="submit" class="btn primary" name="intent" value="post"${busy}>${icon(
         "megaphone",
@@ -268,7 +278,7 @@ function updateForm(state) {
   const actions = `<div class="update-actions">${when(editing, button("Cancel", "cancel-update-edit", "text"))}${submits}</div>`;
   return `<section class="panel update-form-panel" aria-labelledby="update-form-title"><h2 id="update-form-title">${
     editing ? "Edit update" : "New update"
-  }</h2><form id="update-form" class="update-form" novalidate>${formError}${fields}${actions}</form></section>`;
+  }</h2><form id="update-form" class="update-form" novalidate>${formError}${unpublishedNote}${fields}${actions}</form></section>`;
 }
 
 /**
@@ -341,6 +351,8 @@ function rowActions(update) {
       "text",
       named("Delete"),
     )}`;
+  // Unpublished: Edit only, to fix a mistake. Never re-posted or deleted.
+  if (update.status === "unpublished") return button("Edit", "edit-update", "text", named("Edit"));
   return "";
 }
 
@@ -403,10 +415,14 @@ export function renderUpdatePeople(update = {}) {
   return `<div class="board-table-wrap"><table class="board-table update-people"><thead><tr><th scope="col">Name</th><th scope="col">Read</th><th scope="col">Confirmed</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
+// Unpublish hides an update from now on; it can't take back what was read.
+export const UNPUBLISH_NOTE =
+  "Volunteers will no longer see it. It stays in your table with its counts. Some may already have read it: to fix a mistake, such as a client's name, use Edit, before or after you unpublish.";
+
 export function unpublishConfirm(update = {}, { busy = false } = {}) {
   return confirmBody({
     lead: `Unpublish ${quoted(update.title)}?`,
-    note: { icon: "help", html: esc("Volunteers will no longer see it. It stays in your table with its counts.") },
+    note: { icon: "help", html: esc(UNPUBLISH_NOTE) },
     confirm: button("Unpublish", "confirm-unpublish-update", "primary full", `data-id="${esc(update.id)}"${busy ? " disabled" : ""}`),
     keep: "Keep it",
   });

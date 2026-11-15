@@ -78,12 +78,12 @@ update_reads
   - Both tables: row security enabled; `revoke all ... from public, anon, authenticated, service_role`.
   - `posted_updates`: `grant select ... to authenticated`, with two policies:
     - `admin_posted_updates`: `using (vitally_policy.is_workspace_admin(workspace_id))`;
-    - `audience_posted_updates`: `using (status <> 'draft' and vitally_policy.in_update_audience(workspace_id, audience, audience_roles))`.
+    - `audience_posted_updates`: `using ((status = 'posted' or (status = 'unpublished' and unpublished_at > now() - vitally_policy.unpublished_read_window())) and vitally_policy.in_update_audience(workspace_id, audience, audience_roles))`. As first written it was `status <> 'draft' and ...`; review round 1 limited unpublished rows to a window (D7).
   - `update_reads`: no grant and no policy.
 - **Rationale:**
   - The feed and the counts need live audience logic and a join with reads. RPCs compute both in one place.
   - The SELECT policy exists so realtime can deliver `posted_updates` changes to the right windows.
-  - Unpublished rows stay readable to their audience (the feed leaves them out). Realtime checks RLS against the new row, so a row that became unreadable would never tell an open window it was unpublished.
+  - Unpublished rows stay readable to their audience for 10 minutes (the feed leaves them out). Realtime checks RLS against the new row, so a row that became unreadable at once would never tell an open window it was unpublished. See D7.
 - **Alternatives:**
   - Direct table reads in the browser: the counts would need roster tables that only admins can read.
   - Broadcast-only realtime: a second mechanism.
@@ -109,7 +109,7 @@ Each RPC:
 
 | RPC | Who | Receipt | What it does |
 |---|---|---|---|
-| `vitally_save_update(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_update jsonb)` | ceiling admin | yes (`SAVE_UPDATE`, digest keeps `'personId', v_person.id`) | Creates a draft (id and revision null) or edits a draft or posted update. `p_update` = `{kind, title, message, irsLink, audience, roles, keepTopUntil, askConfirm, post, askAgain}`. Validates (VT007 `VALIDATION`, detail = field). `post:true` on a new update or a draft posts it (`status='posted'`, `posted_at`, `posted_by`). Editing a posted update sets `edited_at`; `askAgain:true` deletes that update's `update_reads`. Editing an unpublished update gives VT004. A stale revision gives VT003; an unknown id or one in another workspace gives VT002. Returns `{actionId, updateId, revision, status}`. |
+| `vitally_save_update(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_update jsonb)` | ceiling admin | yes (`SAVE_UPDATE`, digest keeps `'personId', v_person.id`) | Creates a draft (id and revision null) or edits a draft or posted update. `p_update` = `{kind, title, message, irsLink, audience, roles, keepTopUntil, askConfirm, post, askAgain}`. Validates (VT007 `VALIDATION`, detail = field). `post:true` on a new update or a draft posts it (`status='posted'`, `posted_at`, `posted_by`). Editing a posted update sets `edited_at`; `askAgain:true` deletes that update's `update_reads`. Editing an unpublished update sets `edited_at` and keeps it unpublished; `askAgain:true` there gives VT007 (`askAgain`) (D7; as first written it gave VT004). A stale revision gives VT003; an unknown id or one in another workspace gives VT002. Returns `{actionId, updateId, revision, status}`. |
 | `vitally_update_action(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_type text)` | ceiling admin | yes (`UPDATE_ACTION`) | `POST`: draft to posted. `UNPUBLISH`: posted to unpublished (`unpublished_at`). `DELETE`: a draft only; the row is deleted. Any other state gives VT004; an unknown type gives VT007. Returns `{actionId, updateId, revision, status}` (`status: 'deleted'` for a delete). |
 | `vitally_mark_updates(p_update_ids uuid[], p_confirm boolean)` | staff | none (naturally idempotent) | At most 200 ids, else VT007. For each id that is in the caller's feed (posted, caller in audience), upserts `update_reads`: keeps an existing `read_at`. With `p_confirm` and `ask_confirm`, sets `confirmed_at` if null. Other ids are ignored silently. Returns `{marked: n}`. |
 | `vitally_my_updates()` | staff (cleared or not) | none | The feed: `{items: [...], unread: n}`. Items are the posted updates the caller is in the audience of, in this order: pinned (`keep_top_until >= today in New York`) first, then the rest, `posted_at desc` within each group. |
@@ -175,6 +175,25 @@ Each RPC:
 - **The catalogue tests above** are updated.
 - **Unit tests:** `posted-updates.test.mjs`, `update-views.test.mjs`, and additions to `controller.test.mjs`, `store.test.mjs`, `shell.test.mjs` / `volunteer-views.test.mjs` (sidebar), and `confirm-dialogs.test.mjs` (golden file).
 - **Browser:** a new top-level test, Chrome only, with its own fixture and timeout. It doesn't touch the main story or its 900 s limit.
+
+### D7: Unpublished updates: a read window, and Edit (review round 1)
+- **The finding** (jin-yu-yang's review, blocking): the audience policy was `status <> 'draft' and in_update_audience(...)`, so an unpublished update stayed readable to its audience forever through a direct `select` with their own session. The admin could not change that: `vitally_save_update` refused to edit an unpublished update, and `DELETE` is drafts only. An update posted with a mistake (a client's name, say) could never be taken back from the table.
+- **Choice** (Hailey: a time limit plus editing):
+  - **A read window.** The audience reads an unpublished row only while `unpublished_at > now() - vitally_policy.unpublished_read_window()`. After that only admins read it. The window is written once, in that immutable helper (`interval '10 minutes'`), which the planner folds to a constant.
+  - **Edit after Unpublish.** `vitally_save_update` edits an unpublished update with the same fields as a posted one. It stays unpublished, keeps `unpublished_at`, `posted_at` and its reads, and sets `edited_at`. `post` changes nothing; `askAgain` is refused (`VT007`, `askAgain`), because nobody is asked to read an update they can't see. The revision check and the receipt replay are unchanged. Nothing re-posts an unpublished update, and `DELETE` stays drafts only.
+  - **UI.** The table offers Edit on an unpublished row. The form says saving keeps it unpublished, offers Save changes and Cancel, and has no "Ask everyone to read it again". The Unpublish confirmation says some may already have read it, and that a mistake is fixed with Edit, before or after unpublishing.
+- **Why 10 minutes:**
+  - The window exists only for Realtime, which checks the policy when it sends the change. Supabase Realtime normally delivers a change well under a second after the commit; the window only has to outlast that delay, and 10 minutes covers a Realtime that has fallen far behind, with plenty to spare.
+  - A window that was asleep or offline misses the change whatever the window: Realtime does not replay. It doesn't rely on the event: on reconnect (`onConnection` back to online), focus and `online`, the controller runs `refresh`, which re-reads `vitally_my_updates`, and that holds posted updates only. An uncleared window, which has no channel, re-reads its feed with every clearance check.
+  - A shorter window saves little: the text was readable to the same people while it was posted.
+- **What the RPCs show a non-admin:** nothing of an unpublished update, inside the window or after it. `vitally_my_updates` and `vitally_mark_updates` filter `status = 'posted'` (a mark of an unpublished id is ignored: `marked: 0`, the same as an unknown id), `update_reads` has no policy and no grant and is not published, and `vitally_posted_updates` is admin-only.
+- **Edits inside and after the window:** an edit inside the window sends the corrected row to open audience windows; they re-read the feed, which ignores it, so nothing reappears. After the window the edit reaches no audience member (the new row fails the policy).
+- **Performance (#165):** no index and no new per-statement helper. The status test costs less than the audience function, so Postgres runs it first: a draft or an update unpublished before the window costs no lookup. Realtime checks one row by primary key per change, and writes are rare admin actions. The browser never selects the table directly.
+- **Remaining exposure:** an update's text is readable to its audience while it is posted, and for 10 minutes after Unpublish. Unpublish and Edit can't take back what someone already read.
+- **Alternatives:**
+  - Readable forever (as first written): the finding.
+  - Not readable at all once unpublished: Realtime could never tell an open window, which would show the update until its next re-read.
+  - Delete or redact on Unpublish: loses the counts the admin keeps, and the agreed lifecycle says posted updates are never deleted.
 
 ## Risks / Trade-offs
 
