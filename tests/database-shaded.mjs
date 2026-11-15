@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createDatabaseFixture, applyArgs, rejected } from "./support/database-fixture.mjs";
-import { SHADED_FIELDS } from "../src/shaded-fields.mjs";
+import { SHADED_FIELDS, householdRows } from "../src/shaded-fields.mjs";
 
 const MIGRATION = new URL("../supabase/migrations/039_preparer_shaded_fields.sql", import.meta.url);
 const ASTRAL = "\u{1F600}"; // one character, two UTF-16 units
@@ -287,6 +287,30 @@ test("the season bound and the household rows are the case's", async () => {
   } finally {
     await f.close();
   }
+});
+
+const PARITY = [
+  {}, { has_household_members: "no", hh: [{ first_name: "Lin" }, { first_name: "Kai" }] },
+  { has_household_members: "yes", hh: [] },
+  ...[1, 3, 4, 6].map((n) => ({ has_household_members: "yes", hh: Array.from({ length: n }, (_, i) => ({ first_name: `Ana${i}` })) })),
+];
+test("the browser and the database count the same household rows", async () => {
+  const f = await createDatabaseFixture();
+  try {
+    for (const answers of PARITY) {
+      const { rows } = await f.sql("select vitally_private.household_rows(2::smallint,$1::jsonb) as n", [JSON.stringify(answers)]);
+      assert.equal(Number(rows[0].n), householdRows(answers, { version: 2 }), JSON.stringify(answers));
+    }
+  } finally { await f.close(); }
+});
+test("Yes, two members, then No: row 1 is refused", async () => {
+  const f = await createDatabaseFixture();
+  try {
+    const caseId = await preparingCase(f);
+    await f.sql(`update public.cases set answers=answers||'{"has_household_members":"no","hh":[{"first_name":"Lin"},{"first_name":"Kai"}]}'::jsonb where id=$1`, [caseId]);
+    await assert.rejects(() => save(f, caseId, { household1QualifyingChild: "yes" }, 0), rejected("VALIDATION"));
+    assert.equal(await stored(f, caseId), undefined);
+  } finally { await f.close(); }
 });
 
 test("the payload has exactly basedOnVersion and fields", async () => {
