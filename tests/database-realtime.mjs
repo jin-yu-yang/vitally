@@ -1208,3 +1208,71 @@ test("realtime carries no code", async () => {
     await f.close();
   }
 });
+
+// OpenSpec change add-case-labels: link changes reach cleared staff and never
+// an applicant, even the owner of the labelled case.
+test("label changes reach staff and no applicant", async () => {
+  const f = await createDatabaseFixture();
+  let staff = null;
+  let applicant = null;
+  let fence = null;
+  try {
+    const caseId = await preparedCase(f, f.applicantA);
+    const [{ id: labelId }] = (
+      await f.sql("select id from public.case_labels where workspace_id=$1 limit 1", [f.workspaceId])
+    ).rows;
+    const toggle = async (on) => {
+      const { error } = await f.setCaseLabel(f.preparer, caseId, labelId, on);
+      assert.equal(error, null);
+    };
+    staff = watchTable(f.siteCoordinator, [{ event: "UPDATE", table: "case_label_links" }], "staff");
+    applicant = watchTable(
+      f.applicantA,
+      [
+        { event: "INSERT", table: "case_labels" },
+        { event: "UPDATE", table: "case_labels" },
+        { event: "INSERT", table: "case_label_links" },
+        { event: "UPDATE", table: "case_label_links" },
+      ],
+      "A/labels",
+    );
+    fence = watchTable(f.applicantA, [{ event: "UPDATE", table: "cases" }], "A/fence");
+    await withDeadline(staff.subscribed, "staff never subscribed");
+    await withDeadline(applicant.subscribed, "A never subscribed");
+    await withDeadline(fence.subscribed, "A's fence never subscribed");
+    // Adding inserts the link; each removal then updates it, so staff see the
+    // UPDATE the spec promises, repeated until the channel is streaming.
+    await toggle(true);
+    await controlUntilSeen(
+      staff,
+      async () => {
+        await toggle(false);
+        const [row] = (
+          await f.sql("select changed_at from public.case_label_links where case_id=$1", [caseId])
+        ).rows;
+        await toggle(true);
+        return { changedAt: row.changed_at.getTime() };
+      },
+      (change) => (row) =>
+        row.case_id === caseId &&
+        row.active === false &&
+        new Date(row.changed_at).getTime() === change.changedAt,
+      "the label removal on the staff channel",
+    );
+    const moved = await f.act(f.preparer, caseId, "REQUEST_DOCUMENT", {
+      title: "Mileage record",
+      message: marker(),
+    });
+    await fence.waitFor(
+      (row) => row.id === caseId && Number(row.revision) === moved.revision,
+      "A's ordered fence",
+    );
+    assert.deepEqual(applicant.payloads, [], "an applicant received label rows");
+    assertHealthy(staff, applicant, fence);
+  } finally {
+    staff?.stop();
+    applicant?.stop();
+    fence?.stop();
+    await f.close();
+  }
+});

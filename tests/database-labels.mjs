@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { createDatabaseFixture } from "./support/database-fixture.mjs";
+import { createDatabaseFixture, PREPARER } from "./support/database-fixture.mjs";
 // OpenSpec change add-case-labels (design D1, D2, D6): the two label tables,
 // the starter labels, and who may read them.
 const STARTERS = [
@@ -285,6 +285,219 @@ test("case labels", async (t) => {
       });
       assert.equal(error, null);
       assert.equal(await count(), before);
+    });
+
+    await t.test("set case label", async (t) => {
+      const eventsOf = async (caseId) =>
+        (
+          await f.sql(
+            "select action,detail,actor_person_id from public.case_events where case_id=$1 and action in ('ADD_CASE_LABEL','REMOVE_CASE_LABEL') order by created_at,id",
+            [caseId],
+          )
+        ).rows;
+      const linksOf = async (caseId) =>
+        (await f.sql("select * from public.case_label_links where case_id=$1", [caseId])).rows;
+      const caseRow = async (caseId) =>
+        (await f.sql("select revision,updated_at,stage from public.cases where id=$1", [caseId]))
+          .rows[0];
+      // Counted for this fixture's workspace only: other test files share the database.
+      const allEvents = async () =>
+        (
+          await f.sql("select count(*)::int as n from public.case_events where workspace_id=$1", [
+            f.workspaceId,
+          ])
+        ).rows[0].n;
+      const scopedCounts = async () =>
+        (
+          await f.sql(
+            "select (select count(*) from public.case_labels where workspace_id=$1) as labels, (select count(*) from public.case_label_links where workspace_id=$1) as links",
+            [f.workspaceId],
+          )
+        ).rows[0];
+      const receipts = async () =>
+        (
+          await f.sql(
+            "select count(*)::int as n from public.action_receipts where operation='SET_CASE_LABEL' and workspace_id=$1",
+            [f.workspaceId],
+          )
+        ).rows[0].n;
+      const screeningCase = async () => {
+        const { caseId } = await f.submittedClientCase();
+        await f.act(f.siteCoordinator, caseId, "START_SCREENING", {});
+        return caseId;
+      };
+      // Earlier tests renamed some starters, so these tests use their own.
+      await insertLabel(f, "Spare", "green");
+      await insertLabel(f, "Old name", "violet");
+      const multi = await labelId(f, "Multi-state");
+
+      await t.test("the preparer adds and removes", async () => {
+        const caseId = await f.preparedCase();
+        const actionId = randomUUID();
+        const added = await f.setCaseLabel(f.preparer, caseId, multi, true, actionId);
+        assert.equal(added.error, null);
+        assert.deepEqual(added.data, { actionId, caseId, labelId: multi, on: true });
+        let links = await linksOf(caseId);
+        assert.equal(links.length, 1);
+        assert.equal(links[0].active, true);
+        assert.equal(links[0].changed_by_person_id, f.preparerId);
+        let events = await eventsOf(caseId);
+        assert.equal(events.length, 1);
+        assert.equal(events[0].action, "ADD_CASE_LABEL");
+        assert.deepEqual(events[0].detail, { labelId: multi, name: "Multi-state" });
+        assert.equal(events[0].actor_person_id, f.preparerId);
+        const removed = await f.setCaseLabel(f.preparer, caseId, multi, false);
+        assert.equal(removed.error, null);
+        links = await linksOf(caseId);
+        assert.equal(links.length, 1);
+        assert.equal(links[0].active, false);
+        events = await eventsOf(caseId);
+        assert.deepEqual(
+          events.map((e) => e.action),
+          ["ADD_CASE_LABEL", "REMOVE_CASE_LABEL"],
+        );
+        assert.equal(await f.receiptsFor(actionId), 1);
+      });
+
+      await t.test("the office labels any case", async () => {
+        const caseId = await screeningCase();
+        assert.equal((await caseRow(caseId)).stage, "screening");
+        const { error } = await f.setCaseLabel(f.siteCoordinator, caseId, multi, true);
+        assert.equal(error, null);
+        assert.equal((await linksOf(caseId))[0].active, true);
+      });
+
+      await t.test("refusals in order", async () => {
+        const caseId = await f.preparedCase();
+        const refused = async (client, cid, lid, code, note) => {
+          const actionId = randomUUID();
+          const before = [await allEvents(), await scopedCounts(), await receipts()];
+          const { data, error } = await f.setCaseLabel(client, cid, lid, true, actionId);
+          assert.equal(data, null, note);
+          assert.equal(error?.code, code, note);
+          assert.equal(await f.receiptsFor(actionId), 0, note);
+          assert.deepEqual([await allEvents(), await scopedCounts(), await receipts()], before, note);
+        };
+        const uncleared = await f.staff({
+          key: "lena_uncleared_label",
+          name: "Lena Uncleared",
+          capabilities: ["prepare"],
+          cleared: false,
+        });
+        await refused(uncleared.client, caseId, multi, "VT009", "uncleared");
+        await refused(f.applicantA, caseId, multi, "VT001", "client");
+        const draft = await f.draftCase(f.applicantA);
+        await refused(f.siteCoordinator, draft.caseId, multi, "VT002", "draft");
+        await refused(f.reviewer, caseId, multi, "VT001", "not the reviewer");
+        const foreignLabel = await labelId(f, "MFS", f.foreignWorkspaceId);
+        await refused(f.siteCoordinator, caseId, foreignLabel, "VT007", "foreign label");
+        await refused(f.siteCoordinator, caseId, null, "VT007", "null label");
+        await f.act(f.siteCoordinator, caseId, "CLOSE_CASE", {
+          confirmed: true,
+          reason: "duplicate",
+        });
+        await refused(f.siteCoordinator, caseId, multi, "VT004", "closed");
+      });
+
+      await t.test("a case in another workspace is not found", async () => {
+        const staff = await f.staff({
+          key: "fiona_foreign_label",
+          name: "Fiona Foreign",
+          capabilities: ["admin"],
+          workspaceId: f.foreignWorkspaceId,
+        });
+        const caseId = await f.preparedCase();
+        const before = await allEvents();
+        const { error } = await f.setCaseLabel(staff.client, caseId, multi, true);
+        assert.equal(error?.code, "VT002");
+        assert.equal((await linksOf(caseId)).length, 0);
+        assert.equal(await allEvents(), before);
+      });
+
+      await t.test("unchanged state writes nothing", async () => {
+        const caseId = await f.preparedCase();
+        const mfs = await labelId(f, "Spare");
+        const never = await f.setCaseLabel(f.preparer, caseId, mfs, false);
+        assert.equal(never.error, null);
+        assert.equal((await eventsOf(caseId)).length, 0);
+        assert.equal((await f.setCaseLabel(f.preparer, caseId, mfs, true)).error, null);
+        assert.equal((await f.setCaseLabel(f.siteCoordinator, caseId, mfs, true)).error, null);
+        assert.equal((await eventsOf(caseId)).length, 1);
+        assert.equal((await linksOf(caseId))[0].changed_by_person_id, f.preparerId);
+      });
+
+      await t.test("concurrent adds", async () => {
+        const caseId = await f.preparedCase();
+        const results = await Promise.all([
+          f.setCaseLabel(f.siteCoordinator, caseId, multi, true),
+          f.setCaseLabel(f.preparer, caseId, multi, true),
+        ]);
+        for (const r of results) assert.equal(r.error, null);
+        assert.equal((await linksOf(caseId)).length, 1);
+        assert.equal((await eventsOf(caseId)).length, 1);
+      });
+
+      await t.test("the case row is untouched", async () => {
+        const caseId = await f.readyCase();
+        await f.act(f.preparer, caseId, "CLAIM_PREPARATION", {});
+        const before = await caseRow(caseId);
+        const { error } = await f.setCaseLabel(f.preparer, caseId, multi, true);
+        assert.equal(error, null);
+        const after = await caseRow(caseId);
+        assert.equal(after.revision, before.revision);
+        assert.equal(after.updated_at.getTime(), before.updated_at.getTime());
+        // f.act reads the current revision, so pin the pre-label one by hand.
+        const { error: submitError } = await f.preparer.rpc("vitally_apply_action", {
+          p_action_id: randomUUID(),
+          p_case_id: caseId,
+          p_expected_revision: Number(before.revision),
+          p_type: "SUBMIT_REVIEW",
+          p_payload: { questionnaire: PREPARER },
+        });
+        assert.equal(submitError, null);
+      });
+
+      await t.test("replay", async () => {
+        const caseId = await f.preparedCase();
+        const actionId = randomUUID();
+        const first = await f.setCaseLabel(f.preparer, caseId, multi, true, actionId);
+        const again = await f.setCaseLabel(f.preparer, caseId, multi, true, actionId);
+        assert.equal(again.error, null);
+        assert.deepEqual(again.data, first.data);
+        assert.equal((await eventsOf(caseId)).length, 1);
+        const other = await f.setCaseLabel(f.preparer, caseId, multi, false, actionId);
+        assert.equal(other.error?.code, "VT007");
+        assert.equal((await eventsOf(caseId)).length, 1);
+      });
+
+      await t.test("reassignment keeps labels", async () => {
+        const caseId = await f.preparedCase();
+        assert.equal((await f.setCaseLabel(f.preparer, caseId, multi, true)).error, null);
+        const other = await f.staff({
+          key: "pia_new_preparer_label",
+          name: "Pia Preparer",
+          capabilities: ["prepare"],
+        });
+        await f.reassignPreparer(caseId, f.preparerId, other.personId);
+        assert.equal((await linksOf(caseId))[0].active, true);
+        const { error } = await f.setCaseLabel(f.preparer, caseId, multi, false);
+        assert.equal(error?.code, "VT001");
+        assert.equal((await f.setCaseLabel(other.client, caseId, multi, false)).error, null);
+      });
+
+      await t.test("history keeps the old name", async () => {
+        const caseId = await f.preparedCase();
+        const id = await labelId(f, "Old name");
+        assert.equal((await f.setCaseLabel(f.preparer, caseId, id, true)).error, null);
+        const { error } = await f.saveLabel(f.siteCoordinator, {
+          labelId: id,
+          expectedRevision: 1,
+          name: "New name",
+          color: "sky",
+        });
+        assert.equal(error, null);
+        assert.equal((await eventsOf(caseId))[0].detail.name, "Old name");
+      });
     });
   } finally {
     await f.close();

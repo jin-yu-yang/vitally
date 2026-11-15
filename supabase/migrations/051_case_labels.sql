@@ -221,6 +221,81 @@ revoke all on function public.vitally_save_label(uuid,uuid,bigint,jsonb) from pu
 grant execute on function public.vitally_save_label(uuid,uuid,bigint,jsonb) to authenticated;
 
 -- ---------------------------------------------------------------------------
+-- 6. vitally_set_case_label: staff who work on a case turn one label on or off
+-- (design D2, D3, D4). The check order follows vitally_log_contact (045): the
+-- caller, clearance, arguments, staff-only, the receipt (a replay re-checks the
+-- person), then the case lock and the case-level rules. A link is never
+-- deleted. Setting a label to the state it is already in writes nothing, and
+-- the case row itself is never touched, so its revision stays valid.
+
+create or replace function public.vitally_set_case_label(p_action_id uuid,p_case_id uuid,p_label_id uuid,p_on boolean)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_receipt public.action_receipts;
+ v_case public.cases;
+ v_label public.case_labels;
+ v_digest text;
+ v_rows integer;
+ v_result jsonb;
+begin
+ v_member=vitally_private.require_membership();
+ v_person=vitally_private.acting_person(v_member);
+ perform vitally_private.require_cleared(v_member);
+ if p_action_id is null or p_case_id is null or p_label_id is null or p_on is null then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ if v_member.access<>'staff' or v_person.id is null then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ v_digest=encode(extensions.digest(jsonb_build_object('operation','SET_CASE_LABEL','caseId',p_case_id,
+  'labelId',p_label_id,'on',p_on,'personId',v_person.id)::text,'sha256'),'hex');
+ v_receipt=vitally_private.reserve_receipt(v_member,p_action_id,'SET_CASE_LABEL',v_digest,v_person.id);
+ if v_receipt.receipt is not null then
+  perform vitally_private.contact_person(v_member,v_person.id);
+  return v_receipt.receipt;
+ end if;
+ v_case=vitally_private.lock_case(v_member,p_case_id);
+ v_person=vitally_private.contact_person(v_member,v_person.id);
+ if not vitally_private.works_on_case(v_case,v_person) then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ select * into v_label from public.case_labels l
+  where l.id=p_label_id and l.workspace_id=v_case.workspace_id;
+ if not found then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ if v_case.stage='closed' then
+  raise sqlstate 'VT004' using message='INVALID_TRANSITION';
+ end if;
+ -- Only a real change writes: turning a label on inserts or revives the link,
+ -- turning it off switches an active link off; anything else matches no row.
+ if p_on then
+  insert into public.case_label_links as k(workspace_id,case_id,label_id,active,changed_by_person_id,changed_at)
+  values(v_case.workspace_id,v_case.id,v_label.id,true,v_person.id,now())
+  on conflict (case_id,label_id) do update
+   set active=true,changed_by_person_id=excluded.changed_by_person_id,changed_at=excluded.changed_at
+   where k.active is distinct from excluded.active;
+ else
+  update public.case_label_links k set active=false,changed_by_person_id=v_person.id,changed_at=now()
+   where k.case_id=v_case.id and k.label_id=v_label.id and k.active;
+ end if;
+ get diagnostics v_rows=row_count;
+ if v_rows=1 then
+  insert into public.case_events(workspace_id,case_id,actor_user_id,actor_person_id,action,detail)
+  values(v_case.workspace_id,v_case.id,v_member.user_id,v_person.id,
+   case when p_on then 'ADD_CASE_LABEL' else 'REMOVE_CASE_LABEL' end,
+   jsonb_build_object('labelId',v_label.id,'name',v_label.name));
+ end if;
+ v_result=jsonb_build_object('actionId',p_action_id,'caseId',v_case.id,'labelId',v_label.id,'on',p_on);
+ update public.action_receipts set target_id=v_case.id,receipt=v_result where id=v_receipt.id;
+ return v_result;
+end;
+$$;
+revoke all on function public.vitally_set_case_label(uuid,uuid,uuid,boolean) from public,anon,authenticated,service_role;
+grant execute on function public.vitally_set_case_label(uuid,uuid,uuid,boolean) to authenticated;
+
+-- ---------------------------------------------------------------------------
 -- Closing line, kept last as sections are appended: no browser or service
 -- role may call a private function directly.
 
