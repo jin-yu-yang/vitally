@@ -344,6 +344,7 @@ test("hidden cells are kept, unnamed, and come back", async () => {
     assert.deepEqual((await stored(f, caseId)).fields, { household1QualifyingChild: "yes", household2QualifyingChild: "yes", incomeW2s: true });
     assert.deepEqual((await saveEvents(f, caseId)).at(-1).changed, ["incomeW2s"]);
     await setHousehold(f, caseId, "yes", 2);
+    assert.deepEqual((await stored(f, caseId)).fields, { household1QualifyingChild: "yes", household2QualifyingChild: "yes", incomeW2s: true });
     await save(f, caseId, { household1QualifyingChild: "no", incomeW2s: true }, 2);
     assert.equal((await stored(f, caseId)).fields.household1QualifyingChild, "no");
   } finally { await f.close(); }
@@ -359,6 +360,7 @@ test("only hidden cells stored: an empty save is accepted", async () => {
     const row = await stored(f, caseId);
     assert.deepEqual(row.fields, { household1QualifyingChild: "yes", household2QualifyingChild: "yes" });
     assert.equal(Number(row.version), 2);
+    assert.deepEqual((await saveEvents(f, caseId)).at(-1).changed, []);
   } finally { await f.close(); }
 });
 
