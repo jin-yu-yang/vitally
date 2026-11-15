@@ -428,7 +428,7 @@ test("volunteer clearance against real Supabase", async (t) => {
 });
 
 // ---------------------------------------------------------------------------
-// The read gate (design D3): the 21 case-data policies read only for a cleared
+// The read gate (design D3): the 23 case-data policies read only for a cleared
 // staff member, through the no-argument InitPlan helper
 // `vitally_policy.cleared_workspace_id()`. `people` is not gated.
 
@@ -438,6 +438,8 @@ const CASE_TABLES = Object.freeze([
   "case_contacts",
   "case_document_cards",
   "case_events",
+  "case_label_links",
+  "case_labels",
   "case_materials",
   "cases",
   "client_events",
@@ -461,7 +463,9 @@ const CASE_TABLES = Object.freeze([
 // client draft. An assistance item with no case is staff work too.
 const PRIVATE_DRAFT = "c.origin='client' and c.stage='draft'";
 const staffCountSql = (table) =>
-  table === "cases"
+  table === "case_labels"
+    ? "select count(*)::int n from public.case_labels t where t.workspace_id=$1"
+    : table === "cases"
     ? `select count(*)::int n from public.cases c where c.workspace_id=$1 and not (${PRIVATE_DRAFT})`
     : table === "assistance_items"
       ? `select count(*)::int n from public.assistance_items t where t.workspace_id=$1
@@ -476,6 +480,8 @@ const FILLED = Object.freeze([
   "admin_followups",
   "assistance_items",
   "case_events",
+  "case_label_links",
+  "case_labels",
   "cases",
   "client_events",
   "contact_log",
@@ -507,6 +513,20 @@ test("the read gate against real Supabase", async (t) => {
     const { contactId } = await f.logContact(f.preparer, assisted, SAMPLE_CONTACT());
     await f.editContact(f.preparer, contactId, { ...SAMPLE_CONTACT(), note: "Fictional corrected note." });
     await f.seedAssistance();
+    // A label on the assisted case fills the label link table (the starter
+    // labels fill the label table).
+    const { id: starterLabelId } = await one(
+      f,
+      "select id from public.case_labels where workspace_id=$1 order by name limit 1",
+      [f.workspaceId],
+    );
+    const labelled = await f.siteCoordinator.rpc("vitally_set_case_label", {
+      p_action_id: randomUUID(),
+      p_case_id: assisted,
+      p_label_id: starterLabelId,
+      p_on: true,
+    });
+    assert.equal(labelled.error, null, "the setup labels a case");
     await f.approvedCase({ wentOver: false });
     const filed = await f.approvedCase();
     const act = (type, payload) => f.act(f.siteCoordinator, filed, type, payload);
@@ -580,7 +600,7 @@ test("the read gate against real Supabase", async (t) => {
           where schemaname='public' and qual like '%access = ''staff''%' and tablename<>'people'
           order by tablename`,
       );
-      assert.equal(rows.length, 21);
+      assert.equal(rows.length, 23);
       assert.deepEqual(rows.map((row) => row.tablename), [...CASE_TABLES]);
       for (const row of rows)
         assert.ok(row.qual.includes("cleared_workspace_id"), `${row.tablename}.${row.policyname}`);
@@ -626,7 +646,7 @@ test("the read gate against real Supabase", async (t) => {
 });
 
 // ---------------------------------------------------------------------------
-// The action gate (design D4): the six case RPCs refuse an uncleared staff
+// The action gate (design D4): the eight case RPCs refuse an uncleared staff
 // member with NOT_CLEARED (VT009) before any lookup or receipt, and a staff
 // caller acts with their effective capabilities. VT009 is not mapped yet
 // (src/contracts.mjs), so the raw SQLSTATE and message are checked.
@@ -681,6 +701,28 @@ test("the action gate against real Supabase", async (t) => {
         ["vitally_create_case", { p_action_id: randomUUID(), p_mode: "assisted", p_answers: {} }],
         ["vitally_log_contact", contactArgs({ caseId: prepared, entry: SAMPLE_CONTACT() })],
         ["vitally_edit_contact", editContactArgs({ contactId, revision: 1, entry: SAMPLE_CONTACT() })],
+        [
+          "vitally_set_case_label",
+          {
+            p_action_id: randomUUID(),
+            p_case_id: prepared,
+            p_label_id: (
+              await one(f, "select id from public.case_labels where workspace_id=$1 order by name limit 1", [
+                f.workspaceId,
+              ])
+            ).id,
+            p_on: true,
+          },
+        ],
+        [
+          "vitally_save_label",
+          {
+            p_action_id: randomUUID(),
+            p_label_id: null,
+            p_expected_revision: null,
+            p_label: { name: "Amended", color: "sky" },
+          },
+        ],
       ];
       const before = await f.stateSnapshot();
       for (const [fn, args] of calls) await refusedNotCleared(member.client, fn, args);
