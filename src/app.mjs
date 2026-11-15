@@ -31,6 +31,7 @@ import {
 import { cardsFor } from "./document-cards.mjs";
 import { FORM_FILES, draftFields } from "./draft-form.mjs";
 import { FORM_14446_FILES, draft14446Fields } from "./draft-virtual-consent.mjs";
+import { exitFormSource } from "./exit-form-source.mjs";
 import { EXIT_FORM_FILE, buildExitFormPdf, exitFormFontFields, exitFormMarks, exitFormNeedsFont } from "./exit-form.mjs";
 import {
   buildDraftPdf,
@@ -1762,13 +1763,17 @@ if (!config) {
   //
   // Staff only: built in this browser from the approval's questionnaire and
   // the case, opened in a new tab like the drafts (or offered as a link when
-  // the browser blocks the tab). Nothing is uploaded or kept.
+  // the browser blocks the tab). Nothing is uploaded or kept. What it may print
+  // is the rule in src/exit-form-source.mjs (#173): the review must be an
+  // approval with a questionnaire, and after Return to signing only the
+  // methods that still hold are ticked.
   async function viewExitForm(reviewId, by) {
     const state = controller.getState();
     if (!isStaffWindow(state.principal)) return;
     const record = state.savedCase;
-    const questionnaire = (record?.reviewerQuestionnaires ?? []).find((q) => q?.reviewId === reviewId);
-    if (!record || !questionnaire) return;
+    const review = (record?.reviews ?? []).find((r) => r?.id === reviewId);
+    const source = exitFormSource(record, review);
+    if (!record || !source) return;
     const tab = window.open("", "_blank");
     if (tab) {
       writeTab(tab, "Preparing the Exit Form…", "exit-form");
@@ -1784,7 +1789,7 @@ if (!config) {
           ? state.workspace.currentSeason
           : 2025;
       const marks = exitFormMarks(
-        questionnaire,
+        source.questionnaire,
         {
           taxYear: season,
           clientNumber: record.clientNumber ?? "",

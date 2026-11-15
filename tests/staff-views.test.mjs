@@ -2927,6 +2927,47 @@ test("review panel shows answers per version", () => {
   assert.match(html, /data-action="view-exit-form" data-review="review-1">Download Exit Form</);
 });
 
+const returnedCase = (overrides = {}) =>
+  staffCase({
+    stage: "review_approved",
+    preparationVersion: 1,
+    reviews: [reviewRow({ status: "approved", decidedAt: "2026-10-17T15:00:00.000Z" })],
+    reviewerQuestionnaires: [revQ()],
+    federalMethod: "efile",
+    stateMethod: "efile",
+    federalResult: "rejected",
+    stateResult: "accepted",
+    internalHistory: [{ id: "e1", action: "RETURN_TO_SIGNING", actorPersonId: "sam", createdAt: "2026-11-02T15:00:00.000Z", detail: {} }],
+    ...overrides,
+  });
+
+test("the Exit Form after Return to signing carries the fill-by-hand note, never the old values' source (#173)", () => {
+  const html = renderStaffCase(returnedCase(), MORGAN);
+  assert.match(html, /data-action="view-exit-form" data-review="review-1">Download Exit Form</);
+  const note = /data-role="exit-form-corrected">([^<]*)</.exec(html);
+  assert.ok(note, "the note renders");
+  assert.ok(
+    note[1].includes(
+      "Fill in by hand: the federal filing method; the federal and Pennsylvania refund or amount owed and how it is paid; Other Tax; Remarks.",
+    ),
+    note[1],
+  );
+  assert.match(html, /Exit Form, Federal<\/span><strong>E-file, refund 120\.00/);
+});
+
+test("no Return to signing, no note", () => {
+  const html = renderStaffCase(returnedCase({ internalHistory: [] }), MORGAN);
+  assert.match(html, /data-action="view-exit-form"/);
+  assert.doesNotMatch(html, /data-role="exit-form-corrected"/);
+});
+
+test("fail-safe: no staff history, no Exit Form button (#173, keep)", () => {
+  const html = renderStaffCase(returnedCase({ internalHistory: undefined }), MORGAN);
+  // The review panel still renders, so only the button's rule is at work.
+  assert.match(html, /Reviewer's answers/);
+  assert.doesNotMatch(html, /view-exit-form/);
+});
+
 test("the Exit Form's blocked-tab link has a place only on the Intake answers tab, and only for who sees the contact details (#122)", () => {
   const record = staffCase({
     stage: "review_approved",
