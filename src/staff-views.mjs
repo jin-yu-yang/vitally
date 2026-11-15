@@ -51,7 +51,7 @@ import {
   CLOSING_REASON_NAMES,
 } from "./domain.mjs";
 import { CONTACT_OUTCOMES } from "./case-actions.mjs";
-import { shadedLabel, reviewRows, PREVIEW_WARNING } from "./shaded-fields.mjs";
+import { shadedLabel, reviewRows, PREVIEW_WARNING, visibleShaded } from "./shaded-fields.mjs";
 import { SHADED_EDITOR, SHADED_UPLOAD } from "./contracts.mjs";
 import {
   CONFIRMED_BY,
@@ -1191,7 +1191,7 @@ export function shadedPanel(record, rights, ui = {}) {
       )}</div></div></div>`
     : "";
   const row = (record?.preparerShadedFields ?? [])[0] ?? null;
-  const filled = Object.keys(row?.fields ?? {}).length;
+  const filled = Object.keys(visibleShaded(row?.fields ?? {}, record?.answers ?? {}, { version: record?.intakeVersion ?? 2 })).length;
   const summary = row ? `${filled} ${filled === 1 ? "field" : "fields"} filled` : "Nothing saved yet";
   const notice = error
     ? `<div class="notice error" role="alert" id="shaded-upload-error">${icon("help")}<div><h3>${
