@@ -42,7 +42,7 @@ import {
   fieldsNeedFont,
   readFilledCopy,
 } from "./draft-pdf.mjs";
-import { readShaded, uploadRefusal } from "./shaded-fields.mjs";
+import { readShaded, shadedCaseRules, uploadRefusal } from "./shaded-fields.mjs";
 import { OPEN_FAILED, createShadedSave, editorGone, openShadedEditor } from "./shaded-editor.mjs";
 import {
   describeFocus,
@@ -1528,18 +1528,6 @@ if (!config) {
     return { bytes, reference, version };
   }
 
-  // What readShaded needs from the case: its household size (rows past it
-  // take no cell) and its season (the year rule), else the workspace's.
-  const shadedRules = (record, workspace) => {
-    const members = Array.isArray(record?.answers?.hh) ? record.answers.hh.length : 0;
-    const season = Number.isInteger(record?.season)
-      ? record.season
-      : Number.isInteger(workspace?.currentSeason)
-        ? workspace.currentSeason
-        : undefined;
-    return { form: "en", householdSize: Math.min(members, 4), season };
-  };
-
   async function downloadShadedCopy(by) {
     const state = controller.getState();
     if (!isStaffWindow(state.principal) || !state.savedCase) return;
@@ -1600,7 +1588,7 @@ if (!config) {
     // Another case was opened while the file was read: this copy was for the old one.
     const now = controller.getState();
     if (now.savedCase?.id !== record.id) return;
-    const { values, errors } = readShaded(read.raw, shadedRules(now.savedCase, now.workspace));
+    const { values, errors } = readShaded(read.raw, shadedCaseRules(now.savedCase, now.workspace));
     if (errors.length) return shadedFailure(errors.map((entry) => entry.message).join(" "));
     const refusal = uploadRefusal({ values, preview: read.preview });
     if (refusal) return shadedFailure(refusal);
@@ -1659,7 +1647,7 @@ if (!config) {
       version: Number(savedShaded(state.savedCase)?.version ?? 0),
       check: (raw) => {
         const now = controller.getState();
-        return readShaded(raw, shadedRules(now.savedCase, now.workspace));
+        return readShaded(raw, shadedCaseRules(now.savedCase, now.workspace));
       },
       save: (values, basedOnVersion) => controller.saveShadedSection(values, basedOnVersion, { from: "editor" }),
       storedVersion: () => Number(savedShaded(controller.getState().savedCase)?.version ?? 0),

@@ -6,6 +6,7 @@ import { FORM_FILES } from "../src/draft-form.mjs";
 import {
   SHADED_FIELDS, SHADED_PAIRS, shadedName, shadedNames, readShaded, checkShaded, shadedPrint, shadedLabel,
   NO_VALUES_MESSAGE, PREVIEW_SAVED_NOTE, PREVIEW_WARNING, uploadRefusal, reviewRows,
+  householdRows, visibleShaded, shadedCaseRules,
 } from "../src/shaded-fields.mjs";
 
 const read = (raw, opts) => readShaded({ [shadedName("household1QualifyingChild")]: raw }, opts);
@@ -182,4 +183,38 @@ test("reviewRows lists the values in table order with plain words", () => {
   assert.deepEqual(rows.map((r) => r.key), ["household1QualifyingChild", "incomeW2s", "incomeW2sCount", "incomeNotes"]);
   assert.deepEqual(rows.map((r) => r.value), ["N/A", "ticked", "2", "a\nb"]);
   assert.deepEqual(rows.map((r) => r.label), rows.map((r) => shadedLabel(r.key)));
+});
+
+const KEPT = [{ first_name: "Lin" }, { first_name: "Kai" }];
+const members = (n) => Array.from({ length: n }, (_, i) => ({ first_name: `M${i}` }));
+test("householdRows follows the household answer and caps at 4", () => {
+  assert.equal(householdRows({}), 0);
+  assert.equal(householdRows({ has_household_members: "no", hh: KEPT }), 0);
+  assert.equal(householdRows({ has_household_members: "yes", hh: [] }), 0);
+  assert.equal(householdRows({ has_household_members: "yes", hh: members(1) }), 1);
+  assert.equal(householdRows({ has_household_members: "yes", hh: members(3) }), 3);
+  assert.equal(householdRows({ has_household_members: "yes", hh: members(4) }), 4);
+  assert.equal(householdRows({ has_household_members: "yes", hh: members(6) }), 4);
+  assert.equal(householdRows({ has_household_members: "yes", hh: "x" }), 0);
+  assert.equal(householdRows({ has_household_members: "yes", hh: KEPT }, { version: 2 }), 2);
+});
+test("visibleShaded drops cells on hidden rows only", () => {
+  const stored = { household1QualifyingChild: "yes", household2OwnSupport: "no", household3LowIncome: "na", incomeW2s: true };
+  assert.deepEqual(visibleShaded(stored, { has_household_members: "no", hh: KEPT }), { incomeW2s: true });
+  assert.deepEqual(visibleShaded(stored, { has_household_members: "yes", hh: KEPT }),
+    { household1QualifyingChild: "yes", household2OwnSupport: "no", incomeW2s: true });
+  assert.deepEqual(visibleShaded(null, {}), {});
+});
+test("the case's rules refuse row 1 once the answer is No", () => {
+  const record = { answers: { has_household_members: "no", hh: KEPT }, intakeVersion: 2, season: 2026 };
+  const { errors } = readShaded({ [shadedName("household1QualifyingChild")]: "yes" }, shadedCaseRules(record, null));
+  assert.equal(errors.length, 1);
+  assert.match(errors[0].message, /^Row 1 has no household member/);
+});
+test("hidden stored cells never block a Save with no change", () => {
+  const stored = { household1QualifyingChild: "yes", incomeW2s: true };
+  const record = { answers: { has_household_members: "no", hh: KEPT }, intakeVersion: 2, season: 2026 };
+  const shown = visibleShaded(stored, record.answers, { version: record.intakeVersion });
+  const raw = Object.fromEntries(Object.entries(shown).map(([k, v]) => [shadedName(k), v === true ? "On" : v]));
+  assert.deepEqual(readShaded(raw, shadedCaseRules(record, null)), { values: { incomeW2s: true }, errors: [] });
 });
