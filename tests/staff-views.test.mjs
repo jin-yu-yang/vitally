@@ -42,6 +42,7 @@ import {
 import { contactSummary, contactEntryFromForm, nowInput } from "../src/contact-log.mjs";
 import { makeSampleAnswers } from "../src/sample-data.mjs";
 import { CONTACT_FIELDS, MATERIALS_ITEMS } from "../src/intake-catalogue.mjs";
+import { LABEL_COLORS } from "../src/case-labels.mjs";
 import { describeStage } from "../src/domain.mjs";
 import { CASE_ACTIONS, SHADED_EDITOR, SHADED_UPLOAD } from "../src/contracts.mjs";
 
@@ -3262,4 +3263,73 @@ test("an assignment reads with the admin, the person, the slot and who held it b
   assert.equal(historySentence(record.internalHistory[2]), "Sam Lee assigned Unknown person as reviewer.");
   // Without a slot (an undecorated entry), it still reads as words.
   assert.equal(historySentence({ action: "ASSIGN_CASE", actorName: "Sam Lee" }), "Sam Lee assigned a volunteer to the case.");
+});
+
+// Case labels: the chips and the header menu (change add-case-labels).
+const CITY = { id: "l1", name: "City Tax", color: "sky" };
+const MFS = { id: "l2", name: "MFS", color: "pink" };
+const WORKSPACE_LABELS = [
+  { ...CITY, revision: 1 },
+  { ...MFS, revision: 1 },
+  { id: "l3", name: "Multi-state", color: "amber", revision: 1 },
+];
+const labelled = (over = {}) => staffCase({ preparerId: "alex", reviewerId: "morgan", labels: [CITY], ...over });
+const ui = (menu = null) => ({ labels: WORKSPACE_LABELS, labelMenu: menu });
+
+test("the preparer sees the chip with a remove button and an add button", () => {
+  const html = caseHeader(labelled(), ALEX, null, ui());
+  assert.match(html, /data-color="sky">City Tax<button/);
+  assert.match(html, /aria-label="Remove label City Tax"/);
+  assert.match(html, /\+ Add a label/);
+  assert.match(html, /data-action="open-label-menu"/);
+});
+
+test("a volunteer who cannot label the case sees the chip only", () => {
+  const other = { id: "riley", name: "Riley", capabilities: ["prepare"] };
+  const html = caseHeader(labelled(), other, null, ui());
+  assert.match(html, /City Tax/);
+  assert.doesNotMatch(html, /toggle-case-label|open-label-menu|Add a label/);
+});
+
+test("a closed case shows the chip only, even for an admin", () => {
+  const html = caseHeader(labelled({ stage: "closed" }), SAM, null, ui({ caseId: "case-a", search: "", editing: null }));
+  assert.match(html, /City Tax/);
+  assert.doesNotMatch(html, /toggle-case-label|open-label-menu|Add a label|label-menu/);
+});
+
+test("the admin's open menu offers Create and an edit per label", () => {
+  const html = caseHeader(labelled(), SAM, null, ui({ caseId: "case-a", search: "Amended", editing: null }));
+  assert.match(html, /Create "Amended"/);
+  assert.match(html, /data-action="create-label"/);
+  const all = caseHeader(labelled(), SAM, null, ui({ caseId: "case-a", search: "", editing: null }));
+  assert.equal((all.match(/data-action="edit-label"/g) ?? []).length, WORKSPACE_LABELS.length);
+  assert.match(html, /name="label-search"/);
+  assert.match(html, /value="Amended"/);
+});
+
+test("the preparer's menu has toggles with aria-pressed and no create or edit", () => {
+  const html = caseHeader(labelled(), ALEX, null, ui({ caseId: "case-a", search: "", editing: null }));
+  assert.doesNotMatch(html, /create-label|edit-label/);
+  assert.match(html, /data-label-id="l1"[^>]*data-on="false"[^>]*aria-pressed="true"|aria-pressed="true"[^>]*data-label-id="l1"/);
+  assert.match(html, /data-label-id="l2"[^>]*aria-pressed="false"|aria-pressed="false"[^>]*data-label-id="l2"/);
+});
+
+test("a menu open for another case is not drawn", () => {
+  const html = caseHeader(labelled(), ALEX, null, ui({ caseId: "other", search: "", editing: null }));
+  assert.doesNotMatch(html, /name="label-search"/);
+});
+
+test("the label form has six color radios, the typed name and the error", () => {
+  const editing = { labelId: "l1", name: "City \"Tax\"", color: "green", error: "A label with this name already exists" };
+  const html = caseHeader(labelled(), SAM, null, ui({ caseId: "case-a", search: "", editing }));
+  const radios = [...html.matchAll(/<input[^>]*type="radio"[^>]*>/g)].map((m) => m[0]);
+  assert.deepEqual(radios.map((r) => r.match(/value="([^"]*)"/)[1]), [...LABEL_COLORS]);
+  assert.ok(radios.every((r) => /name="label-color"/.test(r)));
+  assert.equal(radios.filter((r) => /checked/.test(r)).length, 1);
+  assert.match(radios.find((r) => /checked/.test(r)), /value="green"/);
+  assert.match(html, /id="label-name"[^>]*value="City &quot;Tax&quot;"|value="City &quot;Tax&quot;"[^>]*id="label-name"/);
+  assert.match(html, /A label with this name already exists/);
+  assert.match(html, /data-action="save-label"/);
+  assert.match(html, /data-action="cancel-label-edit"/);
+  assert.doesNotMatch(html, /class="staff-form"/);
 });

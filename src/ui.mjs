@@ -1,6 +1,7 @@
 import { describeStage } from "./domain.mjs";
 import { localeOf } from "./language.mjs";
 import { t } from "./client-text.mjs";
+import { LABEL_COLORS } from "./case-labels.mjs";
 
 export const esc = (v) =>
   String(v ?? "").replace(
@@ -435,4 +436,16 @@ export function trapTarget(controls = [], active = null, shift = false) {
   if (shift && active === first) return last;
   if (!shift && active === last) return first;
   return null;
+}
+
+// A case label's chip (change add-case-labels). The color is a data attribute
+// the stylesheet maps to tokens: a stored value never reaches a style, and an
+// unknown one reads as slate. With `removeFor` set (a case id), a × removes it.
+export function labelChip({ id = "", name, color }, { removeFor = null } = {}) {
+  const shown = LABEL_COLORS.includes(color) ? color : "slate";
+  const remove =
+    removeFor == null
+      ? ""
+      : `<button type="button" class="case-label-remove" data-action="toggle-case-label" data-case-id="${esc(removeFor)}" data-label-id="${esc(id)}" data-on="false" aria-label="Remove label ${esc(name)}">×</button>`;
+  return `<span class="case-label" data-color="${shown}">${esc(name)}${remove}</span>`;
 }

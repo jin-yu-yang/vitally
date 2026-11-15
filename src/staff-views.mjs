@@ -16,11 +16,13 @@ import {
   findSubstep,
   substepTitleOf,
 } from "./intake-catalogue.mjs";
+import { canLabelCase, canManageLabels, labelNameTaken, LABEL_COLORS } from "./case-labels.mjs";
 import { formatAnswer, sendable } from "./intake-form.mjs";
 import { cardsFor, CARD_SUBSTEPS } from "./document-cards.mjs";
 import { serverAnswersV2, variantOf } from "./intake-views.mjs";
 import {
   esc,
+  labelChip,
   icon,
   button,
   fieldId,
@@ -873,8 +875,65 @@ const whoThisWindowIs = (person, principal) => {
   return name ? `Signed in as ${name}.` : NO_LINKED_VOLUNTEER;
 };
 
-export function caseHeader(record, person, principal = null) {
-  return `<section class="panel staff-header" aria-labelledby="case-title"><div class="case-title-row"><h2 id="case-title" tabindex="-1">${esc(record.reference ?? "This case")}</h2><div class="case-client-number">${esc(record.clientNumber == null ? clientNumberLabel(record) : `Client ${formatClientNumber(record.clientNumber)}`)}</div>${stageBadge(record.stage, "en", { record })}<span class="case-people">${namePill("Preparer", record.preparerId, record.preparerName, person?.id)}${namePill("Reviewer", record.reviewerId, record.reviewerName, person?.id)}</span></div>${lifecycleBar(record)}<p class="field-note">${esc(
+// The case's labels, and for those who may label it, the menu (change
+// add-case-labels). A closed case, or a viewer who cannot label it, reads the
+// chips alone.
+function labelRow(record, person, ui) {
+  const labels = record.labels ?? [];
+  const editable = canLabelCase(record, person);
+  const menu = editable && ui?.labelMenu?.caseId === record.id ? ui.labelMenu : null;
+  if (!labels.length && !editable) return "";
+  const chips = labels.map((label) => labelChip(label, editable ? { removeFor: record.id } : {})).join("");
+  const add = editable
+    ? `<button type="button" class="btn text label-add" data-action="open-label-menu" data-case-id="${esc(record.id)}" aria-haspopup="true" aria-expanded="${menu ? "true" : "false"}">+ Add a label</button>`
+    : "";
+  return `<div class="case-label-row">${chips}${add}</div>${menu ? labelMenu(record, person, ui.labels ?? [], menu) : ""}`;
+}
+
+function labelForm(editing) {
+  const radios = LABEL_COLORS.map(
+    (color) =>
+      `<label class="label-color-choice"><input type="radio" name="label-color" value="${color}"${editing.color === color ? " checked" : ""}><span class="case-label" data-color="${color}">${color}</span></label>`,
+  ).join("");
+  return `<div class="label-form" role="group" aria-label="${editing.labelId ? "Edit label" : "New label"}"><label class="label-form-name" for="label-name"><span>Label name</span><input id="label-name" name="label-name" type="text" maxlength="24" autocomplete="off" value="${esc(editing.name)}"></label><div class="label-colors" role="radiogroup" aria-label="Color">${radios}</div>${
+    editing.error ? `<p class="label-error" role="alert">${esc(editing.error)}</p>` : ""
+  }<div class="label-form-actions"><button type="button" class="btn primary" data-action="save-label">Save label</button><button type="button" class="btn text" data-action="cancel-label-edit">Cancel</button></div></div>`;
+}
+
+function labelList(record, person, labels, search) {
+  const on = new Set((record.labels ?? []).map((label) => label.id));
+  const admin = canManageLabels(person);
+  const needle = search.trim().toLowerCase();
+  const shown = labels.filter((label) => label.name.toLowerCase().includes(needle));
+  const rows = shown
+    .map((label) => {
+      const active = on.has(label.id);
+      const edit = admin
+        ? `<button type="button" class="btn text label-edit" data-action="edit-label" data-label-id="${esc(label.id)}" aria-label="Edit label ${esc(label.name)}">Edit</button>`
+        : "";
+      return `<li class="label-menu-row"><button type="button" class="label-toggle" data-action="toggle-case-label" data-case-id="${esc(record.id)}" data-label-id="${esc(label.id)}" data-on="${active ? "false" : "true"}" aria-pressed="${active}">${labelChip(label)}<span class="label-toggle-state">${active ? "On this case" : ""}</span></button>${edit}</li>`;
+    })
+    .join("");
+  const typed = search.trim();
+  const create = !admin
+    ? ""
+    : typed && !labelNameTaken(labels, typed)
+      ? `<button type="button" class="btn secondary label-create" data-action="create-label" data-name="${esc(typed)}">Create "${esc(typed)}"</button>`
+      : !typed
+        ? '<button type="button" class="btn secondary label-create" data-action="create-label">New label</button>'
+        : "";
+  return `<label class="label-search" for="label-search"><span class="sr-only">Search labels</span><input id="label-search" name="label-search" type="search" autocomplete="off" placeholder="Search labels" value="${esc(search)}"></label><ul class="label-menu-list">${rows}</ul>${
+    shown.length ? "" : '<p class="muted">No label matches.</p>'
+  }${create}`;
+}
+
+function labelMenu(record, person, labels, menu) {
+  const body = menu.editing ? labelForm(menu.editing) : labelList(record, person, labels, menu.search ?? "");
+  return `<div class="label-menu" role="group" aria-label="Labels"><div class="label-menu-head"><strong>Labels</strong><button type="button" class="btn text" data-action="close-label-menu" aria-label="Close the label menu">×</button></div>${body}</div>`;
+}
+
+export function caseHeader(record, person, principal = null, ui = {}) {
+  return `<section class="panel staff-header" aria-labelledby="case-title"><div class="case-title-row"><h2 id="case-title" tabindex="-1">${esc(record.reference ?? "This case")}</h2><div class="case-client-number">${esc(record.clientNumber == null ? clientNumberLabel(record) : `Client ${formatClientNumber(record.clientNumber)}`)}</div>${stageBadge(record.stage, "en", { record })}<span class="case-people">${namePill("Preparer", record.preparerId, record.preparerName, person?.id)}${namePill("Reviewer", record.reviewerId, record.reviewerName, person?.id)}</span></div>${labelRow(record, person, ui)}${lifecycleBar(record)}<p class="field-note">${esc(
     whoThisWindowIs(person, principal),
   )}</p></section>`;
 }
@@ -2303,7 +2362,7 @@ export function renderStaffCase(caseRecord, person, ui = {}) {
   ];
   return [
     problemNotice(view),
-    caseHeader(record, person, view.principal),
+    caseHeader(record, person, view.principal, view),
     caseTabs(panels, view.caseTab, {
       documents: (record.requests ?? []).length,
       contacts: (record.contacts ?? []).length,
