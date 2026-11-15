@@ -381,7 +381,8 @@ function commentsFor(answers, members, lang) {
  * shaded-fields.mjs) or null. Its notes are not in `text`: they come back as
  * `notes: [{ name, text, block, page }]` (`block` is the note's heading without
  * "notes", e.g. "Income") for the builder to wrap and continue; `preparerEntries`
- * is true when any shaded value is set, and words the stamp.
+ * is true when any shaded value prints (household cells on rows the client no
+ * longer shows don't print; see visibleShaded), and words the stamp.
  * Returns `{ text, checks, comments, consentPage, words, notes, preparerEntries }`, plus the `stamp`
  * and the `fileName` the builder and the page use. `words.continuedOn` keeps
  * its `{page}` for the builder, which knows the page.
