@@ -25,6 +25,7 @@ The front end **predicts** what a person may do so it can show the right buttons
 - [Feedback](#feedback)
 - [Live updates](#live-updates)
 - [The contact log](#the-contact-log)
+- [Case labels](#case-labels)
 - [Sign-in](#sign-in)
 - [Window state](#window-state)
 - [Client languages](#client-languages)
@@ -797,6 +798,42 @@ once the write lands; an edit keeps the logged time, so it re-reads only the cas
 Connection status (`online`, `reconnecting`, `offline`) comes from the channel and shows in the
 page header. On reconnect, window focus and the browser's `online` event, the
 controller refreshes.
+
+## Case labels
+
+Staff tag a case with short colored labels (City Tax, MFS, Multi-state, or their own). The database
+side is in [Database: case labels](database.md#case-labels). The rules that decide what is shown
+live in [`src/case-labels.mjs`](../../src/case-labels.mjs); the database decides what is allowed.
+
+- **`src/case-labels.mjs`** is pure: `LABEL_COLORS`, `canLabelCase(record, person)` (an `admin` or
+  `followup` person, or the case's preparer or reviewer, on a case that is not closed),
+  `canManageLabels(person)` (`admin`), `sortLabels` and `labelNameTaken` (equal ignoring case).
+- **Chips.** `labelChip` in `ui.mjs` draws a label as a colored chip. The case page header
+  (`labelRow` in `staff-views.mjs`) shows the case's chips, with a remove button
+  ("Remove label <name>") on each for a person who passes `canLabelCase`, and "+ Add a label"
+  after them. Anyone else reads the chips and gets no control. The work board and the case pool
+  show the chips read-only under the reference.
+- **The menu** (`labelMenu`, opened by `open-label-menu`, closed by `close-label-menu` or Escape,
+  which returns the keyboard to the button). A search box filters the label rows; each row is a
+  `toggle-case-label` button that adds or removes the label. An admin also sees Edit
+  (`edit-label`) on each row and, when what was typed matches no label, `Create "<text>"`
+  (`create-label`). The form (`labelForm`) has a name field and six color radios; `save-label` reads
+  them from the page, a create also puts the new label on the case, and `cancel-label-edit` goes
+  back to the list. A name the window can see is taken, a blank name and a name over 24 characters
+  are said in the form and nothing is sent.
+- **State.** The labels and the open menu (`state.labels`, `state.labelMenu`) are window-local and
+  never saved. The labels ride with the case list: `loadList` reads `store.listLabels()` for a
+  staff window. The chips on a board or pool row come from `listCases`, which joins
+  `case_labels` and the active `case_label_links`.
+- **Writes.** `controller.toggleCaseLabel` and `saveLabelEdit` call the store's
+  `setCaseLabel` and `saveLabel`. A write whose answer never came (`UNKNOWN_OUTCOME`) is kept, so
+  pressing it again sends the same action id. A `CONFLICT` re-reads the labels, and the form stays
+  open for the next save.
+- **The case pool's Label filter** (`pool-views.mjs`, `poolLabel`): a select with Any label, each
+  label, and No label. It is one of the filters "Clear filters" clears; a saved value that names a
+  label that no longer exists falls back to Any label.
+- **History.** The History tab reads "<person> added label <name>" and "<person> removed label
+  <name>".
 
 ## The contact log
 
