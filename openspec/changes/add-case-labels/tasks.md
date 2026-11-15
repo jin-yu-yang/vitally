@@ -51,9 +51,9 @@
   - style `.case-label[data-color=…]` chips, the remove button and the label menu (D8).
 - [x] 4.2 Add a shared chip renderer (`src/ui.mjs`) that maps a color name to `data-color` and never writes a style attribute. Unit test it.
 - [x] 4.3 Case header (`caseHeader`, `src/staff-views.mjs`): the chip row, remove buttons and `+ Add a label` when the person may label the case, the menu (search, toggles, the admin's create row and edit form), and the read-only chips otherwise (D10). Unit tests in `tests/staff-views.test.mjs`.
-- [ ] 4.4 Work board: chips under the reference, read-only. Unit test.
-- [ ] 4.5 Case pool (`src/pool-views.mjs`): chips under the reference; the `poolLabel` filter (`Any label`, each label, `No label`) in `DEFAULT_POOL_FILTERS`, `filterPool`, the counts and "Clear filters"; and the fallback for an unknown label (D11). Unit tests in `tests/pool-views.test.mjs`.
-- [ ] 4.6 Staff history: lines for `ADD_CASE_LABEL` and `REMOVE_CASE_LABEL` ("<person> added label <name>"). Unit test.
+- [x] 4.4 Work board: chips under the reference, read-only. Unit test.
+- [x] 4.5 Case pool (`src/pool-views.mjs`): chips under the reference; the `poolLabel` filter (`Any label`, each label, `No label`) in `DEFAULT_POOL_FILTERS`, `filterPool`, the counts and "Clear filters"; and the fallback for an unknown label (D11). Unit tests in `tests/pool-views.test.mjs`.
+- [x] 4.6 Staff history: lines for `ADD_CASE_LABEL` and `REMOVE_CASE_LABEL` ("<person> added label <name>"). Unit test.
 
 ## 5. Seed data, story and docs
 
