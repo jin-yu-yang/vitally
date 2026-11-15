@@ -24,7 +24,7 @@
   - concurrent adds;
   - unchanged `revision` and `updated_at`, including a case action at the old revision still succeeding;
   - replay, and a refusal leaving nothing.
-- [ ] 2.5 Update the shared database tests:
+- [x] 2.5 Update the shared database tests:
   - `tests/support/rpc-signatures.mjs` gets the two new RPCs;
   - the clearance tests go from 21 tables to 23, and from six RPCs to eight;
   - the catalog and policy tests include the new staff-gated policies;
