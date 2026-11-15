@@ -29,7 +29,7 @@
   - the clearance tests go from 21 tables to 23, and from six RPCs to eight;
   - the catalog and policy tests include the new staff-gated policies;
   - `tests/database-realtime.mjs` checks that staff get label changes (a removal included) and clients get none.
-- [ ] 2.6 Run `npm run db:migrate:test` on a stack that already has `main`'s migrations, then `npm run test:database`. Fix until green.
+- [x] 2.6 Run `npm run db:migrate:test` on a stack that already has `main`'s migrations, then `npm run test:database`. Fix until green.
 
 ## 3. Browser: data and actions
 
