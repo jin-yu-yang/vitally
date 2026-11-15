@@ -2104,8 +2104,8 @@ if (!config) {
         break;
       case "save-label":
         await controller.saveLabelEdit({
-          name: root.querySelector('[name="labelName"]')?.value ?? "",
-          color: root.querySelector('[name="labelColor"]:checked')?.value ?? null,
+          name: root.querySelector('[name="label-name"]')?.value ?? "",
+          color: root.querySelector('[name="label-color"]:checked')?.value ?? null,
         });
         break;
       case "cancel-label-edit":
@@ -2486,7 +2486,7 @@ if (!config) {
     } else if (field.name === "workloadSearch") {
       // The Workload and its drawer filter the same way.
       keepTyping(field, "#workload-search", () => controller.setWorkloadView({ search: field.value }));
-    } else if (field.name === "labelSearch") {
+    } else if (field.name === "label-search") {
       keepTyping(field, "#label-search", () => controller.setLabelSearch(field.value));
     } else if (field.name === "assignSearch") {
       keepTyping(field, "#assign-search", () => controller.setAssignSearch(field.value));
