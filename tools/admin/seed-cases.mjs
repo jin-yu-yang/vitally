@@ -362,6 +362,28 @@ export async function seedCases(
   for (const scenario of SEED_SCENARIOS)
     caseIdsByScenario[scenario] = await builders[scenario](scenario);
 
+  // Starter labels go on through the public RPC as the Site Coordinator, once
+  // every case has reached its stage. Only open cases are labelled.
+  for (const { scenario, labels } of values.CASE_LABEL_ASSIGNMENTS) {
+    for (const name of labels) {
+      const { rows: found } = await client.query(
+        "select id from public.case_labels where workspace_id=$1 and lower(name)=lower($2)",
+        [workspaceId, name],
+      );
+      if (!found.length)
+        throw failure(
+          "SEED_SETUP",
+          `The workspace has no case label named "${name}".`,
+        );
+      await callRpc(client, siteCoordinator.userId, "vitally_set_case_label", {
+        p_action_id: randomUUID(),
+        p_case_id: caseIdsByScenario[scenario],
+        p_label_id: found[0].id,
+        p_on: true,
+      }).catch(refused(scenario, "SET_CASE_LABEL"));
+    }
+  }
+
   // No action creates help requests, so the one help request is inserted.
   const help = values.HELP_REQUEST;
   const { rows } = await client.query(
