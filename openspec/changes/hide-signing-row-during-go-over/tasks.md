@@ -27,6 +27,6 @@
 ## 3. Docs and checks
 
 - [x] 3.1 Update `docs/developer/frontend.md` where it describes the Follow-ups signing rows: no Signing row while a go-over follow-up is open.
-- [ ] 3.2 `npm test` and `npx openspec validate --all`
-- [ ] 3.3 `npm run test:browser`, or passing CI `story` jobs on the commit with their screenshots reviewed. No database, sign-in or 繁體 check is needed: there is no SQL, sign-in or client-text change.
+- [x] 3.2 `npm test` and `npx openspec validate --all`
+- [x] 3.3 `npm run test:browser`, or passing CI `story` jobs on the commit with their screenshots reviewed. No database, sign-in or 繁體 check is needed: there is no SQL, sign-in or client-text change.
 - [ ] 3.4 Before archive: merge `main`. If PR #200 has landed, re-copy "The lists and the case page show every stage" into the case-lifecycle delta from the latest canonical text, keeping this change's edits.
