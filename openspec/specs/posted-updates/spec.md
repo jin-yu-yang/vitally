@@ -7,7 +7,7 @@ TBD - created by archiving change add-posted-updates. Update Purpose after archi
 
 ### Requirement: An update's audience is resolved live from the current season's roster
 An update SHALL have the audience `everyone` ("All volunteers") or `roles`, with a non-empty subset of `greeter`, `intaker`, `preparer`, `reviewer` and `admin`. A person SHALL be in an update's audience when all of these hold:
-- their person has an active account in the update's workspace (`accounts.status = 'active'`, capability `account-invitations`), on an active `staff` membership: an invitation not yet used, or a deactivated account, does not count;
+- their person has an active account in the update's workspace (`accounts.status = 'active'`, capability `sign-in-accounts`), on an active `staff` membership: an invitation not yet used, or a deactivated account, does not count;
 - they have a `roster_entries` row for the workspace's current season;
 - the audience is `everyone`, or that entry's roles include at least one of the update's roles.
 
