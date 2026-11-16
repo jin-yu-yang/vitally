@@ -21,4 +21,4 @@
 
 - [x] 4.1 `docs/database.md`: the save keeps hidden household cells; `household_rows` and the rule; migration 050
 - [x] 4.2 `npm test`, `npm run build:hant -- --check` (no text change expected), `npx openspec validate --all`
-- [ ] 4.3 CI on the pushed branch: `checks`, `database`, `sign-in`, `story` (both legs) green on the head commit; story screenshots reviewed
+- [x] 4.3 CI on the pushed branch: `checks`, `database`, `sign-in`, `story` (both legs) green on the head commit; story screenshots reviewed
