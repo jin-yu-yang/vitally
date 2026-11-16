@@ -408,7 +408,7 @@ test("the table has its columns, counts with bars, and the footnote", () => {
   assert.match(one, /All volunteers/);
   assert.match(one, /data-action="open-update-people" data-id="r-1" aria-label="7 of 8 read"[^>]*>7\/8 <meter min="0" max="8" value="7"/);
   assert.match(one, /aria-label="6 of 8 confirmed"[^>]*>6\/8 <meter/);
-  assert.match(html, /Read and confirmed counts show who has not seen an update yet, so you can remind them at the next shift\./);
+  assert.match(html, /Read means the person opened their Notifications panel while the update was in it\. For updates that matter, use “Ask to confirm read” and check Confirmed\./);
 });
 
 test("Not asked when the update does not ask for confirmation", () => {

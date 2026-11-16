@@ -119,3 +119,9 @@
 - [x] 9.2 `audience_member`: "has a sign-in" is an active account (047's `accounts`, `status = 'active'`), on an active staff membership (design D2).
 - [x] 9.3 Spec, design and database tests: an invitation not yet used and a deactivated account are in no audience and no count.
 - [x] 9.4 Verification: `npm test`, `npm run build:hant -- --check`, `npx openspec validate --all` locally; CI on the pushed head.
+
+## 10. Review round 3 (Zeye approved; small fixes)
+
+- [x] 10.1 `vitally_save_update` and the table check trim spaces, tabs and line breaks from both ends (`btrim` with that character set), so a title or message of only whitespace is refused. Database test.
+- [x] 10.2 The admin table's footer says what Read means and points to "Ask to confirm read" and Confirmed.
+- [x] 10.3 Follow-up issue: the feed shows only the current season's updates, built with Start next season.

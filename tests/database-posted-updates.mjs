@@ -307,6 +307,8 @@ test("posted updates against real Supabase", async (t) => {
     await t.test("validation: each field is refused with VALIDATION naming it, and nothing is stored", async () => {
       const cases = [
         ["title", update({ title: "    " })],
+        ["title", update({ title: "\n\t \r\n" })],
+        ["message", update({ message: "\n\t\n" })],
         ["title", update({ title: "x".repeat(121) })],
         ["message", update({ message: "x".repeat(2001) })],
         ["irsLink", update({ kind: "irs_policy", irsLink: "https://example.org/irs" })],
@@ -339,6 +341,24 @@ test("posted updates against real Supabase", async (t) => {
       const row = await rowOf(f, trimmed.updateId);
       assert.equal(row.title, "Padded title");
       assert.equal(row.message, "Padded message");
+      // Line breaks and tabs are trimmed from the ends too, and kept inside.
+      const broken = await draft({ title: "\n\tShift swap\r\n", message: "\tLine one\nLine two\n\n" });
+      const brokenRow = await rowOf(f, broken.updateId);
+      assert.equal(brokenRow.title, "Shift swap");
+      assert.equal(brokenRow.message, "Line one\nLine two");
+      // The table's own check refuses a title or message of only whitespace.
+      for (const column of ["title", "message"]) {
+        await f.sql("begin");
+        try {
+          await assert.rejects(
+            f.sql(`update public.posted_updates set ${column}=$2 where id=$1`, [broken.updateId, "\n\t"]),
+            (error) => error.code === "23514",
+            `${column} check`,
+          );
+        } finally {
+          await f.sql("rollback");
+        }
+      }
     });
 
     await t.test("lifecycle: save draft, POST, UNPUBLISH", async () => {

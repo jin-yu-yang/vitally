@@ -78,9 +78,9 @@ An IRS link SHALL be optional, allowed only on an `irs_policy` update, at most 5
 - **WHEN** an admin saves an office notice with an IRS link
 - **THEN** it is refused with `VALIDATION`
 
-#### Scenario: An empty title
-- **WHEN** an admin saves an update whose title is only spaces
-- **THEN** it is refused with `VALIDATION` naming the title
+#### Scenario: An empty title or message
+- **WHEN** an admin saves an update whose title or message is only spaces, tabs or line breaks
+- **THEN** it is refused with `VALIDATION` naming that field, and nothing is stored
 
 #### Scenario: A role audience with no roles
 - **WHEN** an admin saves an update with audience `roles` and no roles chosen

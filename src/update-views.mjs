@@ -384,7 +384,7 @@ function postedTable(state) {
     body = `<div class="board-table-wrap"><table class="board-table updates-table"><thead><tr><th scope="col">Update</th><th scope="col">Type</th><th scope="col">Posted</th><th scope="col">Audience</th><th scope="col">Read</th><th scope="col">Confirmed</th><th scope="col">Actions</th></tr></thead><tbody>${rows
       .map(updateRow)
       .join("")}</tbody></table></div>`;
-  return `${open}${body}<p class="board-foot">Read and confirmed counts show who has not seen an update yet, so you can remind them at the next shift.</p></section>`;
+  return `${open}${body}<p class="board-foot">Read means the person opened their Notifications panel while the update was in it. For updates that matter, use “Ask to confirm read” and check Confirmed.</p></section>`;
 }
 
 /** The Post an update screen's body: the form beside its preview, then the table. */

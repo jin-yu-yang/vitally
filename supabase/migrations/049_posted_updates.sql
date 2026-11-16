@@ -24,8 +24,10 @@ create table public.posted_updates (
  id uuid primary key default gen_random_uuid(),
  workspace_id uuid not null references public.workspaces(id) on delete cascade,
  kind text not null check (kind in ('irs_policy','office_notice')),
- title text not null check (title=btrim(title) and length(title) between 1 and 120),
- message text not null check (message=btrim(message) and length(message) between 1 and 2000),
+ -- Trimmed of spaces, tabs and line breaks, so a title of only a line break
+ -- and a tab is empty.
+ title text not null check (title=btrim(title,E' \t\n\r') and length(title) between 1 and 120),
+ message text not null check (message=btrim(message,E' \t\n\r') and length(message) between 1 and 2000),
  irs_link text check (length(irs_link)<=500 and irs_link ~* '^https://([a-z0-9-]+\.)*irs\.gov(/[^[:space:]]*)?$'),
  audience text not null check (audience in ('everyone','roles')),
  audience_roles text[] not null default '{}'
@@ -185,11 +187,11 @@ begin
  if v_kind is null or v_kind not in ('irs_policy','office_notice') then
   raise sqlstate 'VT007' using message='VALIDATION',detail='kind';
  end if;
- v_title=case when jsonb_typeof(p_update->'title')='string' then btrim(p_update->>'title') end;
+ v_title=case when jsonb_typeof(p_update->'title')='string' then btrim(p_update->>'title',E' \t\n\r') end;
  if v_title is null or length(v_title) not between 1 and 120 then
   raise sqlstate 'VT007' using message='VALIDATION',detail='title';
  end if;
- v_message=case when jsonb_typeof(p_update->'message')='string' then btrim(p_update->>'message') end;
+ v_message=case when jsonb_typeof(p_update->'message')='string' then btrim(p_update->>'message',E' \t\n\r') end;
  if v_message is null or length(v_message) not between 1 and 2000 then
   raise sqlstate 'VT007' using message='VALIDATION',detail='message';
  end if;
