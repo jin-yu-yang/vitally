@@ -4,8 +4,8 @@
 -- return is, and the staff notice no longer says "closed before filing" for a
 -- return that was filed.
 --
--- Numbered 048 after 047_accounts (#197); renamed at merge time if the order
--- changes.
+-- Numbered 048 to follow 047_accounts.sql (pull request #197), which merges
+-- first. Nothing else refers to the number.
 --
 --   * vitally_private.return_outcome (new): one return's outcome (design D1).
 --   * vitally_private.closed_line (new, five arguments): the reason, the filing
