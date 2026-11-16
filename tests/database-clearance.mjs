@@ -933,6 +933,7 @@ test("vitally_my_clearance against real Supabase", async (t) => {
         missing: [{ kind: "form13615" }],
         capabilities: [],
         isAdmin: false,
+        siteCheck: false,
         siteCoordinatorName: "Avery Lin",
       });
     });
@@ -943,17 +944,20 @@ test("vitally_my_clearance against real Supabase", async (t) => {
         missing: [],
         capabilities: ["prepare"],
         isAdmin: false,
+        siteCheck: false,
         siteCoordinatorName: "Avery Lin",
       });
     });
 
-    await t.test("the answer has exactly five keys", async () => {
+    // 047 (add-account-invitations, design D12) adds siteCheck.
+    await t.test("the answer has exactly six keys", async () => {
       const result = await myClearance(f.preparer);
       assert.deepEqual(Object.keys(result).sort(), [
         "capabilities",
         "cleared",
         "isAdmin",
         "missing",
+        "siteCheck",
         "siteCoordinatorName",
       ]);
     });

@@ -8907,8 +8907,8 @@ test(
       // Added as a new volunteer (Add ticks New volunteer) with no photo ID
       // check: not cleared, and the row says what it waits for.
       assert.equal(
-        (await rowOf(page, NAME).locator("td").nth(3).innerText()).trim(),
-        "Not cleared Photo ID check missing",
+        (await rowOf(page, NAME).locator("td").nth(4).innerText()).trim(),
+        "Not cleared Photo ID check missing, No account yet",
         "the new volunteer's Cleared column",
       );
       assert.equal((await rowNames(page)).length, staffCount + 1);
@@ -9128,7 +9128,7 @@ test(
               .join("");
           });
         const focus = {};
-        const cleared = (p) => p.locator("td").nth(3);
+        const cleared = (p) => p.locator("td").nth(4);
         const win = await engine.newPage({ viewport: DESKTOP });
         const p = win.page;
         await guardToast(p);
@@ -9177,7 +9177,7 @@ test(
             [...document.querySelectorAll("tr.volunteer-row")].some(
               (row) =>
                 row.querySelector(".volunteer-name")?.textContent.trim() === name &&
-                row.querySelectorAll("td")[3]?.textContent.trim() === "Cleared",
+                row.querySelectorAll("td")[4]?.textContent.trim() === "Cleared",
             ),
           SELF_NAME,
           ARRIVAL_MS,

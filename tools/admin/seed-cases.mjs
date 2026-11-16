@@ -467,7 +467,21 @@ export async function seedVolunteers(client, { workspaceId, actorUserId }) {
                        and v.email = any($2::text[]))`,
     [workspaceId, SEED_VALUES.SEED_VOLUNTEERS.map((v) => v.email)],
   );
+  // A seed volunteer who has since been given an account (the demo's Create
+  // account) stays as is: the save below would refuse the address.
+  const withSignIn = new Set(
+    (
+      await client.query(
+        `select lower(v.email) as email
+           from public.people p join public.volunteer_profiles v
+             on v.person_id = p.id and v.workspace_id = p.workspace_id
+          where p.workspace_id = $1 and p.user_id is not null`,
+        [workspaceId],
+      )
+    ).rows.map((row) => row.email),
+  );
   for (const volunteer of SEED_VALUES.SEED_VOLUNTEERS) {
+    if (withSignIn.has(volunteer.email.toLowerCase())) continue;
     await callRpc(client, actorUserId, "vitally_save_volunteer", {
       p_action_id: randomUUID(),
       p_volunteer_id: null,
