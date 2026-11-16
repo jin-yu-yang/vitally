@@ -132,3 +132,19 @@ The PR was rebased onto `main` (the Workload, #195, took 046), the migration bec
 - **No local database, sign-in or story runs:** the local stack is shared with other sessions, so CI stands in for them.
 - **049 was edited in place, not followed by a new migration:** it is on no shared stack and not on `main`; CI applies it to fresh stacks only.
 
+---
+
+## Review round 2 (2026-11-16)
+
+Rebased onto `main` after #197 (`047_accounts.sql`) and #200 (`048_closed_lines_after_filing.sql`) merged; the migration stays `049_posted_updates.sql`, so 001–049 run without a gap. `vitally_private.audience_member` now needs an active account (047) on an active staff membership (design D2). The resolved canonical spec diffs (`sign-in`: twenty-two RPCs; `volunteer-clearance`; `posted-updates`) were shown to and approved by the user before the push.
+
+| Check | Where | Result |
+|---|---|---|
+| `npm test` | local | 1893 / 1894. The 1 failure is the pre-existing Windows-only `tests/write-test-env.test.mjs` test, which also fails on `main` |
+| `npm run build:hant -- --check` | local | pass |
+| `npx openspec validate --all` | local | 17 / 17 |
+| `npm run build:intake` | local | nothing to write |
+| `checks`, `database`, `sign-in`, `story (chrome-client)`, `story (firefox-client)` | CI [run 43964750899](https://github.com/jin-yu-yang/vitally/actions/runs/43964750899) on `25591e2` | all pass on the first attempt (the user checked the run) |
+
+- **No local database, sign-in or story runs:** the local stack is shared with other sessions, so CI stands in for them.
+

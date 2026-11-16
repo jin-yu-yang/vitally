@@ -118,4 +118,4 @@
 - [x] 9.1 Rebase onto `main` again; the migration stays 049. Canonical spec conflicts resolved in `openspec/specs/sign-in/spec.md` (the RPC list now has main's account RPCs and these five: twenty-two in all).
 - [x] 9.2 `audience_member`: "has a sign-in" is an active account (047's `accounts`, `status = 'active'`), on an active staff membership (design D2).
 - [x] 9.3 Spec, design and database tests: an invitation not yet used and a deactivated account are in no audience and no count.
-- [ ] 9.4 Verification: `npm test`, `npm run build:hant -- --check`, `npx openspec validate --all` locally; CI on the pushed head.
+- [x] 9.4 Verification: `npm test`, `npm run build:hant -- --check`, `npx openspec validate --all` locally; CI on the pushed head.
