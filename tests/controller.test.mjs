@@ -7146,6 +7146,34 @@ test("an action refused NOT_CLEARED switches the window to the setup screen, wit
   controller.stop();
 });
 
+test("a screening start refused NOT_CLEARED switches the window to the setup screen (#193)", async () => {
+  const store = adminStaffStore({ cases: [{ id: "case-r", reference: "VT-RRRR-RRRR", stage: "received", revision: 3, answers: {} }] });
+  const { controller } = build({ store });
+  await controller.start();
+  const errorsBefore = controller.getState().errorCount;
+  store.nextClearance = { ...UNCLEARED };
+  // The automatic start is the first write once the admin opens the case.
+  store.failNext = Object.assign(new Error("Finish your setup for this season first."), { code: "NOT_CLEARED" });
+  await controller.selectCase("case-r");
+  await tick();
+  await tick();
+  const state = controller.getState();
+  assert.equal(store.writes.filter((write) => write.type === "START_SCREENING").length, 1);
+  assert.equal(state.errorCount, errorsBefore + 1, "the refusal is recorded");
+  assert.equal(state.principal.clearance.cleared, false);
+  assert.equal(state.error, null, "no inline error: the setup screen says it");
+  assert.equal(state.savedCase, null, "the case is dropped with the rest of the work");
+  assert.match(staffScreen(state), /Finish your setup for this season/);
+  // Once cleared again, opening the case starts screening as usual.
+  store.nextClearance = undefined;
+  await controller.checkClearance();
+  await controller.selectCase("case-r");
+  await tick();
+  assert.equal(store.writes.filter((write) => write.type === "START_SCREENING").length, 2);
+  assert.equal(controller.getState().savedCase.stage, "screening");
+  controller.stop();
+});
+
 test("a ceiling admin whose only role is Intaker gets Volunteers, and none of the office admin's screens", async () => {
   const store = rosterStore({
     people: [{ id: "person-sam", name: "Sam", capabilities: ["admin", "followup", "assist", "receive_documents"] }],
