@@ -3477,18 +3477,7 @@ async function runPermutation(t, roles) {
         "a Yes approval's signing row does not offer Mark ready to e-file",
       );
 
-      // ---- The class case waits for the office to go over the return -------
-      const heldRow = queueRow("signing", classReference);
-      await heldRow.waitFor({ state: "visible", timeout: RENDER_MS });
-      assert.equal(
-        (await heldRow.locator(".queue-needed").innerText()).trim(),
-        "Waiting for the office to go over the return with the client.",
-      );
-      assert.equal(
-        await heldRow.locator('[data-action="open-mark-ready-to-efile"]').count(),
-        0,
-        "Mark ready to e-file was offered before the office went over the return",
-      );
+      // ---- The class case waits for the office to go over the return: only its Call the client row shows
       // Its Call the client row opens the go-over task, whose contact form
       // starts with the purpose already chosen.
       const goOverRow = staff
@@ -3496,6 +3485,11 @@ async function runPermutation(t, roles) {
         .filter({ hasText: classReference })
         .first();
       await goOverRow.waitFor({ state: "visible", timeout: RENDER_MS });
+      assert.equal(
+        await queueRow("signing", classReference).count(),
+        0,
+        "Follow-ups listed a Signing row while the go-over was open",
+      );
       assert.match(await goOverRow.locator(".kind-pill").innerText(), /Call the client/);
       await waitForQuiet(staff);
       await goOverRow.locator('[data-action="open-log-call"]').click({ timeout: CLICK_MS });
@@ -3543,7 +3537,7 @@ async function runPermutation(t, roles) {
         )?.purpose,
         "go_over_return",
       );
-      // Logging a contact never resolves the task: the signing row still waits.
+      // Logging a contact never resolves the task: the case still has no Signing row.
       assert.equal(
         await one(fixture, "select status from public.admin_followups where id=$1", [goOverTaskId]).then(
           (task) => task.status,
