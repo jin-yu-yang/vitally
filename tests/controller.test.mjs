@@ -7621,6 +7621,80 @@ test("posted updates: CONFLICT and INVALID_TRANSITION re-read the table and keep
   controller.stop();
 });
 
+for (const status of ["posted", "unpublished"]) {
+  test(`posted updates: an edit of a ${status} update that meets CONFLICT keeps the typed text, takes the current revision, and the next save succeeds`, async () => {
+    const { store, controller } = await onUpdatesScreen({
+      postedUpdates: [postedRow("u-1", { status, revision: 3, unpublishedAt: status === "unpublished" ? "2026-11-10T14:00:00Z" : null })],
+    });
+    assert.equal(controller.editUpdate("u-1"), true);
+    const typed = { ...controller.getState().updateForm, title: "My fix", message: "My message" };
+    // Another admin saves first: the row is now at revision 4 with their text.
+    Object.assign(store.postedUpdates[0], { revision: 4, title: "Their fix", message: "Their message", editedAt: "2026-11-12T15:00:00Z" });
+    store.failSaveUpdate = domainError("CONFLICT");
+    assert.equal(await controller.saveUpdate(typed, { post: true }), null);
+    assert.equal(store.updateRequests.at(-1).expectedRevision, 3);
+    let state = controller.getState();
+    assert.equal(state.updateForm.title, "My fix", "the typed title stays");
+    assert.equal(state.updateForm.message, "My message", "the typed message stays");
+    assert.deepEqual(state.updateEditing, {
+      id: "u-1",
+      revision: 4,
+      status,
+      conflict: { title: "Their fix", message: "Their message" },
+    });
+    assert.equal(state.error, null, "said in the form, not as the banner");
+    assert.equal(state.busy, false);
+    // Saving again sends the new revision and replaces theirs.
+    const result = await controller.saveUpdate(state.updateForm, { post: true });
+    assert.notEqual(result, null);
+    const sent = store.updateRequests.at(-1);
+    assert.equal(sent.expectedRevision, 4);
+    assert.equal(sent.updateId, "u-1");
+    assert.equal(sent.update.title, "My fix");
+    assert.equal(sent.update.post, status === "posted", "an unpublished update is never posted by its save");
+    state = controller.getState();
+    assert.equal(state.updateEditing, null);
+    assert.equal(state.error, null);
+    controller.stop();
+  });
+}
+
+test("posted updates: Cancel after a CONFLICT drops the typed text and leaves the other admin's version", async () => {
+  const { store, controller } = await onUpdatesScreen();
+  controller.editUpdate("u-1");
+  Object.assign(store.postedUpdates[0], { revision: 4, title: "Their fix" });
+  store.failSaveUpdate = domainError("CONFLICT");
+  await controller.saveUpdate({ ...controller.getState().updateForm, title: "My fix" }, { post: true });
+  assert.equal(controller.getState().updateEditing.conflict.title, "Their fix");
+  const saves = callCount(store, "saveUpdate");
+  controller.cancelUpdateEdit();
+  const state = controller.getState();
+  assert.deepEqual(state.updateForm, emptyUpdateForm());
+  assert.equal(state.updateEditing, null);
+  assert.equal(state.postedUpdates.find((row) => row.id === "u-1").title, "Their fix");
+  assert.equal(callCount(store, "saveUpdate"), saves, "nothing is saved");
+  controller.stop();
+});
+
+test("posted updates: a CONFLICT on an edit whose update is gone, or whose table can't be read, says so in the banner", async () => {
+  const { store, controller } = await onUpdatesScreen();
+  controller.editUpdate("u-1");
+  store.postedUpdates = [];
+  store.failSaveUpdate = domainError("CONFLICT");
+  await controller.saveUpdate({ ...controller.getState().updateForm }, { post: true });
+  let state = controller.getState();
+  assert.equal(state.error.message, "Someone changed this update. Check the table and try again.");
+  assert.equal(state.updateEditing.conflict, undefined);
+  store.postedUpdates = [postedRow("u-1", { revision: 5 })];
+  store.failSaveUpdate = domainError("CONFLICT");
+  store.failPosted = domainError("OFFLINE");
+  await controller.saveUpdate({ ...controller.getState().updateForm }, { post: true });
+  state = controller.getState();
+  assert.equal(state.updateEditing.revision, 3, "no revision is taken without reading it");
+  assert.equal(state.updateEditing.conflict, undefined);
+  controller.stop();
+});
+
 test("posted updates: a VALIDATION refusal names its field in the form, in the form's words", async () => {
   const { store, controller } = await onUpdatesScreen();
   store.failSaveUpdate = domainError("VALIDATION", "irsLink");

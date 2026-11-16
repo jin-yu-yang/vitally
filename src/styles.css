@@ -6255,6 +6255,18 @@ html:lang(zh-Hant) {
   color: var(--vt-muted);
   margin-left: 6px;
 }
+/* Another admin's version after a save conflict: their message keeps its
+   line breaks, and a long one wraps instead of widening the form. */
+.update-conflict p + p {
+  margin-top: 6px;
+}
+.update-conflict .update-conflict-message {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.update-conflict p span {
+  font-weight: 600;
+}
 .update-form fieldset {
   margin: 0 0 22px;
   padding: 0;

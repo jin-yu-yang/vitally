@@ -125,3 +125,8 @@
 - [x] 10.1 `vitally_save_update` and the table check trim spaces, tabs and line breaks from both ends (`btrim` with that character set), so a title or message of only whitespace is refused. Database test.
 - [x] 10.2 The admin table's footer says what Read means and points to "Ask volunteers to confirm they have read it" and Confirmed.
 - [x] 10.3 Follow-up issue: the feed shows only the current season's updates, built with Start next season.
+
+## 11. Review round 4 (jin-yu-yang's second review)
+
+- [x] 11.1 A save refused with `CONFLICT` while editing reads the table again, keeps the typed fields, takes the update's current revision and status, and shows "Another admin changed this update" with their current title and message. Saving again replaces their version; Cancel leaves it. For draft, posted and unpublished edits. The database revision check is unchanged. Controller tests (conflict → typed text kept → the next save succeeds, for posted and unpublished; Cancel; update gone or table unreadable) and a view test.
+- [x] 11.2 Spec: "Ask everyone to read it again" moved back under the posted-edit requirement; the Post an update screen's requirement says what a conflict does. The volunteer-roster spec's `vitally_policy` requirement names its four functions (delta `specs/volunteer-roster/spec.md`).

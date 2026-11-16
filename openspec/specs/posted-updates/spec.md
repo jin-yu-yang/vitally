@@ -131,6 +131,10 @@ Saving changes to a posted update SHALL keep it posted and record that it was ed
 - **WHEN** an update has 6 confirmations, and an admin fixes a typo without ticking the checkbox
 - **THEN** it still has 6 confirmations, and the panel marks it "Edited"
 
+#### Scenario: Ask everyone to read it again
+- **WHEN** an admin edits a posted update with "Ask everyone to read it again" ticked
+- **THEN** it has no reads or confirmations, and it is unread in every audience member's feed
+
 ### Requirement: An admin can edit an unpublished update, and it stays unpublished
 A ceiling admin SHALL be able to save changes to an unpublished update, with the same fields as a posted one, so a mistake (for example a client's name) can be fixed after Unpublish. The save SHALL record the edit, keep the update unpublished and keep its unpublished time, its posted time and every read and confirmation. `post` SHALL change nothing, and "Ask everyone to read it again" (`askAgain`) SHALL be refused with `VALIDATION` naming `askAgain`. The revision check and the receipt replay SHALL apply as for any write. The edited update SHALL stay out of every feed.
 
@@ -149,10 +153,6 @@ A ceiling admin SHALL be able to save changes to an unpublished update, with the
 #### Scenario: A stale or replayed edit of an unpublished update
 - **WHEN** an admin saves an unpublished update with a stale revision, and then replays a successful save's action id
 - **THEN** the stale save is refused with `CONFLICT`, and the replay returns the first result without a second change
-
-#### Scenario: Ask everyone to read it again
-- **WHEN** an admin edits that update with "Ask everyone to read it again" ticked
-- **THEN** it has no reads or confirmations, and it is unread in every audience member's feed
 
 ### Requirement: The feed returns the caller's posted updates in one item shape
 `vitally_my_updates()` SHALL return, for a `staff` caller (cleared or not), the posted updates whose audience includes the caller, and the badge count. A client SHALL be refused with `FORBIDDEN`; an anonymous caller SHALL have no execute grant.
@@ -277,11 +277,15 @@ A ceiling admin, cleared or not, SHALL have a "Post an update" link in the sideb
 - "Ask volunteers to confirm they have read it";
 - Save draft and Post update.
 
-A Preview SHALL show the update as volunteers will see it, updated as the admin types, with a line naming the audience and whether confirmation is asked. When an existing update is edited, the form SHALL be filled with it and SHALL offer Cancel. A posted update's form SHALL also offer "Ask everyone to read it again". A successful save SHALL clear the form and show a confirmation message. A failed save SHALL keep what was typed.
+A Preview SHALL show the update as volunteers will see it, updated as the admin types, with a line naming the audience and whether confirmation is asked. When an existing update is edited, the form SHALL be filled with it and SHALL offer Cancel. A posted update's form SHALL also offer "Ask everyone to read it again". A successful save SHALL clear the form and show a confirmation message. A failed save SHALL keep what was typed. When an edit is refused with `CONFLICT` because another admin saved the update first, the screen SHALL read the update again, keep what was typed, take the update's current revision and status for the next save, and say "Another admin changed this update" with their current title and message. Saving again SHALL replace their version with the typed one; Cancel SHALL leave theirs. This SHALL hold for draft, posted and unpublished edits.
 
 #### Scenario: Post an update
 - **WHEN** an admin fills in an IRS policy update to All volunteers that asks for confirmation, and presses Post update
 - **THEN** it is posted, the form is cleared, a message says it was posted, and it appears at the top of the Posted updates table
+
+#### Scenario: Another admin saved first
+- **WHEN** two admins edit the same posted or unpublished update, the first saves, and then the second saves
+- **THEN** the second save is refused, the second admin's text stays in the form beside the first admin's title and message, and saving again replaces the first admin's version
 
 #### Scenario: The preview follows the form
 - **WHEN** an admin types a title

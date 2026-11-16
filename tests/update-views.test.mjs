@@ -296,6 +296,32 @@ test("editing an unpublished update says it stays unpublished, offers Save chang
   assert.doesNotMatch(posted, /update-unpublished-note/);
 });
 
+test("after a save conflict the form keeps the typed text and shows the other admin's title and message", () => {
+  const html = renderPostUpdatePage(
+    adminState({
+      updateForm: { ...emptyUpdateForm(), title: "My title", message: "My message" },
+      updateEditing: {
+        id: "r-1",
+        revision: 4,
+        status: "posted",
+        conflict: { title: "Their <title>", message: "Line one\nLine two" },
+      },
+    }),
+  );
+  assert.match(
+    html,
+    /<div class="notice amber update-conflict" role="alert" id="update-conflict-note">[\s\S]*?<strong>Another admin changed this update\.<\/strong> Your text is still in the form\. Saving again replaces their version with yours; Cancel keeps theirs\.<\/p>/,
+  );
+  assert.match(html, /<p class="update-conflict-title"><span>Their title:<\/span> Their &lt;title&gt;<\/p>/);
+  assert.match(html, /<p class="update-conflict-message"><span>Their message:<\/span> Line one\nLine two<\/p>/);
+  assert.match(html, /id="update-title"[^>]*value="My title"/);
+  assert.match(html, />My message<\/textarea>/);
+  assert.match(html, /data-action="cancel-update-edit"[^>]*>Cancel<\/button>/);
+  // No conflict, no note.
+  const plain = renderPostUpdatePage(adminState({ updateEditing: { id: "r-1", revision: 3, status: "posted" } }));
+  assert.doesNotMatch(plain, /update-conflict-note/);
+});
+
 test("editing a draft keeps Save draft and Post update, with Cancel, and no ask-again box", () => {
   const html = renderPostUpdatePage(adminState({ updateEditing: { id: "r-1", revision: 1, status: "draft" } }));
   assert.match(html, /Edit update/);

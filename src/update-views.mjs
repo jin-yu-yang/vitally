@@ -220,6 +220,10 @@ const checkRow = (id, name, on, title, hint) =>
 export const UNPUBLISHED_EDIT_NOTE =
   "This update is unpublished. Saving changes keeps it unpublished: volunteers don't see it, and it doesn't come back to their feed.";
 
+export const UPDATE_CONFLICT_HEADING = "Another admin changed this update.";
+export const UPDATE_CONFLICT_NOTE =
+  "Your text is still in the form. Saving again replaces their version with yours; Cancel keeps theirs.";
+
 function updateForm(state) {
   const form = { ...emptyUpdateForm(), ...(state.updateForm ?? {}) };
   const errors = state.updateFormError ?? null;
@@ -237,6 +241,16 @@ function updateForm(state) {
     : "";
   const unpublishedNote = editingUnpublished
     ? `<p class="notice amber" role="note" id="update-unpublished-note">${icon("help")}<span>${esc(UNPUBLISHED_EDIT_NOTE)}</span></p>`
+    : "";
+  // Another admin saved first: their title and message as they are now, so
+  // this admin can decide whether to replace them.
+  const conflict = editing?.conflict ?? null;
+  const conflictNote = conflict
+    ? `<div class="notice amber update-conflict" role="alert" id="update-conflict-note">${icon("help")}<div><p><strong>${esc(
+        UPDATE_CONFLICT_HEADING,
+      )}</strong> ${esc(UPDATE_CONFLICT_NOTE)}</p><p class="update-conflict-title"><span>Their title:</span> ${esc(
+        conflict.title,
+      )}</p><p class="update-conflict-message"><span>Their message:</span> ${esc(conflict.message)}</p></div></div>`
     : "";
   const fields = `${kindChoices(form, errors)}<label class="field" for="update-title"><span>Title</span><input type="text" id="update-title" name="title" maxlength="120" autocomplete="off" value="${esc(
     form.title,
@@ -278,7 +292,7 @@ function updateForm(state) {
   const actions = `<div class="update-actions">${when(editing, button("Cancel", "cancel-update-edit", "text"))}${submits}</div>`;
   return `<section class="panel update-form-panel" aria-labelledby="update-form-title"><h2 id="update-form-title">${
     editing ? "Edit update" : "New update"
-  }</h2><form id="update-form" class="update-form" novalidate>${formError}${unpublishedNote}${fields}${actions}</form></section>`;
+  }</h2><form id="update-form" class="update-form" novalidate>${formError}${conflictNote}${unpublishedNote}${fields}${actions}</form></section>`;
 }
 
 /**

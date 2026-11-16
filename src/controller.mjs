@@ -123,6 +123,7 @@ export const VOLUNTEER_CONFLICT_MESSAGE = STAFF_VOLUNTEER_CONFLICT_MESSAGE;
 // the form keeps what was typed. Staff-only, so named STAFF_.
 const STAFF_UPDATE_CONFLICT_MESSAGE = "Someone changed this update. Check the table and try again.";
 const STAFF_UPDATE_TRANSITION_MESSAGE = "This update can no longer be changed.";
+const EDITABLE_UPDATE_STATUSES = Object.freeze(["draft", "posted", "unpublished"]);
 const STAFF_UPDATE_GONE_MESSAGE = "This update is no longer in the table.";
 const STAFF_UPDATE_FORM_MESSAGE = "Please check the update and try again.";
 const UPDATE_ACTIONS = Object.freeze(["POST", "UNPUBLISH", "DELETE"]);
@@ -1398,7 +1399,7 @@ export function createController({
   // unpublished one stays unpublished).
   function editUpdate(id) {
     const row = state.postedUpdates.find((entry) => entry?.id === id);
-    if (!row || !["draft", "posted", "unpublished"].includes(row.status)) return false;
+    if (!row || !EDITABLE_UPDATE_STATUSES.includes(row.status)) return false;
     state.updateForm = {
       kind: row.kind,
       title: String(row.title ?? ""),
@@ -1458,6 +1459,33 @@ export function createController({
     noteFailure(error, message ? { message } : undefined);
     await readPostedUpdates().catch(() => {});
     show();
+  }
+
+  // An edit refused because another admin changed the update first. The form
+  // keeps what this admin typed and now carries the update's current revision
+  // and status, with their title and message beside it (`conflict`): saving
+  // again replaces their version, Cancel leaves it. Without this every retry
+  // sent the stale revision and met the same CONFLICT. False when the table
+  // can't be read again, the update is gone or can no longer be edited, or
+  // the form has moved on to something else meanwhile.
+  async function takeUpdateConflict(id) {
+    try {
+      await readPostedUpdates();
+    } catch {
+      return false;
+    }
+    const row = state.postedUpdates.find((entry) => entry?.id === id);
+    if (!row || !EDITABLE_UPDATE_STATUSES.includes(row.status) || state.updateEditing?.id !== id) return false;
+    state.updateEditing = {
+      id,
+      revision: Number(row.revision),
+      status: row.status,
+      conflict: { title: String(row.title ?? ""), message: String(row.message ?? "") },
+    };
+    state.updateFormError = null;
+    state.error = null;
+    show();
+    return true;
   }
 
   // After a write landed: the table and the feed (the admin may be in the
@@ -1526,6 +1554,7 @@ export function createController({
         show();
         return null;
       }
+      if (error?.code === "CONFLICT" && editing && (await takeUpdateConflict(editing.id))) return null;
       await noteUpdateFailure(error);
       return null;
     }
@@ -3995,7 +4024,12 @@ export function createController({
       notificationsFresh: [...state.notificationsFresh],
       postedUpdates: state.postedUpdates.map((entry) => ({ ...entry })),
       updateForm: copyUpdateForm(state.updateForm),
-      updateEditing: state.updateEditing ? { ...state.updateEditing } : null,
+      updateEditing: state.updateEditing
+        ? {
+            ...state.updateEditing,
+            ...(state.updateEditing.conflict ? { conflict: { ...state.updateEditing.conflict } } : {}),
+          }
+        : null,
       updateFormError: state.updateFormError ? { ...state.updateFormError } : null,
       draftAnswers: { ...state.draftAnswers },
       revealed: [...state.revealed],
