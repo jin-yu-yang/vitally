@@ -18,7 +18,7 @@
 
 ## 2. Browser story
 
-- [ ] 2.1 In `tests/browser.mjs` (the class case's go-over, about line 3480), replace the `heldRow` assertions:
+- [x] 2.1 In `tests/browser.mjs` (the class case's go-over, about line 3480), replace the `heldRow` assertions:
   - once the Call the client row is visible, Follow-ups shows no `signing` row for the class case;
   - update the "the signing row still waits" comment after the contact is logged: logging a contact still leaves the Signing row out.
 
