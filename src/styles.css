@@ -3197,8 +3197,16 @@ textarea::placeholder {
 }
 
 /* ---- Follow-ups: the office queue ---- */
+/* The Invite a client panel sits under the queue as a card of the same shape. */
+.invite-client {
+  margin-top: 16px;
+}
+.invite-client .section-head {
+  margin-bottom: 12px;
+}
 .office-queue,
-.case-pool {
+.case-pool,
+.invite-client {
   padding: 20px 22px;
   border-color: var(--vt-line);
   border-radius: var(--vt-radius);
@@ -3214,7 +3222,8 @@ textarea::placeholder {
   align-items: baseline;
   gap: 4px 10px;
 }
-.office-queue .section-head h2 {
+.office-queue .section-head h2,
+.invite-client .section-head h2 {
   font-size: 17px;
   letter-spacing: 0;
 }

@@ -10,10 +10,11 @@ import { openDatabase } from "../tools/admin/database.mjs";
 // reach. Every check reads the catalog over a plain connection; the refused
 // inserts run in a transaction that is rolled back.
 
-// The row-security policies at 044, one per table, by table and name. 043
+// The row-security policies at 047, one per table, by table and name. 043
 // renames the sixteen staff-only policies and drops or adds none; 044 adds the
-// three admin-only Roster policies.
+// three admin-only Roster policies; 047 adds the admin-only accounts policy.
 const POLICIES = Object.freeze([
+  ["accounts", "admin_accounts"],
   ["admin_followups", "staff_admin_followups"],
   ["assistance_items", "staff_assistance_items"],
   ["case_contacts", "visible_case_contacts"],
@@ -42,7 +43,7 @@ const POLICIES = Object.freeze([
   ["volunteer_profiles", "admin_volunteer_profiles"],
   ["workspaces", "member_workspace"],
 ]);
-// The eight public RPCs after 045, by name and identity arguments.
+// The seventeen public RPCs after 047, by name and identity arguments.
 const RPCS = Object.freeze([
   "vitally_apply_action(p_action_id uuid, p_case_id uuid, p_expected_revision bigint, p_type text, p_payload jsonb)",
   "vitally_assistance_action(p_action_id uuid, p_item_id uuid, p_expected_revision bigint, p_type text, p_note text)",
@@ -52,6 +53,27 @@ const RPCS = Object.freeze([
   "vitally_edit_contact(p_action_id uuid, p_contact_id uuid, p_expected_revision bigint, p_entry jsonb)",
   "vitally_save_volunteer(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_volunteer jsonb)",
   "vitally_my_clearance()",
+  "vitally_prepare_account(p_action_id uuid, p_op text, p_target jsonb)",
+  "vitally_record_account(p_action_id uuid, p_op text, p_target jsonb, p_user_id uuid)",
+  "vitally_deactivate_account(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)",
+  "vitally_reactivate_account(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)",
+  "vitally_client_invitations()",
+  "vitally_cancel_invitation(p_action_id uuid, p_target jsonb, p_expected_revision bigint)",
+  "vitally_expire_invitations()",
+  "vitally_complete_site_check(p_name text, p_sidn text)",
+  "vitally_activate_client_account()",
+]);
+// The public RPCs that only read: no action id, no digest.
+// The RPCs that take no action id and store no digest: the reads, and (047,
+// design D11, D12, D15) the expiry sweep, the caller's own site check and a
+// client's first-read activation, whose repeat is harmless or judged afresh.
+const READ_ONLY_RPCS = Object.freeze([
+  "vitally_activate_client_account",
+  "vitally_client_invitations",
+  "vitally_complete_site_check",
+  "vitally_expire_invitations",
+  "vitally_my_clearance",
+  "vitally_prepare_account",
 ]);
 // The signatures 043 drops by name.
 const OLD_SIGNATURES = Object.freeze([
@@ -146,7 +168,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
     });
 
-    await t.test("the public API is exactly eight RPCs", async () => {
+    await t.test("the public API is exactly seventeen RPCs", async () => {
       const { rows } = await sql(
         `select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as signature
            from pg_proc p where p.pronamespace='public'::regnamespace`,
@@ -175,6 +197,44 @@ test("the catalog after the sample-case tools and presenter access are removed",
       }
     });
 
+    // 047 (review round 2, design D15): membership_in_use and the first-use
+    // trigger name the foreign keys to memberships by hand, so a new table that
+    // refers to a membership must be added to both. The person's link and the
+    // account are the two that an unclaimed invitation may have. Schemas named
+    // test_hold_ are the accounts test's own, dropped when it ends.
+    await t.test("membership_in_use and the first-use trigger cover every foreign key to memberships", async () => {
+      const keys = await sql(
+        `select c.conrelid::regclass::text as rel, a.attname as col
+           from pg_constraint c
+           join pg_class r on r.oid=c.conrelid
+           join pg_namespace n on n.oid=r.relnamespace
+           cross join lateral unnest(c.conkey) k(attnum)
+           join pg_attribute a on a.attrelid=c.conrelid and a.attnum=k.attnum
+          where c.contype='f' and c.confrelid='public.memberships'::regclass
+            and a.attname<>'workspace_id' and n.nspname not like 'test\\_hold\\_%'`,
+      );
+      const keyed = keys.rows.map((row) => `${row.rel}.${row.col}`).sort(byText);
+      const unclaimed = ["accounts.user_id", "people.user_id"];
+      for (const key of unclaimed) assert.ok(keyed.includes(key), key);
+      const inUse = keyed.filter((key) => !unclaimed.includes(key));
+      assert.equal(inUse.length, new Set(inUse).size, "one key per column");
+
+      const source = await sql(
+        "select prosrc from pg_proc where oid='vitally_private.membership_in_use(uuid,uuid)'::regprocedure",
+      );
+      const checked = [
+        ...source.rows[0].prosrc.matchAll(/from public\.(\w+) where workspace_id=p_workspace_id and (\w+)=p_user_id/g),
+      ].map(([, rel, col]) => `${rel}.${col}`);
+      assert.deepEqual(checked.sort(byText), inUse, "membership_in_use");
+
+      const triggers = await sql(
+        `select tgrelid::regclass::text as rel, pg_get_triggerdef(oid) as def
+           from pg_trigger where tgname='vitally_client_account_used'`,
+      );
+      const used = triggers.rows.map((row) => `${row.rel}.${row.def.match(/client_account_used\('(\w+)'\)/)?.[1]}`);
+      assert.deepEqual(used.sort(byText), inUse, "vitally_client_account_used");
+    });
+
     await t.test("private entry points are not callable by clients", async () => {
       for (const signature of [
         "vitally_private.acting_person(public.memberships)",
@@ -194,8 +254,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
         "select p.proname, p.prosrc from pg_proc p where p.pronamespace='public'::regnamespace order by 1",
       );
       assert.equal(rows.length, RPCS.length);
-      // vitally_my_clearance only reads: it takes no action id and stores no digest.
-      for (const row of rows.filter((entry) => entry.proname !== "vitally_my_clearance"))
+      for (const row of rows.filter((entry) => !READ_ONLY_RPCS.includes(entry.proname)))
         assert.match(row.prosrc, /'personId',\s*v_person\.id/, row.proname);
     });
 
