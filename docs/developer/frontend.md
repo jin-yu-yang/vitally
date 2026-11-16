@@ -619,7 +619,9 @@ sends its payload through `payloadFor` (`{confirmed: true}` for "Mark ready to e
 `adminEligibility` (`admin-views.mjs`) allows the first only for an admin on a `review_approved` case
 whose reviewer has recorded a completed call with the client (the database checks the same), and
 the second only for an admin on a `ready_to_efile` case. The Follow-ups signing and e-filing rows
-offer the same two marks, selecting the case in place.
+offer the same two marks, selecting the case in place. While a `go_over_return` follow-up is open,
+Follow-ups lists no signing row for the case: its Call the client row stands for it until the task
+is resolved or cancelled (#177).
 
 After E-filed, three more admin buttons record the IRS's and Pennsylvania's answers by hand
 (nothing is sent to either). "Mark e-filed…" asks how each return was filed with four choices

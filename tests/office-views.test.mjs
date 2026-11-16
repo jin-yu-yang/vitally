@@ -178,12 +178,12 @@ test("Follow-ups shows new applications, screening, signing and e-filing", () =>
     assert.match(waiting, /Waiting for the reviewer&#39;s call with the client\./); // esc() writes ' as &#39;
     assert.doesNotMatch(waiting, /Waiting for the client to sign\./);
   }
-  // D13: the reviewer's call is done but the office has not gone over the return.
-  const over = renderFollowups([{ ...rec("G", "review_approved"), goOverOpen: true }], [], ui);
-  assert.doesNotMatch(over, /open-mark-ready-to-efile/);
-  assert.match(over, /Waiting for the office to go over the return with the client\./);
-  assert.match(over, /The office still needs to go over the return with the client\./);
-  assert.doesNotMatch(over, /Waiting for the client to sign\./);
+  // #177: while the office's go-over is open, the case is its Call the client row alone.
+  const over = renderFollowups([{ ...rec("G", "review_approved"), goOverOpen: true, openFollowups: 1 }], [], ui);
+  assert.doesNotMatch(over, /data-kind="signing"/);
+  assert.doesNotMatch(over, /Waiting for the office to go over the return with the client\./);
+  assert.match(rowOf(over, "G"), /1 open task/);
+  assert.match(rowOf(over, "G"), /data-action="open-log-call"/);
   const overDone = renderFollowups([{ ...rec("G", "review_approved"), goOverOpen: false }], [], ui);
   assert.match(overDone, /Waiting for the client to sign\./);
   assert.match(overDone, /open-mark-ready-to-efile/);
@@ -209,6 +209,22 @@ test("Follow-ups shows new applications, screening, signing and e-filing", () =>
   );
   assert.match(signing, /data-kind="signing"/);
   assert.doesNotMatch(signing, /data-kind="intake"/);
+});
+
+test("an open go-over hides the Signing row, whatever else the case waits on (#177)", () => {
+  const kinds = (record) => followupQueue([kase(record)], [], NOW).map((row) => row.kind).sort();
+  const base = { id: "g", stage: "review_approved", reviewContactStatus: "completed", goOverOpen: true, openFollowups: 1 };
+  assert.deepEqual(kinds(base), ["call"]);
+  assert.deepEqual(kinds({ ...base, reviewContactStatus: "pending" }), ["call"]);
+  assert.deepEqual(kinds({ ...base, federalMethod: "efile" }), ["call"]);
+  assert.deepEqual(kinds({ ...base, openFollowups: 2 }), ["call"]);
+  assert.match(rowOf(page([kase({ ...base, openFollowups: 2 })]), "g"), /2 open tasks/);
+  assert.deepEqual(kinds({ ...base, goOverOpen: false }), ["call", "signing"]);
+  assert.deepEqual(kinds({ ...base, goOverOpen: undefined, openFollowups: 0 }), ["signing"]);
+  const counts = queueCounts(followupQueue([kase(base)], [], NOW), officeFilters({}));
+  assert.equal(counts.signing, 0);
+  assert.equal(counts.call, 1);
+  assert.equal(counts.all, 1);
 });
 
 test("an unclaimed row offers a reminder to the office and a reason to everyone else", () => {
