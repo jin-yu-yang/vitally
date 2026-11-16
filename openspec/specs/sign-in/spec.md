@@ -85,7 +85,15 @@ For a `staff` member, every public RPC that acts on the workspace SHALL act as t
 - `vitally_log_contact(p_action_id uuid, p_case_id uuid, p_followup_id uuid, p_entry jsonb)`;
 - `vitally_edit_contact(p_action_id uuid, p_contact_id uuid, p_expected_revision bigint, p_entry jsonb)`;
 - `vitally_save_volunteer(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_volunteer jsonb)`, whose volunteer argument names the volunteer being edited, never the actor;
-- `vitally_my_clearance()`.
+- `vitally_my_clearance()`;
+- `vitally_prepare_account(p_action_id uuid, p_op text, p_target jsonb)`;
+- `vitally_record_account(p_action_id uuid, p_op text, p_target jsonb, p_user_id uuid)`, whose user argument names the auth user being given an account, never the actor;
+- `vitally_deactivate_account(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)` and `vitally_reactivate_account(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)`, whose volunteer argument names the volunteer whose account changes, never the actor;
+- `vitally_client_invitations()`;
+- `vitally_cancel_invitation(p_action_id uuid, p_target jsonb, p_expected_revision bigint)`, whose target names the volunteer or client whose invitation is cancelled, never the actor;
+- `vitally_expire_invitations()`;
+- `vitally_complete_site_check(p_name text, p_sidn text)`, which acts on the caller's own account;
+- `vitally_activate_client_account()`, which acts on a client caller's own account.
 
 None of them SHALL take a person parameter. Each SHALL be executable by `authenticated` and by no other client role.
 
@@ -113,7 +121,7 @@ The acting person SHALL be resolved before the request digest and the receipt, s
 
 #### Scenario: The old signatures are gone
 - **WHEN** the database catalog is read
-- **THEN** no public function takes `p_person_id`, and `public` holds exactly these eight RPCs, each with execute granted to `authenticated` only
+- **THEN** no public function takes `p_person_id`, and `public` holds exactly these thirteen RPCs, each with execute granted to `authenticated` only
 
 ### Requirement: A client acts with no person
 An `applicant` SHALL act with no person. The RPCs take no person parameter, so a client's request SHALL have no way to name one. Clients' behaviour SHALL NOT otherwise change.
@@ -190,7 +198,7 @@ The roster command SHALL never print an email address.
 - **THEN** the workspace's people are exactly its staff members; it has no Alex, Morgan or Sam
 
 ### Requirement: A roster needs staff and a default follow-up person
-A roster SHALL list at least one staff member and SHALL name a `defaultFollowup`. A roster that still has a `presenters` list SHALL be accepted, and the command SHALL print "presenters is no longer used and was ignored; those addresses get no access." It SHALL create no account and no membership for those addresses. A workspace SHALL work for its staff and clients.
+A roster SHALL list at least one staff member and SHALL name a `defaultFollowup`. A roster MAY give the site's SIDN as `siteNumber` (`S` and eight digits; spaces, hyphens and letter case ignored), which the command stores as the workspace's site number for the volunteer site check (capability `sign-in-accounts`); any other value SHALL stop the command with "siteNumber must be the site's SIDN: S followed by eight digits." A roster that still has a `presenters` list SHALL be accepted, and the command SHALL print "presenters is no longer used and was ignored; those addresses get no access." It SHALL create no account and no membership for those addresses. A workspace SHALL work for its staff and clients.
 
 #### Scenario: A staff roster
 - **WHEN** a roster lists staff members and clients and a `defaultFollowup` naming a staff member with `followup`

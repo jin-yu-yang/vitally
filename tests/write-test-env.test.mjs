@@ -67,6 +67,7 @@ test("the written configuration is one the local target guard accepts", () => {
     VITALLY_TEST_DATABASE_URL: STATUS.DB_URL,
     VITALLY_TARGET_MANIFEST: OPTIONS.manifestPath,
     VITALLY_TEST_LOCAL_INSTANCE_ID: "vitally-ci",
+    VITALLY_TEST_MAIL_URL: STATUS.MAILPIT_URL,
   });
   assert.deepEqual(manifest, {
     version: 1,
@@ -99,6 +100,16 @@ test("the older key names are used when the new ones are absent", () => {
   const { env } = testConfigFromStatus(older, OPTIONS);
   assert.equal(env.VITALLY_TEST_PUBLISHABLE_KEY, STATUS.ANON_KEY);
   assert.equal(env.VITALLY_TEST_ADMIN_KEY, STATUS.SERVICE_ROLE_KEY);
+});
+
+test("writes the mail catcher URL", () => {
+  const { env } = testConfigFromStatus(STATUS, OPTIONS);
+  assert.equal(env.VITALLY_TEST_MAIL_URL, "http://127.0.0.1:57324");
+  assert.match(formatEnv(env), /^VITALLY_TEST_MAIL_URL=http:\/\/127\.0\.0\.1:57324$/m);
+  const { MAILPIT_URL, ...inbucketOnly } = STATUS;
+  assert.equal(testConfigFromStatus(inbucketOnly, OPTIONS).env.VITALLY_TEST_MAIL_URL, STATUS.INBUCKET_URL);
+  const { INBUCKET_URL, ...neither } = inbucketOnly;
+  assert.equal(testConfigFromStatus(neither, OPTIONS).env.VITALLY_TEST_MAIL_URL, undefined);
 });
 
 test("every key, secret and the database URL are masked, but not the bare default password", () => {

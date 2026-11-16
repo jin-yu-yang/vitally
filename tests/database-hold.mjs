@@ -314,7 +314,7 @@ test("documents at intake against real Supabase", async (t) => {
         assert.equal((await columns(caseId)).stage, "closed");
         assert.equal((await columns(caseId)).closing_reason, reason);
         assert.equal((await f.clientMessages(caseId)).at(-1), line);
-        const fn = await f.sql("select vitally_private.closed_line($1) as line", [reason]);
+        const fn = await f.sql("select vitally_private.closed_line($1,null,null,null,null) as line", [reason]);
         assert.equal(fn.rows[0].line, line);
       }
     });
