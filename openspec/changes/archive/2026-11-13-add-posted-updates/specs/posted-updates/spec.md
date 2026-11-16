@@ -2,11 +2,11 @@
 
 ### Requirement: An update's audience is resolved live from the current season's roster
 An update SHALL have the audience `everyone` ("All volunteers") or `roles`, with a non-empty subset of `greeter`, `intaker`, `preparer`, `reviewer` and `admin`. A person SHALL be in an update's audience when all of these hold:
-- their person is linked to an active `staff` membership in the update's workspace;
+- their person has an active account in the update's workspace (`accounts.status = 'active'`, capability `account-invitations`), on an active `staff` membership: an invitation not yet used, or a deactivated account, does not count;
 - they have a `roster_entries` row for the workspace's current season;
 - the audience is `everyone`, or that entry's roles include at least one of the update's roles.
 
-Clearance SHALL NOT matter. The audience SHALL be evaluated whenever it is read, never stored per person, so people added to the roster later are in it, and people who leave it are not. The audience check SHALL live in one function, so it can later switch from the active staff membership to an active account.
+Clearance SHALL NOT matter. The audience SHALL be evaluated whenever it is read, never stored per person, so people added to the roster later are in it, and people who leave it are not. The audience check SHALL live in one function.
 
 #### Scenario: An uncleared volunteer is in All volunteers
 - **WHEN** a staff member has a current-season roster entry with no roles, and an update to All volunteers is posted
@@ -23,6 +23,14 @@ Clearance SHALL NOT matter. The audience SHALL be evaluated whenever it is read,
 #### Scenario: Inactive membership
 - **WHEN** a person with a current-season roster entry has only an inactive staff membership
 - **THEN** they are in no update's audience
+
+#### Scenario: An invitation not yet used
+- **WHEN** a volunteer with a current-season roster entry has been invited and has not signed in yet, so their account is `invited`
+- **THEN** they are in no update's audience, and the admin's audience counts leave them out
+
+#### Scenario: A deactivated account
+- **WHEN** an admin deactivates a volunteer's account
+- **THEN** that volunteer is in no update's audience and reads no update row
 
 #### Scenario: A role audience
 - **WHEN** an update's audience is Reviewer, and one staff member's entry has Reviewer and another's has only Preparer

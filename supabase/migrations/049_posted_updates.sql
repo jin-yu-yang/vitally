@@ -71,17 +71,19 @@ grant select on public.posted_updates to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- (b) The live audience (design D2). Evaluated whenever it is read, never
--- stored per person. A person is in an update's audience when their sign-in
--- has an active staff membership in the workspace, they have a roster entry
--- for the workspace's current season, and the audience is everyone or that
--- entry holds one of the update's roles. Clearance does not matter.
--- When add-account-invitations lands, "active staff membership" switches to
--- "active account" here, and only here.
+-- stored per person. A person is in an update's audience when they have an
+-- active account in the workspace (047: an invitation not yet used, or a
+-- deactivated account, does not count) on an active staff membership, they
+-- have a roster entry for the workspace's current season, and the audience is
+-- everyone or that entry holds one of the update's roles. Clearance does not
+-- matter. The membership stays in the join to keep the audience to staff
+-- sign-ins; deactivating an account also makes its membership inactive.
 
 create function vitally_private.audience_member(p_workspace_id uuid,p_person_id uuid,p_audience text,p_roles text[])
 returns boolean language sql stable security definer set search_path='' as $$
  select exists(select 1 from public.people p
-  join public.memberships m on m.workspace_id=p.workspace_id and m.user_id=p.user_id
+  join public.accounts a on a.workspace_id=p.workspace_id and a.person_id=p.id and a.status='active'
+  join public.memberships m on m.workspace_id=a.workspace_id and m.user_id=a.user_id
    and m.active and m.access='staff'
   join public.workspaces w on w.id=p.workspace_id
   join public.roster_entries r on r.workspace_id=p.workspace_id and r.person_id=p.id and r.season=w.current_season

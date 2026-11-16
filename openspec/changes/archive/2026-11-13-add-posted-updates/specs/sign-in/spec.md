@@ -10,6 +10,14 @@ For a `staff` member, every public RPC that acts on the workspace SHALL act as t
 - `vitally_edit_contact(p_action_id uuid, p_contact_id uuid, p_expected_revision bigint, p_entry jsonb)`;
 - `vitally_save_volunteer(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_volunteer jsonb)`, whose volunteer argument names the volunteer being edited, never the actor;
 - `vitally_my_clearance()`;
+- `vitally_prepare_account(p_action_id uuid, p_op text, p_target jsonb)`;
+- `vitally_record_account(p_action_id uuid, p_op text, p_target jsonb, p_user_id uuid)`, whose user argument names the auth user being given an account, never the actor;
+- `vitally_deactivate_account(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)` and `vitally_reactivate_account(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)`, whose volunteer argument names the volunteer whose account changes, never the actor;
+- `vitally_client_invitations()`;
+- `vitally_cancel_invitation(p_action_id uuid, p_target jsonb, p_expected_revision bigint)`, whose target names the volunteer or client whose invitation is cancelled, never the actor;
+- `vitally_expire_invitations()`;
+- `vitally_complete_site_check(p_name text, p_sidn text)`, which acts on the caller's own account;
+- `vitally_activate_client_account()`, which acts on a client caller's own account;
 - `vitally_save_update(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_update jsonb)`;
 - `vitally_update_action(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_type text)`;
 - `vitally_mark_updates(p_update_ids uuid[], p_confirm boolean)`;
@@ -42,7 +50,7 @@ The acting person SHALL be resolved before the request digest and the receipt of
 
 #### Scenario: The old signatures are gone
 - **WHEN** the database catalog is read
-- **THEN** no public function takes `p_person_id`, and `public` holds exactly these thirteen RPCs, each with execute granted to `authenticated` only
+- **THEN** no public function takes `p_person_id`, and `public` holds exactly these twenty-two RPCs, each with execute granted to `authenticated` only
 
 #### Scenario: The read-only and naturally idempotent RPCs store no receipt
 - **WHEN** a staff member calls `vitally_my_clearance`, `vitally_my_updates`, `vitally_posted_updates` or `vitally_mark_updates`

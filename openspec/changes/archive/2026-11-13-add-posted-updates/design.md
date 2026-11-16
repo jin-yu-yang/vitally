@@ -88,13 +88,13 @@ update_reads
   - Direct table reads in the browser: the counts would need roster tables that only admins can read.
   - Broadcast-only realtime: a second mechanism.
 
-### D2: Live audience = active staff membership + current-season roster entry (+ role overlap)
+### D2: Live audience = active account + current-season roster entry (+ role overlap)
 - **Choice:** `vitally_private.audience_member(workspace_id, person_id, audience, audience_roles)` is true when:
-  - the person's `people.user_id` has an active `staff` membership in the workspace;
+  - the person has an active account in the workspace (`accounts.status = 'active'`, from 047), on an active `staff` membership. As first written (before 047 was on `main`) this was "an active staff membership"; review round 2 switched it, as the note below planned;
   - **and** the person has a `roster_entries` row for `workspaces.current_season`;
   - **and** either `audience = 'everyone'` or the entry's `roles && audience_roles`.
 - `vitally_policy.in_update_audience(workspace_id, audience, audience_roles)` applies it to the caller's own person. It is security definer, stable, `search_path=''`, and executable by `authenticated` only.
-- **Note for later:** once add-account-invitations' accounts table lands, replace "active staff membership" with "active account" in `audience_member`. This is the only place to change.
+- **Active account (review round 2, after add-account-invitations merged as 047):** `audience_member` joins `accounts` on `(workspace_id, person_id)` with `status = 'active'`. So a volunteer who was invited but has not signed in yet (`invited`), or whose account was deactivated, is in no audience and in no count. The membership join stays (`active and access = 'staff'`): it keeps the audience to staff sign-ins, and costs nothing, because deactivating an account also makes its membership inactive. This was the only place to change: `in_update_audience`, the feed, the marks and the admin counts all call it.
 - **Rationale:** it is resolved live, as the user decided. Someone added to the roster later sees earlier updates, and denominators follow the roster.
 - **The policy text never contains `access = 'staff'`.** So `database-clearance.mjs`'s count of 21 still holds. The canonical scenario is reworded (delta spec) to name `posted_updates` as excluded.
 
@@ -215,4 +215,4 @@ Each RPC:
 ## Open Questions
 
 - **System notifications (`person_notices`).** Owner: the user, in a later change. It affects only the feed function's union and a new table. The panel and the badge are fixed by the contract.
-- **Switching `audience_member` to "active account" once add-account-invitations lands.** Owner: whichever change lands second. It affects one function.
+- ~~**Switching `audience_member` to "active account" once add-account-invitations lands.**~~ Done in review round 2 (D2).

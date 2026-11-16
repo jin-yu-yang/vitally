@@ -190,6 +190,38 @@ test("posted updates against real Supabase", async (t) => {
       assert.equal(await isMember(f, gone.personId), false);
     });
 
+    // Design D2 (review round 2): "has a sign-in" is an active account (047).
+    await t.test("audience: an invited account not yet used and a deactivated account are not in the audience", async () => {
+      const invited = await f.staff({ key: "ivy_invited", name: "Ivy Laurent", capabilities: [], cleared: false });
+      await addEntry(f, invited.personId);
+      const posted = await post({ title: "Badge pickup moved to the front desk" });
+      // The positive control: with an active account, the update reaches them.
+      assert.equal(await isMember(f, invited.personId), true, "active account");
+      assert.ok((await feedIds(invited.client)).includes(posted.updateId), "in the feed while active");
+      const sizeOf = async () => (await listed(admin, posted.updateId)).audienceSize;
+      const activeSize = await sizeOf();
+      // An invitation not yet used: out of the audience, the feed and the count.
+      await f.sql(
+        `update public.accounts set status='invited',activated_at=null,expires_at=now()+interval '7 days'
+          where workspace_id=$1 and person_id=$2`,
+        [f.workspaceId, invited.personId],
+      );
+      assert.equal(await isMember(f, invited.personId), false, "invited");
+      assert.deepEqual(await selectedIds(invited.client, [posted.updateId]), [], "no row while invited");
+      assert.equal((await feedIds(invited.client)).includes(posted.updateId), false, "not in the feed while invited");
+      assert.equal(await sizeOf(), activeSize - 1, "the audience count drops");
+      // Active again, then deactivated the way the Roster does it.
+      await f.sql(
+        "update public.accounts set status='active',activated_at=now(),expires_at=null where workspace_id=$1 and person_id=$2",
+        [f.workspaceId, invited.personId],
+      );
+      assert.equal(await isMember(f, invited.personId), true, "active again");
+      await f.sql("select vitally_private.deactivate_account($1,$2)", [f.workspaceId, invited.userId]);
+      assert.equal(await isMember(f, invited.personId), false, "deactivated");
+      assert.deepEqual(await selectedIds(invited.client, [posted.updateId]), [], "no row once deactivated");
+      assert.equal(await sizeOf(), activeSize - 1, "not counted once deactivated");
+    });
+
     await t.test("audience: a Reviewer update reaches the reviewer and not the preparer", async () => {
       const posted = await post({ title: "Reviewer checklist changed", audience: "roles", roles: ["reviewer"] });
       assert.ok((await feedIds(f.reviewer)).includes(posted.updateId), "reviewer");

@@ -158,7 +158,7 @@ grep -n -E "^create (or replace )?function" supabase/migrations/*.sql
 
 Two schemas:
 
-- **`public`**: the application tables and the thirteen browser-callable functions.
+- **`public`**: the application tables and the twenty-two browser-callable functions.
 - **`vitally_private`**: helper functions, the migration ledger, and tables browsers must never
   reach. Every function here is `SECURITY DEFINER` with `search_path=''`, and `EXECUTE` is revoked
   from every role, including `service_role`.
@@ -285,7 +285,7 @@ policy and `vitally_private.lock_case` (which applies the same rule to writes) i
 
 ## The action API
 
-Browsers can call exactly thirteen functions. Each runs as its owner (`SECURITY DEFINER`), checks the
+Browsers can call exactly twenty-two functions. Each runs as its owner (`SECURITY DEFINER`), checks the
 caller itself, and returns a JSON receipt.
 
 | Function | Purpose | Returns |
@@ -382,9 +382,10 @@ Since 049 a ceiling admin posts IRS policy updates and office notices, and every
 the ones addressed to them. The behaviour is in the spec,
 [`openspec/specs/posted-updates/spec.md`](../../openspec/specs/posted-updates/spec.md).
 
-- **The audience is live.** A person is in an update's audience when they have an active staff
-  membership, a sign-in, and a roster entry for the workspace's current season, and the update is
-  for everyone or for one of their roles (`vitally_private.audience_member`). Nothing is stored per
+- **The audience is live.** A person is in an update's audience when they have an active account
+  (047; an invitation not yet used or a deactivated account does not count) on an active staff
+  membership, and a roster entry for the workspace's current season, and the update is for
+  everyone or for one of their roles (`vitally_private.audience_member`). Nothing is stored per
   person, so someone added to the roster later sees earlier updates too.
 - **No clearance check.** An uncleared staff member reads their feed on Finish your setup. An
   update holds no case data.
