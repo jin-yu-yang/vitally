@@ -123,5 +123,5 @@
 ## 10. Review round 3 (Zeye approved; small fixes)
 
 - [x] 10.1 `vitally_save_update` and the table check trim spaces, tabs and line breaks from both ends (`btrim` with that character set), so a title or message of only whitespace is refused. Database test.
-- [x] 10.2 The admin table's footer says what Read means and points to "Ask to confirm read" and Confirmed.
+- [x] 10.2 The admin table's footer says what Read means and points to "Ask volunteers to confirm they have read it" and Confirmed.
 - [x] 10.3 Follow-up issue: the feed shows only the current season's updates, built with Start next season.
