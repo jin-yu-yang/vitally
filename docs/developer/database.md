@@ -24,7 +24,7 @@ it. Run everything described here against the local stack from [`docs/setup.md`]
 
 ## Migrations
 
-The schema is forty-seven plain SQL files (001 to 047) in [`supabase/migrations/`](../../supabase/migrations/), applied
+The schema is forty-eight plain SQL files (001 to 048) in [`supabase/migrations/`](../../supabase/migrations/), applied
 in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 
 | File | Adds |
@@ -76,6 +76,7 @@ in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 | `045_volunteer_clearance.sql` | Hand-written: volunteer clearance ([roster clearance](#roster-clearance)). A guard refuses with `VT008` if a person with a sign-in holds a current-season role their confirmed certificates don't support ([setup](../setup.md#045s-guard)), and strips such roles from people with no sign-in; `roster_entries.is_new` and `photo_id_checked_at`; the private role helpers (`confirmed_certificates`, `missing_certificates`, `role_capabilities`, `effective_capabilities`, `cleared`); the deferred constraint triggers `roster_entries_role_certificates` and `certificates_role_certificates`; the read gate `vitally_policy.cleared_workspace_id()` on the staff branch of the 21 case-data policies; `require_cleared` (`VT009` `NOT_CLEARED`) in the six case RPCs; `acting_person`, `check_operation_authority` and `contact_person` return the effective capabilities; the RPC `vitally_my_clearance`; `require_cleared_assignee` (no caller yet); `open_work`; and `vitally_save_volunteer` with role needs (`VT007` `ROLE_NEEDS`), the photo ID check and the open-work rule (`VT004` `OPEN_WORK`) |
 | `046_volunteer_workload.sql` | Hand-written: the admin Workload's one write, the case action `ASSIGN_CASE` `{slot, personId, expectedHolderId}` (`vitally_private.act_assign_case`), added to `vitally_apply_action`, `check_operation_authority` (admin-only group) and `check_payload`, each re-created from its latest definition. No new table, column or Realtime change: the page reads what the staff window already holds |
 | `047_accounts.sql` | Hand-written: sign-in accounts (change `add-account-invitations`). The `accounts` table (one row per membership: `invited`, `active` or `deactivated`, with `expires_at` and site-check attempts), admin-only to read; a backfill giving every existing membership a row; a trigger on `auth.users` that activates a client's invitation at first sign-in and cancels an expired one; triggers on the six tables that refer to a membership, activating an invited client's account at first use; an expiry sweep that leaves an invitation in use alone and skips (and logs) one it cannot cancel; `add_staff_member` and `initialize_workspace` writing active accounts; `cleared` requiring an active account; `vitally_private.site_numbers` (the site's SIDN, set by the roster command, unreadable through the API) and `volunteer_profiles.signed_in_name`; the RPCs `vitally_prepare_account`, `vitally_record_account`, `vitally_deactivate_account`, `vitally_reactivate_account`, `vitally_client_invitations`, `vitally_cancel_invitation`, `vitally_expire_invitations`, `vitally_complete_site_check` and `vitally_activate_client_account`; and `vitally_my_clearance` with `siteCheck` |
+| `048_closed_lines_after_filing.sql` | Hand-written: a close after a filing says what was filed (issue #170, change `fix-closed-lines-after-filing`). `vitally_private.return_outcome` (one return: accepted, waiting, on paper or not filed) and a five-argument `vitally_private.closed_line` (the reason and each return's method and result) that replaces 036's `closed_line(text)`, which is dropped; `act_close_case` passes the case's filing columns and words the staff notice for a close after a filing; `vitally_close_unsigned` passes them too. No table, policy, RPC signature or Realtime change ([closing after a filing](#closing-after-a-filing)) |
 **Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
 never edit an applied one.** The build writes a file only when the hash differs from the newest
 catalogue migration's. The hash covers the catalogue and `LOADER_VERSION` in
@@ -120,10 +121,11 @@ do not copy them from older files:
 
 | Function | Current definition |
 | --- | --- |
+| `vitally_private.return_outcome`, `closed_line`, `act_close_case`, `public.vitally_close_unsigned` | `048_closed_lines_after_filing.sql` |
 | `vitally_private.check_payload`, `check_preparer_fields`, `act_save_preparer_fields` | `039_preparer_shaded_fields.sql` |
-| `vitally_private.acting_person`, `contact_person`, `check_operation_authority`, `require_cleared`, `open_work`, the role helpers, `role_certificates_check`, `vitally_policy.cleared_workspace_id`, and the RPCs `public.vitally_apply_action`, `vitally_assistance_action`, `vitally_close_unsigned`, `vitally_create_case`, `vitally_log_contact`, `vitally_edit_contact`, `vitally_save_volunteer`, `vitally_my_clearance` | `045_volunteer_clearance.sql` |
+| `vitally_private.acting_person`, `contact_person`, `check_operation_authority`, `require_cleared`, `open_work`, the role helpers, `role_certificates_check`, `vitally_policy.cleared_workspace_id`, and the RPCs `public.vitally_apply_action`, `vitally_assistance_action`, `vitally_create_case`, `vitally_log_contact`, `vitally_edit_contact`, `vitally_save_volunteer`, `vitally_my_clearance` | `045_volunteer_clearance.sql` |
 | `vitally_private.add_staff_member`, `vitally_policy.is_workspace_admin` | `044_volunteer_roster_records.sql` |
-| `vitally_private.lock_case`, `lock_assistance_item`, `act_close_case`, `initialize_workspace` | `043_remove_presenter_access.sql` |
+| `vitally_private.lock_case`, `lock_assistance_item`, `initialize_workspace` | `043_remove_presenter_access.sql` |
 | `vitally_private.check_staff_links`, `set_default_followup` | `038_staff_identity.sql` |
 | `vitally_private.filing_notes_append_only`, `reserve_receipt` | `040_remove_sample_case_tools.sql` |
 | `vitally_private.check_authority`, `receive_document`, `act_verify_document` | `036_hold_and_closing.sql` |
@@ -137,11 +139,9 @@ do not copy them from older files:
 | `vitally_private.cases_intake_version_insert` | `023_remove_intake_v1.sql` |
 | `vitally_private.act_update_contact` | `023_remove_intake_v1.sql` |
 | `vitally_private.act_submit`, `act_start_screening` | `032_screening_and_efiling_stages.sql` |
-| `vitally_private.act_close_case` | `036_hold_and_closing.sql` |
 | `vitally_private.act_request_documents_at_intake`, `act_put_on_hold`, `act_resume_from_hold`, `act_withdraw` | `036_hold_and_closing.sql` |
 | `vitally_private.act_mark_ready_to_efile`, `act_mark_efiled`, `act_record_filing_result`, `filing_line`, `efiled_line` | `037_adjust_filing_to_pcdc.sql` |
 | `vitally_private.act_return_to_signing` | `035_post_efiling_stages.sql` |
-| `public.vitally_close_unsigned` | `038_staff_identity.sql` |
 | `vitally_private.load_intake_catalogue`, `check_intake_value`, `intake_holds`, `intake_missing` | `011_intake_v2.sql` |
 | `vitally_private.works_on_case` | `013_contact_materials.sql` |
 | `public.vitally_assistance_action` | `038_staff_identity.sql` |
@@ -462,7 +462,9 @@ and `closed` stay refused). Any close before filing (a withdrawn close at those 
 of a Hold from `review_approved` with any reason) opens a `withdrawal_notice`, assigned to the
 workspace's follow-up person like the client's notice. Its stored text is "The client withdrew; make
 sure the return is not transmitted in TaxSlayer." for reason `withdrawn`, or "The case was closed
-before filing; make sure the return is not transmitted in TaxSlayer." for any other reason.
+before filing; make sure the return is not transmitted in TaxSlayer." for any other reason, or,
+when either return was already filed (048), "The case was closed after a return was filed; make
+sure the rejected return is not transmitted again in TaxSlayer."
 Two moves at the same revision: one wins, the other gets
 the revision conflict. The preparer's own document loop during preparation is unchanged. Five
 admin-only actions and one submit rule shape the earlier stages:
@@ -628,11 +630,32 @@ with no repeats, and `p_confirmed` must be `true`.
   `CONFLICT`, and nothing changes, the receipt included. The browser reloads the list and the dialog
   reopens without that case ([Front end](frontend.md#the-season-end-dialog)).
 - **Per case:** one `CLOSE_CASE` history row (`reason` `dismissed`, `seasonEnd` true) and one client
-  line ("PCDC could not reach you, so this application was closed. Your return was not filed."),
+  line ("PCDC could not reach you, so this application was closed. Your return was not filed.", or
+  what each return is when one was already filed: [closing after a filing](#closing-after-a-filing)),
   the same closing steps as `CLOSE_CASE`, and **no** `withdrawal_notice` follow-up, so no TaxSlayer
   notice.
 - **Receipt:** `{actionId, cases: [{caseId, reference, revision}]}`, one entry per closed case with
   its new revision. A replay of the same `p_action_id` and list returns the stored receipt.
+
+## Closing after a filing
+
+A case can close after one of its returns was filed: at `rejected`, or after Return to signing
+when one return was accepted and the other rejected. The client's closing line comes from
+`vitally_private.closed_line(reason, federal_method, federal_result, state_method, state_result)`
+(048), called by `act_close_case` and `vitally_close_unsigned` with the case's four filing columns.
+
+- **Each return's outcome** is `vitally_private.return_outcome(method, result)`: `accepted`;
+  `paper` (given to the client, or a paper method with no result yet); `waiting` (e-filed, no
+  answer yet); otherwise `not_filed` (rejected, or no method). "No Pennsylvania return needed" is
+  not told apart from not filed.
+- **With a filed return** (either outcome other than `not_filed`) and reason `dismissed`,
+  `withdrawn`, `out_of_scope` or `no_need_to_file`, the line is the reason's sentence, then a
+  federal sentence, then a Pennsylvania sentence, joined by one space. For example: "PCDC could not
+  reach you, so this application was closed. Your federal return was filed and accepted. Do not
+  file it again. Your Pennsylvania return was not filed."
+- **Otherwise** (nothing filed, or reason `duplicate` or `other`) the line is 036's, unchanged.
+- The browser's status panel words a closed case from the same rule, and
+  `database-closed-after-filing.mjs` checks every combination against it.
 
 ## The contact log
 
@@ -864,6 +887,7 @@ What the suite covers, by file:
 | `database-redesign.mjs` | Visits, `case_document_cards` and the two card actions (017), and who may mark and move cards (018) |
 | `database-intake-default.mjs` | The column default, new applications on version 2, the seed's answers passing the field checks, and version-2 round trips (019, 020) |
 | `database-intake-v1-removed.mjs` | Migration 023: the guard's predicates and count, every workspace on 2, both `CHECK`s refusing 1, an application's fixed version, a create that carries answers refused, the dropped functions, and the seed's submitted case (no screening detail in its submit history) |
+| `database-closed-after-filing.mjs` | Closing after a filed return (048): the client's line for each reason and outcome, the staff notice after a filing, and every combination against the status panel's wording |
 | `database-season-close.mjs` | `vitally_close_unsigned`: closing signing cases as Dismissed, all or nothing, refusals, replay, the receipt, and that unlisted cases are left alone |
 | `database-realtime.mjs` | Realtime privacy between clients and for staff tables |
 | `database-store.mjs` | The browser's data adapter against the real database |
