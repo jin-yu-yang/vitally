@@ -1,0 +1,128 @@
+# ViTally roadmap
+
+Where ViTally stands and what comes next, as of **Nov 17, 2026**. Dates are targets, not promises.
+Update this page when a row's state changes; the [README](../README.md) only links here.
+
+## Where ViTally stands
+
+The core workflow is built and has been tried by experienced PCDC volunteers, the admin team and
+the program manager. The next stage is about three things:
+
+| | Goal | How we get there |
+| --- | --- | --- |
+| **Trust** | PCDC can see for itself that its data is safe. | Much of the protection is already built in: the database checks every action, uncleared volunteers read no case data, and no uploaded files are stored. Next we make it visible: a plain-language security summary, an export PCDC keeps in SharePoint, and a rollout PCDC controls step by step. |
+| **Adoption** | ViTally replaces tools instead of adding one. | Volunteer management moves over from Airtable (roster, certificates, workload, schedule), and team updates from Slack (posted updates, notifications, a note for the team). |
+| **Maintenance** | ViTally keeps running after this season. | Clear handoff documentation so other developers can step in, and a support model agreed with PCDC. Once features settle, upkeep is mostly security updates and yearly form changes. |
+
+### What works today
+
+- **Clients:** sign in with an emailed code (office-invited addresses); fill the intake at home
+  in English, 简体 or 繁體 (switchable at any moment), in standard or senior wording; sign
+  Forms 15080 and 14446; follow their case; withdraw.
+- **Office:** screening checks, Add a case for walk-ins, Follow-ups, the case pool, waiting for
+  documents and Hold, same-day signing, e-filed / accepted / rejected for federal and
+  Pennsylvania, Return to signing, close, case history and contact log.
+- **Volunteers:** work board, claim preparation or review, questionnaires at each hand-off, the
+  shaded section of Form 13614-C, auto-generated 13614-C and 14446 drafts, PCDC's Exit Form at
+  signing. The database stops anyone reviewing their own preparation.
+- **Volunteer management (admin):** Roster with roles and certificates per season; a role exists
+  only once its certificates are confirmed; an uncleared volunteer reads no case data and sees
+  "Finish your setup"; Workload with Assign and Reassign; account invitations by email.
+- **Updates:** admins post updates to the team, with notifications.
+
+Behaviour is specified in [`openspec/specs/`](../openspec/specs/).
+
+## 1. Before Dec 21 (end of the semester)
+
+**Outcome:** ViTally is deployed to a hosted test environment, ready to send magic links to
+testers, and covers volunteer management (instead of Airtable) and team updates (instead of
+Slack). Screening stays in Airtable. Dates are targets.
+
+| | Work | Issue | Target | State |
+| --- | --- | --- | --- | --- |
+| Adoption | Roster: Form 13615 and photo ID uploads to PCDC's OneDrive link with "I've uploaded it" | [#138](https://github.com/jin-yu-yang/vitally/issues/138) | Nov 29 | Not started |
+| Adoption | Season settings, site coordinator role, Start next season | [#138](https://github.com/jin-yu-yang/vitally/issues/138) | Nov 29 | Not started |
+| Adoption | Returning-volunteer picker; Roster CSV export | [#138](https://github.com/jin-yu-yang/vitally/issues/138) | Nov 29 | Not started; picker can be cut |
+| Adoption | Clearance fixes: role changes without a reload, a self-cleared admin, screen-reader announcement | [#190](https://github.com/jin-yu-yang/vitally/issues/190) [#191](https://github.com/jin-yu-yang/vitally/issues/191) [#192](https://github.com/jin-yu-yang/vitally/issues/192) | Nov 22 | Not started |
+| Adoption | Workload and Reassign | #139 | — | **Done** |
+| Adoption | Hourly volunteer schedule with a role per shift | [#140](https://github.com/jin-yu-yang/vitally/issues/140) | Dec 6 | Not started |
+| Adoption | Posted updates and notifications | #150 | — | **Done** |
+| Adoption | Note for the team on the case page | [#151](https://github.com/jin-yu-yang/vitally/issues/151) | Dec 6 | Not started; first to cut |
+| Adoption | Case labels (City Tax, MFS, Multi-state) | [#148](https://github.com/jin-yu-yang/vitally/issues/148) | Nov 22 | In review ([#206](https://github.com/jin-yu-yang/vitally/pull/206)) |
+| Adoption | One account reaches both the office and the work board | [#104](https://github.com/jin-yu-yang/vitally/issues/104) | Dec 13 | Not started; can be cut |
+| Adoption | Mobile layouts for the admin screens | [#147](https://github.com/jin-yu-yang/vitally/issues/147) | Dec 20 | Not started |
+| Trust | **"Export this season's data"** to CSV, so PCDC can keep it in SharePoint | not filed | Dec 13 | What the file holds and who may export: to decide by Dec 7 |
+| Trust | **Plain-language security summary:** one page on where data lives, who sees what, when it's deleted, compared with Airtable | not filed | Dec 13 | Not started |
+| Testing | **Hosted test environment**, end to end with one tester, then the final deploy | [#159](https://github.com/jin-yu-yang/vitally/issues/159) | Dec 6 / Dec 13 / Dec 20 | Project and email sending done; see [Deployment](#deployment) |
+
+If we run late, we cut in this order: note for the team, the #104 switch, the returning-volunteer
+picker.
+
+## 2. Before the pilot (tax season 2027)
+
+**Outcome:** PCDC volunteers use ViTally for real cases, one step at a time, and someone is
+responsible for it after the student team. The season opens in late January 2027; nothing here is
+scheduled week by week yet. Real-client prerequisites are collected in
+[#167](https://github.com/jin-yu-yang/vitally/issues/167).
+
+**Trust**
+- **Step-by-step rollout:** fictional data, then a little low-risk real data, then full use. PCDC
+  decides each step; real data only when PCDC agrees. *(not filed)*
+- **A plan for when things go wrong:** how we notice a problem, who we tell, how we pause the
+  system. *(not filed)*
+- Security items before real taxpayer data: sensitive fields, staff sign-in, audit of reads,
+  hosting headers, IRS confidentiality rules ([#160](https://github.com/jin-yu-yang/vitally/issues/160));
+  a volunteer sees only the cases they work on ([#162](https://github.com/jin-yu-yang/vitally/issues/162));
+  a backup-and-restore drill and real accounts ([#159](https://github.com/jin-yu-yang/vitally/issues/159)).
+- **Season data:** when a new season starts, export to CSV, PCDC keeps it in SharePoint, ViTally
+  deletes the previous season (agreed with PCDC). The deletion is
+  [#161](https://github.com/jin-yu-yang/vitally/issues/161).
+
+**Adoption**
+- Magic links to more volunteers and to PCDC's board; improve from their feedback.
+- Mobile client intake: clients fill the intake on their phones ([#153](https://github.com/jin-yu-yang/vitally/issues/153)).
+- Client documents through PCDC's OneDrive upload link ([#157](https://github.com/jin-yu-yang/vitally/issues/157));
+  how clients get an account beyond office invitations ([#158](https://github.com/jin-yu-yang/vitally/issues/158)).
+- Remove the remaining demo wording ([#58](https://github.com/jin-yu-yang/vitally/issues/58)); rename
+  "senior version" to "conversational version" (tester suggestion).
+- Exit Form and drafts: long Remarks cut off, font downloads ([#122](https://github.com/jin-yu-yang/vitally/issues/122),
+  [#121](https://github.com/jin-yu-yang/vitally/issues/121)); the 2026 revision of Form 13614-C
+  ([#42](https://github.com/jin-yu-yang/vitally/issues/42)).
+- May follow during the season: same-day service ([#163](https://github.com/jin-yu-yang/vitally/issues/163)),
+  amendments ([#155](https://github.com/jin-yu-yang/vitally/issues/155)), the client's place in the
+  queue ([#164](https://github.com/jin-yu-yang/vitally/issues/164)), a volunteer's own cases
+  ([#110](https://github.com/jin-yu-yang/vitally/issues/110)).
+
+**Maintenance**
+- **Handoff documentation** so volunteer developers can step in. *(not filed)*
+- **A long-term support model:** for example seasonal support from the original team. The upkeep
+  after features settle is mostly security updates and yearly form changes. *(not filed;
+  unresolved)*
+
+### Later
+
+Client profiles and visit history ([#146](https://github.com/jin-yu-yang/vitally/issues/146)),
+season analytics ([#141](https://github.com/jin-yu-yang/vitally/issues/141)), groups and pinned
+cases ([#149](https://github.com/jin-yu-yang/vitally/issues/149)), case location
+([#152](https://github.com/jin-yu-yang/vitally/issues/152)), staff Settings
+([#154](https://github.com/jin-yu-yang/vitally/issues/154)), a second state return
+([#116](https://github.com/jin-yu-yang/vitally/issues/116)), scale
+([#165](https://github.com/jin-yu-yang/vitally/issues/165)). Not planned: chat and SMS,
+appointment booking, storing documents in ViTally.
+
+## Deployment
+
+The test environment runs under Hailey's accounts, inside a Supabase organization so it can be
+handed to PCDC later.
+
+- **Done:** Supabase project with custom SMTP (Resend, sender `ViTally <help@govitally.org>`);
+  the `govitally.org` domain at Cloudflare, with `help@govitally.org` forwarded; the front end's
+  [`public-config.json`](../public-config.json) points at the hosted project (#212).
+- **Remaining:** migrations on the hosted database; the `accounts` Edge Function and its secrets;
+  Auth Site URL / Redirect URLs and the email rate limit; public sign-up off; the front end on the
+  custom domain; the tester roster and the site's SIDN. The seed never runs against the hosted
+  project.
+
+Step by step: [`docs/setup.md` §6–7](setup.md#6-classroom-and-hosted-setup-pending). Free
+tiers cover the December test; for the season, Supabase Pro (about $25 a month, no pausing, daily
+backups) is recommended.
