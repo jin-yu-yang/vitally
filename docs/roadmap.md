@@ -53,7 +53,8 @@ Slack). Screening stays in Airtable. Dates are targets.
 | Adoption | Mobile layouts for the admin screens | [#147](https://github.com/jin-yu-yang/vitally/issues/147) | Dec 20 | Not started |
 | Trust | **"Export this season's data"** to CSV, so PCDC can keep it in SharePoint | not filed | Dec 13 | What the file holds and who may export: to decide by Dec 7 |
 | Trust | **Plain-language security summary:** one page on where data lives, who sees what, when it's deleted, compared with Airtable | not filed | Dec 13 | Not started |
-| Testing | **Hosted test environment**, end to end with one tester, then the final deploy | [#159](https://github.com/jin-yu-yang/vitally/issues/159) | Dec 6 / Dec 13 / Dec 20 | Project and email sending done; see [Deployment](#deployment) |
+| Testing | **Hosted test environment**: project, email, migrations, Edge Function, Auth settings, custom domain, tester roster | #159 | — | **Done** (Nov 17) |
+| Testing | Keep the test environment on current `main`: redeploy as features land, invite testers, final deploy | — | Dec 20 | Ongoing |
 
 If we run late, we cut in this order: note for the team, the #104 switch, the returning-volunteer
 picker.
@@ -73,7 +74,7 @@ scheduled week by week yet. Real-client prerequisites are collected in
 - Security items before real taxpayer data: sensitive fields, staff sign-in, audit of reads,
   hosting headers, IRS confidentiality rules ([#160](https://github.com/jin-yu-yang/vitally/issues/160));
   a volunteer sees only the cases they work on ([#162](https://github.com/jin-yu-yang/vitally/issues/162));
-  a backup-and-restore drill and real accounts ([#159](https://github.com/jin-yu-yang/vitally/issues/159)).
+  a backup-and-restore drill, project ownership and production accounts ([#215](https://github.com/jin-yu-yang/vitally/issues/215)).
 - **Season data:** when a new season starts, export to CSV, PCDC keeps it in SharePoint, ViTally
   deletes the previous season (agreed with PCDC). The deletion is
   [#161](https://github.com/jin-yu-yang/vitally/issues/161).
@@ -115,13 +116,15 @@ appointment booking, storing documents in ViTally.
 The test environment runs under Hailey's accounts, inside a Supabase organization so it can be
 handed to PCDC later.
 
-- **Done:** Supabase project with custom SMTP (Resend, sender `ViTally <help@govitally.org>`);
-  the `govitally.org` domain at Cloudflare, with `help@govitally.org` forwarded; the front end's
-  [`public-config.json`](../public-config.json) points at the hosted project (#212).
-- **Remaining:** migrations on the hosted database; the `accounts` Edge Function and its secrets;
-  Auth Site URL / Redirect URLs and the email rate limit; public sign-up off; the front end on the
-  custom domain; the tester roster and the site's SIDN. The seed never runs against the hosted
-  project.
+- **Done (Nov 17):** Supabase project with custom SMTP (Resend, sender `ViTally <help@govitally.org>`);
+  the `govitally.org` domain at Cloudflare, with `help@govitally.org` forwarded; migrations on the
+  hosted database; the `accounts` Edge Function and its secrets; Auth Site URL / Redirect URLs, a
+  raised email rate limit and public sign-up off; the front end on the custom domain with
+  [`public-config.json`](../public-config.json); the tester roster and the site's SIDN.
+- **Ongoing:** redeploy migrations and the front end as features land on `main`. The seed never
+  runs against the hosted project.
+- **Before real data:** backup-and-restore drill, ownership and billing, production accounts
+  ([#215](https://github.com/jin-yu-yang/vitally/issues/215)).
 
 Step by step: [`docs/setup.md` §6–7](setup.md#6-classroom-and-hosted-setup-pending). Free
 tiers cover the December test; for the season, Supabase Pro (about $25 a month, no pausing, daily

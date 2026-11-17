@@ -38,9 +38,11 @@ npm ci
 
 ## Deployment
 
-Test environment: **not live yet**. It will be a hosted Supabase project plus the static front
-end ([`public-config.json`](public-config.json)), with email from `help@govitally.org`. What is
-left: [docs/roadmap.md](docs/roadmap.md#deployment). How: [`docs/setup.md` §6–7](docs/setup.md#6-classroom-and-hosted-setup-pending).
+Test environment: **live** since Nov 17, on the `govitally.org` domain, for invited testers with
+fictional data. It is a hosted Supabase project plus this repository's static front end
+([`public-config.json`](public-config.json)), with email from `help@govitally.org`. How to deploy:
+[`docs/setup.md` §6–7](docs/setup.md#6-classroom-and-hosted-setup-pending). What is next:
+[docs/roadmap.md](docs/roadmap.md#deployment).
 
 ## Local Development
 
