@@ -24,6 +24,9 @@ const STAFF_ONLY_TABLES = [
   "case_label_links",
 ];
 const WORKFLOW_TABLES = [...CLIENT_VISIBLE_TABLES, ...STAFF_ONLY_TABLES];
+// Workflow tables service_role holds nothing on (051, matching 049): only
+// their RPCs write them, and no tool reads them with the service key.
+const NO_SERVICE_ROLE_TABLES = new Set(["case_label_links"]);
 async function rows(client, table, filter = {}) {
   let q = client.from(table).select("*");
   for (const [k, v] of Object.entries(filter)) q = q.eq(k, v);
@@ -1196,20 +1199,18 @@ test("workflow records stay owner-visible, staff-only, and write-protected", asy
                 [role, `public.${table}`],
               )
             ).rows[0];
-            assert.equal(acl.sel, role !== "anon", `${table} SELECT ${role}`);
+            const service =
+              role === "service_role" && !NO_SERVICE_ROLE_TABLES.has(table);
             assert.equal(
-              acl.can_insert,
-              role === "service_role",
-              `${table} INSERT ${role}`,
+              acl.sel,
+              role === "authenticated" || service,
+              `${table} SELECT ${role}`,
             );
-            assert.equal(
-              acl.can_update,
-              role === "service_role",
-              `${table} UPDATE ${role}`,
-            );
+            assert.equal(acl.can_insert, service, `${table} INSERT ${role}`);
+            assert.equal(acl.can_update, service, `${table} UPDATE ${role}`);
             assert.equal(
               acl.can_delete,
-              role === "service_role",
+              service,
               `${table} DELETE ${role}`,
             );
           }

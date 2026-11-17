@@ -57,6 +57,13 @@ test("case labels", async (t) => {
         ["x".repeat(25), "sky"],
         ["city tax", "green"],
         ["Amended", "red"],
+        // Trimmed of tabs and line breaks too (as 049 trims), and one line only.
+        ["\t", "sky"],
+        ["\n\t", "sky"],
+        ["Amended\n", "sky"],
+        ["\tAmended", "sky"],
+        ["Amend\ned", "sky"],
+        ["Amend\red", "sky"],
       ]) {
         await assert.rejects(insertLabel(f, name, color), undefined, `${name}/${color}`);
       }
@@ -151,6 +158,19 @@ test("case labels", async (t) => {
       assert.ok(anon.error || anon.data.length === 0);
     });
 
+    // As on 049's tables: only the two RPCs write labels, so the service key
+    // gets no grant on either table.
+    await t.test("service_role holds nothing on the label tables", async () => {
+      for (const table of ["case_labels", "case_label_links"]) {
+        const grants = await f.sql(
+          `select p, has_table_privilege('service_role', $1, p) as granted
+             from unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p`,
+          [`public.${table}`],
+        );
+        assert.deepEqual(grants.rows.filter((row) => row.granted).map((row) => row.p), [], table);
+      }
+    });
+
     await t.test("an admin creates a label", async () => {
       const { data, error } = await f.saveLabel(f.siteCoordinator, {
         name: "Late filing",
@@ -175,7 +195,7 @@ test("case labels", async (t) => {
       const { data, error } = await f.saveLabel(f.siteCoordinator, {
         labelId: id,
         expectedRevision: 1,
-        name: " City tax (Phila.) ",
+        name: "\t City tax (Phila.)\r\n",
         color: "violet",
       });
       assert.equal(error, null);
@@ -218,6 +238,9 @@ test("case labels", async (t) => {
       await refuseSave(f.siteCoordinator, "VT007", { label: { ...ok, x: 1 } }, "extra key");
       await refuseSave(f.siteCoordinator, "VT007", { name: "   ", color: "sky" }, "blank");
       await refuseSave(f.siteCoordinator, "VT007", { name: "x".repeat(25), color: "sky" }, "long");
+      await refuseSave(f.siteCoordinator, "VT007", { name: "\n\t", color: "sky" }, "only a tab and a line break");
+      await refuseSave(f.siteCoordinator, "VT007", { name: "Amend\ned", color: "sky" }, "a line break inside");
+      await refuseSave(f.siteCoordinator, "VT007", { name: "Amend\red", color: "sky" }, "a carriage return inside");
       await refuseSave(f.siteCoordinator, "VT007", { name: "Fresh", color: "#ff0000" }, "color");
       await refuseSave(f.siteCoordinator, "VT007", { name: "mfs", color: "sky" }, "clash");
       await refuseSave(

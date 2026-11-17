@@ -8,7 +8,8 @@ Staff-only case labels: short shared markers such as City Tax, MFS and Multi-sta
 ### Requirement: A workspace has its own labels
 Each workspace SHALL have its own set of case labels.
 - Each label SHALL have a name and a color.
-- The name SHALL be stored trimmed, with 1 to 24 characters.
+- The name SHALL be stored trimmed of spaces, tabs and line breaks, with 1 to 24 characters.
+- The name SHALL be one line: a line break inside it SHALL be refused.
 - Two labels in one workspace SHALL NOT have names that are equal ignoring case.
 - The color SHALL be one of `sky`, `amber`, `pink`, `green`, `violet` and `slate`.
 - Two labels MAY share a color.
@@ -24,6 +25,14 @@ Each workspace SHALL have its own set of case labels.
 
 #### Scenario: A blank or long name is refused
 - **WHEN** an admin saves a label whose trimmed name is empty, or longer than 24 characters
+- **THEN** the save is refused with `VALIDATION`
+
+#### Scenario: Tabs and line breaks around a name are trimmed
+- **WHEN** an admin saves a label named a tab, then "Amended", then a line break
+- **THEN** it is stored as "Amended"; a name of only tabs and line breaks is refused with `VALIDATION`
+
+#### Scenario: A line break inside a name is refused
+- **WHEN** an admin saves a label whose name has a line break between two words
 - **THEN** the save is refused with `VALIDATION`
 
 #### Scenario: An unknown color is refused

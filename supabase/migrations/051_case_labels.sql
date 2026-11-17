@@ -35,7 +35,7 @@ create table if not exists public.case_labels (
  updated_at timestamptz not null default now(),
  primary key (id),
  unique (workspace_id, id),
- constraint case_labels_name check (name = btrim(name) and char_length(name) between 1 and 24),
+ constraint case_labels_name check (name = btrim(name, E' \t\n\r') and char_length(name) between 1 and 24 and name !~ E'[\n\r]'),
  constraint case_labels_color check (color in ('sky','amber','pink','green','violet','slate')),
  foreign key (workspace_id, created_by_person_id) references public.people(workspace_id, id),
  foreign key (workspace_id, updated_by_person_id) references public.people(workspace_id, id)
@@ -74,10 +74,8 @@ revoke all on public.case_labels from public, anon, authenticated, service_role;
 revoke all on public.case_label_links from public, anon, authenticated, service_role;
 grant select on public.case_labels to authenticated;
 grant select on public.case_label_links to authenticated;
--- service_role keeps the full workflow-table grant (031's style), so tooling
--- and the shared privilege test treat these tables like their neighbours.
-grant select, insert, update, delete on public.case_labels to service_role;
-grant select, insert, update, delete on public.case_label_links to service_role;
+-- service_role gets nothing, as on 049's tables: only the two RPCs below
+-- write labels, and no tool reads them with the service key.
 
 -- ---------------------------------------------------------------------------
 -- 3. Starter labels (D6). Every new workspace gets City Tax, MFS and
@@ -138,8 +136,9 @@ begin
   or jsonb_typeof(p_label->'color') is distinct from 'string' then
   raise sqlstate 'VT007' using message='VALIDATION';
  end if;
- v_name=btrim(p_label->>'name');
- if char_length(v_name) not between 1 and 24
+ -- Trimmed like 049's titles (spaces, tabs and line breaks), and one line only.
+ v_name=btrim(p_label->>'name',E' \t\n\r');
+ if char_length(v_name) not between 1 and 24 or v_name ~ E'[\n\r]'
   or (p_label->>'color') not in ('sky','amber','pink','green','violet','slate') then
   raise sqlstate 'VT007' using message='VALIDATION';
  end if;
