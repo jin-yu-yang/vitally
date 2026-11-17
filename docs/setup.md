@@ -14,13 +14,11 @@ reminders and closure), Realtime-driven shared state, rehearsal cases from `npm 
 hold permanent fictional rehearsal accounts for signing in by hand
 ([Signing in locally](#signing-in-locally)).
 
-**Hosted test environment (state on Nov 17, 2026):** a hosted Supabase project exists, with
-custom SMTP through Resend (sender `help@govitally.org`), and `main` now commits a
-`/public-config.json` pointing at it (#212). Still to do before testers can sign in: migrations
-on the hosted database, the `accounts` Edge Function and its secrets, Auth Site URL / Redirect
-URLs and the email rate limit, public sign-up off, serving the front end on the custom domain, and
-the tester roster ([Classroom and hosted setup](#6-classroom-and-hosted-setup-pending) below; the
-`docs/roadmap.md` keeps the current list). Every test described below runs against the
+**Hosted test environment (Nov 17, 2026):** running for invited testers with fictional data. The
+hosted Supabase project has the migrations, the `accounts` Edge Function and its secrets, custom
+SMTP through Resend (sender `help@govitally.org`), Auth URLs set and public sign-up off; the front
+end is served on the `govitally.org` domain with `/public-config.json` (#212). The current state
+is kept in [`docs/roadmap.md`](roadmap.md#deployment). Every test described below runs against the
 isolated local stack; none of it exercises the hosted project or real mail delivery.
 
 ## 1. Runtime
@@ -820,9 +818,9 @@ SMTP (see below), and the `accounts` Edge Function deployed with `verify_jwt = f
 testers can receive invitations or sign-in codes. Without them, Create account and Invite create
 the account but no email arrives.
 
-Since Nov 16 the Supabase project, its custom SMTP (Resend, on the `govitally.org` domain) and the
-front end's `/public-config.json` exist; the remaining steps are listed in `docs/roadmap.md`, Deployment
-section. The list below is the original Task 10B / 10D checklist, kept for reference.
+All of this was done for the December test on Nov 17 (see [`docs/roadmap.md`](roadmap.md#deployment)).
+The list below is the original Task 10B / 10D checklist, kept for reference when the project is set
+up again or handed over.
 
 A hosted or classroom copy never shows the fill tools, because its Supabase URL is not on the
 machine that serves it. Classroom demos type their answers, or run from a local stack.
