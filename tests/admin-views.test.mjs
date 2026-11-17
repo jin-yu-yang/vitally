@@ -1597,7 +1597,7 @@ test("the office's Exit Form panel uses the latest approval and stays after fili
   assert.match(html, /data-action="view-exit-form" data-review="review-2">/);
 });
 
-test("the office's Exit Form panel needs a reviewer questionnaire, and uses the latest approval that has one", () => {
+test("the office's Exit Form panel needs a reviewer questionnaire on the latest approval, with no fallback (#173)", () => {
   const exitForm = { federal: null, state: null, local: [] };
   const none = officeCase({
     stage: "review_approved",
@@ -1618,7 +1618,33 @@ test("the office's Exit Form panel needs a reviewer questionnaire, and uses the 
     ],
     reviewerQuestionnaires: [{ id: "rq-1", reviewId: "review-1", exitForm }],
   });
-  const html = renderAdminCase(later, { person: SAM });
-  assert.equal((html.match(/data-action="view-exit-form"/g) ?? []).length, 1);
+  assert.doesNotMatch(renderAdminCase(later, { person: SAM }), /exit-form-title|view-exit-form/);
+});
+
+test("the office's Exit Form panel after Return to signing carries the note", () => {
+  const exitForm = { federal: null, state: null, local: [] };
+  const returned = officeCase({
+    stage: "review_approved",
+    preparationVersion: 1,
+    reviewerId: "morgan",
+    reviews: [{ id: "review-1", preparationVersion: 1, status: "approved", reviewerId: "morgan", decidedAt: "2026-10-17T15:00:00.000Z" }],
+    reviewerQuestionnaires: [{ id: "rq-1", reviewId: "review-1", exitForm }],
+    federalMethod: "efile",
+    stateMethod: "efile",
+    federalResult: "rejected",
+    stateResult: "accepted",
+    internalHistory: [{ id: "e1", action: "RETURN_TO_SIGNING", actorPersonId: "sam", createdAt: "2026-11-02T15:00:00.000Z", detail: {} }],
+  });
+  const html = renderAdminCase(returned, { person: SAM });
+  assert.match(html, /<h2 id="exit-form-title">Exit Form<\/h2>/);
   assert.match(html, /data-action="view-exit-form" data-review="review-1">/);
+  const note = /data-role="exit-form-corrected">([^<]*)</.exec(html);
+  assert.ok(note, "the note renders");
+  assert.ok(
+    note[1].includes(
+      "Fill in by hand: the federal filing method; the federal and Pennsylvania refund or amount owed and how it is paid; Other Tax; Remarks.",
+    ),
+    note[1],
+  );
+  assert.doesNotMatch(html, /filled from the reviewer's answers/);
 });

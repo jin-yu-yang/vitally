@@ -15,6 +15,7 @@ import {
   runFilePath,
   SEED_SCENARIOS,
   seedCases,
+  seedVolunteers,
   seedWorkspace,
 } from "../tools/admin/seed-cases.mjs";
 import * as SEED_VALUES from "../tools/admin/seed-values.mjs";
@@ -417,6 +418,8 @@ test("seed command against real Supabase", async (t) => {
             await f.sql(
               `select v.email, e.roles, e.is_new, e.photo_id_checked_at is not null as photo,
                       vitally_private.cleared(p.workspace_id, p.id) as cleared,
+                      exists(select 1 from public.accounts a
+                              where a.workspace_id=p.workspace_id and a.person_id=p.id) as has_account,
                       (select count(*)::int from public.certificates c
                         where c.person_id=p.id and c.season=e.season) as certs
                  from public.people p
@@ -432,8 +435,14 @@ test("seed command against real Supabase", async (t) => {
           assert.equal(empty.length, 1);
           assert.equal(empty[0].certs, 0);
           assert.equal(empty[0].cleared, false);
-          assert.ok(volunteers.some((v) => v.is_new && v.photo && v.cleared));
+          // 047 (add-account-invitations, design D6): the seed volunteers have
+          // no sign-in and so no account, and none is cleared, not even the new
+          // one whose photo ID is checked. The role accounts above, which have
+          // active accounts, are the cleared counterpart.
+          assert.ok(volunteers.every((v) => !v.has_account), "no seed volunteer has an account");
+          assert.ok(volunteers.some((v) => v.is_new && v.photo && v.roles.length > 0 && !v.cleared));
           assert.ok(volunteers.some((v) => v.is_new && !v.photo && !v.cleared));
+          assert.ok(volunteers.every((v) => !v.cleared), "no seed volunteer is cleared");
         } finally {
           await rm(runDir, { recursive: true, force: true });
         }
@@ -700,6 +709,44 @@ test("seed command against real Supabase", async (t) => {
         await rm(runDir, { recursive: true, force: true });
       }
     });
+    await t.test("a seed re-run keeps a seed volunteer who got an account", async () => {
+      const emails = SEED_VALUES.SEED_VOLUNTEERS.map((v) => v.email);
+      const args = { workspaceId: f.workspaceId, actorUserId: f.siteCoordinatorUserId };
+      const seedClient = await openDatabase({ kind: "test" });
+      try {
+        await seedVolunteers(seedClient, args);
+        // What Create account does to the person: give them a sign-in.
+        const account = await f.provision();
+        // One statement, so the staff membership and the link exist together at commit.
+        const linked = await f.sql(
+          `with m as (
+             insert into public.memberships(workspace_id,user_id,access)
+             values($1,$3,'staff') returning user_id
+           )
+           update public.people p set user_id=(select user_id from m)
+             from public.volunteer_profiles v
+            where v.person_id=p.id and v.workspace_id=p.workspace_id
+              and p.workspace_id=$1 and v.email=$2 returning p.id`,
+          [f.workspaceId, emails[0], account.userId],
+        );
+        assert.equal(linked.rows.length, 1);
+        assert.equal(await seedVolunteers(seedClient, args), 8);
+      } finally {
+        await seedClient.end();
+      }
+      const rows = (
+        await f.sql(
+          `select v.email, count(*)::int n, max(p.user_id::text) as user_id
+             from public.people p join public.volunteer_profiles v on v.person_id=p.id
+            where p.workspace_id=$1 and v.email=any($2) group by v.email`,
+          [f.workspaceId, emails],
+        )
+      ).rows;
+      assert.equal(rows.length, 8);
+      assert.ok(rows.every((r) => r.n === 1));
+      assert.ok(rows.find((r) => r.email === emails[0]).user_id);
+    });
+
   } finally {
     await client.end();
     await f.close();

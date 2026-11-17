@@ -10,6 +10,8 @@ import {
   submitVerificationCode,
   APP_COOLDOWN_SECONDS,
 } from "./support/browser-fixture.mjs";
+import { latestCode } from "./support/mail-catcher.mjs";
+import { TEST_SITE_NUMBER } from "./support/database-fixture.mjs";
 import { redactAddresses, WORK_BOARD_HEADING } from "./support/story-pages.mjs";
 import { NEUTRAL_SEND_MESSAGE } from "../src/auth.mjs";
 
@@ -628,6 +630,228 @@ async function runEngineGate(t, engineName) {
           await win.context.close();
         }
       });
+
+      // Client invitations (change add-account-invitations): the admin invites
+      // an address on the office screen; the function emails the real code; the
+      // client signs in with it, and the admin's list turns Active.
+      await t.test(
+        "an admin invites a client who signs in with the emailed code",
+        async () => {
+          const mailUrl = process.env.VITALLY_TEST_MAIL_URL;
+          assert.ok(
+            mailUrl,
+            "VITALLY_TEST_MAIL_URL is required (tools/admin/write-test-env.mjs writes it).",
+          );
+          const email = `invited-${randomUUID()}@example.org`;
+          const admin = await engine.newPage();
+          const client = await engine.newPage();
+          try {
+            await loginTestUser({
+              page: admin.page,
+              actor: fixture.actor("siteCoordinator"),
+              fixture,
+              heading: "Office queue",
+            });
+            const panel = admin.page.locator("section.invite-client");
+            await panel.waitFor();
+            await panel.getByLabel("Client email", { exact: true }).fill(email);
+            const after = new Date(Date.now() - 2_000);
+            await panel.getByRole("button", { name: "Invite", exact: true }).click();
+            // Design D13: nothing is sent until the address is confirmed.
+            const confirm = admin.page.getByRole("dialog", { name: `Send a sign-in invitation to ${email}?` });
+            await confirm.getByRole("button", { name: "Send", exact: true }).click();
+            const row = panel.locator("tbody tr", { hasText: email });
+            await row.getByText("Invited", { exact: true }).waitFor();
+
+            const code = await latestCode(mailUrl, email, { after, timeoutMs: 30_000 });
+            const { rows } = await fixture.database.sql(
+              "select id from auth.users where lower(email)=$1",
+              [email],
+            );
+            assert.equal(rows.length, 1, "the invitation created no single Auth user");
+            const userId = rows[0].id;
+            let bodyError = null;
+            try {
+              // The real form with /auth/v1/otp answered by automation, so no
+              // second email goes out and the invitation's code stays valid.
+              await loginTestUser({
+                page: client.page,
+                actor: { key: "invited_client", email, userId },
+                fixture,
+                otp: code,
+              });
+              await admin.page.reload();
+              const panelAfter = admin.page.locator("section.invite-client");
+              await panelAfter
+                .locator("tbody tr", { hasText: email })
+                .getByText("Active", { exact: true })
+                .waitFor();
+              assert.deepEqual(admin.pageErrors, []);
+              assert.deepEqual(client.pageErrors, []);
+            } catch (error) {
+              bodyError = error;
+              throw error;
+            } finally {
+              // The function's user and membership are not the fixture's: the
+              // membership (its accounts row cascades) goes first, because
+              // memberships.user_id references auth.users with no ON DELETE.
+              // A cleanup failure is raised only when the body passed.
+              try {
+                await fixture.database.sql(
+                  "delete from public.memberships where user_id=$1",
+                  [userId],
+                );
+                const removal = await fixture.database.service((adminApi) =>
+                  adminApi.auth.admin.deleteUser(userId),
+                );
+                if (removal?.error) throw removal.error;
+              } catch (cleanupError) {
+                if (!bodyError) throw cleanupError;
+              }
+            }
+          } finally {
+            await client.context.close();
+            await admin.context.close();
+          }
+        },
+      );
+
+      // Volunteer accounts (change add-account-invitations, design D10, D12,
+      // D13): Create account waits for a save and asks before sending; the
+      // volunteer signs in with the emailed code to "Confirm your site", a
+      // wrong SIDN is said, the right one moves them on, and the Roster says
+      // who signed in. A second invitation is cancelled from the drawer, which
+      // makes its email editable again.
+      await t.test(
+        "an admin creates a volunteer's account, who confirms the site at first sign-in",
+        async () => {
+          const mailUrl = process.env.VITALLY_TEST_MAIL_URL;
+          assert.ok(mailUrl, "VITALLY_TEST_MAIL_URL is required (tools/admin/write-test-env.mjs writes it).");
+          const db = fixture.database;
+          const addVolunteer = async (name, email) => {
+            const { data, error } = await db.siteCoordinator.rpc("vitally_save_volunteer", {
+              p_action_id: randomUUID(),
+              p_volunteer_id: null,
+              p_expected_revision: null,
+              p_volunteer: {
+                name, email, phone: null, works: "on_site", languages: ["english"],
+                otherLanguage: null, roles: [], certificates: [], isNew: false, photoIdChecked: false,
+              },
+            });
+            assert.equal(error, null, `save volunteer: ${error?.code}`);
+            return data.personId;
+          };
+          const email = `volunteer-${randomUUID()}@example.org`;
+          const otherEmail = `volunteer-${randomUUID()}@example.org`;
+          const volunteerId = await addVolunteer("Noor Haddad", email);
+          const otherId = await addVolunteer("Elio Brandt", otherEmail);
+          const admin = await engine.newPage();
+          const volunteer = await engine.newPage();
+          const created = [];
+          let bodyError = null;
+          try {
+            await loginTestUser({ page: admin.page, actor: fixture.actor("siteCoordinator"), fixture, heading: "Office queue" });
+            const openDrawer = async (personId) => {
+              await admin.page.locator('[data-action="open-volunteers"]').first().click();
+              await admin.page.locator(`[data-action="open-edit-volunteer"][data-volunteer-id="${personId}"]`).click();
+              return admin.page.getByRole("dialog");
+            };
+            let drawer = await openDrawer(volunteerId);
+            const create = drawer.getByRole("button", { name: "Create account", exact: true });
+            // Unsaved changes turn Create account off.
+            const field = drawer.getByLabel("Email", { exact: true });
+            await field.fill(`typo-${email}`);
+            await drawer.getByText("Save your changes first.", { exact: true }).waitFor();
+            assert.equal(await create.isDisabled(), true, "Create account with unsaved changes");
+            // A fresh page drops the unsaved edit. The window keeps its screen
+            // (the Volunteers page) but not the drawer.
+            await admin.page.reload();
+            await admin.page.locator('[data-action="open-volunteers"]').first().waitFor();
+            drawer = await openDrawer(volunteerId);
+            const after = new Date(Date.now() - 2_000);
+            await drawer.getByRole("button", { name: "Create account", exact: true }).click();
+            const confirm = admin.page.getByRole("dialog", { name: `Send a sign-in invitation to ${email}?` });
+            await confirm.getByRole("button", { name: "Send", exact: true }).click();
+            await admin.page.getByText("Account created and sign-in code sent", { exact: true }).waitFor();
+
+            const code = await latestCode(mailUrl, email, { after, timeoutMs: 30_000 });
+            const { rows } = await db.sql("select id from auth.users where lower(email)=$1", [email]);
+            assert.equal(rows.length, 1, "one Auth user for the invitation");
+            created.push(rows[0].id);
+            await loginTestUser({
+              page: volunteer.page,
+              actor: { key: "invited_volunteer", email, userId: rows[0].id },
+              fixture,
+              otp: code,
+              heading: "Confirm your site",
+            });
+            const form = volunteer.page.locator("#site-check-form");
+            await form.getByLabel("Your name", { exact: true }).fill("Noor H.");
+            await form.getByLabel("Site number (SIDN)", { exact: true }).fill("S99999999");
+            await form.getByRole("button", { name: "Confirm", exact: true }).click();
+            await volunteer.page.getByText("That isn't this site's number.", { exact: true }).waitFor();
+            await form.getByLabel("Site number (SIDN)", { exact: true }).fill(TEST_SITE_NUMBER);
+            await form.getByRole("button", { name: "Confirm", exact: true }).click();
+            await volunteer.page.getByRole("heading", { name: SETUP_HEADING, exact: true }).waitFor();
+
+            await admin.page.reload();
+            await admin.page.locator('[data-action="open-volunteers"]').first().waitFor();
+            await admin.page.locator('[data-action="open-volunteers"]').first().click();
+            await admin.page
+              .locator("tr.volunteer-row", { hasText: "Noor Haddad" })
+              .getByText("Signed in as Noor H.", { exact: true })
+              .waitFor();
+
+            // Cancel invitation from the drawer: the email is editable again.
+            drawer = await openDrawer(otherId);
+            await drawer.getByRole("button", { name: "Create account", exact: true }).click();
+            await admin.page
+              .getByRole("dialog", { name: `Send a sign-in invitation to ${otherEmail}?` })
+              .getByRole("button", { name: "Send", exact: true })
+              .click();
+            await admin.page.getByText("Status:", { exact: false }).getByText("Invited", { exact: true }).waitFor();
+            const other = await db.sql("select id from auth.users where lower(email)=$1", [otherEmail]);
+            created.push(...other.rows.map((row) => row.id));
+            await admin.page.getByRole("button", { name: "Cancel invitation", exact: true }).click();
+            await admin.page
+              .getByRole("dialog", { name: "Cancel this invitation?" })
+              .getByRole("button", { name: "Cancel invitation", exact: true })
+              .click();
+            await admin.page.getByText("Invitation cancelled.", { exact: true }).waitFor();
+            await admin.page.getByText("Status:", { exact: false }).getByText("Not created", { exact: true }).waitFor();
+            assert.equal(
+              await admin.page.getByLabel("Email", { exact: true }).getAttribute("readonly"),
+              null,
+              "the email is editable again",
+            );
+            assert.deepEqual(admin.pageErrors, []);
+            assert.deepEqual(volunteer.pageErrors, []);
+          } catch (error) {
+            bodyError = error;
+            throw error;
+          } finally {
+            // The function's users are not the fixture's: the person's link
+            // and the membership (its account cascades) go in one statement,
+            // since a staff membership needs its person at commit; then the user.
+            try {
+              for (const userId of created) {
+                await db.sql(
+                  `with unlinked as (update public.people set user_id=null where user_id=$1 returning id)
+                   delete from public.memberships where user_id=$1`,
+                  [userId],
+                );
+                const removal = await db.service((adminApi) => adminApi.auth.admin.deleteUser(userId));
+                if (removal?.error) throw removal.error;
+              }
+            } catch (cleanupError) {
+              if (!bodyError) throw cleanupError;
+            } finally {
+              await volunteer.context.close();
+              await admin.context.close();
+            }
+          }
+        },
+      );
 
       if (engineName === "chrome")
         await t.test(

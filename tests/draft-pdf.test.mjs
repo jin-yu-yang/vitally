@@ -699,10 +699,16 @@ test("the blocked-tab draft link can be found again by the focus restore", () =>
   assert.deepEqual(focusSelectors(focus), ['[id="draft-ready-link"]']);
 });
 
+// Row 1 of the household cells prints only while the client shows a member.
+const WITH_CHILD = {
+  ...BASE, has_household_members: "yes",
+  hh: [{ member_id: "1".padStart(32, "0"), first_name: "Ana", last_name: "Lin", dob: "2015-06-07", relationship: "son_daughter", months_lived: "12", married: "single", us_citizen: "yes", resident_na: "yes", fulltime_student: "no", disabled: "no", ippin: "no" }],
+};
+
 test("shaded values round-trip in all three forms, a Chinese reason through runs", async () => {
   const shaded = { household1QualifyingChild: "yes", incomeW2s: true, incomeW2sCount: 2, incomeRefundAmount: "412.00", infoDisallowedReason: "子女资格不符" };
   for (const form of ["en", "zh-s", "zh-t"]) {
-    const { doc } = await build(BASE, { form, shaded, flatten: false, fontFiles: await fontFilesFor(form) });
+    const { doc } = await build(WITH_CHILD, { form, shaded, flatten: false, fontFiles: await fontFilesFor(form) });
     const f = doc.getForm();
     assert.equal(f.getTextField(shadedName("household1QualifyingChild", form)).getText(), "Yes", form);
     assert.ok(f.getCheckBox(shadedName("incomeW2s", form)).isChecked(), form);

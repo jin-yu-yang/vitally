@@ -10,6 +10,7 @@ import { CONTACT_FIELDS, findQuestion, isMemberId } from "../src/intake-catalogu
 import { newMemberId, renderQuestion, reviewAlerts, valuesFromControls, withholdInvalid } from "../src/intake-form.mjs";
 import { fictionalAnswers, fillBlankAnswers, makeSampleAnswers } from "../src/sample-data.mjs";
 import { cardsFor } from "../src/document-cards.mjs";
+import { emptyUpdateForm } from "../src/posted-updates.mjs";
 import { CONSENT_14446 } from "./support/consent-14446.mjs";
 
 // Doubles, not mocks: every test asserts the envelopes that reach the store and
@@ -59,6 +60,10 @@ function fakeStore({
     defaultIntakeVersion: 2,
   },
   clearance,
+  // Posted updates (change add-posted-updates): the staff feed and the admin
+  // table. `feed` items are read state per this one caller.
+  feed = [],
+  postedUpdates = [],
 } = {}) {
   const records = new Map(cases.map((entry) => [entry.id, entry]));
   // A staff principal is cleared by default, for what their roster entry
@@ -236,6 +241,81 @@ function fakeStore({
     async getWorkspace() {
       store.calls.push("getWorkspace");
       return { ...store.workspace };
+    },
+    // Posted updates. `failFeed`, `failMark`, `failPosted`, `failSaveUpdate`
+    // and `failUpdateAction` make the next such call reject. The feed's
+    // badge is counted the way the database counts it.
+    feed: feed.map((item) => ({ ...item })),
+    postedUpdates: postedUpdates.map((entry) => ({ ...entry })),
+    marks: [],
+    updateRequests: [],
+    failFeed: null,
+    failMark: null,
+    failPosted: null,
+    failSaveUpdate: null,
+    failUpdateAction: null,
+    async getUpdates() {
+      store.calls.push("getUpdates");
+      if (store.failFeed) {
+        const error = store.failFeed;
+        store.failFeed = null;
+        throw error;
+      }
+      const items = store.feed.map((item) => ({ ...item }));
+      const unread = items.filter((item) => item.readAt == null || (item.askConfirm && item.confirmedAt == null)).length;
+      return { items, unread };
+    },
+    async markUpdates(request) {
+      store.calls.push("markUpdates");
+      store.marks.push({ ids: [...request.ids], confirm: request.confirm });
+      if (store.failMark) {
+        const error = store.failMark;
+        store.failMark = null;
+        throw error;
+      }
+      let marked = 0;
+      for (const item of store.feed)
+        if (request.ids.includes(item.id)) {
+          marked += 1;
+          item.readAt = item.readAt ?? "2026-11-12T15:00:00Z";
+          if (request.confirm && item.askConfirm) item.confirmedAt = item.confirmedAt ?? "2026-11-12T15:00:00Z";
+        }
+      return { marked };
+    },
+    async listPostedUpdates() {
+      store.calls.push("listPostedUpdates");
+      if (store.failPosted) {
+        const error = store.failPosted;
+        store.failPosted = null;
+        throw error;
+      }
+      return store.postedUpdates.map((entry) => ({ ...entry }));
+    },
+    async saveUpdate(request) {
+      store.calls.push("saveUpdate");
+      store.updateRequests.push(request);
+      if (store.failSaveUpdate) {
+        const error = store.failSaveUpdate;
+        store.failSaveUpdate = null;
+        throw error;
+      }
+      return {
+        actionId: request.actionId,
+        updateId: request.updateId ?? "u-new",
+        revision: (request.expectedRevision ?? 0) + 1,
+        status: request.update.post ? "posted" : "draft",
+      };
+    },
+    async updateAction(request) {
+      store.calls.push("updateAction");
+      store.updateRequests.push(request);
+      if (store.failUpdateAction) {
+        const error = store.failUpdateAction;
+        store.failUpdateAction = null;
+        throw error;
+      }
+      const status = { POST: "posted", UNPUBLISH: "unpublished", DELETE: "deleted" }[request.type];
+      return { actionId: request.actionId, updateId: request.updateId, revision: request.expectedRevision + 1, status };
     },
     subscribe(handlers) {
       store.subscriptions += 1;
@@ -5123,10 +5203,23 @@ test("an applicant's help-request list counts as loaded, and sign-out starts ove
   const { controller } = build({ store });
   await controller.start();
   // The Roster's list is a staff admin's, read only on its screen: an
-  // applicant never reads it.
-  assert.deepEqual(controller.getState().lists, { cases: "ready", assistance: "ready", volunteers: "loading" });
+  // applicant never reads it. Nor the posted-update feed and table, which
+  // are staff's.
+  assert.deepEqual(controller.getState().lists, {
+    cases: "ready",
+    assistance: "ready",
+    volunteers: "loading",
+    updates: "loading",
+    postedUpdates: "loading",
+  });
   await controller.signOut();
-  assert.deepEqual(controller.getState().lists, { cases: "loading", assistance: "loading", volunteers: "loading" });
+  assert.deepEqual(controller.getState().lists, {
+    cases: "loading",
+    assistance: "loading",
+    volunteers: "loading",
+    updates: "loading",
+    postedUpdates: "loading",
+  });
   controller.stop();
 });
 
@@ -6451,6 +6544,7 @@ const ROSTER_VOLUNTEER = Object.freeze({
   certificates: [],
   revision: 4,
   hasSignIn: false,
+  account: { status: "none", revision: null },
 });
 
 const VOLUNTEER_PAYLOAD = Object.freeze({
@@ -6492,6 +6586,27 @@ const rosterStore = (overrides = {}) => {
     }
     return { actionId: request.actionId, personId: request.volunteerId ?? "v-new", revision: 1 };
   };
+  // The account calls: `accountAnswer` is what the next call resolves to,
+  // `failAccount` makes the next call reject.
+  store.accountAnswer = { status: "invited", emailSent: true, accountRevision: 1 };
+  store.failAccount = null;
+  for (const [method, type] of [
+    ["createAccount", "create"],
+    ["resendAccount", "resend"],
+    ["deactivateAccount", "deactivate"],
+    ["reactivateAccount", "reactivate"],
+    ["cancelInvitation", "cancel"],
+  ])
+    store[method] = async (request) => {
+      store.calls.push(method);
+      store.writes.push({ type, ...request });
+      if (store.failAccount) {
+        const error = store.failAccount;
+        store.failAccount = null;
+        throw error;
+      }
+      return { ...store.accountAnswer };
+    };
   return store;
 };
 const volunteerReads = (store) => store.calls.filter((entry) => entry === "listVolunteers").length;
@@ -6931,6 +7046,838 @@ test("a staff member's own people entry carries their effective capabilities, no
 });
 
 // ---------------------------------------------------------------------------
+// Posted updates: the feed and the Post an update screen
+// (change add-posted-updates, Task 4)
+// ---------------------------------------------------------------------------
+
+const feedItem = (id, overrides = {}) => ({
+  source: "posted_update",
+  id,
+  kind: "office_notice",
+  title: `Office notice ${id}`,
+  message: "The office opens at 9 on Saturday.",
+  irsLink: null,
+  postedAt: "2026-11-10T14:00:00Z",
+  postedByName: "Sam Rivera",
+  edited: false,
+  pinned: false,
+  askConfirm: false,
+  readAt: null,
+  confirmedAt: null,
+  ...overrides,
+});
+
+const postedRow = (id, overrides = {}) => ({
+  id,
+  kind: "irs_policy",
+  title: `IRS update ${id}`,
+  message: "The standard mileage rate changed.",
+  irsLink: "https://www.irs.gov/newsroom",
+  audience: "roles",
+  roles: ["preparer", "reviewer"],
+  keepTopUntil: "2026-11-20",
+  askConfirm: true,
+  status: "posted",
+  createdAt: "2026-11-09T14:00:00Z",
+  postedAt: "2026-11-09T14:00:00Z",
+  postedByName: "Sam Rivera",
+  editedAt: null,
+  unpublishedAt: null,
+  revision: 3,
+  audienceSize: 8,
+  readCount: 5,
+  confirmedCount: 2,
+  people: [],
+  ...overrides,
+});
+
+const NOT_ADMIN_CLEARED = Object.freeze({
+  cleared: true,
+  missing: [],
+  capabilities: ["prepare"],
+  isAdmin: false,
+  siteCoordinatorName: null,
+});
+const UNCLEARED_ADMIN = Object.freeze({
+  cleared: false,
+  missing: [{ kind: "form13615" }],
+  capabilities: [],
+  isAdmin: true,
+  siteCoordinatorName: "Jordan Avery",
+});
+const UNCLEARED_VOLUNTEER = Object.freeze({
+  cleared: false,
+  missing: [{ kind: "form13615" }],
+  capabilities: [],
+  isAdmin: false,
+  siteCoordinatorName: "Jordan Avery",
+});
+
+const VALID_UPDATE = Object.freeze({
+  kind: "office_notice",
+  title: "Closed on Thanksgiving",
+  message: "The office is closed on Thursday.",
+  irsLink: "",
+  audience: "everyone",
+  roles: [],
+  keepTopUntil: "",
+  askConfirm: false,
+});
+
+const callCount = (store, name) => store.calls.filter((entry) => entry === name).length;
+const domainError = (code, details) =>
+  Object.assign(new Error(code), { code, cause: details ? { message: code, details } : undefined });
+
+// An admin window on the Post an update screen, cleared unless told.
+async function onUpdatesScreen(overrides = {}) {
+  const store = adminStaffStore({ postedUpdates: [postedRow("u-1")], ...overrides });
+  const built = build({ store });
+  await built.controller.start();
+  built.controller.navigate("office-updates");
+  await built.controller.loadPostedUpdates();
+  return { store, ...built };
+}
+
+test("posted updates: a window starts with an empty feed, a closed panel and an empty form", () => {
+  const state = build({ store: adminStaffStore() }).controller.getState();
+  assert.deepEqual(state.updates, []);
+  assert.equal(state.updatesUnread, 0);
+  assert.equal(state.notificationsOpen, false);
+  assert.deepEqual(state.notificationsFresh, []);
+  assert.equal(state.lists.updates, "loading");
+  assert.deepEqual(state.postedUpdates, []);
+  assert.equal(state.lists.postedUpdates, "loading");
+  assert.deepEqual(state.updateForm, emptyUpdateForm());
+  assert.equal(state.updateEditing, null);
+  assert.equal(state.updateFormError, null);
+});
+
+test("posted updates: a cleared staff load reads the feed and takes the badge from the RPC", async () => {
+  const store = staffStore({ feed: [feedItem("f-1"), feedItem("f-2", { readAt: "2026-11-11T15:00:00Z" })] });
+  const { controller } = build({ store });
+  await controller.start();
+  const state = controller.getState();
+  assert.equal(callCount(store, "getUpdates"), 1);
+  assert.equal(state.lists.updates, "ready");
+  assert.deepEqual(state.updates.map((item) => item.id), ["f-1", "f-2"]);
+  assert.equal(state.updatesUnread, 1);
+  controller.stop();
+});
+
+test("posted updates: a client window never reads the feed", async () => {
+  const store = fakeStore({ feed: [feedItem("f-1")] });
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(callCount(store, "getUpdates"), 0);
+  controller.stop();
+});
+
+test("posted updates: a failed feed read marks the feed failed and blocks nothing else", async () => {
+  const store = staffStore({ cases: [{ id: "case-a", reference: "VT-AAAA-BBBB", stage: "preparing", revision: 1, answers: {} }] });
+  store.failFeed = domainError("OFFLINE");
+  const { controller, events } = build({ store });
+  await controller.start();
+  let state = controller.getState();
+  assert.equal(state.lists.updates, "failed");
+  assert.equal(state.lists.cases, "ready");
+  assert.equal(state.cases.length, 1);
+  assert.equal(state.error, null, "no page-wide error");
+  // The next read lands, and a later failure keeps what was shown.
+  store.feed = [feedItem("f-1")];
+  await events.emit("focus");
+  state = controller.getState();
+  assert.equal(state.lists.updates, "ready");
+  assert.equal(state.updatesUnread, 1);
+  store.failFeed = domainError("SERVER_ERROR");
+  await store.handlers.onChange({ table: "posted_updates" });
+  state = controller.getState();
+  assert.equal(state.lists.updates, "failed");
+  assert.deepEqual(state.updates.map((item) => item.id), ["f-1"], "the previous items stay");
+  assert.equal(state.error, null);
+  controller.stop();
+});
+
+test("posted updates: an uncleared window reads the feed on load and with every clearance check", async () => {
+  const store = staffStore({ clearance: { ...UNCLEARED_VOLUNTEER }, feed: [feedItem("f-1")] });
+  const { controller, events } = build({ store });
+  await controller.start();
+  assert.equal(callCount(store, "getUpdates"), 1);
+  assert.equal(controller.getState().updatesUnread, 1);
+  store.feed.push(feedItem("f-2"));
+  await controller.checkClearance();
+  assert.equal(callCount(store, "getUpdates"), 2);
+  assert.equal(controller.getState().updatesUnread, 2);
+  await events.emit("focus");
+  assert.equal(callCount(store, "getUpdates"), 3);
+  // A failed check still reads the feed.
+  store.nextClearance = domainError("OFFLINE");
+  await controller.checkClearance();
+  assert.equal(callCount(store, "getUpdates"), 4);
+  assert.equal(store.calls.includes("listCases"), false);
+  controller.stop();
+});
+
+test("posted updates: a window whose connection comes back re-reads the feed, so a missed Unpublish is caught up", async () => {
+  const store = staffStore({ feed: [feedItem("f-1")] });
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(controller.getState().updatesUnread, 1);
+  await store.handlers.onConnection("online");
+  await store.handlers.onConnection("offline");
+  // The update was unpublished while the window was away: the feed no longer has it.
+  store.feed = [];
+  const reads = callCount(store, "getUpdates");
+  await store.handlers.onConnection("online");
+  await tick();
+  assert.equal(callCount(store, "getUpdates"), reads + 1);
+  assert.deepEqual(controller.getState().updates, []);
+  assert.equal(controller.getState().updatesUnread, 0);
+  controller.stop();
+});
+
+test("posted updates: a posted_updates change re-reads the feed, and the admin table only on its screen", async () => {
+  const { store, controller } = await onUpdatesScreen();
+  const feedReads = callCount(store, "getUpdates");
+  const listReads = callCount(store, "listPostedUpdates");
+  store.feed = [feedItem("f-1")];
+  await store.handlers.onChange({ table: "posted_updates" });
+  assert.equal(callCount(store, "getUpdates"), feedReads + 1);
+  assert.equal(callCount(store, "listPostedUpdates"), listReads + 1);
+  assert.equal(controller.getState().updatesUnread, 1);
+  controller.navigate("staff");
+  await store.handlers.onChange({ table: "posted_updates" });
+  assert.equal(callCount(store, "getUpdates"), feedReads + 2);
+  assert.equal(callCount(store, "listPostedUpdates"), listReads + 1, "off the screen: no table read");
+  controller.stop();
+});
+
+test("posted updates: opening the panel marks the unread items shown in one call, then re-reads", async () => {
+  const store = staffStore({
+    feed: [feedItem("f-1"), feedItem("f-2"), feedItem("f-3", { readAt: "2026-11-11T15:00:00Z" })],
+  });
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(controller.getState().updatesUnread, 2);
+  const reads = callCount(store, "getUpdates");
+  controller.openDialog("notifications");
+  await controller.openNotifications();
+  const state = controller.getState();
+  assert.equal(state.notificationsOpen, true);
+  assert.deepEqual(store.marks, [{ ids: ["f-1", "f-2"], confirm: false }]);
+  assert.equal(callCount(store, "getUpdates"), reads + 1);
+  assert.equal(state.updatesUnread, 0);
+  controller.closeNotifications();
+  assert.equal(controller.getState().notificationsOpen, false);
+  controller.stop();
+});
+
+test("posted updates: opening the panel with nothing unread marks nothing", async () => {
+  const store = staffStore({ feed: [feedItem("f-1", { readAt: "2026-11-11T15:00:00Z" })] });
+  const { controller } = build({ store });
+  await controller.start();
+  controller.openDialog("notifications");
+  await controller.openNotifications();
+  assert.equal(controller.getState().notificationsOpen, true);
+  assert.equal(callCount(store, "markUpdates"), 0);
+  controller.stop();
+});
+
+test("posted updates: a change while the panel is open marks only newly shown unread items (Review Focus 1)", async () => {
+  const store = staffStore({ feed: [feedItem("f-1")] });
+  const { controller } = build({ store });
+  await controller.start();
+  controller.openDialog("notifications");
+  await controller.openNotifications();
+  assert.equal(store.marks.length, 1);
+  // An admin fixes a typo: the item is re-read with its new text, still read.
+  store.feed[0] = { ...store.feed[0], title: "Office notice, corrected", edited: true };
+  await store.handlers.onChange({ table: "posted_updates" });
+  let state = controller.getState();
+  assert.equal(state.updates[0].title, "Office notice, corrected");
+  assert.equal(state.updates[0].edited, true);
+  assert.equal(store.marks.length, 1, "an edit to a read item marks nothing");
+  // A new update arrives while the panel is open: only it is marked.
+  store.feed.unshift(feedItem("f-2"));
+  await store.handlers.onChange({ table: "posted_updates" });
+  assert.deepEqual(store.marks.at(-1), { ids: ["f-2"], confirm: false });
+  assert.equal(store.marks.length, 2);
+  state = controller.getState();
+  assert.equal(state.updatesUnread, 0);
+  // Closed: a new update stays unread.
+  controller.closeNotifications();
+  store.feed.unshift(feedItem("f-3"));
+  await store.handlers.onChange({ table: "posted_updates" });
+  assert.equal(store.marks.length, 2);
+  assert.equal(controller.getState().updatesUnread, 1);
+  controller.stop();
+});
+
+test("posted updates: the panel open on the setup screen marks what a clearance check shows", async () => {
+  const store = staffStore({ clearance: { ...UNCLEARED_VOLUNTEER }, feed: [feedItem("f-1")] });
+  const { controller } = build({ store });
+  await controller.start();
+  controller.openDialog("notifications");
+  await controller.openNotifications();
+  assert.deepEqual(store.marks, [{ ids: ["f-1"], confirm: false }]);
+  store.feed.unshift(feedItem("f-2"));
+  await controller.checkClearance();
+  assert.deepEqual(store.marks.at(-1), { ids: ["f-2"], confirm: false });
+  assert.equal(controller.getState().updatesUnread, 0);
+  controller.stop();
+});
+
+test("posted updates: the panel keeps highlighting what was unread when it opened, until it closes", async () => {
+  const store = staffStore({
+    feed: [feedItem("f-1"), feedItem("f-2", { readAt: "2026-11-11T15:00:00Z" })],
+  });
+  const { controller } = build({ store });
+  await controller.start();
+  assert.deepEqual(controller.getState().notificationsFresh, []);
+  controller.openDialog("notifications");
+  await controller.openNotifications();
+  let state = controller.getState();
+  // Marked and re-read: f-1 is read now, and still fresh.
+  assert.deepEqual(store.marks, [{ ids: ["f-1"], confirm: false }]);
+  assert.notEqual(state.updates.find((item) => item.id === "f-1").readAt, null);
+  assert.deepEqual(state.notificationsFresh, ["f-1"]);
+  // A new update while the panel is open joins the set.
+  store.feed.unshift(feedItem("f-3"));
+  await store.handlers.onChange({ table: "posted_updates" });
+  state = controller.getState();
+  assert.deepEqual([...state.notificationsFresh].sort(), ["f-1", "f-3"]);
+  // Closed: the set is gone.
+  controller.closeDialog();
+  controller.closeNotifications();
+  assert.deepEqual(controller.getState().notificationsFresh, []);
+  controller.stop();
+});
+
+test("posted updates: closing the dialog by any path ends the panel's fresh set", async () => {
+  const store = staffStore({ feed: [feedItem("f-1")] });
+  const { controller } = build({ store });
+  await controller.start();
+  controller.openDialog("notifications");
+  await controller.openNotifications();
+  assert.deepEqual(controller.getState().notificationsFresh, ["f-1"]);
+  controller.closeDialog();
+  const state = controller.getState();
+  assert.equal(state.notificationsOpen, false);
+  assert.deepEqual(state.notificationsFresh, []);
+  controller.stop();
+});
+
+test("posted updates: the panel does not open, or mark, without its dialog", async () => {
+  const store = staffStore({ feed: [feedItem("f-1")] });
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.openNotifications();
+  assert.equal(controller.getState().notificationsOpen, false);
+  assert.equal(callCount(store, "markUpdates"), 0);
+  controller.stop();
+});
+
+test("posted updates: after navigating away from the open panel, a realtime change marks nothing", async () => {
+  const store = staffStore({ feed: [feedItem("f-1")] });
+  const { controller } = build({ store });
+  await controller.start();
+  controller.openDialog("notifications");
+  await controller.openNotifications();
+  assert.equal(callCount(store, "markUpdates"), 1);
+  controller.navigate("staff");
+  let state = controller.getState();
+  assert.equal(state.dialog, null);
+  assert.equal(state.notificationsOpen, false);
+  assert.deepEqual(state.notificationsFresh, []);
+  store.feed.unshift(feedItem("f-2"));
+  await store.handlers.onChange({ table: "posted_updates" });
+  assert.equal(callCount(store, "markUpdates"), 1, "no panel shows: nothing is marked");
+  state = controller.getState();
+  assert.equal(state.updatesUnread, 1);
+  controller.stop();
+});
+
+test("posted updates: after clearance is lost with the panel open, a realtime change marks nothing", async () => {
+  const store = staffStore({ feed: [feedItem("f-1")] });
+  const { controller, events } = build({ store });
+  await controller.start();
+  controller.openDialog("notifications");
+  await controller.openNotifications();
+  assert.equal(callCount(store, "markUpdates"), 1);
+  store.nextClearance = { ...UNCLEARED_VOLUNTEER };
+  await controller.checkClearance();
+  let state = controller.getState();
+  assert.equal(state.principal.clearance.cleared, false);
+  assert.equal(state.dialog, null);
+  assert.equal(state.notificationsOpen, false);
+  assert.deepEqual(state.notificationsFresh, []);
+  // An uncleared window has no realtime channel: focus re-reads the feed.
+  store.feed.unshift(feedItem("f-2"));
+  await store.handlers?.onChange({ table: "posted_updates" });
+  await events.emit("focus");
+  assert.equal(callCount(store, "markUpdates"), 1, "no panel shows: nothing is marked");
+  state = controller.getState();
+  assert.equal(state.updatesUnread, 1);
+  controller.stop();
+});
+
+test("posted updates: I've read this confirms the one item, then re-reads", async () => {
+  const store = staffStore({ feed: [feedItem("f-1", { askConfirm: true, readAt: "2026-11-11T15:00:00Z" })] });
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(controller.getState().updatesUnread, 1);
+  const reads = callCount(store, "getUpdates");
+  assert.equal(await controller.confirmUpdate("f-1"), true);
+  assert.deepEqual(store.marks, [{ ids: ["f-1"], confirm: true }]);
+  assert.equal(callCount(store, "getUpdates"), reads + 1);
+  const state = controller.getState();
+  assert.equal(state.updatesUnread, 0);
+  assert.equal(state.updates[0].confirmedAt, "2026-11-12T15:00:00Z");
+  controller.stop();
+});
+
+test("posted updates: a non-admin window restored on Post an update lands on the board", async () => {
+  const sessionStorage = fakeSession();
+  const seed = build({ store: adminStaffStore(), sessionStorage });
+  await seed.controller.start();
+  seed.controller.navigate("office-updates");
+  seed.controller.stop();
+  // Another window of the same user, now without admin.
+  const store = adminStaffStore({ clearance: { ...NOT_ADMIN_CLEARED } });
+  const { controller } = build({ store, sessionStorage });
+  await controller.start();
+  assert.equal(controller.getState().screen, "staff");
+  assert.equal(callCount(store, "listPostedUpdates"), 0);
+  // Navigating there lands on the board too, and the table is not read.
+  controller.navigate("office-updates");
+  await controller.loadPostedUpdates();
+  assert.equal(controller.getState().screen, "staff");
+  assert.equal(callCount(store, "listPostedUpdates"), 0);
+  controller.stop();
+});
+
+test("posted updates: an admin window restored on Post an update reads the table", async () => {
+  const sessionStorage = fakeSession();
+  const seed = build({ store: adminStaffStore(), sessionStorage });
+  await seed.controller.start();
+  seed.controller.navigate("office-updates");
+  seed.controller.stop();
+  const store = adminStaffStore({ postedUpdates: [postedRow("u-1")] });
+  const { controller } = build({ store, sessionStorage });
+  await controller.start();
+  const state = controller.getState();
+  assert.equal(state.screen, "office-updates");
+  assert.equal(state.lists.postedUpdates, "ready");
+  assert.deepEqual(state.postedUpdates.map((entry) => entry.id), ["u-1"]);
+  controller.stop();
+});
+
+test("posted updates: an uncleared ceiling admin keeps Post an update, with its table and no case", async () => {
+  const sessionStorage = fakeSession();
+  const seed = build({ store: adminStaffStore({ clearance: { ...UNCLEARED_ADMIN } }), sessionStorage });
+  await seed.controller.start();
+  seed.controller.navigate("office-updates");
+  await seed.controller.loadPostedUpdates();
+  assert.equal(seed.controller.getState().screen, "office-updates");
+  seed.controller.stop();
+  const store = adminStaffStore({ clearance: { ...UNCLEARED_ADMIN }, postedUpdates: [postedRow("u-1")] });
+  const { controller, events } = build({ store, sessionStorage });
+  await controller.start();
+  let state = controller.getState();
+  assert.equal(state.screen, "office-updates", "the restored screen survives the setup hold");
+  assert.equal(state.lists.postedUpdates, "ready");
+  assert.equal(store.calls.includes("listCases"), false);
+  // Focus re-reads the clearance, the feed and the table.
+  const listReads = callCount(store, "listPostedUpdates");
+  await events.emit("focus");
+  assert.equal(callCount(store, "listPostedUpdates"), listReads + 1);
+  // Becoming cleared keeps the screen.
+  store.nextClearance = { ...UNCLEARED_ADMIN, cleared: true, missing: [] };
+  await controller.checkClearance();
+  state = controller.getState();
+  assert.equal(state.principal.clearance.cleared, true);
+  assert.equal(state.screen, "office-updates");
+  controller.stop();
+});
+
+test("posted updates: an invalid form sets its error, keeps the form and sends nothing", async () => {
+  const { store, controller } = await onUpdatesScreen();
+  const form = { ...VALID_UPDATE, title: "   ", audience: "roles", roles: [] };
+  assert.equal(await controller.saveUpdate(form, { post: true }), null);
+  const state = controller.getState();
+  assert.deepEqual(state.updateFormError, {
+    title: "Enter a title of up to 120 characters.",
+    roles: "Choose at least one role.",
+  });
+  assert.equal(state.updateForm.title, "   ");
+  assert.equal(callCount(store, "saveUpdate"), 0);
+  controller.stop();
+});
+
+test("posted updates: a valid post sends post true, clears the form and re-reads the table and the feed", async () => {
+  const { store, controller } = await onUpdatesScreen();
+  const listReads = callCount(store, "listPostedUpdates");
+  const feedReads = callCount(store, "getUpdates");
+  controller.setUpdateForm({ ...VALID_UPDATE });
+  assert.equal(controller.getState().updateForm.title, VALID_UPDATE.title);
+  const result = await controller.saveUpdate({ ...VALID_UPDATE }, { post: true });
+  assert.equal(result.status, "posted");
+  const sent = store.updateRequests.at(-1);
+  assert.equal(sent.updateId, null);
+  assert.equal(sent.expectedRevision, null);
+  assert.equal(typeof sent.actionId, "string");
+  assert.deepEqual(sent.update, {
+    kind: "office_notice",
+    title: "Closed on Thanksgiving",
+    message: "The office is closed on Thursday.",
+    irsLink: null,
+    audience: "everyone",
+    roles: [],
+    keepTopUntil: null,
+    askConfirm: false,
+    post: true,
+    askAgain: false,
+  });
+  const state = controller.getState();
+  assert.deepEqual(state.updateForm, emptyUpdateForm());
+  assert.equal(state.updateEditing, null);
+  assert.equal(state.updateFormError, null);
+  assert.equal(state.busy, false);
+  assert.equal(callCount(store, "listPostedUpdates"), listReads + 1);
+  assert.equal(callCount(store, "getUpdates"), feedReads + 1);
+  // Save draft sends post false.
+  const draft = await controller.saveUpdate({ ...VALID_UPDATE }, { post: false });
+  assert.equal(draft.status, "draft");
+  assert.equal(store.updateRequests.at(-1).update.post, false);
+  controller.stop();
+});
+
+test("posted updates: OFFLINE keeps the request, and the retry sends the very same one (Review Focus 4)", async () => {
+  let minted = 0;
+  const store = adminStaffStore({ postedUpdates: [postedRow("u-1")] });
+  const { controller } = build({ store, newActionId: () => `action-${(minted += 1)}` });
+  await controller.start();
+  controller.navigate("office-updates");
+  await controller.loadPostedUpdates();
+  store.failSaveUpdate = domainError("OFFLINE");
+  assert.equal(await controller.saveUpdate({ ...VALID_UPDATE }, { post: true }), null);
+  let state = controller.getState();
+  assert.equal(state.error.code, "OFFLINE");
+  assert.equal(state.updateForm.title, VALID_UPDATE.title, "the typed form stays");
+  const first = store.updateRequests.at(-1);
+  const result = await controller.saveUpdate({ ...VALID_UPDATE }, { post: true });
+  assert.equal(result.status, "posted");
+  const second = store.updateRequests.at(-1);
+  assert.equal(second, first, "the same request object");
+  assert.equal(second.actionId, "action-1");
+  assert.equal(minted, 1);
+  state = controller.getState();
+  assert.equal(state.error, null);
+  // Different values after a lost answer are a new save.
+  store.failSaveUpdate = domainError("OFFLINE");
+  await controller.saveUpdate({ ...VALID_UPDATE }, { post: true });
+  await controller.saveUpdate({ ...VALID_UPDATE, title: "Closed on Friday too" }, { post: true });
+  assert.equal(store.updateRequests.at(-1).actionId, "action-3");
+  controller.stop();
+});
+
+test("posted updates: a second press while a save is out sends nothing", async () => {
+  const { store, controller } = await onUpdatesScreen();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const save = store.saveUpdate;
+  store.saveUpdate = async (request) => {
+    await gate;
+    return save(request);
+  };
+  const first = controller.saveUpdate({ ...VALID_UPDATE }, { post: true });
+  assert.equal(await controller.saveUpdate({ ...VALID_UPDATE }, { post: true }), null);
+  release();
+  assert.equal((await first).status, "posted");
+  assert.equal(callCount(store, "saveUpdate"), 1);
+  controller.stop();
+});
+
+test("posted updates: CONFLICT and INVALID_TRANSITION re-read the table and keep the form", async () => {
+  const { store, controller } = await onUpdatesScreen();
+  const listReads = callCount(store, "listPostedUpdates");
+  store.failSaveUpdate = domainError("CONFLICT");
+  assert.equal(await controller.saveUpdate({ ...VALID_UPDATE }, { post: true }), null);
+  let state = controller.getState();
+  assert.equal(state.error.message, "Someone changed this update. Check the table and try again.");
+  assert.equal(state.updateForm.title, VALID_UPDATE.title);
+  assert.equal(callCount(store, "listPostedUpdates"), listReads + 1);
+  store.failSaveUpdate = domainError("INVALID_TRANSITION");
+  assert.equal(await controller.saveUpdate({ ...VALID_UPDATE }, { post: true }), null);
+  state = controller.getState();
+  assert.equal(state.error.message, "This update can no longer be changed.");
+  assert.equal(state.updateForm.title, VALID_UPDATE.title);
+  assert.equal(callCount(store, "listPostedUpdates"), listReads + 2);
+  // A refusal is final: the next press is a new request.
+  const before = store.updateRequests.at(-1);
+  await controller.saveUpdate({ ...VALID_UPDATE }, { post: true });
+  assert.notEqual(store.updateRequests.at(-1), before);
+  controller.stop();
+});
+
+for (const status of ["posted", "unpublished"]) {
+  test(`posted updates: an edit of a ${status} update that meets CONFLICT keeps the typed text, takes the current revision, and the next save succeeds`, async () => {
+    const { store, controller } = await onUpdatesScreen({
+      postedUpdates: [postedRow("u-1", { status, revision: 3, unpublishedAt: status === "unpublished" ? "2026-11-10T14:00:00Z" : null })],
+    });
+    assert.equal(controller.editUpdate("u-1"), true);
+    const typed = { ...controller.getState().updateForm, title: "My fix", message: "My message" };
+    // Another admin saves first: the row is now at revision 4 with their text.
+    Object.assign(store.postedUpdates[0], { revision: 4, title: "Their fix", message: "Their message", editedAt: "2026-11-12T15:00:00Z" });
+    store.failSaveUpdate = domainError("CONFLICT");
+    assert.equal(await controller.saveUpdate(typed, { post: true }), null);
+    assert.equal(store.updateRequests.at(-1).expectedRevision, 3);
+    let state = controller.getState();
+    assert.equal(state.updateForm.title, "My fix", "the typed title stays");
+    assert.equal(state.updateForm.message, "My message", "the typed message stays");
+    assert.deepEqual(state.updateEditing, {
+      id: "u-1",
+      revision: 4,
+      status,
+      conflict: { title: "Their fix", message: "Their message" },
+    });
+    assert.equal(state.error, null, "said in the form, not as the banner");
+    assert.equal(state.busy, false);
+    // Saving again sends the new revision and replaces theirs.
+    const result = await controller.saveUpdate(state.updateForm, { post: true });
+    assert.notEqual(result, null);
+    const sent = store.updateRequests.at(-1);
+    assert.equal(sent.expectedRevision, 4);
+    assert.equal(sent.updateId, "u-1");
+    assert.equal(sent.update.title, "My fix");
+    assert.equal(sent.update.post, status === "posted", "an unpublished update is never posted by its save");
+    state = controller.getState();
+    assert.equal(state.updateEditing, null);
+    assert.equal(state.error, null);
+    controller.stop();
+  });
+}
+
+test("posted updates: Cancel after a CONFLICT drops the typed text and leaves the other admin's version", async () => {
+  const { store, controller } = await onUpdatesScreen();
+  controller.editUpdate("u-1");
+  Object.assign(store.postedUpdates[0], { revision: 4, title: "Their fix" });
+  store.failSaveUpdate = domainError("CONFLICT");
+  await controller.saveUpdate({ ...controller.getState().updateForm, title: "My fix" }, { post: true });
+  assert.equal(controller.getState().updateEditing.conflict.title, "Their fix");
+  const saves = callCount(store, "saveUpdate");
+  controller.cancelUpdateEdit();
+  const state = controller.getState();
+  assert.deepEqual(state.updateForm, emptyUpdateForm());
+  assert.equal(state.updateEditing, null);
+  assert.equal(state.postedUpdates.find((row) => row.id === "u-1").title, "Their fix");
+  assert.equal(callCount(store, "saveUpdate"), saves, "nothing is saved");
+  controller.stop();
+});
+
+test("posted updates: a CONFLICT on an edit whose update is gone, or whose table can't be read, says so in the banner", async () => {
+  const { store, controller } = await onUpdatesScreen();
+  controller.editUpdate("u-1");
+  store.postedUpdates = [];
+  store.failSaveUpdate = domainError("CONFLICT");
+  await controller.saveUpdate({ ...controller.getState().updateForm }, { post: true });
+  let state = controller.getState();
+  assert.equal(state.error.message, "Someone changed this update. Check the table and try again.");
+  assert.equal(state.updateEditing.conflict, undefined);
+  store.postedUpdates = [postedRow("u-1", { revision: 5 })];
+  store.failSaveUpdate = domainError("CONFLICT");
+  store.failPosted = domainError("OFFLINE");
+  await controller.saveUpdate({ ...controller.getState().updateForm }, { post: true });
+  state = controller.getState();
+  assert.equal(state.updateEditing.revision, 3, "no revision is taken without reading it");
+  assert.equal(state.updateEditing.conflict, undefined);
+  controller.stop();
+});
+
+test("posted updates: a VALIDATION refusal names its field in the form, in the form's words", async () => {
+  const { store, controller } = await onUpdatesScreen();
+  store.failSaveUpdate = domainError("VALIDATION", "irsLink");
+  const form = { ...VALID_UPDATE, kind: "irs_policy", irsLink: "https://www.irs.gov/x" };
+  assert.equal(await controller.saveUpdate(form, { post: true }), null);
+  let state = controller.getState();
+  assert.deepEqual(state.updateFormError, { irsLink: "Use an https link on irs.gov." });
+  assert.equal(state.updateForm.irsLink, "https://www.irs.gov/x");
+  assert.equal(state.error, null, "said in the form, not as a banner");
+  store.failSaveUpdate = domainError("VALIDATION", "update");
+  await controller.saveUpdate(form, { post: true });
+  state = controller.getState();
+  assert.deepEqual(state.updateFormError, { form: "Please check the update and try again." });
+  controller.stop();
+});
+
+test("posted updates: Unpublish passes the row's revision and re-reads the table", async () => {
+  const { store, controller } = await onUpdatesScreen();
+  const listReads = callCount(store, "listPostedUpdates");
+  const result = await controller.updateAction("u-1", "UNPUBLISH");
+  assert.equal(result.status, "unpublished");
+  const sent = store.updateRequests.at(-1);
+  assert.equal(sent.updateId, "u-1");
+  assert.equal(sent.expectedRevision, 3);
+  assert.equal(sent.type, "UNPUBLISH");
+  assert.equal(typeof sent.actionId, "string");
+  assert.equal(callCount(store, "listPostedUpdates"), listReads + 1);
+  // A refusal re-reads and says so.
+  store.failUpdateAction = domainError("CONFLICT");
+  assert.equal(await controller.updateAction("u-1", "UNPUBLISH"), null);
+  assert.equal(controller.getState().error.message, "Someone changed this update. Check the table and try again.");
+  assert.equal(callCount(store, "listPostedUpdates"), listReads + 2);
+  controller.stop();
+});
+
+test("posted updates: an action on an update another admin deleted says it is gone and re-reads the table", async () => {
+  const { store, controller } = await onUpdatesScreen({ postedUpdates: [postedRow("u-2", { status: "draft", revision: 1 })] });
+  const listReads = callCount(store, "listPostedUpdates");
+  store.failUpdateAction = domainError("NOT_FOUND");
+  assert.equal(await controller.updateAction("u-2", "POST"), null);
+  assert.equal(controller.getState().error.message, "This update is no longer in the table.");
+  assert.equal(callCount(store, "listPostedUpdates"), listReads + 1);
+  // A save of an edit to it says the same.
+  controller.editUpdate("u-2");
+  store.failSaveUpdate = domainError("NOT_FOUND");
+  assert.equal(await controller.saveUpdate({ ...controller.getState().updateForm }, { post: false }), null);
+  assert.equal(controller.getState().error.message, "This update is no longer in the table.");
+  assert.equal(callCount(store, "listPostedUpdates"), listReads + 2);
+  controller.stop();
+});
+
+test("posted updates: a keep-at-the-top date before today is refused, unless it is the saved date of the update being edited", async () => {
+  const now = Date.parse("2026-11-25T15:00:00Z");
+  const store = adminStaffStore({ postedUpdates: [postedRow("u-1", { keepTopUntil: "2026-11-20" })] });
+  const { controller } = build({ store, clock: () => now });
+  await controller.start();
+  controller.navigate("office-updates");
+  await controller.loadPostedUpdates();
+  const saves = callCount(store, "saveUpdate");
+  // A new update with yesterday's date.
+  assert.equal(await controller.saveUpdate({ ...VALID_UPDATE, keepTopUntil: "2026-11-24" }, { post: true }), null);
+  assert.deepEqual(controller.getState().updateFormError, { keepTopUntil: "Choose today or a later date." });
+  assert.equal(callCount(store, "saveUpdate"), saves);
+  // Today saves.
+  assert.notEqual(await controller.saveUpdate({ ...VALID_UPDATE, keepTopUntil: "2026-11-25" }, { post: true }), null);
+  assert.equal(callCount(store, "saveUpdate"), saves + 1);
+  // Editing an update kept since an earlier day: its own date still saves.
+  controller.editUpdate("u-1");
+  assert.notEqual(await controller.saveUpdate({ ...controller.getState().updateForm, title: "Fixed" }, { post: true }), null);
+  assert.equal(callCount(store, "saveUpdate"), saves + 2);
+  // ...but another past date does not.
+  controller.editUpdate("u-1");
+  assert.equal(
+    await controller.saveUpdate({ ...controller.getState().updateForm, keepTopUntil: "2026-11-19" }, { post: true }),
+    null,
+  );
+  assert.deepEqual(controller.getState().updateFormError, { keepTopUntil: "Choose today or a later date." });
+  assert.equal(callCount(store, "saveUpdate"), saves + 2);
+  controller.stop();
+});
+
+test("posted updates: an action whose answer was lost is retried with the same request", async () => {
+  const { store, controller } = await onUpdatesScreen({ postedUpdates: [postedRow("u-2", { status: "draft", revision: 1 })] });
+  store.failUpdateAction = domainError("OFFLINE");
+  assert.equal(await controller.updateAction("u-2", "DELETE"), null);
+  const first = store.updateRequests.at(-1);
+  const result = await controller.updateAction("u-2", "DELETE");
+  assert.equal(result.status, "deleted");
+  assert.equal(store.updateRequests.at(-1), first);
+  controller.stop();
+});
+
+test("posted updates: Edit fills the form from the table, saves with its revision, and Cancel resets", async () => {
+  const { store, controller } = await onUpdatesScreen();
+  assert.equal(controller.editUpdate("u-1"), true);
+  let state = controller.getState();
+  assert.deepEqual(state.updateEditing, { id: "u-1", revision: 3, status: "posted" });
+  assert.deepEqual(state.updateForm, {
+    kind: "irs_policy",
+    title: "IRS update u-1",
+    message: "The standard mileage rate changed.",
+    irsLink: "https://www.irs.gov/newsroom",
+    audience: "roles",
+    roles: ["preparer", "reviewer"],
+    keepTopUntil: "2026-11-20",
+    askConfirm: true,
+    askAgain: false,
+  });
+  // Save changes, asking everyone to read it again.
+  await controller.saveUpdate({ ...state.updateForm, title: "IRS update, corrected", askAgain: true }, { post: true });
+  const sent = store.updateRequests.at(-1);
+  assert.equal(sent.updateId, "u-1");
+  assert.equal(sent.expectedRevision, 3);
+  assert.equal(sent.update.askAgain, true);
+  assert.equal(sent.update.title, "IRS update, corrected");
+  state = controller.getState();
+  assert.equal(state.updateEditing, null);
+  assert.deepEqual(state.updateForm, emptyUpdateForm());
+  // Cancel.
+  controller.editUpdate("u-1");
+  controller.cancelUpdateEdit();
+  state = controller.getState();
+  assert.equal(state.updateEditing, null);
+  assert.deepEqual(state.updateForm, emptyUpdateForm());
+  assert.equal(state.updateFormError, null);
+  // An update that is not in the table is not opened.
+  assert.equal(controller.editUpdate("u-missing"), false);
+  controller.stop();
+});
+
+test("posted updates: an unpublished update is edited with its revision, never posted and never asked to be read again", async () => {
+  const { store, controller } = await onUpdatesScreen({
+    postedUpdates: [postedRow("u-3", { status: "unpublished", revision: 4, unpublishedAt: "2026-11-12T15:00:00Z" })],
+  });
+  assert.equal(controller.editUpdate("u-3"), true);
+  assert.deepEqual(controller.getState().updateEditing, { id: "u-3", revision: 4, status: "unpublished" });
+  // Save changes is the form's post intent; for an unpublished update it sends post: false.
+  const result = await controller.saveUpdate(
+    { ...controller.getState().updateForm, title: "Name removed", askAgain: true },
+    { post: true },
+  );
+  assert.notEqual(result, null);
+  const sent = store.updateRequests.at(-1);
+  assert.equal(sent.updateId, "u-3");
+  assert.equal(sent.expectedRevision, 4);
+  assert.equal(sent.update.title, "Name removed");
+  assert.equal(sent.update.post, false);
+  assert.equal(sent.update.askAgain, false);
+  assert.equal(controller.getState().updateEditing, null);
+  controller.stop();
+});
+
+test("posted updates: a draft's edit never asks everyone to read it again", async () => {
+  const { store, controller } = await onUpdatesScreen({ postedUpdates: [postedRow("u-2", { status: "draft", revision: 1 })] });
+  controller.editUpdate("u-2");
+  await controller.saveUpdate({ ...controller.getState().updateForm, askAgain: true }, { post: false });
+  assert.equal(store.updateRequests.at(-1).update.askAgain, false);
+  controller.stop();
+});
+
+test("posted updates: signing out resets every posted-update field", async () => {
+  const { store, controller } = await onUpdatesScreen();
+  store.feed = [feedItem("f-1")];
+  await controller.loadFeed();
+  controller.openDialog("notifications");
+  await controller.openNotifications();
+  controller.editUpdate("u-1");
+  await controller.saveUpdate({ ...VALID_UPDATE, title: "" }, { post: true });
+  await controller.signOut();
+  const state = controller.getState();
+  assert.deepEqual(state.updates, []);
+  assert.equal(state.updatesUnread, 0);
+  assert.equal(state.notificationsOpen, false);
+  assert.deepEqual(state.notificationsFresh, []);
+  assert.equal(state.lists.updates, "loading");
+  assert.deepEqual(state.postedUpdates, []);
+  assert.equal(state.lists.postedUpdates, "loading");
+  assert.deepEqual(state.updateForm, emptyUpdateForm());
+  assert.equal(state.updateEditing, null);
+  assert.equal(state.updateFormError, null);
+});
+
+// ---------------------------------------------------------------------------
 // The setup screen (change add-volunteer-clearance, Task 8)
 // ---------------------------------------------------------------------------
 
@@ -7243,6 +8190,629 @@ test("the window's focus re-checks the clearance only while the setup screen sho
   assert.equal(store.calls.filter((entry) => entry === "listCases").length, caseReads + 1);
   state = controller.getState();
   assert.equal(state.error, null);
+  controller.stop();
+});
+
+// ---- the site check (change add-account-invitations, decision 4) ----------
+
+const SITE_CHECK = Object.freeze({ ...UNCLEARED, siteCheck: true });
+// An invited volunteer's store: `siteAnswer` is what the next site check
+// answers (a value or an Error to reject with).
+const siteCheckStore = () => {
+  const store = staffStore({ clearance: { ...SITE_CHECK } });
+  store.siteAnswer = { status: "active" };
+  store.siteCalls = [];
+  store.completeSiteCheck = async (name, sidn) => {
+    store.calls.push("completeSiteCheck");
+    store.siteCalls.push([name, sidn]);
+    if (store.siteAnswer instanceof Error) throw store.siteAnswer;
+    return store.siteAnswer;
+  };
+  return store;
+};
+const siteRefusal = (details) =>
+  Object.assign(new Error("VALIDATION"), { code: "VALIDATION", cause: { message: "VALIDATION", details } });
+
+test("an invited volunteer's window shows the site check, not the setup screen", async () => {
+  const store = siteCheckStore();
+  const { controller } = build({ store });
+  await controller.start();
+  const html = staffScreen(controller.getState());
+  assert.match(html, /<h1>Confirm your site<\/h1>/);
+  assert.doesNotMatch(html, /Finish your setup for this season/);
+  for (const call of ["listCases", "listAssistance"]) assert.equal(store.calls.includes(call), false, call);
+  controller.stop();
+});
+
+test("the right SIDN reads the clearance again and moves on to the setup screen", async () => {
+  const store = siteCheckStore();
+  const { controller } = build({ store });
+  await controller.start();
+  const before = clearanceCalls(store);
+  store.nextClearance = { ...UNCLEARED, siteCheck: false };
+  assert.equal(await controller.completeSiteCheck("  Kim Novak ", "S12345"), "active");
+  assert.deepEqual(store.siteCalls, [["Kim Novak", "S12345"]]);
+  assert.equal(clearanceCalls(store) - before, 1);
+  const state = controller.getState();
+  assert.equal(state.siteCheck, null);
+  assert.equal(state.busy, false);
+  assert.match(staffScreen(state), /Finish your setup for this season/);
+  controller.stop();
+});
+
+test("a wrong SIDN keeps the name and says so exactly", async () => {
+  const store = siteCheckStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.siteAnswer = { status: "invited", reason: "WRONG_SITE", attemptsLeft: 3 };
+  assert.equal(await controller.completeSiteCheck("Kim Novak", "S99999"), "wrong-site");
+  const state = controller.getState();
+  assert.deepEqual(state.siteCheck, { name: "Kim Novak", error: "That isn't this site's number.", cancelled: false });
+  const html = staffScreen(state);
+  assert.match(html, /value="Kim Novak"/);
+  assert.match(html, /id="site-check-sidn" name="sidn" type="text" value=""/);
+  assert.match(html, /That isn&#39;t this site&#39;s number\./);
+  assert.equal(state.error, null);
+  controller.stop();
+});
+
+test("a cancelled invitation replaces the form, and the window stops asking about the clearance", async () => {
+  for (const reason of ["EXPIRED", "TOO_MANY_ATTEMPTS"]) {
+    const store = siteCheckStore();
+    const { controller, events } = build({ store });
+    await controller.start();
+    store.siteAnswer = { status: "cancelled", reason };
+    assert.equal(await controller.completeSiteCheck("Kim Novak", "S99999"), "cancelled");
+    const html = staffScreen(controller.getState());
+    assert.match(html, /This invitation was cancelled\. Ask your site coordinator to invite you again\./);
+    assert.doesNotMatch(html, /site-check-form/);
+    assert.match(html, /data-action="sign-out"/);
+    // No membership is left: the window's focus asks nothing more.
+    const before = clearanceCalls(store);
+    await events.emit("focus");
+    assert.equal(clearanceCalls(store), before, reason);
+    assert.equal(controller.getState().error, null);
+    controller.stop();
+  }
+});
+
+test("an empty name is refused without asking the server", async () => {
+  const store = siteCheckStore();
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(await controller.completeSiteCheck("   ", "S12345"), "invalid");
+  assert.equal(store.calls.includes("completeSiteCheck"), false);
+  assert.equal(controller.getState().siteCheck.error, "Enter your name.");
+  controller.stop();
+});
+
+test("the server's NO_NAME and SITE_NOT_SET are said on the screen; anything else is the safety net", async () => {
+  const store = siteCheckStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.siteAnswer = siteRefusal("NO_NAME");
+  assert.equal(await controller.completeSiteCheck("K", "S1"), "invalid");
+  assert.equal(controller.getState().siteCheck.error, "Enter your name.");
+  store.siteAnswer = siteRefusal("SITE_NOT_SET");
+  assert.equal(await controller.completeSiteCheck("Kim Novak", "S1"), "invalid");
+  assert.deepEqual(controller.getState().siteCheck, {
+    name: "Kim Novak",
+    error: "This site isn't set up for sign-in yet. Ask your site coordinator.",
+    cancelled: false,
+  });
+  assert.equal(controller.getState().error, null);
+  store.siteAnswer = siteRefusal("NO_SIDN");
+  assert.equal(await controller.completeSiteCheck("Kim Novak", ""), "invalid");
+  assert.equal(controller.getState().siteCheck.error, "Enter this site's SIDN.");
+  store.siteAnswer = Object.assign(new Error("SERVER_ERROR"), { code: "SERVER_ERROR" });
+  await assert.rejects(() => controller.completeSiteCheck("Kim Novak", "S1"), (error) => error.code === "SERVER_ERROR");
+  assert.equal(controller.getState().busy, false);
+  controller.stop();
+});
+
+// Review round finding I1: the invitation went away before the press, or an
+// earlier press landed and its answer was lost.
+test("a site check refused as FORBIDDEN says the invitation was cancelled", async () => {
+  const store = siteCheckStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.siteAnswer = Object.assign(new Error("FORBIDDEN"), { code: "FORBIDDEN" });
+  assert.equal(await controller.completeSiteCheck("Kim Novak", "S1"), "cancelled");
+  const state = controller.getState();
+  assert.match(staffScreen(state), /This invitation was cancelled\. Ask your site coordinator to invite you again\./);
+  assert.equal(state.error, null);
+  controller.stop();
+});
+
+test("a site check refused as INVALID_TRANSITION reads the clearance again", async () => {
+  const store = siteCheckStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.siteAnswer = Object.assign(new Error("INVALID_TRANSITION"), { code: "INVALID_TRANSITION" });
+  store.nextClearance = { ...UNCLEARED, siteCheck: false };
+  const before = clearanceCalls(store);
+  assert.equal(await controller.completeSiteCheck("Kim Novak", "S1"), "active");
+  assert.equal(clearanceCalls(store) - before, 1);
+  const state = controller.getState();
+  assert.equal(state.siteCheck, null);
+  assert.equal(state.error, null);
+  assert.match(staffScreen(state), /Finish your setup for this season/);
+  controller.stop();
+});
+
+test("a window with no site check sends nothing", async () => {
+  const store = siteCheckStore();
+  store.nextClearance = { ...UNCLEARED, siteCheck: false };
+  const { controller } = build({ store });
+  await controller.start();
+  // The re-check says this account is past its site check.
+  await controller.checkClearance();
+  assert.equal(await controller.completeSiteCheck("Kim Novak", "S1"), null);
+  assert.deepEqual(store.siteCalls, []);
+  assert.doesNotMatch(staffScreen(controller.getState()), /Confirm your site/);
+  controller.stop();
+});
+
+// ---- the drawer's Account section (change add-account-invitations) --------
+
+const accountRefusal = (code, message, details) =>
+  Object.assign(new Error(code), { code, cause: { message, details } });
+
+async function accountDrawer(store, options = {}) {
+  let n = 0;
+  const built = build({ store, newActionId: () => `action-${++n}`, ...options });
+  await built.controller.start();
+  built.controller.navigate("office-volunteers");
+  await built.controller.loadVolunteers();
+  built.controller.openDialog("volunteer", { volunteerId: "v-1" });
+  return built;
+}
+
+test("create account shows the sent message and re-reads the roster", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  const reads = volunteerReads(store);
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "invited", revision: 1 } }];
+  controller.openDialog("send-invitation", { volunteerId: "v-1" });
+  assert.equal(await controller.createAccount(), true);
+  assert.deepEqual(store.writes.at(-1), { type: "create", actionId: "action-1", volunteerId: "v-1" });
+  const state = controller.getState();
+  assert.deepEqual(state.volunteerAccountNotice, { kind: "ok", text: "Account created and sign-in code sent" });
+  assert.equal(volunteerReads(store), reads + 1);
+  assert.equal(state.volunteers[0].account.status, "invited");
+  assert.equal(state.dialog, "volunteer");
+  assert.equal(state.busy, false);
+  controller.stop();
+});
+
+test("email not sent shows the Resend message", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  store.accountAnswer = { status: "invited", emailSent: false, accountRevision: 1 };
+  controller.openDialog("send-invitation", { volunteerId: "v-1" });
+  assert.equal(await controller.createAccount(), true);
+  assert.equal(
+    controller.getState().volunteerAccountNotice.text,
+    "Account created; the email wasn't sent. Use Resend in a minute.",
+  );
+  // A replayed Resend says the same: nothing was sent this time.
+  store.accountAnswer = { status: "invited", emailSent: false, accountRevision: 1, replay: true };
+  assert.equal(await controller.resendAccount(), true);
+  assert.equal(controller.getState().volunteerAccountNotice.text, "The email wasn't sent. Use Resend in a minute.");
+  controller.stop();
+});
+
+test("a refusal with a sentence is said in the drawer and returns false", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  store.failAccount = accountRefusal("VALIDATION", "VALIDATION", "NO_EMAIL");
+  controller.openDialog("send-invitation", { volunteerId: "v-1" });
+  assert.equal(await controller.createAccount(), false);
+  const state = controller.getState();
+  assert.deepEqual(state.volunteerAccountNotice, { kind: "error", text: "Add an email first" });
+  assert.equal(state.dialog, "volunteer", "back in the drawer, which says it");
+  assert.equal(state.error, null);
+  assert.equal(state.busy, false);
+  controller.stop();
+});
+
+test("OPEN_WORK on deactivate shows the open-work sentence", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "active", revision: 3 } }];
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("deactivate-account", { volunteerId: "v-1" });
+  store.failAccount = accountRefusal("INVALID_TRANSITION", "OPEN_WORK", JSON.stringify(["Pat Doe (preparing)"]));
+  assert.equal(await controller.deactivateAccount(), false);
+  const state = controller.getState();
+  assert.equal(
+    state.volunteerAccountNotice.text,
+    "Mira Patel still has open work: Pat Doe (preparing). Finish it or hand it over first.",
+  );
+  assert.equal(state.dialog, "volunteer", "back in the drawer, which says it");
+  assert.deepEqual(store.writes.at(-1), { type: "deactivate", actionId: "action-1", volunteerId: "v-1", expectedRevision: 3 });
+  controller.stop();
+});
+
+test("CONFLICT on deactivate says someone else changed this volunteer", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "active", revision: 3 } }];
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("deactivate-account", { volunteerId: "v-1" });
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "deactivated", revision: 4 } }];
+  store.failAccount = Object.assign(new Error("stale"), { code: "CONFLICT" });
+  const reads = volunteerReads(store);
+  await assert.rejects(() => controller.deactivateAccount(), (error) => error.code === "CONFLICT");
+  const state = controller.getState();
+  assert.equal(state.error.message, VOLUNTEER_CONFLICT_MESSAGE);
+  assert.equal(volunteerReads(store), reads + 1);
+  assert.equal(state.volunteers[0].account.revision, 4);
+  assert.equal(state.dialog, "volunteer");
+  controller.stop();
+});
+
+test("deactivate asks for confirmation first", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "active", revision: 3 } }];
+  const { controller } = await accountDrawer(store);
+  // From the drawer alone, nothing is sent.
+  assert.equal(await controller.deactivateAccount(), false);
+  assert.equal(store.calls.includes("deactivateAccount"), false);
+  controller.openDialog("deactivate-account", { volunteerId: "v-1" });
+  assert.equal(store.calls.includes("deactivateAccount"), false, "asking sends nothing");
+  // Keeping the account returns to the drawer.
+  controller.closeDialog();
+  assert.equal(controller.getState().dialog, "volunteer");
+  assert.equal(controller.getState().dialogContext.volunteerId, "v-1");
+  controller.openDialog("deactivate-account", { volunteerId: "v-1" });
+  assert.equal(await controller.deactivateAccount(), true);
+  assert.equal(store.calls.filter((entry) => entry === "deactivateAccount").length, 1);
+  assert.equal(controller.getState().volunteerAccountNotice.text, "Account deactivated");
+  assert.equal(controller.getState().dialog, "volunteer");
+  controller.stop();
+});
+
+test("an account action whose answer never came is sent again with the same action id", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  store.failAccount = Object.assign(new Error("offline"), { code: "OFFLINE" });
+  controller.openDialog("send-invitation", { volunteerId: "v-1" });
+  await assert.rejects(() => controller.createAccount(), (error) => error.code === "OFFLINE");
+  // Pressed again: asked again, then sent with the same action id.
+  controller.openDialog("send-invitation", { volunteerId: "v-1" });
+  assert.equal(await controller.createAccount(), true);
+  const sent = store.writes.filter((entry) => entry.type === "create");
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].actionId, sent[0].actionId);
+  assert.equal(await controller.resendAccount(), true);
+  assert.notEqual(store.writes.at(-1).actionId, sent[0].actionId);
+  controller.stop();
+});
+
+test("Create account asks first with the saved email, and nothing is sent before Send", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, email: "ada@example.org" }];
+  const { controller } = await accountDrawer(store);
+  // From the drawer alone, nothing is sent.
+  assert.equal(await controller.createAccount(), false);
+  controller.openDialog("send-invitation", { volunteerId: "v-1" });
+  const asked = controller.getState();
+  assert.match(dialog(asked), /<h2 id="modal-title">Send a sign-in invitation to ada@example\.org\?<\/h2>/);
+  assert.equal(store.calls.includes("createAccount"), false, "asking sends nothing");
+  // Cancel goes back to the drawer, still sending nothing.
+  controller.closeDialog();
+  assert.equal(controller.getState().dialog, "volunteer");
+  assert.equal(controller.getState().dialogContext.volunteerId, "v-1");
+  assert.equal(store.calls.includes("createAccount"), false);
+  controller.openDialog("send-invitation", { volunteerId: "v-1" });
+  assert.equal(await controller.createAccount(), true);
+  assert.equal(store.calls.filter((entry) => entry === "createAccount").length, 1);
+  assert.equal(controller.getState().dialog, "volunteer");
+  controller.stop();
+});
+
+test("a replayed Create account says it was already sent", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  store.accountAnswer = { status: "invited", emailSent: false, accountRevision: 1, replay: true };
+  controller.openDialog("send-invitation", { volunteerId: "v-1" });
+  assert.equal(await controller.createAccount(), true);
+  assert.deepEqual(controller.getState().volunteerAccountNotice, {
+    kind: "ok",
+    text: "This invitation was already sent. If it didn't arrive, use Resend.",
+  });
+  controller.stop();
+});
+
+test("ALREADY_INVITED on Create account fits a volunteer", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  store.failAccount = accountRefusal("INVALID_TRANSITION", "INVALID_TRANSITION", "ALREADY_INVITED");
+  controller.openDialog("send-invitation", { volunteerId: "v-1" });
+  assert.equal(await controller.createAccount(), false);
+  assert.deepEqual(controller.getState().volunteerAccountNotice, {
+    kind: "error",
+    text: "This person is already invited or signed in.",
+  });
+  controller.stop();
+});
+
+test("Cancel invitation asks first, then cancels at the account revision and says so", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, hasSignIn: true, account: { status: "invited", revision: 2, activatedAt: null } }];
+  const { controller } = await accountDrawer(store);
+  // From the drawer alone, nothing is sent.
+  assert.equal(await controller.cancelInvitation(), false);
+  controller.openDialog("cancel-invitation", { volunteerId: "v-1" });
+  assert.equal(store.calls.includes("cancelInvitation"), false, "asking sends nothing");
+  // Keeping it returns to the drawer.
+  controller.closeDialog();
+  assert.equal(controller.getState().dialog, "volunteer");
+  controller.openDialog("cancel-invitation", { volunteerId: "v-1" });
+  const reads = volunteerReads(store);
+  // What the re-read finds: no account, and the email editable again.
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, hasSignIn: false, revision: 5, account: { status: "none", revision: null } }];
+  assert.equal(await controller.cancelInvitation(), true);
+  assert.deepEqual(store.writes.at(-1), {
+    type: "cancel",
+    actionId: "action-1",
+    target: { volunteerId: "v-1" },
+    expectedRevision: 2,
+  });
+  const state = controller.getState();
+  assert.deepEqual(state.volunteerAccountNotice, { kind: "ok", text: "Invitation cancelled." });
+  assert.equal(state.dialog, "volunteer");
+  assert.equal(volunteerReads(store), reads + 1);
+  const drawer = dialog(state);
+  assert.match(drawer, /Status: <strong>Not created<\/strong>/);
+  assert.match(drawer, /data-action="account-create"/);
+  assert.doesNotMatch(drawer, /id="volunteer-email"[^>]*readonly/, "the email can be edited again");
+  controller.stop();
+});
+
+test("Cancel invitation refused INVALID_TRANSITION says it can no longer be cancelled", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "invited", revision: 2, activatedAt: null } }];
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("cancel-invitation", { volunteerId: "v-1" });
+  store.failAccount = accountRefusal("INVALID_TRANSITION", "INVALID_TRANSITION", null);
+  assert.equal(await controller.cancelInvitation(), false);
+  const state = controller.getState();
+  assert.deepEqual(state.volunteerAccountNotice, { kind: "error", text: "This invitation can no longer be cancelled." });
+  assert.equal(state.error, null);
+  assert.equal(state.dialog, "volunteer");
+  // IN_USE (design D15) has its own sentence.
+  controller.openDialog("cancel-invitation", { volunteerId: "v-1" });
+  store.failAccount = accountRefusal("INVALID_TRANSITION", "INVALID_TRANSITION", "IN_USE");
+  assert.equal(await controller.cancelInvitation(), false);
+  assert.deepEqual(controller.getState().volunteerAccountNotice, {
+    kind: "error",
+    text: "This account is already in use, so the invitation can't be cancelled.",
+  });
+  assert.equal(controller.getState().error, null);
+  controller.stop();
+});
+
+test("Cancel invitation on a stale drawer says someone else changed this volunteer", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "invited", revision: 2, activatedAt: null } }];
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("cancel-invitation", { volunteerId: "v-1" });
+  store.failAccount = Object.assign(new Error("stale"), { code: "CONFLICT" });
+  await assert.rejects(() => controller.cancelInvitation(), (error) => error.code === "CONFLICT");
+  const state = controller.getState();
+  assert.equal(state.error.message, VOLUNTEER_CONFLICT_MESSAGE);
+  assert.equal(state.dialog, "volunteer");
+  controller.stop();
+});
+
+// ---- the office screen's Invite a client panel (change add-account-invitations)
+
+const INVITATION_ROW = { email: "ana@example.org", status: "invited", invitedAt: "2026-11-10T10:00:00Z", activatedAt: null, accountRevision: 1 };
+const inviteStore = () => {
+  const store = rosterStore();
+  store.invitations = [];
+  store.failInvite = null;
+  store.inviteAnswer = { status: "invited", emailSent: true, accountRevision: 1 };
+  store.listClientInvitations = async () => {
+    store.calls.push("listClientInvitations");
+    return store.invitations.map((entry) => ({ ...entry }));
+  };
+  for (const [method, type] of [
+    ["inviteClient", "invite"],
+    ["resendClient", "resend-client"],
+    ["cancelInvitation", "cancel-client"],
+  ])
+    store[method] = async (request) => {
+      store.calls.push(method);
+      store.writes.push({ type, ...request });
+      if (store.failInvite) {
+        const error = store.failInvite;
+        store.failInvite = null;
+        throw error;
+      }
+      return { ...store.inviteAnswer };
+    };
+  return store;
+};
+const inviteReads = (store) => store.calls.filter((entry) => entry === "listClientInvitations").length;
+
+test("an admin's start reads the client list", async () => {
+  const store = inviteStore();
+  store.invitations = [INVITATION_ROW];
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(inviteReads(store), 1);
+  assert.deepEqual(controller.getState().invitations, [INVITATION_ROW]);
+  controller.stop();
+});
+
+test("invite refused EMAIL_ON_ROSTER shows its sentence", async () => {
+  const store = inviteStore();
+  const { controller } = build({ store, newActionId: () => "action-1" });
+  await controller.start();
+  store.failInvite = accountRefusal("VALIDATION", "VALIDATION", "EMAIL_ON_ROSTER");
+  assert.equal(controller.askInviteClient(" Mira@Example.org "), true);
+  assert.equal(await controller.inviteClient(), false);
+  // The question names the trimmed email, and that is what is sent.
+  assert.equal(store.writes.at(-1).email, "Mira@Example.org");
+  const state = controller.getState();
+  assert.deepEqual(state.inviteNotice, { kind: "error", text: "That email belongs to a volunteer. Use another email." });
+  assert.equal(state.inviteEmail, " Mira@Example.org ", "what was typed stays");
+  assert.equal(state.error, null);
+  assert.equal(state.busy, false);
+  controller.stop();
+});
+
+test("invite success clears the field, shows the sent message and re-reads the list", async () => {
+  const store = inviteStore();
+  const { controller } = build({ store, newActionId: () => "action-1" });
+  await controller.start();
+  const reads = inviteReads(store);
+  store.invitations = [INVITATION_ROW];
+  controller.askInviteClient("ana@example.org");
+  assert.equal(await controller.inviteClient(), true);
+  assert.deepEqual(store.writes.at(-1), { type: "invite", actionId: "action-1", email: "ana@example.org" });
+  const state = controller.getState();
+  assert.equal(state.dialog, null, "the question closed; the panel says the result");
+  assert.deepEqual(state.inviteNotice, { kind: "ok", text: "Account created and sign-in code sent" });
+  assert.equal(state.inviteEmail, "");
+  assert.equal(inviteReads(store), reads + 1);
+  assert.deepEqual(state.invitations, [INVITATION_ROW]);
+  controller.stop();
+});
+
+test("invite with the email not sent says to use Resend; a retry after OFFLINE keeps the action id", async () => {
+  const store = inviteStore();
+  let n = 0;
+  const { controller } = build({ store, newActionId: () => `action-${++n}` });
+  await controller.start();
+  store.failInvite = Object.assign(new Error("OFFLINE"), { code: "OFFLINE" });
+  controller.askInviteClient("ana@example.org");
+  await assert.rejects(() => controller.inviteClient(), (error) => error.code === "OFFLINE");
+  store.inviteAnswer = { status: "invited", emailSent: false, accountRevision: 1 };
+  controller.askInviteClient("ana@example.org");
+  assert.equal(await controller.inviteClient(), true);
+  assert.deepEqual(store.writes.map((entry) => entry.actionId), ["action-1", "action-1"]);
+  assert.equal(controller.getState().inviteNotice.text, "Account created; the email wasn't sent. Use Resend in a minute.");
+  controller.stop();
+});
+
+test("Invite asks first with the typed, trimmed email; nothing is sent before Send", async () => {
+  const store = inviteStore();
+  const { controller } = build({ store, newActionId: () => "action-1" });
+  await controller.start();
+  assert.equal(await controller.inviteClient(), false, "no question, nothing sent");
+  assert.equal(controller.askInviteClient("  ada@example.org "), true);
+  const state = controller.getState();
+  assert.equal(state.dialog, "send-invitation");
+  assert.match(dialog(state), /<h2 id="modal-title">Send a sign-in invitation to ada@example\.org\?<\/h2>/);
+  assert.equal(state.inviteEmail, "  ada@example.org ", "what was typed stays");
+  assert.equal(store.calls.includes("inviteClient"), false, "asking sends nothing");
+  // Cancel closes the question; nothing was sent.
+  controller.closeDialog();
+  assert.equal(controller.getState().dialog, null);
+  assert.equal(await controller.inviteClient(), false);
+  assert.equal(store.calls.includes("inviteClient"), false);
+  controller.stop();
+});
+
+test("a replayed invite says it was already sent; ALREADY_INVITED fits a client", async () => {
+  const store = inviteStore();
+  let n = 0;
+  const { controller } = build({ store, newActionId: () => `action-${++n}` });
+  await controller.start();
+  store.inviteAnswer = { status: "invited", emailSent: false, accountRevision: 1, replay: true };
+  controller.askInviteClient("ana@example.org");
+  assert.equal(await controller.inviteClient(), true);
+  assert.deepEqual(controller.getState().inviteNotice, {
+    kind: "ok",
+    text: "This invitation was already sent. If it didn't arrive, use Resend.",
+  });
+  store.failInvite = accountRefusal("INVALID_TRANSITION", "INVALID_TRANSITION", "ALREADY_INVITED");
+  controller.askInviteClient("ana@example.org");
+  assert.equal(await controller.inviteClient(), false);
+  assert.deepEqual(controller.getState().inviteNotice, { kind: "error", text: "This person is already invited or signed in." });
+  controller.stop();
+});
+
+test("the office list's Cancel asks, cancels by email at the row's revision and re-reads the list", async () => {
+  const store = inviteStore();
+  store.invitations = [INVITATION_ROW];
+  const { controller } = build({ store, newActionId: () => "action-7" });
+  await controller.start();
+  controller.openDialog("cancel-invitation", { email: "ana@example.org", revision: 1 });
+  assert.match(dialog(controller.getState()), /Cancel this invitation\?/);
+  assert.equal(store.calls.includes("cancelInvitation"), false, "asking sends nothing");
+  const reads = inviteReads(store);
+  store.invitations = [];
+  assert.equal(await controller.cancelInvitation(), true);
+  assert.deepEqual(store.writes.at(-1), {
+    type: "cancel-client",
+    actionId: "action-7",
+    target: { email: "ana@example.org" },
+    expectedRevision: 1,
+  });
+  const state = controller.getState();
+  assert.equal(state.dialog, null);
+  assert.deepEqual(state.inviteNotice, { kind: "ok", text: "Invitation cancelled." });
+  assert.equal(inviteReads(store), reads + 1);
+  assert.deepEqual(state.invitations, []);
+  // Refused INVALID_TRANSITION: said in the panel.
+  store.invitations = [INVITATION_ROW];
+  controller.openDialog("cancel-invitation", { email: "ana@example.org", revision: 1 });
+  store.failInvite = accountRefusal("INVALID_TRANSITION", "INVALID_TRANSITION", null);
+  assert.equal(await controller.cancelInvitation(), false);
+  assert.deepEqual(controller.getState().inviteNotice, { kind: "error", text: "This invitation can no longer be cancelled." });
+  assert.equal(controller.getState().error, null);
+  // IN_USE (design D15): its own sentence, in the panel.
+  controller.openDialog("cancel-invitation", { email: "ana@example.org", revision: 1 });
+  store.failInvite = accountRefusal("INVALID_TRANSITION", "INVALID_TRANSITION", "IN_USE");
+  assert.equal(await controller.cancelInvitation(), false);
+  assert.deepEqual(controller.getState().inviteNotice, {
+    kind: "error",
+    text: "This account is already in use, so the invitation can't be cancelled.",
+  });
+  assert.equal(controller.getState().error, null);
+  controller.stop();
+});
+
+test("resend a client sends the email and says so", async () => {
+  const store = inviteStore();
+  const { controller } = build({ store, newActionId: () => "action-9" });
+  await controller.start();
+  assert.equal(await controller.resendClient("ana@example.org"), true);
+  assert.deepEqual(store.writes.at(-1), { type: "resend-client", actionId: "action-9", email: "ana@example.org" });
+  assert.equal(controller.getState().inviteNotice.text, "Sign-in code sent");
+  controller.stop();
+});
+
+test("a focus refresh re-reads the client invitations", async () => {
+  const store = inviteStore();
+  const { controller, events } = build({ store });
+  await controller.start();
+  const reads = inviteReads(store);
+  store.invitations = [{ ...INVITATION_ROW, status: "active" }];
+  await events.emit("focus");
+  assert.equal(inviteReads(store), reads + 1);
+  assert.equal(controller.getState().invitations[0].status, "active");
+  // A failed read never fails the refresh.
+  store.listClientInvitations = async () => {
+    throw new Error("down");
+  };
+  await events.emit("focus");
+  assert.equal(controller.getState().error, null);
+  controller.stop();
+});
+
+test("an empty email sends no invite and asks nothing", async () => {
+  const store = inviteStore();
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(controller.askInviteClient("   "), false);
+  assert.equal(controller.getState().dialog, null, "no question");
+  assert.equal(await controller.inviteClient(), false);
+  assert.equal(store.calls.includes("inviteClient"), false);
+  assert.deepEqual(controller.getState().inviteNotice, { kind: "error", text: "Add an email first" });
   controller.stop();
 });
 

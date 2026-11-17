@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { renderRoster, volunteerDrawerBody } from "../src/volunteer-views.mjs";
+import {
+  renderRoster,
+  volunteerDrawerBody,
+  deactivateAccountDialogBody,
+  cancelInvitationDialogBody,
+} from "../src/volunteer-views.mjs";
 import { staffScreen, dialog } from "../src/views.mjs";
 import { cleared } from "./support/clearance.mjs";
 
@@ -95,7 +100,7 @@ test("the table has the spec's columns and a count", () => {
   });
   assert.match(html, /class="board-table people-table"/);
   const headers = [...html.matchAll(/<th scope="col">([^<]*)<\/th>/g)].map((m) => m[1]);
-  assert.deepEqual(headers, ["Volunteer", "Roles", "Certificates", "Languages", "Cleared", "Edit"]);
+  assert.deepEqual(headers, ["Volunteer", "Roles", "Certificates", "Languages", "Account", "Cleared", "Edit"]);
   assert.match(html, /2 of 2 volunteers/);
   assert.match(html, /data-action="open-edit-volunteer" data-volunteer-id="v-1"/);
 });
@@ -298,6 +303,151 @@ test("the volunteer dialog is a drawer with its own overline and title", () => {
   assert.match(failed, /id="drawer-error"/);
 });
 
+const withStatus = (status, extra = {}) =>
+  volunteer({ account: { status, revision: status === "none" ? null : 4 }, ...extra });
+
+test("roster row shows the account column", () => {
+  const html = renderRoster(
+    ["none", "invited", "active", "deactivated"].map((status, i) => withStatus(status, { id: `v-${i}`, name: `Person ${i}` })),
+    { list: "ready", filters: {} },
+  );
+  const cells = rowsOf(html).map((row) => row.match(new RegExp("</td><td>(Not created|Invited|Active|Deactivated)</td>"))?.[1]);
+  assert.deepEqual(cells, ["Not created", "Invited", "Active", "Deactivated"]);
+});
+
+test("cleared cell lists No account yet after Form 13615", () => {
+  const html = renderRoster(
+    [withStatus("none", { roles: [], cleared: false, missing: ["form13615", "noAccount"] })],
+    { list: "ready", filters: {} },
+  );
+  assert.match(html, /Form 13615 missing, No account yet/);
+  const other = renderRoster(
+    [
+      withStatus("invited", { id: "a", cleared: false, missing: ["notSignedIn"] }),
+      withStatus("deactivated", { id: "b", cleared: false, missing: ["deactivated"] }),
+    ],
+    { list: "ready", filters: {} },
+  );
+  assert.match(other, /Hasn&#39;t signed in yet/);
+  assert.match(other, /Account deactivated/);
+});
+
+const drawerFor = (status, ui = {}) =>
+  volunteerDrawerBody({ volunteer: withStatus(status), isNew: false, ui });
+const accountPart = (html) => html.split('class="check-group volunteer-account"')[1] ?? "";
+
+test("drawer account section offers Create account with no account", () => {
+  const section = accountPart(drawerFor("none"));
+  assert.match(section, /Not created/);
+  assert.match(section, /data-action="account-create"/);
+  // The page shows the hint (and turns the button off) while the form has
+  // unsaved changes; it is drawn hidden.
+  assert.match(section, /aria-describedby="volunteer-account-hint"/);
+  assert.match(section, /<p class="field-note" id="volunteer-account-hint" hidden>Save your changes first\.<\/p>/);
+  assert.doesNotMatch(section, /account-resend|account-deactivate|account-reactivate/);
+  assert.ok(drawerFor("none").indexOf("Photo ID checked") < drawerFor("none").indexOf("volunteer-account"), "after the season section");
+});
+
+test("drawer account section offers Resend, Cancel invitation and Deactivate when invited", () => {
+  const section = accountPart(drawerFor("invited"));
+  assert.match(section, /Invited/);
+  assert.match(section, /data-action="account-resend"/);
+  assert.match(section, /data-action="account-cancel-invitation" data-volunteer-id="v-1">Cancel invitation</);
+  assert.ok(section.indexOf("account-resend") < section.indexOf("account-cancel-invitation"), "next to Resend");
+  assert.match(section, /data-action="account-deactivate"/);
+  assert.doesNotMatch(section, /account-create|account-reactivate/);
+});
+
+test("Cancel invitation is offered only for an invitation never used", () => {
+  // Invited again after being active (a reactivation): not cancellable.
+  const used = volunteerDrawerBody({
+    volunteer: volunteer({ account: { status: "invited", revision: 6, activatedAt: "2026-11-02T10:00:00Z" } }),
+    isNew: false,
+    ui: {},
+  });
+  assert.doesNotMatch(accountPart(used), /account-cancel-invitation/);
+  assert.match(accountPart(used), /account-resend/);
+  for (const status of ["none", "active", "deactivated"])
+    assert.doesNotMatch(accountPart(drawerFor(status)), /account-cancel-invitation/, status);
+});
+
+test("drawer account section offers Deactivate when active", () => {
+  const section = accountPart(drawerFor("active"));
+  assert.match(section, /Active/);
+  assert.match(section, /data-action="account-deactivate"/);
+  assert.doesNotMatch(section, /account-create|account-resend|account-reactivate/);
+});
+
+test("drawer account section offers Reactivate when deactivated", () => {
+  const section = accountPart(drawerFor("deactivated"));
+  assert.match(section, /data-action="account-reactivate"/);
+  assert.doesNotMatch(section, /account-create|account-resend|account-deactivate/);
+});
+
+test("drawer account section offers nothing for a new volunteer before saving", () => {
+  const html = volunteerDrawerBody({ volunteer: null, isNew: true, ui: {} });
+  assert.doesNotMatch(html, /volunteer-account|account-create/);
+});
+
+test("the drawer says the last account result, and the confirmation asks before deactivating", () => {
+  const ok = accountPart(drawerFor("invited", { accountNotice: { kind: "ok", text: "Account created and sign-in code sent" } }));
+  assert.match(ok, /role="status"[^>]*>.*Account created and sign-in code sent/);
+  const bad = accountPart(drawerFor("none", { accountNotice: { kind: "error", text: "Add an email first" } }));
+  assert.match(bad, /role="alert"[^>]*>.*Add an email first/);
+  const confirm = deactivateAccountDialogBody({ volunteer: volunteer() });
+  assert.match(confirm, /Mira Patel/);
+  assert.match(confirm, /data-action="confirm-deactivate-account"/);
+  assert.match(confirm, /data-action="close-dialog"/);
+  const html = dialog(baseState({ dialog: "deactivate-account", dialogContext: { volunteerId: "v-1" } }));
+  assert.match(html, /Deactivate this account?/);
+});
+
+test("Signed in as shows in the row's Account cell and in the drawer, escaped", () => {
+  const signed = withStatus("active", { signedInName: "Mira <b>P</b>" });
+  const [row] = rowsOf(renderRoster([signed], { list: "ready", filters: {} }));
+  assert.match(row, /<td>Active<span class="volunteer-signed-in">Signed in as Mira &lt;b&gt;P&lt;\/b&gt;<\/span><\/td>/);
+  const section = accountPart(volunteerDrawerBody({ volunteer: signed, isNew: false, ui: {} }));
+  assert.match(section, /<p class="volunteer-signed-in">Signed in as Mira &lt;b&gt;P&lt;\/b&gt;<\/p>/);
+  assert.doesNotMatch(section, /<b>P/);
+  // No name given yet: no line.
+  const [plain] = rowsOf(renderRoster([withStatus("invited")], { list: "ready", filters: {} }));
+  assert.doesNotMatch(plain, /Signed in as/);
+  assert.doesNotMatch(accountPart(drawerFor("invited")), /Signed in as/);
+});
+
+test("the cancel question names the volunteer and the email, and changes nothing until confirmed", () => {
+  const body = cancelInvitationDialogBody({ volunteer: volunteer({ account: { status: "invited", revision: 4 } }) });
+  assert.match(body, /Mira Patel \(mira@example\.test\)/);
+  assert.match(body, /The email can be edited again, and you can invite them again later\./);
+  assert.match(body, /data-action="confirm-cancel-invitation"[^>]*>Cancel invitation</);
+  assert.match(body, /data-action="close-dialog"/);
+  const html = dialog(baseState({ dialog: "cancel-invitation", dialogContext: { volunteerId: "v-1" } }));
+  assert.match(html, /<h2 id="modal-title">Cancel this invitation\?<\/h2>/);
+  assert.match(html, /Mira Patel \(mira@example\.test\)/);
+  // From the office list: the email only.
+  const office = dialog(baseState({ dialog: "cancel-invitation", dialogContext: { email: "ana@example.org", revision: 1 } }));
+  assert.match(office, /Cancel this invitation\?/);
+  assert.match(office, /The invitation for ana@example\.org will be cancelled/);
+  assert.match(office, /data-action="confirm-cancel-invitation"/);
+});
+
+test("the send question is exactly the email it goes to", () => {
+  const drawer = dialog(
+    baseState({
+      volunteers: [volunteer({ email: "ada@example.org", account: { status: "none", revision: null } })],
+      dialog: "send-invitation",
+      dialogContext: { volunteerId: "v-1" },
+    }),
+  );
+  assert.match(drawer, /<h2 id="modal-title">Send a sign-in invitation to ada@example\.org\?<\/h2>/);
+  assert.match(drawer, /data-action="confirm-send-invitation"[^>]*>Send</);
+  assert.match(drawer, /data-action="close-dialog"[^>]*>Cancel</);
+  const office = dialog(baseState({ dialog: "send-invitation", dialogContext: { email: "ada@example.org" } }));
+  assert.match(office, /Send a sign-in invitation to ada@example\.org\?/);
+  const hostile = dialog(baseState({ dialog: "send-invitation", dialogContext: { email: "<i>x</i>@example.org" } }));
+  assert.match(hostile, /Send a sign-in invitation to &lt;i&gt;x&lt;\/i&gt;@example\.org\?/);
+});
+
 // ---- The Workload tab (change add-volunteer-workload) ----------------------
 
 const WORKER = volunteer({ id: "p-alex", name: "Alex Chen", roles: ["preparer"] });
@@ -385,4 +535,73 @@ test("the assign dialog is a drawer naming the case, the client and the slot", (
   assert.equal(failed.match(/role="alert"/g).length, 1);
   const gone = dialog(workloadState({ dialog: "assign", dialogContext: { caseId: "gone", slot: "preparer" } }));
   assert.match(gone, /This case could not be opened/);
+});
+
+// ---------------------------------------------------------------------------
+// Posted updates (change add-posted-updates): Notifications and Post an update
+// ---------------------------------------------------------------------------
+
+const preparerState = (overrides = {}) =>
+  baseState({
+    screen: "staff",
+    principal: { userId: "u2", workspaceId: "w1", access: "staff", personId: "p-alex", clearance: cleared() },
+    ...overrides,
+  });
+const notificationsButton = (html) => html.match(/<button[^>]*data-action="open-notifications"[^>]*>[\s\S]*?<\/button>/)?.[0] ?? "";
+
+test("a cleared preparer's sidebar has Notifications with a bell, and no badge at 0", () => {
+  const html = staffScreen(preparerState({ updatesUnread: 0 }));
+  const entry = notificationsButton(html);
+  assert.match(entry, /Notifications/);
+  assert.match(entry, /<path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4l2-2ZM10 21h4"\/>/, "the bell");
+  assert.doesNotMatch(entry, /nav-badge|unread/);
+  assert.doesNotMatch(html, /data-action="open-post-update"/);
+});
+
+test("the badge shows the unread count and names it", () => {
+  const entry = notificationsButton(staffScreen(preparerState({ updatesUnread: 3 })));
+  assert.match(entry, /aria-label="Notifications, 3 unread"/);
+  assert.match(entry, /<span class="nav-badge" aria-hidden="true">3<\/span>/);
+});
+
+test("a ceiling admin gets Post an update after Volunteers, and Notifications", () => {
+  const html = staffScreen(baseState({ screen: "staff" }));
+  assert.match(html, /data-action="open-post-update"[^>]*>(?:<svg[\s\S]*?<\/svg>)? Post an update<\/button>/);
+  assert.ok(
+    html.indexOf('data-action="open-volunteers"') < html.indexOf('data-action="open-post-update"'),
+    "Post an update comes after Volunteers",
+  );
+  assert.match(html, /data-action="open-notifications"/);
+});
+
+test("a non-admin left on Post an update gets the work board", () => {
+  const html = staffScreen(preparerState({ screen: "office-updates" }));
+  assert.match(html, /Work board<\/h2>/);
+  assert.doesNotMatch(html, /OFFICE · ADMIN|update-form/);
+});
+
+test("the setup screen still has Notifications; an uncleared ceiling admin also gets Post an update", () => {
+  const uncleared = { cleared: false, missing: [{ kind: "form13615" }], capabilities: [], isAdmin: false, siteCoordinatorName: null };
+  const volunteerHtml = staffScreen(
+    preparerState({ principal: { userId: "u2", workspaceId: "w1", access: "staff", personId: "p-alex", clearance: uncleared }, updatesUnread: 1 }),
+  );
+  assert.match(volunteerHtml, /Finish your setup for this season/);
+  assert.match(notificationsButton(volunteerHtml), /aria-label="Notifications, 1 unread"/);
+  assert.doesNotMatch(volunteerHtml, /open-post-update/);
+
+  const adminPrincipal = { userId: "u1", workspaceId: "w1", access: "staff", personId: "p-sam", clearance: { ...uncleared, isAdmin: true } };
+  const setup = staffScreen(baseState({ screen: "staff", principal: adminPrincipal }));
+  assert.match(setup, /data-action="open-post-update"/);
+  assert.match(setup, /data-action="open-notifications"/);
+  // The uncleared admin's Post an update screen.
+  const updates = staffScreen(baseState({ screen: "office-updates", principal: adminPrincipal, postedUpdates: [], updateForm: null }));
+  assert.match(updates, /<h1>Post an update<\/h1>/);
+  assert.match(updates, /data-action="open-post-update" aria-current="page"/);
+  assert.doesNotMatch(updates, /Finish your setup for this season<\/h1>/);
+});
+
+test("a client has no Notifications", async () => {
+  const { page, clientHeader } = await import("../src/views.mjs");
+  const state = { principal: { access: "applicant" }, connection: "online", screen: "applications" };
+  assert.doesNotMatch(page(state, "<main></main>") + clientHeader(state), /open-notifications|Notifications/);
 });

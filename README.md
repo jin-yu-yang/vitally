@@ -30,7 +30,7 @@ Rows are things a person using ViTally can see or do.
 | A client starts the form without an account and gets one on submit | Shrunk | Clients sign in with a one-time email code instead of a password; only invited addresses for now |
 | The office checks new requests against a checklist | Delivered | Screening stage with screening checks on the office case page |
 | A volunteer claims a case and works it, answering a short questionnaire at each hand-off | Delivered | Work board and case pool; preparer and reviewer questionnaires |
-| The client gets PCDC's Exit Form at signing, filled from the reviewer's answers | Delivered | "Download Exit Form" under an approved review, and an Exit Form panel on the office's case page; made in the browser on PCDC's own template, nothing kept (#115) |
+| The client gets PCDC's Exit Form at signing, filled from the reviewer's answers | Delivered | "Download Exit Form" under an approved review, and an Exit Form panel on the office's case page; made in the browser on PCDC's own template, nothing kept (#115); after a Return to signing it prints only the methods ViTally holds and says what to fill in by hand (#173) |
 | A reviewer can never review their own preparation | Delivered | Enforced by the database, so no screen can skip it |
 | Every staff member signs in as themselves | Delivered | Staff accounts from the roster sign in by email code and act as themselves ("Signed in as …"), enforced by the database (#90, 10/29) |
 | A case reaches E-filed, then Accepted or Rejected, and can be closed | Delivered | Mark e-filed, filing result (IRS and Pennsylvania), close with a reason |
@@ -168,7 +168,7 @@ roadmap of what separates the demo from the product described in [`docs/spec.md`
 ```text
 index.html, server.mjs   static entry page and local dev server (no build step)
 src/                     browser app: controller, Supabase store, auth, views, styles
-supabase/migrations/     database schema, row-level security, action functions, intake catalogue (001–046)
+supabase/migrations/     database schema, row-level security, action functions, intake catalogue (001–050)
 tests/                   unit tests (*.test.mjs), database suites, browser suites
 tools/                   vendor bundle and intake catalogue builds, guarded admin tooling (migrate, roster)
 docs/                    specs, plans, setup guide, developer guide, design, project documents
