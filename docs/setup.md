@@ -20,7 +20,7 @@ custom SMTP through Resend (sender `help@govitally.org`), and `main` now commits
 on the hosted database, the `accounts` Edge Function and its secrets, Auth Site URL / Redirect
 URLs and the email rate limit, public sign-up off, serving the front end on the custom domain, and
 the tester roster ([Classroom and hosted setup](#6-classroom-and-hosted-setup-pending) below; the
-README's Deployment section keeps the current list). Every test described below runs against the
+`docs/roadmap.md` keeps the current list). Every test described below runs against the
 isolated local stack; none of it exercises the hosted project or real mail delivery.
 
 ## 1. Runtime
@@ -821,7 +821,7 @@ testers can receive invitations or sign-in codes. Without them, Create account a
 the account but no email arrives.
 
 Since Nov 16 the Supabase project, its custom SMTP (Resend, on the `govitally.org` domain) and the
-front end's `/public-config.json` exist; the remaining steps are listed in the README's Deployment
+front end's `/public-config.json` exist; the remaining steps are listed in `docs/roadmap.md`, Deployment
 section. The list below is the original Task 10B / 10D checklist, kept for reference.
 
 A hosted or classroom copy never shows the fill tools, because its Supabase URL is not on the
