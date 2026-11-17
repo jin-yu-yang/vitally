@@ -2287,6 +2287,13 @@ export function createController({
         show();
         return;
       }
+      // Not cleared: the setup screen says it, like any other action (#193).
+      if (error?.code === "NOT_CLEARED") {
+        held.gaveUp = true;
+        noteFailure(error);
+        show();
+        return;
+      }
       if (SCREENING_RACES.includes(error?.code)) {
         raced = true;
         if (screeningStart === held) screeningStart = null;
