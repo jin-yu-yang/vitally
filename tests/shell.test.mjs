@@ -50,8 +50,10 @@ test("the staff sidebar carries the logo, the one screen that exists, and the ac
   assert.match(html, /data-action="open-help"/);
   assert.match(html, /data-action="sign-out"/);
   assert.match(html, /Sign out/);
-  // Nothing without a screen behind it.
-  assert.doesNotMatch(html, /Dashboard|Schedule|Documents|Messages|Notifications/);
+  // Nothing without a screen behind it. Notifications has its panel (change
+  // add-posted-updates).
+  assert.doesNotMatch(html, /Dashboard|Schedule|Documents|Messages/);
+  assert.match(html, /data-action="open-notifications"/);
 
   const office = staffSidebar({ screen: "staff-case" }, { id: "sam", name: "Sam", capabilities: ["admin"] }, true);
   assert.match(office, /Follow-ups/);
@@ -115,6 +117,11 @@ test("app.mjs makes the Exit Form for a staff window only, and records nothing",
   const body = app.slice(app.indexOf("async function viewExitForm"), app.indexOf("// ---- leaving Add a case"));
   assert.match(body, /if \(!isStaffWindow\(state\.principal\)\) return;/);
   assert.match(body, /spouseShown\(visible\)/);
+  // What it prints follows the rule in src/exit-form-source.mjs (#173).
+  assert.match(app, /exitFormSource\(record, review\)/);
+  // The PDF is made from the source questionnaire, never the stored one again (#173).
+  assert.match(body, /exitFormMarks\(\s*source\.questionnaire/);
+  assert.doesNotMatch(app, /reviewerQuestionnaires \?\? \[\]\)\.find\(\(q\) => q\?\.reviewId === reviewId\)/);
   // The date on the form is today's, never the approval's.
   assert.match(body, /isoToday\(\)/);
   assert.match(body, /"The Exit Form could not be made\. Close this tab and try again\."/);
@@ -343,7 +350,7 @@ test("the drawer is the modal frame at the edge, and each dialog names its place
 });
 
 test("the drawer list is exported once, for the renderer and app.mjs's focus fallback alike", () => {
-  assert.deepEqual([...DRAWERS], ["log-call", "resolve-help", "volunteer", "assign"]);
+  assert.deepEqual([...DRAWERS], ["log-call", "resolve-help", "volunteer", "assign", "notifications"]);
   assert.ok(Object.isFrozen(DRAWERS));
   const app = readFileSync(fileURLToPath(new URL("../src/app.mjs", import.meta.url)), "utf8");
   assert.doesNotMatch(app, /\["log-call",\s*"resolve-help"\]/);

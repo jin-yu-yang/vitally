@@ -237,7 +237,7 @@ A client session SHALL be able to read neither questionnaire table: row-level se
 - **THEN** that attempt reads "No questionnaire was recorded for this version."
 
 ### Requirement: An approved review offers the Exit Form
-ViTally SHALL offer "Download Exit Form" for an approved review that has a reviewer questionnaire. On a volunteer's case page, each such review in the Independent review panel SHALL have the button, whether or not that volunteer is on the case. On the office's case page, which has no Independent review panel, the Overview SHALL have an Exit Form panel with the button for the latest such review. Neither SHALL appear for a review with no questionnaire, or before there is an approved review. The office's panel SHALL stay on the case at later stages.
+ViTally SHALL offer "Download Exit Form" for an approved review that has a reviewer questionnaire. On a volunteer's case page, each such review in the Independent review panel SHALL have the button, whether or not that volunteer is on the case. On the office's case page, which has no Independent review panel, the Overview SHALL have an Exit Form panel with the button for the latest approved review. If the latest approved review has no questionnaire, there SHALL be no panel: ViTally SHALL NOT fall back to an earlier approved review. Neither SHALL appear for a review with no questionnaire, or before there is an approved review. The office's panel SHALL stay on the case at later stages. What the form prints after a Return to signing is set by "The Exit Form after a Return to signing prints only what ViTally holds".
 
 #### Scenario: A volunteer sees the button on the approved review
 - **WHEN** a volunteer opens a case with an approved review that has a reviewer questionnaire
@@ -255,6 +255,10 @@ ViTally SHALL offer "Download Exit Form" for an approved review that has a revie
 - **WHEN** an office persona opens a case with two approved reviews that each have a questionnaire
 - **THEN** the Exit Form panel has one button, and it is for the later review
 
+#### Scenario: No fallback to an earlier approval
+- **WHEN** an office persona opens a case whose latest approved review has no questionnaire and an earlier approved review has one
+- **THEN** the Overview has no Exit Form panel
+
 #### Scenario: The office's panel stays after filing
 - **WHEN** an office persona opens an e-filed case whose approved review has a questionnaire
 - **THEN** the Overview still has the Exit Form panel
@@ -264,7 +268,7 @@ ViTally SHALL offer "Download Exit Form" for an approved review that has a revie
 - **THEN** the Overview has no Exit Form panel
 
 ### Requirement: Staff make the Exit Form in the browser and nothing is kept
-Only a staff window SHALL be able to make the Exit Form. The form SHALL be built in the browser from the approved review's questionnaire and the case, and SHALL NOT be uploaded or stored. Pressing "Download Exit Form" SHALL open the PDF in a new tab. If the form can't be made, the tab SHALL say "The Exit Form could not be made. Close this tab and try again.", the case page's error notice SHALL say "The Exit Form could not be made. Try again.", and the notice's Try again SHALL build it again. Making the form SHALL NOT change the case.
+Only a staff window SHALL be able to make the Exit Form. The form SHALL be built in the browser from the approved review's questionnaire and the case, or, after a Return to signing, from the case alone (see "The Exit Form after a Return to signing prints only what ViTally holds"). It SHALL NOT be uploaded or stored. Pressing "Download Exit Form" SHALL open the PDF in a new tab. If the form can't be made, the tab SHALL say "The Exit Form could not be made. Close this tab and try again.", the case page's error notice SHALL say "The Exit Form could not be made. Try again.", and the notice's Try again SHALL build it again. Making the form SHALL NOT change the case.
 
 If the browser blocks the tab, ViTally SHALL show no error, and SHALL draw the finished PDF as a link in the case page's Intake answers tab, named `exit-form-<client number>.pdf`. The link SHALL stop working after about 60 seconds. The tab SHALL NOT switch.
 
@@ -388,3 +392,45 @@ The blank template `src/forms/exit-form-pcdc.pdf` SHALL have no Author or Title 
 #### Scenario: The server serves only the exact name
 - **WHEN** a browser requests `/src/forms/exit-form-pcdc.pdf`, and then `/src/forms/exit-form.pdf`
 - **THEN** the first is served, and the second is not found
+
+### Requirement: The Exit Form after a Return to signing prints only what ViTally holds
+When a Return to signing came after a review's approval (by the case's staff history), that review's Exit Form SHALL print no value from its questionnaire. It SHALL print the header, and SHALL tick a return's filing method from the case only when set and the result is not `rejected`. Results, amounts, payment methods, debit dates, Other Tax entries and Remarks SHALL be blank. A record without staff history SHALL offer no Exit Form.
+
+#### Scenario: Returned to signing, one return rejected
+- **WHEN** a case's federal return was e-filed and rejected, its state return was e-filed and accepted, and the office returned it to signing
+- **THEN** the Exit Form ticks only the state's e-file box, writes no amount, payment method, debit date, Other Tax entry or Remarks, and the note lists the federal filing method, the refund or amount owed, Other Tax and Remarks
+
+#### Scenario: Refiled after a Return to signing
+- **WHEN** the rejected federal return of a case returned to signing has been e-filed again and is waiting for an answer
+- **THEN** the Exit Form ticks the federal e-file box as well, and the note no longer lists the federal filing method
+
+#### Scenario: Refiled on paper
+- **WHEN** the rejected federal return was refiled on paper (given to the client)
+- **THEN** the Exit Form ticks the federal paper box
+
+#### Scenario: A return with no method
+- **WHEN** a case returned to signing has no filing method for a return
+- **THEN** that return has no box ticked
+
+#### Scenario: No Return to signing
+- **WHEN** a case was approved and has not been returned to signing
+- **THEN** the Exit Form shows the questionnaire's results, amounts, payment methods, Other Tax entries and Remarks, and carries no fill-by-hand note
+
+#### Scenario: Both paths follow the rule
+- **WHEN** a case was returned to signing after its approval
+- **THEN** the PDF made from the office's panel and from the volunteer's button has none of the questionnaire's values
+
+#### Scenario: No staff history
+- **WHEN** a case record carries no staff history
+- **THEN** no "Download Exit Form" is offered
+
+### Requirement: The Exit Form after a Return to signing says what to fill in by hand
+After a Return to signing, the office's Exit Form panel and the volunteer's "Download Exit Form" SHALL carry the note "The return was corrected after this review (Return to signing). This form prints only what ViTally holds. Fill in by hand: <list>." The list SHALL name, in this order, "the federal filing method" and "the Pennsylvania filing method" when that box is not ticked, then always "the federal and Pennsylvania refund or amount owed and how it is paid", "Other Tax" and "Remarks".
+
+#### Scenario: The note names the unticked method
+- **WHEN** a case was returned to signing with its federal return rejected and its state return accepted
+- **THEN** both places carry the note, and its list reads "the federal filing method; the federal and Pennsylvania refund or amount owed and how it is paid; Other Tax; Remarks"
+
+#### Scenario: No note without a Return to signing
+- **WHEN** a case was approved and has not been returned to signing
+- **THEN** neither place carries the note

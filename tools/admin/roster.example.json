@@ -27,5 +27,6 @@
     }
   ],
   "defaultFollowup": "site_coordinator",
+  "siteNumber": "S00000000",
   "applicants": ["client-a@example.org"]
 }

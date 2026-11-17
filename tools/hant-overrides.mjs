@@ -5,4 +5,5 @@
 // converted text: { from: <Simplified source substring>, to: <Traditional>, reason }.
 export default Object.freeze([
   { from: "不合并申报", to: "不合併申報", reason: "合併申報 is the tax term; OpenCC segments 不合|并" },
+  { from: "递交并被接受", to: "遞交並被接受", reason: "并 is 'and' (並) here; OpenCC segments 交|并" },
 ]);

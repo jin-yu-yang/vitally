@@ -48,15 +48,17 @@ The database SHALL let a signed-in staff member read `volunteer_profiles`, `rost
 - **THEN** `authenticated` holds only `select` on the three tables, and `anon` and `service_role` hold nothing
 
 ### Requirement: The admin check answers only for the caller
-The schema `vitally_policy` SHALL hold exactly two functions:
+The schema `vitally_policy` SHALL hold exactly four functions:
 - `is_workspace_admin(p_workspace_id uuid)`, which answers whether the signed-in caller's person has `admin` in `people.capabilities` in the given workspace;
-- `cleared_workspace_id()`, which returns the workspace of the caller's active `staff` membership when the caller is cleared for its current season, and null otherwise.
+- `cleared_workspace_id()`, which returns the workspace of the caller's active `staff` membership when the caller is cleared for its current season, and null otherwise;
+- `in_update_audience(p_workspace_id uuid, p_audience text, p_roles text[])`, which answers whether the signed-in caller's person is in a posted update's audience (capability `posted-updates`);
+- `unpublished_read_window()`, which returns how long the audience still reads an unpublished update (capability `posted-updates`).
 
-Each SHALL take no user id and SHALL answer only for the signed-in caller. Each SHALL be `security definer` and `stable` with `search_path=''`. Execute on each SHALL be granted to `authenticated` only, and SHALL NOT be held by `public`, `anon` or `service_role`. No function in `vitally_policy` SHALL take a user id.
+None SHALL take a user id, and each that answers about a person SHALL answer only for the signed-in caller. `is_workspace_admin`, `cleared_workspace_id` and `in_update_audience` SHALL be `security definer` and `stable` with `search_path=''`. `unpublished_read_window` reads nothing: it SHALL be `immutable`, not `security definer`, with `search_path=''`. Execute on each SHALL be granted to `authenticated` only, and SHALL NOT be held by `public`, `anon` or `service_role`.
 
 #### Scenario: The catalog
 - **WHEN** the database catalog is read
-- **THEN** `vitally_policy` holds only `is_workspace_admin(uuid)` and `cleared_workspace_id()`, with those properties and grants, and no argument of any function in the schema names a user
+- **THEN** `vitally_policy` holds only `is_workspace_admin(uuid)`, `cleared_workspace_id()`, `in_update_audience(uuid, text, text[])` and `unpublished_read_window()`, with those properties and grants, and no argument of any function in the schema names a user
 
 #### Scenario: A non-admin asks
 - **WHEN** a staff member without `admin` calls `is_workspace_admin` for their own workspace
@@ -143,6 +145,7 @@ Edit SHALL open the same drawer filled in with the volunteer's values, and savin
 - The save SHALL change only the certificates the drawer manages. It SHALL NOT delete or change an `uploaded` certificate that it is not sent. Ticking a certificate whose row is `uploaded` SHALL confirm it, by that admin, now, and roles that need it MAY be granted in the same save.
 - A photo ID check that stays ticked SHALL keep its original time.
 - The email of a volunteer who has a sign-in SHALL be read-only in the drawer, and SHALL be refused by the database if changed.
+- Cancel invitation (sign-in-accounts) SHALL remove the sign-in of a volunteer whose invitation was never completed, after which the email SHALL be editable again. An account that was ever active SHALL keep its email locked.
 - A save based on values someone else has since changed SHALL be refused with a conflict, and the drawer SHALL say so.
 
 #### Scenario: Editing fields
@@ -172,6 +175,10 @@ Edit SHALL open the same drawer filled in with the volunteer's values, and savin
 #### Scenario: A volunteer with a sign-in
 - **WHEN** an admin opens Edit for a volunteer who has a sign-in
 - **THEN** the email field is read-only
+
+#### Scenario: After Cancel invitation
+- **WHEN** an admin cancels the invitation of a volunteer who never completed it, and opens Edit
+- **THEN** the email field can be changed, and the save lands
 
 #### Scenario: Changing a locked email anyway
 - **WHEN** a call changes the email of a volunteer who has a sign-in
@@ -243,7 +250,11 @@ The Roster SHALL list every volunteer with a roster entry for the workspace's cu
 - email and phone;
 - their roles, and their confirmed certificates as neutral labels;
 - their languages;
-- whether they are cleared, and if not, what is missing: their Form 13615 when they have no roles, or the photo ID check when they are new and unchecked;
+- their account: "Not created", "Invited", "Active" or "Deactivated";
+- whether they are cleared, and if not, what is missing, in this order:
+  - their Form 13615 when they have no roles;
+  - the photo ID check when they are new and unchecked;
+  - "No account yet" when they have no account, "Hasn't signed in yet" when it is invited, or "Account deactivated" when it is deactivated;
 - an Edit button.
 
 A volunteer with no roles SHALL show "No roles recorded", and one with no certificates SHALL show "None recorded". The page SHALL say that a volunteer works on cases only once they are cleared. The page SHALL show no season label.
@@ -254,15 +265,27 @@ A volunteer with no roles SHALL show "No roles recorded", and one with no certif
 
 #### Scenario: A staff member nobody has recorded yet
 - **WHEN** a staff member created by the roster command appears on the Roster before anyone has recorded them
-- **THEN** their row shows the email from their account, "No roles recorded", and that they are not cleared because their Form 13615 is missing
+- **THEN** their row shows the email from their account, "No roles recorded", "Active", and that they are not cleared because their Form 13615 is missing
 
 #### Scenario: A cleared volunteer
-- **WHEN** a volunteer has Preparer with VSC, IT&QR and Basic confirmed, and is not marked new
+- **WHEN** a volunteer with an active account has Preparer with VSC, IT&QR and Basic confirmed, and is not marked new
 - **THEN** their row shows them as cleared
 
 #### Scenario: New and not yet checked
-- **WHEN** a volunteer has Greeter with VSC, and is marked new with no photo ID check
+- **WHEN** a volunteer with an active account has Greeter with VSC, and is marked new with no photo ID check
 - **THEN** their row says the photo ID check is missing
+
+#### Scenario: Roles but no account
+- **WHEN** a volunteer with no sign-in has Preparer with its certificates and is not marked new
+- **THEN** their row shows "Not created" and not cleared, with "No account yet"
+
+#### Scenario: Invited
+- **WHEN** a volunteer with roles has an invited account
+- **THEN** their row shows "Invited" and not cleared, with "Hasn't signed in yet"
+
+#### Scenario: Deactivated
+- **WHEN** a volunteer with roles has a deactivated account
+- **THEN** their row shows "Deactivated" and not cleared, with "Account deactivated"
 
 ### Requirement: A save cannot take away what a person's open work needs
 `vitally_save_volunteer` SHALL refuse a save, with nothing written, when it would leave the person without a capability their open work needs, or uncleared while they hold any open work. Open work and the capability each needs SHALL be:

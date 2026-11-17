@@ -25,6 +25,7 @@ The front end **predicts** what a person may do so it can show the right buttons
 - [Feedback](#feedback)
 - [Live updates](#live-updates)
 - [The contact log](#the-contact-log)
+- [Posted updates](#posted-updates)
 - [Sign-in](#sign-in)
 - [Window state](#window-state)
 - [Client languages](#client-languages)
@@ -38,10 +39,11 @@ The front end **predicts** what a person may do so it can show the right buttons
 ```mermaid
 flowchart TD
   app["app.mjs<br/>bootstrap + DOM events"] --> controller["controller.mjs<br/>all state"]
-  app --> views["views.mjs, client-views.mjs,<br/>staff-views.mjs, admin-views.mjs,<br/>office-views.mjs, pool-views.mjs,<br/>volunteer-views.mjs"]
+  app --> views["views.mjs, client-views.mjs,<br/>staff-views.mjs, admin-views.mjs,<br/>office-views.mjs, pool-views.mjs,<br/>volunteer-views.mjs, update-views.mjs"]
   app --> caseActions["case-actions.mjs<br/>payload builders"]
   views --> roster["volunteer-roster.mjs<br/>Roster lists, search, form checks"]
   views --> workload["volunteer-workload.mjs<br/>Workload counts, Unassigned, candidates"]
+  views --> postedUpdates["posted-updates.mjs<br/>update form checks, audience text"]
   views --> intakeForm["intake-form.mjs<br/>version-2 renderer, draft rules"]
   intakeForm --> catalogue["intake-catalogue.mjs<br/>catalogue rules"]
   controller --> catalogue
@@ -117,7 +119,7 @@ sign-in (`sendCode`, `verifyCode`, `editAuthEmail`, `editAuthCode`, `restartSign
 **`staffWindow()`** is everything a staff screen does (its reads, its eligibility rules and its
 actions), true only for a `staff` account (`isStaffWindow` in [`src/contracts.mjs`](../../src/contracts.mjs)
 says the same for the views). The person acting is always the account's own `principal.personId`; a
-client sends none. None of the eight RPCs takes the acting person, so the browser never claims an identity (`vitally_save_volunteer` takes a volunteer's person id, but as the record to change, not as who is acting); the
+client sends none. None of the twenty-two RPCs takes the acting person, so the browser never claims an identity (`vitally_save_volunteer` takes a volunteer's person id, but as the record to change, not as who is acting); the
 database resolves it ([Database: who is acting](database.md#who-is-acting)). An account with any
 other access (a former presenter) gets the "This account has no access" screen and nothing is
 loaded for it.
@@ -142,7 +144,7 @@ Three rules the controller keeps:
 | Signed out | Email and code form ([`client-views.mjs`](../../src/client-views.mjs) `accessScreen`); "cannot reach the server" and "no access" screens ([`views.mjs`](../../src/views.mjs)) |
 | Applicant | `applications` (list and lookup by Application ID), `reference` (new ID to keep), `intake` (the sub-step form, built by `src/intake-views.mjs`), `progress` (status, client number, requests, send document) |
 | Staff window, volunteer account | `staff`: the work board; `staff-case`: the case page with its tabs ([`staff-views.mjs`](../../src/staff-views.mjs)) |
-| Staff window, `admin` account | `staff`: the Follow-ups queue ([`office-views.mjs`](../../src/office-views.mjs)); `office-cases`: the case pool ([`pool-views.mjs`](../../src/pool-views.mjs)); `office-add-case`: Add a case for a walk-in client ([`office-views.mjs`](../../src/office-views.mjs)); `staff-case`: the office's case page ([`admin-views.mjs`](../../src/admin-views.mjs)); `office-volunteers`: the Volunteers Roster and its Add / Edit drawer ([`volunteer-views.mjs`](../../src/volunteer-views.mjs), rules in [`volunteer-roster.mjs`](../../src/volunteer-roster.mjs)); the same page's **Workload** tab for cleared admins, with the Unassigned lists, tagged rows for anyone holding a case without the role, and the Assign / Reassign drawer, which sends `ASSIGN_CASE` with the revision and holder it was opened on ([`workload-views.mjs`](../../src/workload-views.mjs), counts and candidates in [`volunteer-workload.mjs`](../../src/volunteer-workload.mjs)). The Workload is built from the staff case list, `volunteers` and `people` already in the window, so it adds no table or subscription; its tab, sort, search and open rows are window-local and never saved |
+| Staff window, `admin` account | `staff`: the Follow-ups queue ([`office-views.mjs`](../../src/office-views.mjs)); `office-cases`: the case pool ([`pool-views.mjs`](../../src/pool-views.mjs)); `office-add-case`: Add a case for a walk-in client ([`office-views.mjs`](../../src/office-views.mjs)); `staff-case`: the office's case page ([`admin-views.mjs`](../../src/admin-views.mjs)); `office-volunteers`: the Volunteers Roster and its Add / Edit drawer ([`volunteer-views.mjs`](../../src/volunteer-views.mjs), rules in [`volunteer-roster.mjs`](../../src/volunteer-roster.mjs)); the same page's **Workload** tab for cleared admins, with the Unassigned lists, tagged rows for anyone holding a case without the role, and the Assign / Reassign drawer, which sends `ASSIGN_CASE` with the revision and holder it was opened on ([`workload-views.mjs`](../../src/workload-views.mjs), counts and candidates in [`volunteer-workload.mjs`](../../src/volunteer-workload.mjs)). The Workload is built from the staff case list, `volunteers` and `people` already in the window, so it adds no table or subscription; its tab, sort, search and open rows are window-local and never saved; `office-updates`: Post an update ([`update-views.mjs`](../../src/update-views.mjs)), for a ceiling admin only, cleared or not |
 | Staff account | The staff screens: the sidebar and the case page header say "Signed in as <name>", and the person is the account's own (`staffScreen` in `views.mjs` picks the office screens when that person has `admin`, and the volunteer work board otherwise). Always English |
 
 **Fill tools.** They follow the demo-tools switch. Three controls exist: the staff "Auto-fill fictional data" button, the client intake's fiction toolbar and the office's Add a case "Fill fictional details" pill. With the switch on, an "Auto-fill fictional data" button appears at the top of each questionnaire, the review-contact form and the filing dialogs (Mark ready to e-file, Mark e-filed, Record filing result, Return to signing). [`src/demo-fill.mjs`](../../src/demo-fill.mjs) fills the form with fictional values that the form's own payload builder accepts. It never overwrites typed text or a defaulted choice, and it sends nothing: the form's own button still submits. `demoFillButton(enabled)` renders nothing when the switch (`state.demoTools`) is off, and the `demo-fill` handler in `app.mjs` checks `demoToolsOn` again. The switch is on only when `/public-config.json` sends `demoTools: true` (`server.mjs` does so only with `VITALLY_DEMO_TOOLS=1` and a loopback `SUPABASE_URL`) and the config's `supabaseUrl` is loopback. When on, these controls show to whoever is on that screen; when off, to no one
@@ -364,18 +366,25 @@ that differs), a `kind` (`box`, `count`, `amount`, `cell`, `vin`, `year`, `reaso
   `[{ key, label, message }]`: a count is 0–99, an amount has at most six digits and two decimals,
   a year is four digits from 2000 to before the season, a reason is at most 120 characters and a
   note at most 500, the Yes/No box pairs (`SHADED_PAIRS`) cannot both be ticked, and a household
-  row past the household's size must be blank.
+  row past the visible count must be blank.
 - `readShaded(raw, { form, householdSize, season })` maps `{ pdfFieldName: value }` to
   `{ values, errors }`: a blank is absent, a checkbox is `true`, a household cell is
   `yes`, `no` or `na`. The same table serves the draft fill, the editing copy, the upload and the
   editor. The database repeats the keys and the shape rules; the browser checks first and names
   the field it refuses, and the database stays the authority.
+- `householdRows(answers, { version })` is the number of visible household rows: the `hh`
+  members, capped at 4, while the catalogue shows `hh` for the case's `intakeVersion`
+  (has_household_members is Yes), else 0. Cells on rows past it stay stored but are never shown,
+  printed or counted. `visibleShaded(values, answers, { version })` drops them, and
+  `shadedCaseRules(record, workspace)` gives `readShaded` the `householdSize` (the same count)
+  and the season.
 
 **The draft fill.** `draftFields(answers, { …, shaded })` in
 [`src/draft-form.mjs`](../../src/draft-form.mjs) puts the saved values on the form: boxes are
 ticked, other values are printed (`shadedPrint`), and the notes come back as
-`notes: [{ name, text, block, page }]` for the builder instead of going into `text`. When any
-value is set, `preparerEntries` is true and the stamp reads "DRAFT – online answers and preparer
+`notes: [{ name, text, block, page }]` for the builder instead of going into `text`. The draft, the editing copy
+and the case page's count all read the values through `visibleShaded`. When a visible value
+prints, `preparerEntries` is true and the stamp reads "DRAFT – online answers and preparer
 entries" instead of "DRAFT – prepared from online answers". All three languages of the 13614-C
 print the saved section (the 14446 has none and ignores it). `buildDraftPdf` in
 [`src/draft-pdf.mjs`](../../src/draft-pdf.mjs) wraps each note in its own box with the wrapping of
@@ -482,8 +491,23 @@ in the browser from an approval's reviewer questionnaire, and nothing is uploade
 - **Where it is offered.** "Download Exit Form" appears under each approved review that has a
   reviewer questionnaire, on the volunteer's Independent review panel (`exitFormTool` in
   `staff-views.mjs`). The office's case page has no review panel, so its Overview gets an Exit Form
-  panel (`exitFormPanel`) for the latest such approval; before there is one, the panel is not
-  shown.
+  panel (`exitFormPanel`) for the latest approved review only, with no fallback to an earlier one; if
+  that review has no questionnaire, the panel is not shown.
+- **After a Return to signing.** The questionnaire records the return as it stood at approval, so
+  `exitFormSource(record, review)` in [`src/exit-form-source.mjs`](../../src/exit-form-source.mjs)
+  decides what both places may print. If a `RETURN_TO_SIGNING` entry in the staff history is later
+  than the review's `decidedAt` (an approval with no `decidedAt`, or one that can't be parsed,
+  counts every Return to signing as later), only the settled methods (a method is set and its result is not
+  `rejected`) are ticked, and everything else is blank: amounts, payment methods, debit dates, Other
+  Tax and Remarks. `exitFormNote` builds the note that says what to fill in by hand. The note is HTML,
+  shown in the office panel and beside the volunteer's "Download Exit Form" button, and only when
+  the return was corrected. The PDF itself carries no note, only the blanks. Without staff history,
+  no form is offered. Fixed in
+  [#173](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/173). Still open:
+  [#203](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/203) (collect the corrected
+  values at Return to signing) and
+  [#204](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/204) (the review-contact
+  line after a Return to signing).
 - **Who may make it.** `viewExitForm` in `app.mjs` returns at once for anything but a staff window
   (`isStaffWindow`). Like the drafts, it opens a new tab and, if the browser blocks the tab,
   offers a link instead (`draftOffers`). A blocked tab's link is drawn on the Intake answers tab, so
@@ -491,7 +515,7 @@ in the browser from an approval's reviewer questionnaire, and nothing is uploade
   volunteer who can't see the contact details
   ([#122](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/122)).
 - **What goes on it.** `exitFormMarks(questionnaire, header, today)` in
-  [`src/exit-form.mjs`](../../src/exit-form.mjs) decides everything, with no DOM. `buildExitFormPdf`
+  [`src/exit-form.mjs`](../../src/exit-form.mjs) decides everything, with no DOM. Its questionnaire comes from `exitFormSource`. `buildExitFormPdf`
   then draws it on the blank template.
   - The header has the tax year (the case's season), today's date, the client number, and the
     taxpayer's name. A couple (married, or widowed in the tax year, by the intake's own spouse
@@ -517,7 +541,7 @@ in the browser from an approval's reviewer questionnaire, and nothing is uploade
   made ([#122](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/122)).
 - **Privacy.** Nothing about a bank account is drawn, because none is stored
   (`review-and-corrections`).
-- **Tests.** `tests/exit-form.test.mjs` covers the marks, builds real PDFs, and pins long Remarks
+- **Tests.** `tests/exit-form-source.test.mjs` pins the source rule and the note. `tests/exit-form.test.mjs` covers the marks, builds real PDFs, and pins long Remarks
   and the template's document info. `tests/shell.test.mjs` pins `viewExitForm`'s wiring. The button
   assertions are in `tests/staff-views.test.mjs` and `tests/admin-views.test.mjs`, and the allowlist
   entry is in `tests/server.test.mjs`. The browser story presses the button, a failure with its
@@ -789,7 +813,9 @@ re-reads it:
 - any event about the open case (its requests, documents, history, reviews): that case;
 - an `assistance_items` event: the assistance list;
 - a `workspaces` event (a change to the workspace row, such as its intake
-  version): everything, with a notice if the open case vanished.
+  version): everything, with a notice if the open case vanished;
+- a `posted_updates` event: the Notifications feed, and the admin's table when Post an update is
+  open. `update_reads` is not published, so the table re-reads on opening and on focus instead.
 
 `case_contacts`, `case_materials`, `contact_log` and `contact_log_versions` events carry a case id
 like the other child tables, so they re-read the open case. That is how a contact logged in one
@@ -826,6 +852,38 @@ database side is in [Database: the contact log](database.md#the-contact-log).
   re-read the case. The store reads `contact_log` and `contact_log_versions` for `getCase`.
 - **Copy** writes to the system clipboard with `navigator.clipboard.writeText` (`copyContacts` in
   `app.mjs`). A refused clipboard shows a warning toast instead. Tests that check the text read the clipboard back.
+
+## Posted updates
+
+Admins post IRS policy updates and office notices; every staff member reads the ones addressed to
+them. The database side is in [Database: posted updates](database.md#posted-updates).
+
+- **[`posted-updates.mjs`](../../src/posted-updates.mjs)** is pure: the empty form, the checks
+  and their sentences (also shown for a database `VALIDATION` on that field), the request a save
+  sends, the audience text ("All volunteers", "Preparers and Reviewers") and whether an update
+  is pinned today in New York.
+- **[`update-views.mjs`](../../src/update-views.mjs)** draws the Notifications panel (a drawer),
+  the Post an update screen (the form, its live preview and the table), the who-has-read dialog and
+  the Unpublish and Delete confirmations. Staff screens, so English only.
+- **The bell.** Notifications is in every staff sidebar, Finish your setup included. Its badge
+  is `state.updatesUnread`, the RPC's own count; the view never recounts it.
+- **The feed** (`loadFeed`) is read with the work, on every refresh (focus, `online`), on a
+  `posted_updates` or `workspaces` event, and with every clearance check. An uncleared window has
+  no Realtime channel, so its feed re-reads on focus and Check again. A failed read keeps the items
+  it had and never blocks the rest.
+- **Opening the panel** marks the unread items it shows read in one `vitally_mark_updates` call,
+  then re-reads. While it stays open, each later read marks what is new. I've read this confirms.
+  The items that were unread while it showed (`state.notificationsFresh`) stay highlighted until
+  it closes. Marking needs the panel's dialog itself: a path that drops the dialog (navigation,
+  lost clearance) ends the panel too, so a later read marks nothing.
+- **A narrowed audience.** When an admin narrows a posted update's audience, the people who left
+  it get no Realtime event (the policy checks the new row). Their feed drops the update on its
+  next read (focus, `online`), and marking it does nothing.
+- **Keep at the top until** cannot be before today in New York; an edit may keep the update's own
+  saved date. The check is the form's (`validateUpdate`); the database has none.
+- **Typing in the form** stores the values without a render, and `app.mjs` redraws only
+  `#update-preview`, so the text being typed is never replaced. A save or table action that fails
+  offline keeps its request, so pressing again resends the same action id.
 
 ## Sign-in
 
