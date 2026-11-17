@@ -66,7 +66,7 @@ import { t, SENTENCES } from "./client-text.mjs";
 import { createToastTimer } from "./toast.mjs";
 import { contactEntryFromForm, contactSummary, contactSummaries } from "./contact-log.mjs";
 import { decorateStaffCase, outcomeGroup, staffEligibility } from "./staff-views.mjs";
-import { volunteerFromForm, volunteerFormChanged, rolesToUntick } from "./volunteer-roster.mjs";
+import { volunteerFromForm, volunteerFormChanged, rolesToUntick, untickedRolesMessage } from "./volunteer-roster.mjs";
 import { actionToast, renderUpdatePreview, saveToast, updateFormFromValues } from "./update-views.mjs";
 
 // Bootstrap and DOM wiring, and nothing else. No state lives here (the
@@ -498,6 +498,19 @@ if (!config) {
       box.checked = false;
       for (const [id, draft] of checkDrafts(box)) keepDraft(id, draft);
     }
+    announceUntickedRoles(form, untickedRolesMessage(drop, certificates));
+  }
+
+  // The drawer's polite status line (#192). Emptied first and filled on the
+  // next frame, so the same sentence twice in a row is still read out.
+  function announceUntickedRoles(form, message) {
+    const notice = form.querySelector("#volunteer-role-notice");
+    if (!notice || !message) return;
+    notice.textContent = "";
+    requestAnimationFrame(() => {
+      const current = root.querySelector("#volunteer-role-notice");
+      if (current) current.textContent = message;
+    });
   }
 
   // One input event's draft for a field, or null: the field is back to what

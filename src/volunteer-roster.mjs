@@ -202,6 +202,28 @@ export function withoutLostRoles(payload, list, volunteerId) {
   };
 }
 
+// What the drawer announces after a certificate change unticked `roles`
+// (rolesToUntick's answer), for screen readers: "Admin was unticked: it needs
+// IT&QR." Roles that now lack the same certificates share one sentence.
+// `certificates` is the ticked set after the change; "" when nothing was unticked.
+export function untickedRolesMessage(roles, certificates) {
+  const groups = new Map();
+  for (const role of roles ?? []) {
+    const missing = missingFor(role, certificates).join(" and ");
+    if (!missing) continue;
+    if (!groups.has(missing)) groups.set(missing, []);
+    groups.get(missing).push(roleLabel(role));
+  }
+  return [...groups]
+    .map(([missing, labels]) => {
+      const names = labels.length > 1 ? `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}` : labels[0];
+      return labels.length > 1
+        ? `${names} were unticked: they need ${missing}.`
+        : `${names} was unticked: it needs ${missing}.`;
+    })
+    .join(" ");
+}
+
 // The server's ROLE_NEEDS detail, "<role>: <labels joined ', '>", as the
 // drawer's sentence; null when it isn't that shape.
 export function roleNeedsMessage(details) {

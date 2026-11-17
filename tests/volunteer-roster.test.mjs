@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   ROLES, CERTIFICATES, WORKS, LANGUAGES,
   combineVolunteers, filterVolunteers, volunteerFromForm, volunteerProblem,
-  ROLE_NEEDS, missingFor, withoutLostRoles, roleNeedsMessage, openWorkMessage, rolesToUntick,
+  ROLE_NEEDS, missingFor, withoutLostRoles, roleNeedsMessage, openWorkMessage, rolesToUntick, untickedRolesMessage,
   accountMessage, volunteerFormChanged
 } from "../src/volunteer-roster.mjs";
 
@@ -326,4 +326,44 @@ test("volunteerFormChanged is false for the saved values and true for any edit",
   assert.equal(volunteerFormChanged(saved, form((fd) => fd.set("isNew", "on"))), true);
   assert.equal(volunteerFormChanged(saved, form((fd) => fd.set("otherLanguage", "Ilocano"))), true);
   assert.equal(volunteerFormChanged(null, form()), true, "no saved volunteer: nothing is saved yet");
+});
+
+// untickedRolesMessage(rolesToUntick's answer, checkedCertificates AFTER the change) (#192)
+test("the unticked-roles sentence names the role and what it now needs", () => {
+  assert.equal(untickedRolesMessage(["admin"], ["vsc"]), "Admin was unticked: it needs IT&QR.");
+  assert.equal(
+    untickedRolesMessage(["preparer"], ["vsc", "itqr"]),
+    "Preparer was unticked: it needs Basic or Advanced."
+  );
+});
+
+test("roles that now lack the same certificates share one sentence", () => {
+  assert.equal(
+    untickedRolesMessage(["preparer", "reviewer"], ["vsc", "itqr"]),
+    "Preparer and Reviewer were unticked: they need Basic or Advanced."
+  );
+  assert.equal(
+    untickedRolesMessage(["greeter", "intaker", "preparer", "reviewer", "admin"], ["itqr", "basic"]),
+    "Greeter, Intaker, Preparer, Reviewer and Admin were unticked: they need VSC."
+  );
+  assert.equal(
+    untickedRolesMessage(["intaker", "preparer"], ["vsc", "basic"]),
+    "Intaker and Preparer were unticked: they need IT&QR."
+  );
+});
+
+test("roles that lack different certificates get a sentence each; a role lacking nothing is left out", () => {
+  assert.equal(
+    untickedRolesMessage(["admin", "preparer"], ["vsc", "itqr"]),
+    "Preparer was unticked: it needs Basic or Advanced."
+  );
+  assert.equal(
+    untickedRolesMessage(["greeter", "preparer"], ["itqr"]),
+    "Greeter was unticked: it needs VSC. Preparer was unticked: it needs VSC and Basic or Advanced."
+  );
+});
+
+test("nothing unticked, nothing announced", () => {
+  assert.equal(untickedRolesMessage([], ["vsc"]), "");
+  assert.equal(untickedRolesMessage(undefined, []), "");
 });
