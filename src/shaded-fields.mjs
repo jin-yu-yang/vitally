@@ -7,6 +7,8 @@
 // build on it. The browser applies the rules before sending and names the
 // field it refuses; the database stays the authority.
 
+import { visibleAnswers } from "./intake-catalogue.mjs";
+
 export const COUNT_MAX = 99;
 export const AMOUNT = /^(0|[1-9][0-9]{0,5})(\.[0-9]{1,2})?$/;
 export const VIN = /^[A-Za-z0-9]{1,17}$/;
@@ -222,6 +224,38 @@ const rowOf = (key) => {
   const m = /^household([1-4])/.exec(key);
   return m ? Number(m[1]) : 0;
 };
+
+export const HOUSEHOLD_ROWS = 4;
+
+// How many household rows the case shows: the household answer, only while
+// the catalogue shows it (has_household_members = yes), capped at 4.
+export function householdRows(answers, { version = 2 } = {}) {
+  const hh = visibleAnswers(version, answers ?? {}).hh;
+  return Array.isArray(hh) ? Math.min(hh.length, HOUSEHOLD_ROWS) : 0;
+}
+
+// The stored cells without those on rows the case no longer shows.
+export function visibleShaded(values, answers, { version = 2 } = {}) {
+  const rows = householdRows(answers, { version });
+  return Object.fromEntries(
+    Object.entries(values ?? {}).filter(([key]) => rowOf(key) <= rows),
+  );
+}
+
+// What readShaded needs from the case: its household size (rows past it
+// take no cell) and its season (the year rule), else the workspace's.
+export function shadedCaseRules(record, workspace) {
+  const season = Number.isInteger(record?.season)
+    ? record.season
+    : Number.isInteger(workspace?.currentSeason)
+      ? workspace.currentSeason
+      : undefined;
+  return {
+    form: "en",
+    householdSize: householdRows(record?.answers, { version: record?.intakeVersion ?? 2 }),
+    season,
+  };
+}
 
 function rule(field, season) {
   const label = field.label;

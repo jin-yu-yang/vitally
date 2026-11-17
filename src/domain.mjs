@@ -3,7 +3,7 @@
 // revisions (see `supabase/migrations/`), and this file only names what the
 // browser is allowed to show and to send.
 import { isLang } from "./language.mjs";
-import { t, filingSentences } from "./client-text.mjs";
+import { t, filingSentences, closedLine } from "./client-text.mjs";
 
 // Names and plain-language copy for every server stage in STAGES, so the
 // browser can name what it is showing without deciding anything. Each stage has
@@ -333,10 +333,23 @@ export const TRANSMIT_NOTICE_REASON =
   "The client withdrew; make sure the return is not transmitted in TaxSlayer.";
 export const CLOSED_BEFORE_FILING_NOTICE_REASON =
   "The case was closed before filing; make sure the return is not transmitted in TaxSlayer.";
+export const CLOSED_AFTER_FILING_NOTICE_REASON =
+  "The case was closed after a return was filed; make sure the rejected return is not transmitted again in TaxSlayer.";
 export const BEFORE_FILING_NOTICE_REASONS = Object.freeze([
   TRANSMIT_NOTICE_REASON,
   CLOSED_BEFORE_FILING_NOTICE_REASON,
+  CLOSED_AFTER_FILING_NOTICE_REASON,
 ]);
+
+// One return's outcome for a closed message: accepted, waiting for an answer,
+// on paper, or not filed (rejected, or no method). Pennsylvania "no return
+// needed" is not told apart from not filed (design D1).
+export function returnOutcome(method, result) {
+  if (result === "accepted") return "accepted";
+  if (result === "given_to_client" || (method === "paper" && !result)) return "paper";
+  if (method === "efile" && !result) return "waiting";
+  return "not_filed";
+}
 
 // The client text key of a Hold or a closed case's own message, or null when
 // the stage's base message stands (a documents Hold; Closed with no reason or
@@ -351,8 +364,19 @@ function holdClosedKey(stage, record) {
 export function describeStage(stage, lang = "en", record = null) {
   const known = Object.hasOwn(STAGE_DESCRIPTIONS, stage ?? "");
   const base = known ? STAGE_DESCRIPTIONS[stage] : UNKNOWN_STAGE;
-  const keyed = holdClosedKey(stage, record);
-  const variant = keyed
+  const composed =
+    stage === "closed"
+      ? closedLine(
+          closingReasonOf(record),
+          returnOutcome(record?.federalMethod, record?.federalResult),
+          returnOutcome(record?.stateMethod, record?.stateResult),
+          lang,
+        )
+      : null;
+  const keyed = composed ? null : holdClosedKey(stage, record);
+  const variant = composed
+    ? composed
+    : keyed
     ? t(keyed, {}, lang)
     : FILING_STAGES.includes(stage)
       ? filingMessage(stage, lang, record)

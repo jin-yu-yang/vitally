@@ -35,7 +35,9 @@ import { cardsFor } from "./document-cards.mjs";
 import { createShadedSave } from "./shaded-editor.mjs";
 import { createWindowState } from "./window-state.mjs";
 import { isLang, readLanguage, writeLanguage } from "./language.mjs";
-import { volunteerProblem, withoutLostRoles, roleNeedsMessage, openWorkMessage } from "./volunteer-roster.mjs";
+import { volunteerProblem, withoutLostRoles, roleNeedsMessage, openWorkMessage, accountMessage } from "./volunteer-roster.mjs";
+import { emptyUpdateForm, toUpdateRequest, validateUpdate } from "./posted-updates.mjs";
+import { nowInput } from "./contact-log.mjs";
 
 // The one place browser state lives. It owns what is loaded, what is being
 // edited, and which action envelope is in flight; it renders nothing and knows
@@ -72,7 +74,13 @@ const STAFF_SCREENS = Object.freeze([
   "office-cases",
   "office-add-case",
   "office-volunteers",
+  // Post an update (change add-posted-updates): a ceiling admin's only,
+  // cleared or not (`screenAllowed`).
+  "office-updates",
 ]);
+// The admin screens an uncleared ceiling admin keeps (design D10 of
+// add-volunteer-clearance, and add-posted-updates).
+const ADMIN_SETUP_SCREENS = Object.freeze(["office-volunteers", "office-updates"]);
 
 // An action whose answer never arrived may or may not have been applied. Those
 // are the only failures worth retrying with the same envelope; a refusal is
@@ -111,6 +119,14 @@ const STAFF_CONTACT_CONFLICT_MESSAGE =
 const STAFF_VOLUNTEER_CONFLICT_MESSAGE =
   "Someone else changed this volunteer. Close this and open it again to see their changes.";
 export const VOLUNTEER_CONFLICT_MESSAGE = STAFF_VOLUNTEER_CONFLICT_MESSAGE;
+// Post an update (change add-posted-updates): the table is read again and
+// the form keeps what was typed. Staff-only, so named STAFF_.
+const STAFF_UPDATE_CONFLICT_MESSAGE = "Someone changed this update. Check the table and try again.";
+const STAFF_UPDATE_TRANSITION_MESSAGE = "This update can no longer be changed.";
+const EDITABLE_UPDATE_STATUSES = Object.freeze(["draft", "posted", "unpublished"]);
+const STAFF_UPDATE_GONE_MESSAGE = "This update is no longer in the table.";
+const STAFF_UPDATE_FORM_MESSAGE = "Please check the update and try again.";
+const UPDATE_ACTIONS = Object.freeze(["POST", "UNPUBLISH", "DELETE"]);
 const STAFF_VOLUNTEER_GONE_MESSAGE = "This volunteer could not be opened. Close this and try again.";
 const EDIT_CONFLICT_MESSAGE =
   "Someone else changed this application while you were editing. Choose which answers to keep.";
@@ -302,7 +318,13 @@ export function createController({
     cases: [],
     // Whether each list has been read (design D6): a first load that failed
     // must never look like an empty list.
-    lists: { cases: "loading", assistance: "loading", volunteers: "loading" },
+    lists: {
+      cases: "loading",
+      assistance: "loading",
+      volunteers: "loading",
+      updates: "loading",
+      postedUpdates: "loading",
+    },
     people: [],
     // The Roster (admin only): read when its screen opens and after each
     // save, never live. Its filters and the drawer's own sentence are
@@ -310,11 +332,41 @@ export function createController({
     volunteers: [],
     volunteerFilters: { search: "", role: "all" },
     volunteerFormError: null,
+    // The last account action's result in the drawer: {kind: "ok" | "error", text}.
+    volunteerAccountNotice: null,
+    // The office screen's Invite a client panel (admin only): the client
+    // accounts (null until read), the email as typed, and the last result.
+    invitations: null,
+    invitationsFailed: false,
+    inviteEmail: "",
+    inviteNotice: null,
+    // The site check's own state (change add-account-invitations): null, or
+    // `{name, error, cancelled}` once Confirm was pressed. Window-local.
+    siteCheck: null,
     // The Volunteers page's tab, and the Workload's own view (change
     // add-volunteer-workload): window-local and never persisted. The Workload
     // tab is only ever set for a cleared, effective admin (`canSeeWorkload`).
     volunteerTab: "roster",
     workload: freshWorkloadView(),
+    // Posted updates (change add-posted-updates). The feed is every staff
+    // window's, cleared or not: `updates` is the RPC's items as read,
+    // `updatesUnread` its own badge count (never recounted here), and
+    // `notificationsOpen` whether the panel shows. A failed read keeps the
+    // items and marks `lists.updates` failed; it blocks nothing else.
+    // `notificationsFresh` holds the ids that were unread while the panel
+    // showed (those it opened with, and any marked while open): the panel
+    // highlights them until it closes, though they are marked read at once.
+    updates: [],
+    updatesUnread: 0,
+    notificationsOpen: false,
+    notificationsFresh: [],
+    // The Post an update screen (a ceiling admin's): the table, the form as
+    // typed, the update being edited (`{id, revision, status}` or null) and
+    // the form's own errors (`{field: message}` or null). None persisted.
+    postedUpdates: [],
+    updateForm: emptyUpdateForm(),
+    updateEditing: null,
+    updateFormError: null,
     // The caller's own workspace row, read only for a staff window: the
     // office's defaults.
     workspace: null,
@@ -401,6 +453,14 @@ export function createController({
   // The Roster save whose outcome is unknown, likewise the very request sent
   // (`saveVolunteer`). Window memory only: a reload starts without it.
   let pendingVolunteerSave = null;
+  // An account action whose answer never came, kept with the revision it was
+  // sent at, so pressing the same button again sends the same action id.
+  let pendingAccountAction = null;
+  let pendingInviteAction = null;
+  // Post an update's save and table action whose outcome is unknown, kept
+  // the same way: `{ key, request }`, where the key says what was pressed.
+  let pendingUpdateSave = null;
+  let pendingUpdateAction = null;
   // The screening start for the open case, if one is due or held:
   // `{ action, inFlight, gaveUp }` (`startScreeningIfDue`).
   let screeningStart = null;
@@ -481,6 +541,11 @@ export function createController({
   // Screens the current principal may be on, first entry first.
   const screens = () => (staffWindow() ? STAFF_SCREENS : CLIENT_SCREENS);
 
+  // Whether this principal may be on a screen: in its list, and Post an
+  // update only for a ceiling admin.
+  const screenAllowed = (screen) =>
+    screens().includes(screen) && (screen !== "office-updates" || ceilingAdmin(state.principal));
+
   // Where "back to the list" goes for whoever is signed in.
   const homeScreen = () => screens()[0];
 
@@ -517,7 +582,7 @@ export function createController({
     if (!saved) return;
     // Every field has already been checked for its shape; the screen is checked
     // here, against the list this principal is allowed.
-    if (screens().includes(saved.screen)) state.screen = saved.screen;
+    if (screenAllowed(saved.screen)) state.screen = saved.screen;
     if (saved.selectedCaseId) state.selectedCaseId = saved.selectedCaseId;
     if (saved.openPanels) state.openPanels = saved.openPanels;
     if (saved.pendingCreateActionId)
@@ -812,8 +877,13 @@ export function createController({
     // Not cleared: the focus, `online` and retry re-read the clearance only.
     if (awaitingClearance(state)) {
       await checkClearance();
+      // Post an update's table re-reads on focus too (an uncleared admin's
+      // window has no realtime channel).
+      if (awaitingClearance(state) && state.screen === "office-updates") await loadPostedUpdates();
       return;
     }
+    // The feed never blocks the rest, and never fails the refresh.
+    await readFeed();
     let failure = null;
     if (!dataLoaded) {
       // The first load never finished: read everything it reads.
@@ -835,6 +905,14 @@ export function createController({
       } catch (error) {
         failure = failure ?? error;
       }
+      // A client who signed in since shows as Active (never throws).
+      await readInvitations();
+      if (state.screen === "office-updates")
+        try {
+          await readPostedUpdates();
+        } catch (error) {
+          failure = failure ?? error;
+        }
     }
     try {
       await loadSelected();
@@ -946,11 +1024,16 @@ export function createController({
     // rather than by a case id: a claim in another window has to reach this one.
     const touchesAssistance =
       touchesWorkspace || change.table === "assistance_items";
-    if (!touchesList && !touchesOpen && !touchesAssistance) return;
+    // A posted update reaches the feed, and the admin's table when it shows
+    // (a workspace change may move the season, and so every audience).
+    const touchesUpdates = touchesWorkspace || change.table === "posted_updates";
+    if (!touchesList && !touchesOpen && !touchesAssistance && !touchesUpdates) return;
     try {
+      if (touchesUpdates) await readFeed();
       if (touchesList) await loadList();
       if (touchesWorkspace) await loadWorkspace();
       if (touchesAssistance) await loadAssistance();
+      if (touchesUpdates && state.screen === "office-updates") await readPostedUpdates();
       // The open case comes last, because it is the one read that may
       // legitimately find nothing: a case that is gone must not stop the
       // lists around it from being refreshed.
@@ -978,6 +1061,8 @@ export function createController({
       await loadWorkspace();
       // The Roster is read only where it is shown (a restored window on it).
       if (state.screen === "office-volunteers") await readVolunteers();
+      await readInvitations();
+      if (state.screen === "office-updates") await readPostedUpdates();
     } else {
       state.lists.assistance = "ready";
     }
@@ -999,6 +1084,20 @@ export function createController({
       if (state.lists.volunteers !== "ready") state.lists.volunteers = "failed";
       throw error;
     }
+  }
+
+  // The office screen's client list. Only an admin's window asks. A failed
+  // read never fails the load around it: the panel says so and keeps what it
+  // had. It never throws.
+  async function readInvitations() {
+    if (!staffWindow() || !ceilingAdmin(state.principal)) return;
+    try {
+      state.invitations = await store.listClientInvitations();
+    } catch {
+      state.invitationsFailed = true;
+      return;
+    }
+    state.invitationsFailed = false;
   }
 
   // Opening the Roster: read its list, and say a failure with its own Try
@@ -1157,6 +1256,349 @@ export function createController({
 
   function clearVolunteerFormError() {
     state.volunteerFormError = null;
+    state.volunteerAccountNotice = null;
+  }
+
+  // ---- posted updates (change add-posted-updates) --------------------------
+  //
+  // The feed: every staff window's, cleared or not. A read that fails marks
+  // the feed failed and keeps what it showed; it never reaches the page-wide
+  // error, so the board and the setup screen carry on. While the panel is
+  // open, each read marks the unread items it shows (`markShown`), once:
+  // the re-read after marking marks nothing, so an item the database did not
+  // mark is never sent round again by that read.
+  async function readFeed({ mark = true } = {}) {
+    if (!staffWindow() || typeof store.getUpdates !== "function") return;
+    const asked = state.principal.userId;
+    const same = () => staffWindow() && state.principal.userId === asked;
+    let answer;
+    try {
+      answer = await store.getUpdates();
+    } catch (error) {
+      if (!same()) return;
+      state.lists = { ...state.lists, updates: "failed" };
+      if (error?.code === "OFFLINE") state.connection = "offline";
+      return;
+    }
+    if (!same()) return;
+    state.updates = Array.isArray(answer?.items) ? answer.items.map((item) => ({ ...item })) : [];
+    state.updatesUnread = Math.max(0, Number(answer?.unread) || 0);
+    state.lists = { ...state.lists, updates: "ready" };
+    noteConnected();
+    if (mark && panelShowing()) await markShown();
+  }
+
+  // The panel shows only while its dialog does: a path that drops the dialog
+  // (navigation, lost clearance) leaves nothing to mark.
+  function panelShowing() {
+    return state.notificationsOpen && state.dialog === "notifications";
+  }
+
+  // The panel is closed, by whatever path: nothing more is marked, and the
+  // highlight of what was fresh goes with it.
+  function endNotifications() {
+    state.notificationsOpen = false;
+    state.notificationsFresh = [];
+  }
+
+  // The unread items the panel shows, marked read in one call (at most the
+  // 200 the RPC takes), then the feed again for the badge. Items already
+  // read are never sent. A failed mark leaves them unread, for the next one.
+  async function markShown() {
+    const unread = state.updates.filter((item) => item && item.id && item.readAt == null).map((item) => item.id);
+    // Still highlighted after the re-read, until the panel closes.
+    state.notificationsFresh = [...new Set([...state.notificationsFresh, ...unread])];
+    const ids = unread.slice(0, 200);
+    if (!ids.length) return;
+    try {
+      await store.markUpdates({ ids, confirm: false });
+    } catch (error) {
+      if (error?.code === "OFFLINE") state.connection = "offline";
+      return;
+    }
+    await readFeed({ mark: false });
+  }
+
+  // The public feed read: never rejects.
+  async function loadFeed() {
+    await readFeed();
+    show();
+  }
+
+  async function openNotifications() {
+    if (!staffWindow() || state.dialog !== "notifications") return;
+    state.notificationsOpen = true;
+    state.notificationsFresh = [];
+    show();
+    await markShown();
+    show();
+  }
+
+  function closeNotifications() {
+    endNotifications();
+    show();
+  }
+
+  // "I've read this": the one item, confirmed, then the feed again. A
+  // failure is said with its own Try again. Resolves true when it landed.
+  async function confirmUpdate(id) {
+    if (!staffWindow() || !id) return false;
+    try {
+      await store.markUpdates({ ids: [id], confirm: true });
+    } catch (error) {
+      noteLocalFailure(error, () => confirmUpdate(id));
+      return false;
+    }
+    noteConnected();
+    await readFeed();
+    show();
+    return true;
+  }
+
+  // Post an update's table: a ceiling admin's, cleared or not. Like the
+  // Roster's list, a first read that fails marks it failed, and one that
+  // loaded once keeps what it shows. It throws, for loadData and refresh.
+  async function readPostedUpdates() {
+    if (!staffWindow() || !ceilingAdmin(state.principal)) return;
+    try {
+      const rows = await store.listPostedUpdates();
+      state.postedUpdates = Array.isArray(rows) ? rows : [];
+      state.lists = { ...state.lists, postedUpdates: "ready" };
+      noteConnected();
+    } catch (error) {
+      if (state.lists.postedUpdates !== "ready") state.lists = { ...state.lists, postedUpdates: "failed" };
+      throw error;
+    }
+  }
+
+  // Opening the screen: read the table, and say a failure with its own Try
+  // again. Never rejects.
+  async function loadPostedUpdates() {
+    try {
+      await readPostedUpdates();
+    } catch (error) {
+      noteLocalFailure(error, loadPostedUpdates);
+      return;
+    }
+    show();
+  }
+
+  function copyUpdateForm(form) {
+    const source = form && typeof form === "object" ? form : {};
+    return { ...source, roles: Array.isArray(source.roles) ? [...source.roles] : [] };
+  }
+
+  // The form as typed: kept, never drawn (the page draws its own preview),
+  // so a re-render cannot empty a field somebody is using.
+  function setUpdateForm(form) {
+    state.updateForm = copyUpdateForm(form);
+  }
+
+  // Edit from the table: the form holds the row, and the save carries its
+  // revision. A draft, a posted update or an unpublished one is edited (an
+  // unpublished one stays unpublished).
+  function editUpdate(id) {
+    const row = state.postedUpdates.find((entry) => entry?.id === id);
+    if (!row || !EDITABLE_UPDATE_STATUSES.includes(row.status)) return false;
+    state.updateForm = {
+      kind: row.kind,
+      title: String(row.title ?? ""),
+      message: String(row.message ?? ""),
+      irsLink: row.irsLink ?? "",
+      audience: row.audience === "roles" ? "roles" : "everyone",
+      roles: Array.isArray(row.roles) ? [...row.roles] : [],
+      keepTopUntil: row.keepTopUntil ?? "",
+      askConfirm: Boolean(row.askConfirm),
+      askAgain: false,
+    };
+    state.updateEditing = { id: row.id, revision: Number(row.revision), status: row.status };
+    state.updateFormError = null;
+    pendingUpdateSave = null;
+    show();
+    return true;
+  }
+
+  function resetUpdateForm() {
+    state.updateForm = emptyUpdateForm();
+    state.updateEditing = null;
+    state.updateFormError = null;
+    pendingUpdateSave = null;
+  }
+
+  function cancelUpdateEdit() {
+    resetUpdateForm();
+    show();
+  }
+
+  // What a VALIDATION refusal's field says, in the form's own words.
+  function updateFieldError(field, form) {
+    const messages = {
+      kind: "Choose a type.",
+      title: "Enter a title of up to 120 characters.",
+      message: "Enter a message of up to 2000 characters.",
+      irsLink:
+        form?.kind === "office_notice" ? "Only IRS policy updates link to the IRS." : "Use an https link on irs.gov.",
+      roles: "Choose at least one role.",
+    };
+    return Object.hasOwn(messages, field) ? { [field]: messages[field] } : { form: STAFF_UPDATE_FORM_MESSAGE };
+  }
+
+  // A refused or lost update write: CONFLICT, INVALID_TRANSITION and
+  // NOT_FOUND (another admin deleted it) are said in their own words,
+  // anything else as it came. The table is read again either way: what the
+  // write did, or what changed under it.
+  async function noteUpdateFailure(error) {
+    const message =
+      error?.code === "CONFLICT"
+        ? STAFF_UPDATE_CONFLICT_MESSAGE
+        : error?.code === "INVALID_TRANSITION"
+          ? STAFF_UPDATE_TRANSITION_MESSAGE
+          : error?.code === "NOT_FOUND"
+            ? STAFF_UPDATE_GONE_MESSAGE
+            : undefined;
+    noteFailure(error, message ? { message } : undefined);
+    await readPostedUpdates().catch(() => {});
+    show();
+  }
+
+  // An edit refused because another admin changed the update first. The form
+  // keeps what this admin typed and now carries the update's current revision
+  // and status, with their title and message beside it (`conflict`): saving
+  // again replaces their version, Cancel leaves it. Without this every retry
+  // sent the stale revision and met the same CONFLICT. False when the table
+  // can't be read again, the update is gone or can no longer be edited, or
+  // the form has moved on to something else meanwhile.
+  async function takeUpdateConflict(id) {
+    try {
+      await readPostedUpdates();
+    } catch {
+      return false;
+    }
+    const row = state.postedUpdates.find((entry) => entry?.id === id);
+    if (!row || !EDITABLE_UPDATE_STATUSES.includes(row.status) || state.updateEditing?.id !== id) return false;
+    state.updateEditing = {
+      id,
+      revision: Number(row.revision),
+      status: row.status,
+      conflict: { title: String(row.title ?? ""), message: String(row.message ?? "") },
+    };
+    state.updateFormError = null;
+    state.error = null;
+    show();
+    return true;
+  }
+
+  // After a write landed: the table and the feed (the admin may be in the
+  // audience) as they are now.
+  async function afterUpdateWrite() {
+    try {
+      await readPostedUpdates();
+      state.error = null;
+    } catch (error) {
+      noteFailure(error);
+    }
+    await readFeed();
+    show();
+  }
+
+  // Save draft, Post update and Save changes. Resolves to the store's
+  // receipt (`{actionId, updateId, revision, status}`) when it landed, and
+  // null when it did not; the form keeps what was typed until it lands.
+  // A save whose answer never came is kept, as the Roster's is: the same
+  // press with the same form sends that very request, so its action id is
+  // the same and the database replays its receipt (Review Focus 4).
+  async function saveUpdate(form, { post = false } = {}) {
+    if (state.busy || !staffWindow()) return null;
+    const typed = copyUpdateForm(form);
+    state.updateForm = typed;
+    const editing = state.updateEditing ? { ...state.updateEditing } : null;
+    const key = JSON.stringify({ typed, post: Boolean(post), editing });
+    let request = pendingUpdateSave?.key === key ? pendingUpdateSave.request : null;
+    pendingUpdateSave = null;
+    if (!request) {
+      // A date before today (New York) is refused, except the saved date of
+      // the update being edited.
+      const saved = editing ? state.postedUpdates.find((entry) => entry?.id === editing.id) : null;
+      const problem = validateUpdate(typed, {
+        today: nowInput(clock()).slice(0, 10),
+        savedKeepTopUntil: saved?.keepTopUntil ?? null,
+      });
+      if (problem) {
+        state.updateFormError = problem;
+        show();
+        return null;
+      }
+      // "Ask everyone to read it again" goes only with a posted update, and
+      // an unpublished update's save never asks to post it.
+      const askAgain = editing?.status === "posted" && typed.askAgain === true;
+      const posting = Boolean(post) && editing?.status !== "unpublished";
+      request = {
+        actionId: newActionId(),
+        updateId: editing?.id ?? null,
+        expectedRevision: editing ? editing.revision : null,
+        update: toUpdateRequest(typed, { post: posting, askAgain }),
+      };
+    }
+    state.updateFormError = null;
+    state.busy = true;
+    state.error = null;
+    show();
+    let result;
+    try {
+      result = await store.saveUpdate(request);
+    } catch (error) {
+      state.busy = false;
+      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingUpdateSave = { key, request };
+      if (error?.code === "VALIDATION") {
+        state.updateFormError = updateFieldError(error?.cause?.details, typed);
+        show();
+        return null;
+      }
+      if (error?.code === "CONFLICT" && editing && (await takeUpdateConflict(editing.id))) return null;
+      await noteUpdateFailure(error);
+      return null;
+    }
+    state.busy = false;
+    noteConnected();
+    resetUpdateForm();
+    await afterUpdateWrite();
+    return result ?? { status: request.update.post ? "posted" : "draft" };
+  }
+
+  // A table action: POST (a draft), UNPUBLISH (a posted update) or DELETE
+  // (a draft), with the revision the table shows. Resolves to the receipt,
+  // or null. A lost answer is kept and resent unchanged, as a save is.
+  async function updateAction(id, type) {
+    if (state.busy || !staffWindow() || !UPDATE_ACTIONS.includes(type)) return null;
+    const row = state.postedUpdates.find((entry) => entry?.id === id);
+    if (!row) {
+      noteFailure({ code: "NOT_FOUND" }, { message: STAFF_UPDATE_GONE_MESSAGE });
+      show();
+      return null;
+    }
+    const key = JSON.stringify({ id, type, revision: Number(row.revision) });
+    let request = pendingUpdateAction?.key === key ? pendingUpdateAction.request : null;
+    pendingUpdateAction = null;
+    if (!request)
+      request = { actionId: newActionId(), updateId: id, expectedRevision: Number(row.revision), type };
+    state.busy = true;
+    state.error = null;
+    show();
+    let result;
+    try {
+      result = await store.updateAction(request);
+    } catch (error) {
+      state.busy = false;
+      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingUpdateAction = { key, request };
+      await noteUpdateFailure(error);
+      return null;
+    }
+    state.busy = false;
+    noteConnected();
+    // The form held that update at its old revision: it is done with.
+    if (state.updateEditing?.id === id) resetUpdateForm();
+    await afterUpdateWrite();
+    return result ?? { status: type };
   }
 
   // A list that never loaded and whose read failed says so; one that loaded
@@ -1248,7 +1690,7 @@ export function createController({
     restoreSession();
     // A staff window lands on the work board and a client on their applications,
     // unless this window was already somewhere this principal may be.
-    if (!screens().includes(state.screen)) state.screen = homeScreen();
+    if (!screenAllowed(state.screen)) state.screen = homeScreen();
     state.error = null;
     if (awaitingClearance(state)) {
       await holdForClearance();
@@ -1261,6 +1703,8 @@ export function createController({
   // the realtime channel and the open case. `focus` moves the keyboard to the
   // rebuilt page, as navigation does (the window just became cleared).
   async function loadWork({ focus = false } = {}) {
+    // The feed first: it never fails the load, and the load never stops it.
+    await readFeed();
     try {
       await loadData();
       state.error = null;
@@ -1301,7 +1745,8 @@ export function createController({
     state.dialogContext = null;
     // The Workload is case data: back to the Roster.
     state.volunteerTab = "roster";
-    if (!(ceilingAdmin(state.principal) && state.screen === "office-volunteers"))
+    endNotifications();
+    if (!(ceilingAdmin(state.principal) && ADMIN_SETUP_SCREENS.includes(state.screen)))
       state.screen = "staff";
   }
 
@@ -1309,7 +1754,11 @@ export function createController({
     dropWork();
     persistSession();
     show();
+    // The feed is the setup screen's too.
+    await readFeed();
+    show();
     if (state.screen === "office-volunteers") await loadVolunteers();
+    if (state.screen === "office-updates") await loadPostedUpdates();
   }
 
   // An action refused NOT_CLEARED: the window is not cleared any more. It
@@ -1345,6 +1794,9 @@ export function createController({
 
   async function recheckClearance() {
     if (!staffWindow()) return;
+    // A cancelled site check has no membership left to ask about: the screen
+    // says so and offers only Sign out.
+    if (state.siteCheck?.cancelled) return;
     const asked = state.principal.userId;
     const same = () => staffWindow() && state.principal.userId === asked;
     let answer;
@@ -1354,6 +1806,9 @@ export function createController({
         throw controllerError("SERVER_ERROR", "Something went wrong.");
     } catch (error) {
       if (same()) noteLocalFailure(error, checkClearance);
+      // The feed re-reads with every check, answered or not.
+      await readFeed();
+      if (same()) show();
       return;
     }
     if (!same()) return;
@@ -1369,12 +1824,14 @@ export function createController({
     }
     const now = !awaitingClearance(state);
     if (now && !was) {
-      if (state.screen !== "office-volunteers") state.screen = homeScreen();
+      if (!ADMIN_SETUP_SCREENS.includes(state.screen)) state.screen = homeScreen();
       // The setup screen is replaced by the work: the keyboard goes to it.
       await loadWork({ focus: true });
       return;
     }
     if (!now && was) dropWork();
+    // Still not cleared: the feed re-reads with the check.
+    await readFeed();
     persistSession();
     show();
   }
@@ -1519,15 +1976,38 @@ export function createController({
     state.session = "none";
     state.principal = null;
     state.cases = [];
-    state.lists = { cases: "loading", assistance: "loading", volunteers: "loading" };
+    state.lists = {
+      cases: "loading",
+      assistance: "loading",
+      volunteers: "loading",
+      updates: "loading",
+      postedUpdates: "loading",
+    };
     dataLoaded = false;
     state.people = [];
     state.volunteers = [];
     state.volunteerFilters = { search: "", role: "all" };
     state.volunteerFormError = null;
+    state.volunteerAccountNotice = null;
+    state.invitations = null;
+    state.invitationsFailed = false;
+    state.inviteEmail = "";
+    state.inviteNotice = null;
+    state.siteCheck = null;
     state.volunteerTab = "roster";
     state.workload = freshWorkloadView();
     pendingVolunteerSave = null;
+    pendingAccountAction = null;
+    pendingInviteAction = null;
+    state.updates = [];
+    state.updatesUnread = 0;
+    endNotifications();
+    state.postedUpdates = [];
+    state.updateForm = emptyUpdateForm();
+    state.updateEditing = null;
+    state.updateFormError = null;
+    pendingUpdateSave = null;
+    pendingUpdateAction = null;
     state.assistance = [];
     state.workspace = null;
     state.openPanels = [];
@@ -1569,6 +2049,8 @@ export function createController({
     // The no-access window has nowhere to go: the logo and every other
     // navigation do nothing, so the screen and its Sign out stay.
     if (state.screen === "no-access" && !state.principal) return;
+    // Post an update is a ceiling admin's: anyone else lands on their home.
+    if (screen === "office-updates" && !screenAllowed(screen)) screen = homeScreen();
     // A new office draft belongs to the Add a case page: leaving drops it.
     if (screen !== "office-add-case") {
       state.officeDraft = false;
@@ -1579,6 +2061,7 @@ export function createController({
     state.error = null;
     state.dialog = null;
     state.dialogContext = null;
+    endNotifications();
     persistSession();
     show(true);
   }
@@ -1595,15 +2078,31 @@ export function createController({
     state.lookup = String(value ?? "");
   }
 
+  // The questions the drawer's Account section asks; the office panel asks
+  // the same two with an email and no volunteer.
+  const DRAWER_QUESTIONS = Object.freeze(["send-invitation", "cancel-invitation"]);
+
   function openDialog(name, context = null) {
+    if (name !== "notifications") endNotifications();
     state.dialog = name;
     state.dialogContext = context ? { ...context } : null;
     show();
   }
 
   function closeDialog() {
+    // Keeping the account (or not sending, or keeping the invitation) goes
+    // back to the drawer it was asked from.
+    if (
+      state.dialog === "deactivate-account" ||
+      (DRAWER_QUESTIONS.includes(state.dialog) && state.dialogContext?.volunteerId)
+    ) {
+      state.dialog = "volunteer";
+      show();
+      return;
+    }
     state.dialog = null;
     state.dialogContext = null;
+    endNotifications();
     show();
   }
 
@@ -3063,6 +3562,355 @@ export function createController({
     return true;
   }
 
+  // The drawer's Account section (change add-account-invitations): Create
+  // account, Resend, Deactivate and Reactivate for the volunteer the drawer
+  // names. A refusal with a sentence of its own (a missing email, open work, a
+  // used email) is said in the drawer and returns false; a stale revision
+  // (CONFLICT) or anything unreadable is the banner's message, thrown. An
+  // answer that never came is kept: the same press again sends the same
+  // action id. Create account, Cancel invitation and Deactivate are sent only
+  // from their question (`asked`), which returns to the drawer whatever the
+  // outcome.
+  const ACCOUNT_ACTIONS = Object.freeze({
+    create: { send: (request) => store.createAccount(request), asked: "send-invitation" },
+    resend: { send: (request) => store.resendAccount(request) },
+    deactivate: { send: (request) => store.deactivateAccount(request), asked: "deactivate-account" },
+    reactivate: { send: (request) => store.reactivateAccount(request) },
+    cancel: { send: (request) => store.cancelInvitation(request), asked: "cancel-invitation" },
+  });
+  const EMAIL_NOT_SENT = "The email wasn't sent. Use Resend in a minute.";
+  const CREATED_NOT_SENT = "Account created; the email wasn't sent. Use Resend in a minute.";
+  // A replayed answer (the same action id again) sent nothing this time, but
+  // the first attempt did (decision 6).
+  const ALREADY_SENT = "This invitation was already sent. If it didn't arrive, use Resend.";
+  const INVITATION_CANCELLED = "Invitation cancelled.";
+  const NOT_CANCELLABLE = "This invitation can no longer be cancelled.";
+  // IN_USE (design D15): the account was already used, so it is not cancelled.
+  const IN_USE_NOT_CANCELLABLE = "This account is already in use, so the invitation can't be cancelled.";
+  const cancelRefusal = (error) =>
+    error?.cause?.details === "IN_USE" ? IN_USE_NOT_CANCELLABLE : NOT_CANCELLABLE;
+
+  async function runAccountAction(kind) {
+    const action = ACCOUNT_ACTIONS[kind];
+    if (state.busy || !action) return false;
+    if (state.dialog !== (action.asked ?? "volunteer")) return false;
+    const volunteerId = state.dialogContext?.volunteerId ?? null;
+    const current = volunteerId
+      ? (state.volunteers.find((entry) => entry?.id === volunteerId) ?? null)
+      : null;
+    if (!current) throw refuse("NOT_FOUND", STAFF_VOLUNTEER_GONE_MESSAGE);
+    const revision = current.account?.revision ?? null;
+    const key = `${kind}:${volunteerId}:${revision}`;
+    const id = pendingAccountAction?.key === key ? pendingAccountAction.actionId : newActionId();
+    const request =
+      kind === "cancel"
+        ? { actionId: id, target: { volunteerId }, expectedRevision: revision }
+        : {
+            actionId: id,
+            volunteerId,
+            ...(kind === "deactivate" || kind === "reactivate" ? { expectedRevision: revision } : {}),
+          };
+    pendingAccountAction = null;
+    state.volunteerAccountNotice = null;
+    state.busy = true;
+    state.error = null;
+    show();
+    // The question closes into the drawer, so its notice and errors show there.
+    const backToDrawer = () => {
+      if (action.asked && state.dialog === action.asked) state.dialog = "volunteer";
+    };
+    let result;
+    try {
+      result = await action.send(request);
+    } catch (error) {
+      state.busy = false;
+      backToDrawer();
+      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingAccountAction = { key, actionId: request.actionId };
+      const cause = error?.cause;
+      const sentence =
+        cause?.message === "OPEN_WORK"
+          ? openWorkMessage(current.name || "This volunteer", cause.details)
+          : error?.code === "CONFLICT"
+            ? null
+            : kind === "cancel" && error?.code === "INVALID_TRANSITION"
+              ? cancelRefusal(error)
+              : accountMessage(cause?.details);
+      if (sentence) {
+        state.volunteerAccountNotice = { kind: "error", text: sentence };
+        await readVolunteers().catch(() => {});
+        show();
+        return false;
+      }
+      noteFailure(
+        error,
+        error?.code === "CONFLICT" ? { message: VOLUNTEER_CONFLICT_MESSAGE } : undefined,
+      );
+      await readVolunteers().catch(() => {});
+      show();
+      throw error;
+    }
+    state.busy = false;
+    backToDrawer();
+    noteConnected();
+    const sent = result?.emailSent === true && result?.replay !== true;
+    state.volunteerAccountNotice = {
+      kind: "ok",
+      text:
+        kind === "create"
+          ? result?.replay === true
+            ? ALREADY_SENT
+            : sent
+              ? "Account created and sign-in code sent"
+              : CREATED_NOT_SENT
+          : kind === "cancel"
+            ? INVITATION_CANCELLED
+            : kind === "resend"
+              ? sent
+                ? "Sign-in code sent"
+                : EMAIL_NOT_SENT
+              : kind === "deactivate"
+                ? "Account deactivated"
+                : result?.status === "invited"
+                  ? "Account reactivated. Use Resend to send a sign-in code."
+                  : "Account reactivated",
+    };
+    try {
+      await readVolunteers();
+      state.error = null;
+    } catch (error) {
+      noteFailure(error);
+    }
+    show();
+    return true;
+  }
+
+  // Invite a client asks first (decision 5): the typed email is kept and the
+  // question names it, trimmed. An empty email is refused here, with no
+  // question. Nothing is sent until `inviteClient` is called from the question.
+  function askInviteClient(rawEmail) {
+    if (state.busy) return false;
+    const email = String(rawEmail ?? "");
+    state.inviteEmail = email;
+    if (!email.trim()) {
+      state.inviteNotice = { kind: "error", text: accountMessage("NO_EMAIL") };
+      show();
+      return false;
+    }
+    state.inviteNotice = null;
+    openDialog("send-invitation", { email: email.trim() });
+    return true;
+  }
+
+  // The question's Send (no volunteer): the panel's invite, closing the
+  // question first so the panel says the result.
+  async function inviteClient() {
+    if (state.dialog !== "send-invitation" || state.dialogContext?.volunteerId) return false;
+    const email = state.dialogContext?.email ?? "";
+    state.dialog = null;
+    state.dialogContext = null;
+    return await runClientInvite("invite", email);
+  }
+
+  // Invite a client / Resend (the office screen's panel). The action id is
+  // kept across an OFFLINE or SERVER_ERROR retry of the same email, like the
+  // drawer's. A refusal is said in the panel, and what was typed stays.
+  async function runClientInvite(kind, rawEmail) {
+    if (state.busy) return false;
+    const email = String(rawEmail ?? "");
+    if (!email.trim()) {
+      state.inviteNotice = { kind: "error", text: accountMessage("NO_EMAIL") };
+      show();
+      return false;
+    }
+    const key = `${kind}:${email.trim().toLowerCase()}`;
+    const request = {
+      actionId: pendingInviteAction?.key === key ? pendingInviteAction.actionId : newActionId(),
+      email,
+    };
+    pendingInviteAction = null;
+    state.inviteNotice = null;
+    state.busy = true;
+    state.error = null;
+    show();
+    let result;
+    try {
+      result = await (kind === "invite" ? store.inviteClient(request) : store.resendClient(request));
+    } catch (error) {
+      state.busy = false;
+      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingInviteAction = { key, actionId: request.actionId };
+      const sentence = error?.code === "CONFLICT" ? null : accountMessage(error?.cause?.details);
+      if (sentence) {
+        state.inviteNotice = { kind: "error", text: sentence };
+        await readInvitations();
+        show();
+        return false;
+      }
+      noteFailure(error);
+      await readInvitations();
+      show();
+      throw error;
+    }
+    state.busy = false;
+    noteConnected();
+    const sent = result?.emailSent === true && result?.replay !== true;
+    state.inviteNotice = {
+      kind: "ok",
+      text:
+        kind === "invite"
+          ? result?.replay === true
+            ? ALREADY_SENT
+            : sent
+              ? "Account created and sign-in code sent"
+              : CREATED_NOT_SENT
+          : sent
+            ? "Sign-in code sent"
+            : EMAIL_NOT_SENT,
+    };
+    if (kind === "invite") state.inviteEmail = "";
+    await readInvitations();
+    show();
+    return true;
+  }
+
+  const resendClient = (email) => runClientInvite("resend", email);
+
+  // The office list's Cancel, from its question: the email and the account
+  // revision the row showed. INVALID_TRANSITION is said in the panel; a stale
+  // row or anything unreadable goes to the safety net. The list is re-read
+  // whatever the outcome.
+  async function cancelClientInvitation() {
+    if (state.busy || state.dialog !== "cancel-invitation" || state.dialogContext?.volunteerId) return false;
+    const email = String(state.dialogContext?.email ?? "");
+    const revision = Number(state.dialogContext?.revision);
+    state.dialog = null;
+    state.dialogContext = null;
+    const key = `cancel:${email.toLowerCase()}:${revision}`;
+    const request = {
+      actionId: pendingInviteAction?.key === key ? pendingInviteAction.actionId : newActionId(),
+      target: { email },
+      expectedRevision: revision,
+    };
+    pendingInviteAction = null;
+    state.inviteNotice = null;
+    state.busy = true;
+    state.error = null;
+    show();
+    try {
+      await store.cancelInvitation(request);
+    } catch (error) {
+      state.busy = false;
+      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingInviteAction = { key, actionId: request.actionId };
+      if (error?.code === "INVALID_TRANSITION") {
+        state.inviteNotice = { kind: "error", text: cancelRefusal(error) };
+        await readInvitations();
+        show();
+        return false;
+      }
+      noteFailure(error);
+      await readInvitations();
+      show();
+      throw error;
+    }
+    state.busy = false;
+    noteConnected();
+    state.inviteNotice = { kind: "ok", text: INVITATION_CANCELLED };
+    await readInvitations();
+    show();
+    return true;
+  }
+
+  // The cancel question's confirm: the drawer's (a volunteer) or the office
+  // list's (an email).
+  const cancelInvitation = () =>
+    state.dialogContext?.volunteerId ? runAccountAction("cancel") : cancelClientInvitation();
+
+  // ---- the site check (change add-account-invitations, decision 4) --------
+  //
+  // An invited volunteer's first sign-in: their name and this site's SIDN.
+  // The right number makes the account active and the clearance is read
+  // again, so the window moves on to the setup screen or the work. A wrong
+  // number keeps the name and says so; a cancelled invitation replaces the
+  // form. A refusal the screen can say is said there; anything else goes to
+  // the safety net. Answers "active", "wrong-site", "cancelled", "invalid",
+  // or null when this window has no site check.
+  const SITE_CHECK_TEXT = Object.freeze({
+    NO_NAME: "Enter your name.",
+    NO_SIDN: "Enter this site's SIDN.",
+    SITE_NOT_SET: "This site isn't set up for sign-in yet. Ask your site coordinator.",
+  });
+  const WRONG_SITE_TEXT = "That isn't this site's number.";
+
+  async function completeSiteCheck(rawName, rawSidn) {
+    if (state.busy || !staffWindow() || state.principal.clearance?.siteCheck !== true) return null;
+    if (state.siteCheck?.cancelled) return null;
+    const name = String(rawName ?? "").trim();
+    if (!name) {
+      state.siteCheck = { name: "", error: SITE_CHECK_TEXT.NO_NAME, cancelled: false };
+      show();
+      return "invalid";
+    }
+    state.siteCheck = { name, error: null, cancelled: false };
+    state.busy = true;
+    state.error = null;
+    show();
+    let answer;
+    try {
+      answer = await store.completeSiteCheck(name, String(rawSidn ?? ""));
+    } catch (error) {
+      state.busy = false;
+      const said =
+        error?.code === "VALIDATION" ? (SITE_CHECK_TEXT[String(error?.cause?.details ?? "")] ?? null) : null;
+      if (said) {
+        state.siteCheck = { name, error: said, cancelled: false };
+        show();
+        return "invalid";
+      }
+      // No invited account of their own any more: an admin cancelled it, or
+      // it expired, before this press.
+      if (error?.code === "FORBIDDEN") {
+        state.siteCheck = { name, error: null, cancelled: true };
+        show();
+        return "cancelled";
+      }
+      // Not invited any more: an earlier press landed and its answer was
+      // lost. The clearance says where the window goes next.
+      if (error?.code === "INVALID_TRANSITION") {
+        state.siteCheck = null;
+        await checkClearance();
+        return "active";
+      }
+      noteFailure(error);
+      show();
+      throw error;
+    }
+    state.busy = false;
+    noteConnected();
+    if (answer?.status === "active") {
+      state.siteCheck = null;
+      await checkClearance();
+      return "active";
+    }
+    if (answer?.status === "cancelled") {
+      state.siteCheck = { name, error: null, cancelled: true };
+      show();
+      return "cancelled";
+    }
+    if (answer?.status === "invited" && answer?.reason === "WRONG_SITE") {
+      state.siteCheck = { name, error: WRONG_SITE_TEXT, cancelled: false };
+      show();
+      return "wrong-site";
+    }
+    const unread = controllerError("SERVER_ERROR", "Something went wrong.");
+    noteFailure(unread);
+    show();
+    throw unread;
+  }
+
+  const createAccount = () => runAccountAction("create");
+  const resendAccount = () => runAccountAction("resend");
+  const deactivateAccount = () => runAccountAction("deactivate");
+  const reactivateAccount = () => runAccountAction("reactivate");
+
   // Season end: the ticked cases and the revisions the dialog showed. The
   // database moves all of them or none. A refusal is shown inside the dialog,
   // which stays open; a CONFLICT also re-reads the list, so the dialog reopens
@@ -3172,6 +4020,17 @@ export function createController({
         expanded: [...state.workload.expanded],
       },
       dialogContext: state.dialogContext ? { ...state.dialogContext } : null,
+      updates: state.updates.map((item) => ({ ...item })),
+      notificationsFresh: [...state.notificationsFresh],
+      postedUpdates: state.postedUpdates.map((entry) => ({ ...entry })),
+      updateForm: copyUpdateForm(state.updateForm),
+      updateEditing: state.updateEditing
+        ? {
+            ...state.updateEditing,
+            ...(state.updateEditing.conflict ? { conflict: { ...state.updateEditing.conflict } } : {}),
+          }
+        : null,
+      updateFormError: state.updateFormError ? { ...state.updateFormError } : null,
       draftAnswers: { ...state.draftAnswers },
       revealed: [...state.revealed],
       openAddSubsteps: [...state.openAddSubsteps],
@@ -3205,14 +4064,33 @@ export function createController({
     runAssistanceAction,
     logContact,
     loadVolunteers,
+    askInviteClient,
+    inviteClient,
+    resendClient,
+    cancelInvitation,
+    completeSiteCheck,
     setVolunteerFilter,
     saveVolunteer,
+    createAccount,
+    resendAccount,
+    deactivateAccount,
+    reactivateAccount,
     clearVolunteerFormError,
     setVolunteerTab,
     setWorkloadView,
     openAssign,
     setAssignSearch,
     assignCase,
+    loadFeed,
+    openNotifications,
+    closeNotifications,
+    confirmUpdate,
+    loadPostedUpdates,
+    saveUpdate,
+    updateAction,
+    editUpdate,
+    cancelUpdateEdit,
+    setUpdateForm,
     closeUnsigned,
     editContact,
     setBoardFilter,

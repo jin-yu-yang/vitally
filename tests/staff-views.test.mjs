@@ -3224,6 +3224,32 @@ test("the download note", () => {
   );
 });
 
+test("the case page counts only the cells it can show", () => {
+  const record = staffCase({
+    stage: "preparing",
+    answers: { has_household_members: "no", hh: [{ first_name: "Lin" }, { first_name: "Kai" }] },
+    preparerShadedFields: [{ caseId: staffCase().id, version: 1,
+      fields: { incomeW2s: true, household1QualifyingChild: "yes", household1OwnSupport: "no" } }],
+  });
+  assert.match(shadedFor({}, record), /1 field filled/);
+});
+test("a Yes case counts its visible household cell with the rest", () => {
+  const record = staffCase({
+    stage: "preparing",
+    answers: { has_household_members: "yes", hh: [{ first_name: "Lin" }] },
+    preparerShadedFields: [{ caseId: staffCase().id, version: 1, fields: { incomeW2s: true, household1QualifyingChild: "yes" } }],
+  });
+  assert.match(shadedFor({}, record), /2 fields filled/);
+});
+test("only hidden cells: 0 fields filled", () => {
+  const record = staffCase({
+    stage: "preparing",
+    answers: { has_household_members: "no", hh: [{ first_name: "Lin" }] },
+    preparerShadedFields: [{ caseId: staffCase().id, version: 1, fields: { household1QualifyingChild: "yes" } }],
+  });
+  assert.match(shadedFor({}, record), /0 fields filled/);
+});
+
 test("the review box", () => {
   const html = shadedFor(review({ infoNotes: "n", infoLastReturnAvailable: true, household1OwnSupport: "yes" }));
   assert.match(html, /<div class="shaded-review" role="region" aria-labelledby="shaded-review-title">/);
