@@ -48,6 +48,7 @@ The case page's count of filled shaded fields SHALL leave out household cells st
 - **WHEN** a case's stored section holds Yes in rows 1 and 2's qualifying child cells, the client changes the household answer to No, and the preparer ticks W-2s and saves
 - **THEN** the save is accepted, the staff history names only "W-2s", and the row 1 and 2 cells stay stored
 - **AND** when the client answers Yes again with the same two members, the editor and the draft show those cells again
+- **NOTE:** today a client's answers cannot change after submission (`SAVE_ANSWERS` is accepted only at draft, and nothing returns a case to draft), so this scenario applies only once a later change lets answers change, for example staff correcting answers during the interview (#202)
 
 ### Requirement: The editing copy keeps only the shaded fields fillable
 The system SHALL make an editing copy of the English 13614-C for the case's preparer. It SHALL show the client's answers as the draft does, and SHALL keep exactly the 106 shaded fields fillable, already holding the saved values on the visible section. A household cell stored on a row that is not visible SHALL NOT be filled in. Every other field SHALL be flattened. The copy SHALL be built for any client answers the draft supports, including names and addresses in Chinese, and with saved notes in Chinese. The editing copy SHALL never be uploaded or stored.

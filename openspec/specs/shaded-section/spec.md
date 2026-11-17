@@ -102,6 +102,7 @@ The case page SHALL offer the shaded-section tools ("Fill the shaded section", "
 - **WHEN** a case's stored section holds Yes in rows 1 and 2's qualifying child cells, the client changes the household answer to No, and the preparer ticks W-2s and saves
 - **THEN** the save is accepted, the staff history names only "W-2s", and the row 1 and 2 cells stay stored
 - **AND** when the client answers Yes again with the same two members, the editor and the draft show those cells again
+- **NOTE:** today a client's answers cannot change after submission (`SAVE_ANSWERS` is accepted only at draft, and nothing returns a case to draft), so this scenario applies only once a later change lets answers change, for example staff correcting answers during the interview (#202)
 
 ### Requirement: A save records which fields changed, for staff only
 Each accepted save SHALL add one staff history line naming the fields whose values changed, by their English labels, and never the values. A save that changed nothing SHALL say "no fields changed". A save SHALL add no client history line and no client message.

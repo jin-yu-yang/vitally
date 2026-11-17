@@ -294,6 +294,8 @@ const PARITY = [
   { has_household_members: "yes", hh: [] },
   { hh: [{ first_name: "Lin" }] },
   { has_household_members: "yes", hh: "x" },
+  { has_household_members: "yes", hh: null },
+  { has_household_members: "yes", hh: [null] },
   ...[1, 3, 4, 6].map((n) => ({ has_household_members: "yes", hh: Array.from({ length: n }, (_, i) => ({ first_name: `Ana${i}` })) })),
 ];
 test("the browser and the database count the same household rows", async () => {

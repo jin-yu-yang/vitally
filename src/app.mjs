@@ -1596,7 +1596,9 @@ if (!config) {
     const row = savedShaded(record);
     const version = Number(row?.version ?? 0);
     const caseVersion = state.savedCase?.intakeVersion ?? 2;
-    const fields = draftFields(state.draftAnswers ?? {}, { form: "en", reference, today: isoToday(), version: caseVersion });
+    // One source for the drawn answers and the household rows that filter the cells.
+    const answers = state.draftAnswers ?? record.answers ?? {};
+    const fields = draftFields(answers, { form: "en", reference, today: isoToday(), version: caseVersion });
     const PDFLib = await import("./vendor/pdf-lib.mjs");
     const [formBytes, fontFiles] = await Promise.all([
       fetchBytes(FORM_FILES.en),
@@ -1604,7 +1606,7 @@ if (!config) {
     ]);
     const bytes = await buildEditingCopy({
       PDFLib, fontkit: PDFLib.fontkit, formBytes, fontFiles, fields,
-      shaded: visibleShaded(row?.fields ?? {}, record.answers ?? {}, { version: caseVersion }), reference, version,
+      shaded: visibleShaded(row?.fields ?? {}, answers, { version: caseVersion }), reference, version,
     });
     return { bytes, reference, version };
   }
