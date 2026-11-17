@@ -491,8 +491,23 @@ in the browser from an approval's reviewer questionnaire, and nothing is uploade
 - **Where it is offered.** "Download Exit Form" appears under each approved review that has a
   reviewer questionnaire, on the volunteer's Independent review panel (`exitFormTool` in
   `staff-views.mjs`). The office's case page has no review panel, so its Overview gets an Exit Form
-  panel (`exitFormPanel`) for the latest such approval; before there is one, the panel is not
-  shown.
+  panel (`exitFormPanel`) for the latest approved review only, with no fallback to an earlier one; if
+  that review has no questionnaire, the panel is not shown.
+- **After a Return to signing.** The questionnaire records the return as it stood at approval, so
+  `exitFormSource(record, review)` in [`src/exit-form-source.mjs`](../../src/exit-form-source.mjs)
+  decides what both places may print. If a `RETURN_TO_SIGNING` entry in the staff history is later
+  than the review's `decidedAt` (an approval with no `decidedAt`, or one that can't be parsed,
+  counts every Return to signing as later), only the settled methods (a method is set and its result is not
+  `rejected`) are ticked, and everything else is blank: amounts, payment methods, debit dates, Other
+  Tax and Remarks. `exitFormNote` builds the note that says what to fill in by hand. The note is HTML,
+  shown in the office panel and beside the volunteer's "Download Exit Form" button, and only when
+  the return was corrected. The PDF itself carries no note, only the blanks. Without staff history,
+  no form is offered. Fixed in
+  [#173](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/173). Still open:
+  [#203](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/203) (collect the corrected
+  values at Return to signing) and
+  [#204](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/204) (the review-contact
+  line after a Return to signing).
 - **Who may make it.** `viewExitForm` in `app.mjs` returns at once for anything but a staff window
   (`isStaffWindow`). Like the drafts, it opens a new tab and, if the browser blocks the tab,
   offers a link instead (`draftOffers`). A blocked tab's link is drawn on the Intake answers tab, so
@@ -500,7 +515,7 @@ in the browser from an approval's reviewer questionnaire, and nothing is uploade
   volunteer who can't see the contact details
   ([#122](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/122)).
 - **What goes on it.** `exitFormMarks(questionnaire, header, today)` in
-  [`src/exit-form.mjs`](../../src/exit-form.mjs) decides everything, with no DOM. `buildExitFormPdf`
+  [`src/exit-form.mjs`](../../src/exit-form.mjs) decides everything, with no DOM. Its questionnaire comes from `exitFormSource`. `buildExitFormPdf`
   then draws it on the blank template.
   - The header has the tax year (the case's season), today's date, the client number, and the
     taxpayer's name. A couple (married, or widowed in the tax year, by the intake's own spouse
@@ -526,7 +541,7 @@ in the browser from an approval's reviewer questionnaire, and nothing is uploade
   made ([#122](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/122)).
 - **Privacy.** Nothing about a bank account is drawn, because none is stored
   (`review-and-corrections`).
-- **Tests.** `tests/exit-form.test.mjs` covers the marks, builds real PDFs, and pins long Remarks
+- **Tests.** `tests/exit-form-source.test.mjs` pins the source rule and the note. `tests/exit-form.test.mjs` covers the marks, builds real PDFs, and pins long Remarks
   and the template's document info. `tests/shell.test.mjs` pins `viewExitForm`'s wiring. The button
   assertions are in `tests/staff-views.test.mjs` and `tests/admin-views.test.mjs`, and the allowlist
   entry is in `tests/server.test.mjs`. The browser story presses the button, a failure with its

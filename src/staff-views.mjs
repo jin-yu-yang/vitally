@@ -17,6 +17,7 @@ import {
   substepTitleOf,
 } from "./intake-catalogue.mjs";
 import { formatAnswer, sendable } from "./intake-form.mjs";
+import { exitFormSource, exitFormNote } from "./exit-form-source.mjs";
 import { cardsFor, CARD_SUBSTEPS } from "./document-cards.mjs";
 import { serverAnswersV2, variantOf } from "./intake-views.mjs";
 import {
@@ -1822,22 +1823,32 @@ function contactStepLine(attempt, questionnaire) {
 }
 
 // Download Exit Form: the client's hand-out, filled from this approval's
-// questionnaire (src/exit-form.mjs). Only an approval that has one offers it.
-const exitFormTool = (record, attempt) =>
-  reviewerQuestionnaireOf(record, attempt)
-    ? `<div class="summary-tools">${button("Download Exit Form", "view-exit-form", "secondary", `data-review="${esc(attempt.id)}"`)}</div>`
+// questionnaire (src/exit-form.mjs) by the rule in src/exit-form-source.mjs
+// (#173): after a Return to signing it carries a fill-by-hand note and prints
+// only the methods that still hold. No source, no button.
+const exitFormTool = (record, attempt) => {
+  const source = exitFormSource(record, attempt);
+  if (!source) return "";
+  const note = source.corrected
+    ? `<p class="field-note" data-role="exit-form-corrected">${esc(exitFormNote(source))}</p>`
     : "";
+  return `${note}<div class="summary-tools">${button("Download Exit Form", "view-exit-form", "secondary", `data-review="${esc(attempt.id)}"`)}</div>`;
+};
 
 /**
- * The office's Exit Form panel: the button for the latest approval that has
- * a reviewer questionnaire. Nothing before there is one.
+ * The office's Exit Form panel: the button for the latest approval, when it
+ * has a reviewer questionnaire (no fallback to an earlier approval, #173).
+ * After a Return to signing the panel shows the fill-by-hand note instead of
+ * the "filled from the reviewer's answers" sentence.
  */
 export function exitFormPanel(record) {
-  const approved = [...(record?.reviews ?? [])]
-    .reverse()
-    .find((attempt) => attempt?.status === "approved" && reviewerQuestionnaireOf(record, attempt));
-  if (!approved) return "";
-  return `<section class="panel" aria-labelledby="exit-form-title"><div class="section-head"><h2 id="exit-form-title">Exit Form</h2></div><p class="field-note">PCDC's hand-out for the client, filled from the reviewer's answers for version ${esc(approved.preparationVersion)}. Print it for the client when they sign.</p>${exitFormTool(record, approved)}</section>`;
+  const approved = (record?.reviews ?? []).findLast((attempt) => attempt?.status === "approved");
+  const source = exitFormSource(record, approved);
+  if (!source) return "";
+  const intro = source.corrected
+    ? "PCDC's hand-out for the client. Print it for the client when they sign."
+    : `PCDC's hand-out for the client, filled from the reviewer's answers for version ${esc(approved.preparationVersion)}. Print it for the client when they sign.`;
+  return `<section class="panel" aria-labelledby="exit-form-title"><div class="section-head"><h2 id="exit-form-title">Exit Form</h2></div><p class="field-note">${intro}</p>${exitFormTool(record, approved)}</section>`;
 }
 
 function reviewAttempts(record) {

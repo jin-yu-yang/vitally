@@ -117,6 +117,11 @@ test("app.mjs makes the Exit Form for a staff window only, and records nothing",
   const body = app.slice(app.indexOf("async function viewExitForm"), app.indexOf("// ---- leaving Add a case"));
   assert.match(body, /if \(!isStaffWindow\(state\.principal\)\) return;/);
   assert.match(body, /spouseShown\(visible\)/);
+  // What it prints follows the rule in src/exit-form-source.mjs (#173).
+  assert.match(app, /exitFormSource\(record, review\)/);
+  // The PDF is made from the source questionnaire, never the stored one again (#173).
+  assert.match(body, /exitFormMarks\(\s*source\.questionnaire/);
+  assert.doesNotMatch(app, /reviewerQuestionnaires \?\? \[\]\)\.find\(\(q\) => q\?\.reviewId === reviewId\)/);
   // The date on the form is today's, never the approval's.
   assert.match(body, /isoToday\(\)/);
   assert.match(body, /"The Exit Form could not be made\. Close this tab and try again\."/);
