@@ -136,7 +136,7 @@ Mark e-filed SHALL record how each return was filed. On a first filing, its dial
 
 Mark ready to e-file SHALL wait for the reviewer's conversation with the client. While the approved review's conversation is not yet recorded as completed, the database SHALL refuse the move as not available. The admin SHALL see "The reviewer still needs to record the conversation with the client." instead of the button, on the case page and on the Follow-ups row.
 
-Mark ready to e-file SHALL also wait for the office to go over the return with the client. While the case has an open follow-up with purpose `go_over_return` (capability `office-follow-up`), the database SHALL refuse the move as not available, and nothing SHALL be recorded. The admin SHALL see "The office still needs to go over the return with the client." instead of the button, on the case page and on the Follow-ups row, and the Follow-ups row SHALL read "Waiting for the office to go over the return with the client.". The wait SHALL end when that follow-up is resolved, whatever the outcome, and when it is cancelled.
+Mark ready to e-file SHALL also wait for the office to go over the return with the client. While the case has an open follow-up with purpose `go_over_return` (capability `office-follow-up`), the database SHALL refuse the move as not available, and nothing SHALL be recorded. The admin SHALL see "The office still needs to go over the return with the client." instead of the button on the case page. Follow-ups SHALL list no Signing row for the case while that follow-up is open: its Call the client row stands for the case (capability `office-follow-up`). The wait SHALL end when that follow-up is resolved, whatever the outcome, and when it is cancelled.
 
 #### Scenario: Marking a case e-filed
 - **WHEN** an admin presses Mark e-filed… for Mei Chen's case, chooses both returns e-filed, ticks the confirmation and confirms
@@ -164,7 +164,7 @@ Mark ready to e-file SHALL also wait for the office to go over the return with t
 
 #### Scenario: The office's go-over comes first
 - **WHEN** a reviewer approved with "no" to going over the return, and the go-over follow-up is still open
-- **THEN** the admin sees "The office still needs to go over the return with the client." instead of Mark ready to e-file…, its Follow-ups row reads "Waiting for the office to go over the return with the client.", and the database refuses the confirmed move as not available, leaving the case at Ready to exit
+- **THEN** the admin sees "The office still needs to go over the return with the client." instead of Mark ready to e-file… on the case page, Follow-ups lists the case's Call the client row and no Signing row, and the database refuses the confirmed move as not available, leaving the case at Ready to exit
 
 #### Scenario: Resolved after reaching the client
 - **WHEN** the office resolves the go-over follow-up with outcome reached
@@ -172,7 +172,7 @@ Mark ready to e-file SHALL also wait for the office to go over the return with t
 
 #### Scenario: Resolved with no further contact
 - **WHEN** the office resolves the go-over follow-up with outcome no further contact
-- **THEN** the admin is offered Mark ready to e-file…, and the database accepts the confirmed move
+- **THEN** the admin is offered Mark ready to e-file…, Follow-ups shows the case's Signing row again, and the database accepts the confirmed move
 
 #### Scenario: Keeping it as it is
 - **WHEN** the admin closes the dialog without confirming
@@ -261,7 +261,7 @@ Its search SHALL reach a case in any stage.
 - a **Waiting for documents** row for each case at Waiting for documents ("Waiting for the client's documents."), with **Put on hold…**;
 - a **Hold** row for each case on Hold: "Can't reach the client about documents." for a Hold that came from Waiting for documents, or "Can't reach the client to sign." for one that came from Ready to exit. It has **Got in touch…** and **Close…**;
 - a **Withdrawn** row for each open `withdrawal_notice` follow-up, with **Resolve**. It reads "The client withdrew; tell <name> to stop work." for a client's own withdrawal during preparation or review, "The client withdrew; make sure the return is not transmitted in TaxSlayer." for an admin's withdrawn close at Ready to exit, a Hold from Ready to exit, or Ready to e-file, "The case was closed before filing; make sure the return is not transmitted in TaxSlayer." for an admin's individual close of a Hold from Ready to exit with any other reason when no return was filed, or "The case was closed after a return was filed; make sure the rejected return is not transmitted again in TaxSlayer." for that close when a return was already filed;
-- a row for each case at Ready to exit ("Waiting for the client to sign."), with **Mark ready to e-file…**. While the reviewer's call with the client is still pending, the row SHALL read "Waiting for the reviewer's call with the client." instead, with the call-pending explanation in place of the button. For a case returned to signing after a rejection, the row SHALL read "Waiting for the client to sign again.";
+- a row for each case at Ready to exit ("Waiting for the client to sign."), with **Mark ready to e-file…**. While the reviewer's call with the client is still pending, the row SHALL read "Waiting for the reviewer's call with the client." instead, with the call-pending explanation in place of the button. For a case returned to signing after a rejection, the row SHALL read "Waiting for the client to sign again.". While the case has an open `go_over_return` follow-up, whatever its reviewer's call or a Return to signing, Follow-ups SHALL list no row for it here: its Call the client row stands for the case until that follow-up is resolved or cancelled (capability `office-follow-up`);
 - a row for each case at Ready to e-file ("Ready to e-file."), with **Mark e-filed…**;
 - a **Filing result** row for each case at E-filed, and for each case at Rejected with an e-filed return still waiting, with **Record filing result…**. It SHALL read "Waiting for the IRS and Pennsylvania." while both returns wait, or "Waiting for Pennsylvania's answer." or "Waiting for the IRS's answer." while one e-filed return waits. A return on paper SHALL never be waited for;
 - a **Rejected** row for each case at Rejected ("Rejected: contact the client to fix and sign again."), followed by the latest fix note, as typed, if there is one. It has **Return to signing…**, or, while an e-filed return still waits, "Waiting for Pennsylvania's answer before the return can go back to signing." (or "…the IRS's answer…") in its place;
@@ -303,6 +303,14 @@ The amber (3 days) and red (5 days) colouring SHALL apply to a Waiting for docum
 #### Scenario: Follow-ups shows signing
 - **WHEN** a case is approved by its reviewer, and the reviewer has recorded the conversation with the client
 - **THEN** Follow-ups shows its row, "Waiting for the client to sign.", with Mark ready to e-file…
+
+#### Scenario: No Signing row during a go-over
+- **WHEN** a case is approved by its reviewer with "no" to going over the return, so its go-over follow-up is open
+- **THEN** Follow-ups lists the case once, as its Call the client row with 1 open task and Log contact, and lists no Signing row for it
+
+#### Scenario: The Signing row follows the go-over
+- **WHEN** the office resolves that go-over follow-up, with either outcome
+- **THEN** the go-over no longer counts in the case's Call the client row (which goes when no other task is open), and Follow-ups lists its Signing row, "Waiting for the client to sign.", with Mark ready to e-file…
 
 #### Scenario: Waiting for documents turns amber
 - **WHEN** a case has waited three days at Waiting for documents

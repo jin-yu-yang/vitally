@@ -150,9 +150,11 @@ export function followupQueue(cases = [], assistance = [], now = Date.now()) {
       rows.push({ kind: "documents", record, item: null, draft: false, since: record.updatedAt });
     else if (record?.stage === "on_hold")
       rows.push({ kind: "hold", record, item: null, draft: false, since: record.updatedAt });
-    else if (record?.stage === "review_approved")
-      rows.push({ kind: "signing", record, item: null, draft: false, since: record.updatedAt });
-    else if (record?.stage === "ready_to_efile")
+    else if (record?.stage === "review_approved") {
+      // The open go-over is the case's Call the client row until it is resolved or cancelled (#177).
+      if (!record.goOverOpen)
+        rows.push({ kind: "signing", record, item: null, draft: false, since: record.updatedAt });
+    } else if (record?.stage === "ready_to_efile")
       rows.push({ kind: "efiling", record, item: null, draft: false, since: record.updatedAt });
     else if (record?.stage === "efiled")
       rows.push({ kind: "result", record, item: null, draft: false, since: record.updatedAt });
@@ -265,9 +267,7 @@ function needed(row) {
         ? "Waiting for the client to sign again."
         : record.reviewContactStatus !== "completed"
           ? "Waiting for the reviewer's call with the client."
-          : record.goOverOpen
-            ? "Waiting for the office to go over the return with the client."
-            : "Waiting for the client to sign.",
+          : "Waiting for the client to sign.",
     );
   if (kind === "efiling") return esc("Ready to e-file.");
   if (kind === "unclaimed") return `${esc(stageWork(record.stage).work)}${remindedNote(record)}`;
