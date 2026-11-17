@@ -80,6 +80,7 @@ scheduled week by week yet. Real-client prerequisites are collected in
 
 **Adoption**
 - Magic links to more volunteers and to PCDC's board; improve from their feedback.
+- Mobile client intake: clients fill the intake on their phones ([#153](https://github.com/jin-yu-yang/vitally/issues/153)).
 - Client documents through PCDC's OneDrive upload link ([#157](https://github.com/jin-yu-yang/vitally/issues/157));
   how clients get an account beyond office invitations ([#158](https://github.com/jin-yu-yang/vitally/issues/158)).
 - Remove the remaining demo wording ([#58](https://github.com/jin-yu-yang/vitally/issues/58)); rename
@@ -103,8 +104,7 @@ scheduled week by week yet. Real-client prerequisites are collected in
 Client profiles and visit history ([#146](https://github.com/jin-yu-yang/vitally/issues/146)),
 season analytics ([#141](https://github.com/jin-yu-yang/vitally/issues/141)), groups and pinned
 cases ([#149](https://github.com/jin-yu-yang/vitally/issues/149)), case location
-([#152](https://github.com/jin-yu-yang/vitally/issues/152)), mobile client intake
-([#153](https://github.com/jin-yu-yang/vitally/issues/153)), staff Settings
+([#152](https://github.com/jin-yu-yang/vitally/issues/152)), staff Settings
 ([#154](https://github.com/jin-yu-yang/vitally/issues/154)), a second state return
 ([#116](https://github.com/jin-yu-yang/vitally/issues/116)), scale
 ([#165](https://github.com/jin-yu-yang/vitally/issues/165)). Not planned: chat and SMS,
