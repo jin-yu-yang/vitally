@@ -9108,3 +9108,75 @@ test("a contact logged in this window re-reads the case list as well as the case
   assert.equal(readsOf(store), reads + 1, "the case is re-read once");
   controller.stop();
 });
+
+// #191: an uncleared admin who saves their own row is asked again at once.
+const SELF_ROW = Object.freeze({ ...ROSTER_VOLUNTEER, id: "person-sam", name: "Sam Ortiz", email: "sam@example.test" });
+const SELF_PAYLOAD = Object.freeze({
+  ...VOLUNTEER_PAYLOAD,
+  name: "Sam Ortiz",
+  email: "sam@example.test",
+  roles: ["admin"],
+  certificates: ["vsc", "itqr"],
+});
+
+const selfRosterStore = (clearance) => {
+  const store = rosterStore({ clearance: { ...clearance } });
+  store.volunteers = [{ ...SELF_ROW }, { ...ROSTER_VOLUNTEER }];
+  return store;
+};
+
+test("an uncleared admin who clears themselves on their own row leaves the setup screen without Check again", async () => {
+  const store = selfRosterStore(UNCLEARED_ADMIN);
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  assert.equal(controller.getState().principal.clearance.cleared, false);
+  controller.openDialog("volunteer", { volunteerId: "person-sam" });
+  const checks = callCount(store, "getClearance");
+  store.nextClearance = { ...UNCLEARED_ADMIN, cleared: true, missing: [], capabilities: ["admin"] };
+  assert.equal(await controller.saveVolunteer(SELF_PAYLOAD), true);
+  const state = controller.getState();
+  assert.equal(callCount(store, "getClearance"), checks + 1, "the save asks for the clearance once");
+  assert.equal(state.principal.clearance.cleared, true);
+  assert.equal(state.screen, "office-volunteers", "the Roster stays where the admin was");
+  controller.stop();
+});
+
+test("an uncleared admin's own save that leaves them uncleared keeps the setup hold", async () => {
+  const store = selfRosterStore(UNCLEARED_ADMIN);
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", { volunteerId: "person-sam" });
+  const checks = callCount(store, "getClearance");
+  assert.equal(await controller.saveVolunteer({ ...SELF_PAYLOAD, roles: [], certificates: ["vsc"] }), true);
+  assert.equal(callCount(store, "getClearance"), checks + 1);
+  assert.equal(controller.getState().principal.clearance.cleared, false);
+  controller.stop();
+});
+
+test("saving someone else's row, or one's own while cleared, asks for no clearance", async () => {
+  const uncleared = selfRosterStore(UNCLEARED_ADMIN);
+  let { controller } = build({ store: uncleared });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", { volunteerId: "v-1" });
+  let checks = callCount(uncleared, "getClearance");
+  assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
+  assert.equal(callCount(uncleared, "getClearance"), checks, "another person's row");
+  controller.stop();
+
+  const clearedStore = selfRosterStore({ ...UNCLEARED_ADMIN, cleared: true, missing: [], capabilities: ["admin"] });
+  ({ controller } = build({ store: clearedStore }));
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", { volunteerId: "person-sam" });
+  checks = callCount(clearedStore, "getClearance");
+  assert.equal(await controller.saveVolunteer(SELF_PAYLOAD), true);
+  assert.equal(callCount(clearedStore, "getClearance"), checks, "one's own row while cleared");
+  controller.stop();
+});

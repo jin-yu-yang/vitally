@@ -9139,6 +9139,11 @@ test(
         assert.equal(await p.getByRole("heading", { name: OFFICE_BOARD_HEADING, exact: true }).count(), 0, "an uncleared admin sees the board");
         assert.equal(await p.locator('[data-action="open-cases"]').count(), 0, "an uncleared admin is offered All cases");
         assert.equal((await p.locator('.sidebar-nav [data-action="open-board"]').innerText()).trim(), "Finish your setup");
+        // Check again while nothing has changed: still the setup screen.
+        await clickAction(p, "check-clearance");
+        await waitForQuiet(p);
+        await p.getByRole("heading", { name: SETUP_HEADING, exact: true }).waitFor({ timeout: RENDER_MS });
+        assert.equal(await p.getByRole("heading", { name: OFFICE_BOARD_HEADING, exact: true }).count(), 0);
 
         // Their own row: not cleared, waiting for the Form 13615 (no roles).
         await clickAction(p, "open-volunteers");
@@ -9178,12 +9183,21 @@ test(
           ARRIVAL_MS,
         );
 
-        // Back to Finish your setup, then Check again: the work board.
+        // Saving their own row asked for the clearance again (#191): the setup
+        // hold is gone without Check again, and the sidebar leads to the board.
+        await waitFor(
+          p,
+          "the sidebar to stop offering Finish your setup",
+          () => {
+            const link = document.querySelector('.sidebar-nav [data-action="open-board"]');
+            return Boolean(link) && link.textContent.trim() !== "Finish your setup";
+          },
+          undefined,
+          ARRIVAL_MS,
+        );
         await clickAction(p, "open-board");
-        await p.getByRole("heading", { name: SETUP_HEADING, exact: true }).waitFor({ timeout: RENDER_MS });
-        await clickAction(p, "check-clearance");
         await p.getByRole("heading", { name: OFFICE_BOARD_HEADING, exact: true }).waitFor({ timeout: ARRIVAL_MS });
-        focus.checkAgainToBoard = await focusNow(p);
+        focus.selfClearedToBoard = await focusNow(p);
         assert.equal(await p.getByRole("heading", { name: SETUP_HEADING, exact: true }).count(), 0);
 
         // Add opens with New volunteer ticked, and Photo ID checked not.

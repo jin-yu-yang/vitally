@@ -3566,6 +3566,11 @@ export function createController({
       noteFailure(error);
     }
     show();
+    // An uncleared admin who just saved their own row may have cleared
+    // themselves (#191): ask again, so the setup screen gives way without
+    // Check again. checkClearance is single-flight and never rejects.
+    if (volunteerId && volunteerId === state.principal?.personId && awaitingClearance(state))
+      await checkClearance();
     return true;
   }
 
