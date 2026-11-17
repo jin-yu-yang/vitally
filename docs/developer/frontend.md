@@ -855,8 +855,11 @@ live in [`src/case-labels.mjs`](../../src/case-labels.mjs); the database decides
   `case_labels` and the active `case_label_links`.
 - **Writes.** `controller.toggleCaseLabel` and `saveLabelEdit` call the store's
   `setCaseLabel` and `saveLabel`. A write whose answer never came (`UNKNOWN_OUTCOME`) is kept, so
-  pressing it again sends the same action id. A `CONFLICT` re-reads the labels, and the form stays
-  open for the next save.
+  pressing it again sends the same action id, before the form's own checks: after a create whose
+  answer was lost, the re-read list already holds the new label, and that is no reason to refuse it.
+  An edit sends the revision the form opened on (`labelMenu.editing.revision`), not the live list's,
+  so a rename or recolor made elsewhere meanwhile gets `CONFLICT`. A `CONFLICT` re-reads the labels,
+  the form takes the fresh revision and stays open, and the next save is judged against it.
 - **The case pool's Label filter** (`pool-views.mjs`, `poolLabel`): a select with Any label, each
   label, and No label. It is one of the filters "Clear filters" clears; a saved value that names a
   label that no longer exists falls back to Any label.

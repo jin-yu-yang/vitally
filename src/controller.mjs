@@ -319,7 +319,8 @@ export function createController({
     cases: [],
     // The office's case labels, and the open label menu (change
     // add-case-labels): window-local, never persisted.
-    // labelMenu = {caseId, search, editing: null | {labelId, name, color, error}}.
+    // labelMenu = {caseId, search,
+    //   editing: null | {labelId, revision, name, color, error}}.
     labels: [],
     labelMenu: null,
     // Whether each list has been read (design D6): a first load that failed
@@ -3549,6 +3550,9 @@ export function createController({
     show();
   }
 
+  // An edit keeps the revision the form opened on (like the assign drawer's
+  // basis): Save sends it, not the live list's, so a rename or recolor made
+  // elsewhere while the form is open is refused with CONFLICT.
   function startLabelEdit(labelId = null, name = "") {
     if (!state.labelMenu) return;
     const current = labelId ? state.labels.find((label) => label.id === labelId) : null;
@@ -3556,6 +3560,7 @@ export function createController({
       ...state.labelMenu,
       editing: {
         labelId: current ? labelId : null,
+        revision: current ? Number(current.revision) : null,
         name: name || current?.name || "",
         color: current?.color ?? LABEL_COLORS[0],
         error: null,
@@ -3608,7 +3613,9 @@ export function createController({
 
   // Save from the form. A create (labelId null) also puts the new label on the
   // case the menu is open for. A bad name or color, or a name the window can
-  // see is taken, is said in the form and nothing is sent.
+  // see is taken, is said in the form and nothing is sent. A save whose answer
+  // never came is sent again first: the re-read list may already hold the
+  // label it created, which is no reason to refuse it.
   async function saveLabelEdit({ name, color }) {
     const editing = state.labelMenu?.editing;
     if (!editing || state.busy) return false;
@@ -3616,32 +3623,41 @@ export function createController({
     const caseId = state.labelMenu.caseId;
     const { labelId } = editing;
     state.labelMenu = { ...state.labelMenu, editing: { ...editing, name: trimmed, color } };
-    let problem = null;
-    if (trimmed.length < 1 || trimmed.length > 24) problem = "A label name is 1 to 24 characters";
-    else if (!LABEL_COLORS.includes(color)) problem = "Pick one of the colors";
-    else if (labelNameTaken(state.labels, trimmed, labelId))
-      problem = "A label with this name already exists";
-    if (problem) {
-      setLabelFormError(problem);
-      show();
-      return false;
+    const key = `save:${labelId ?? "new"}:${trimmed}:${color}`;
+    if (!pendingLabelWrites.has(key)) {
+      let problem = null;
+      if (trimmed.length < 1 || trimmed.length > 24) problem = "A label name is 1 to 24 characters";
+      else if (!LABEL_COLORS.includes(color)) problem = "Pick one of the colors";
+      else if (labelNameTaken(state.labels, trimmed, labelId))
+        problem = "A label with this name already exists";
+      if (problem) {
+        setLabelFormError(problem);
+        show();
+        return false;
+      }
     }
     setLabelFormError(null);
-    const current = labelId ? state.labels.find((label) => label.id === labelId) : null;
-    const key = `save:${labelId ?? "new"}:${trimmed}:${color}`;
     const request = labelRequest(key, () => ({
       actionId: newActionId(),
       labelId,
-      expectedRevision: current ? Number(current.revision) : null,
+      expectedRevision: labelId ? editing.revision : null,
       label: { name: trimmed, color },
     }));
     let saved;
     try {
       saved = await runLabelWrite(key, request, (sent) => store.saveLabel(sent));
     } catch (error) {
-      // The labels were re-read on a CONFLICT; the form stays open and the next
-      // save carries the fresh revision.
+      // The labels were re-read on a CONFLICT; the form stays open and takes
+      // the fresh revision, so the next save is judged against what is there now.
       if (error?.code === "CONFLICT" && state.labelMenu?.editing) {
+        const fresh = state.labels.find((label) => label.id === labelId);
+        state.labelMenu = {
+          ...state.labelMenu,
+          editing: {
+            ...state.labelMenu.editing,
+            ...(fresh ? { revision: Number(fresh.revision) } : {}),
+          },
+        };
         setLabelFormError("This label was changed elsewhere. Check it and save again");
         show();
       }
