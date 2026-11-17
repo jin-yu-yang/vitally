@@ -25,7 +25,7 @@ it. Run everything described here against the local stack from [`docs/setup.md`]
 
 ## Migrations
 
-The schema is forty-seven plain SQL files (001 to 046, then 051) in [`supabase/migrations/`](../../supabase/migrations/), applied
+The schema is fifty-one plain SQL files (001 to 051) in [`supabase/migrations/`](../../supabase/migrations/), applied
 in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 
 | File | Adds |
@@ -76,6 +76,10 @@ in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 | `044_volunteer_roster_records.sql` | Hand-written: the admin-only records behind Volunteers > Roster. The new schema `vitally_policy` holds only `is_workspace_admin(workspace)`, a `security definer` check that answers for the caller alone, used by row policies that must read `people` without recursing into its own policy (it is not an API: PostgREST exposes only `public`); the tables `volunteer_profiles`, `roster_entries` and `certificates` (read by admins only, written only by `vitally_save_volunteer`, not published to Realtime); `staff_people` now hides a person with no sign-in and no capabilities from everyone but an admin; `add_staff_member` links a matching volunteer with no sign-in by email; existing staff get a profile and an empty roster entry, with no roles inferred. Roles and certificates grant nothing: `people.capabilities` is untouched (045 changes this) |
 | `045_volunteer_clearance.sql` | Hand-written: volunteer clearance ([roster clearance](#roster-clearance)). A guard refuses with `VT008` if a person with a sign-in holds a current-season role their confirmed certificates don't support ([setup](../setup.md#045s-guard)), and strips such roles from people with no sign-in; `roster_entries.is_new` and `photo_id_checked_at`; the private role helpers (`confirmed_certificates`, `missing_certificates`, `role_capabilities`, `effective_capabilities`, `cleared`); the deferred constraint triggers `roster_entries_role_certificates` and `certificates_role_certificates`; the read gate `vitally_policy.cleared_workspace_id()` on the staff branch of the 21 case-data policies; `require_cleared` (`VT009` `NOT_CLEARED`) in the six case RPCs; `acting_person`, `check_operation_authority` and `contact_person` return the effective capabilities; the RPC `vitally_my_clearance`; `require_cleared_assignee` (no caller yet); `open_work`; and `vitally_save_volunteer` with role needs (`VT007` `ROLE_NEEDS`), the photo ID check and the open-work rule (`VT004` `OPEN_WORK`) |
 | `046_volunteer_workload.sql` | Hand-written: the admin Workload's one write, the case action `ASSIGN_CASE` `{slot, personId, expectedHolderId}` (`vitally_private.act_assign_case`), added to `vitally_apply_action`, `check_operation_authority` (admin-only group) and `check_payload`, each re-created from its latest definition. No new table, column or Realtime change: the page reads what the staff window already holds |
+| `047_accounts.sql` | Hand-written: sign-in accounts (change `add-account-invitations`). The `accounts` table (one row per membership: `invited`, `active` or `deactivated`, with `expires_at` and site-check attempts), admin-only to read; a backfill giving every existing membership a row; a trigger on `auth.users` that activates a client's invitation at first sign-in and cancels an expired one; triggers on the six tables that refer to a membership, activating an invited client's account at first use; an expiry sweep that leaves an invitation in use alone and skips (and logs) one it cannot cancel; `add_staff_member` and `initialize_workspace` writing active accounts; `cleared` requiring an active account; `vitally_private.site_numbers` (the site's SIDN, set by the roster command, unreadable through the API) and `volunteer_profiles.signed_in_name`; the RPCs `vitally_prepare_account`, `vitally_record_account`, `vitally_deactivate_account`, `vitally_reactivate_account`, `vitally_client_invitations`, `vitally_cancel_invitation`, `vitally_expire_invitations`, `vitally_complete_site_check` and `vitally_activate_client_account`; and `vitally_my_clearance` with `siteCheck` |
+| `048_closed_lines_after_filing.sql` | Hand-written: a close after a filing says what was filed (issue #170, change `fix-closed-lines-after-filing`). `vitally_private.return_outcome` (one return: accepted, waiting, on paper or not filed) and a five-argument `vitally_private.closed_line` (the reason and each return's method and result) that replaces 036's `closed_line(text)`, which is dropped; `act_close_case` passes the case's filing columns and words the staff notice for a close after a filing; `vitally_close_unsigned` passes them too. No table, policy, RPC signature or Realtime change ([closing after a filing](#closing-after-a-filing)) |
+| `049_posted_updates.sql` | Hand-written: posted updates ([below](#posted-updates)). The tables `posted_updates` and `update_reads`, written only through the RPCs; the live audience `vitally_private.audience_member` and the policy helper `vitally_policy.in_update_audience`; two SELECT policies on `posted_updates` (the audience reads an unpublished update only for `vitally_policy.unpublished_read_window()`, 10 minutes, after Unpublish) and none on `update_reads`; the RPCs `vitally_save_update` and `vitally_update_action` (ceiling admins, with receipts), `vitally_mark_updates` and `vitally_my_updates` (every staff member, cleared or not) and `vitally_posted_updates` (ceiling admins); `posted_updates` joins the Realtime publication and `update_reads` does not. No clearance check: an update holds no case data |
+| `050_hidden_household_rows.sql` | Hand-written: `vitally_private.household_rows(version, answers)`, the number of household rows the case shows, and `act_save_preparer_fields` re-created from 039 to use it (#175) |
 | `051_case_labels.sql` | Hand-written: case labels ([below](#case-labels)). The tables `case_labels` (a workspace's labels: name 1 to 24 characters, unique ignoring case, one of six colors, its own `revision`) and `case_label_links` (which labels a case carries; a link is switched off, never deleted), both staff-only and cleared-gated, with no write grant for a browser role and both in the Realtime publication; the trigger `vitally_private.add_starter_labels` on `workspaces` (City Tax, MFS and Multi-state for each new workspace) and a one-time backfill for the existing ones; `vitally_private.check_label`; and the two RPCs `vitally_save_label` and `vitally_set_case_label`, which write the case events `ADD_CASE_LABEL` and `REMOVE_CASE_LABEL`. It redefines no earlier function and leaves `cases.revision` and `updated_at` alone |
 **Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
 never edit an applied one.** The build writes a file only when the hash differs from the newest
@@ -121,11 +125,15 @@ do not copy them from older files:
 
 | Function | Current definition |
 | --- | --- |
-| `vitally_private.check_payload`, `check_preparer_fields`, `act_save_preparer_fields` | `039_preparer_shaded_fields.sql` |
-| `vitally_private.acting_person`, `contact_person`, `check_operation_authority`, `require_cleared`, `open_work`, the role helpers, `role_certificates_check`, `vitally_policy.cleared_workspace_id`, and the RPCs `public.vitally_apply_action`, `vitally_assistance_action`, `vitally_close_unsigned`, `vitally_create_case`, `vitally_log_contact`, `vitally_edit_contact`, `vitally_save_volunteer`, `vitally_my_clearance` | `045_volunteer_clearance.sql` |
+| `vitally_private.return_outcome`, `closed_line`, `act_close_case`, `public.vitally_close_unsigned` | `048_closed_lines_after_filing.sql` |
+| `vitally_private.check_payload`, `check_operation_authority`, `act_assign_case`, and the RPC `public.vitally_apply_action` | `046_volunteer_workload.sql` |
+| `vitally_private.household_rows`, `act_save_preparer_fields` | `050_hidden_household_rows.sql` |
+| `vitally_private.check_preparer_fields` | `039_preparer_shaded_fields.sql` |
+| `vitally_private.acting_person`, `contact_person`, `require_cleared`, `open_work`, the role helpers, `role_certificates_check`, `vitally_policy.cleared_workspace_id`, and the RPCs `public.vitally_assistance_action`, `vitally_create_case`, `vitally_log_contact`, `vitally_edit_contact`, `vitally_save_volunteer`, `vitally_my_clearance` | `045_volunteer_clearance.sql` |
+| `vitally_private.audience_member`, `vitally_policy.in_update_audience`, `vitally_policy.unpublished_read_window`, and the RPCs `public.vitally_save_update`, `vitally_update_action`, `vitally_mark_updates`, `vitally_my_updates`, `vitally_posted_updates` | `049_posted_updates.sql` |
 | `vitally_private.add_starter_labels`, `check_label`, and the RPCs `public.vitally_save_label`, `vitally_set_case_label` | `051_case_labels.sql` |
 | `vitally_private.add_staff_member`, `vitally_policy.is_workspace_admin` | `044_volunteer_roster_records.sql` |
-| `vitally_private.lock_case`, `lock_assistance_item`, `act_close_case`, `initialize_workspace` | `043_remove_presenter_access.sql` |
+| `vitally_private.lock_case`, `lock_assistance_item`, `initialize_workspace` | `043_remove_presenter_access.sql` |
 | `vitally_private.check_staff_links`, `set_default_followup` | `038_staff_identity.sql` |
 | `vitally_private.filing_notes_append_only`, `reserve_receipt` | `040_remove_sample_case_tools.sql` |
 | `vitally_private.check_authority`, `receive_document`, `act_verify_document` | `036_hold_and_closing.sql` |
@@ -139,11 +147,9 @@ do not copy them from older files:
 | `vitally_private.cases_intake_version_insert` | `023_remove_intake_v1.sql` |
 | `vitally_private.act_update_contact` | `023_remove_intake_v1.sql` |
 | `vitally_private.act_submit`, `act_start_screening` | `032_screening_and_efiling_stages.sql` |
-| `vitally_private.act_close_case` | `036_hold_and_closing.sql` |
 | `vitally_private.act_request_documents_at_intake`, `act_put_on_hold`, `act_resume_from_hold`, `act_withdraw` | `036_hold_and_closing.sql` |
 | `vitally_private.act_mark_ready_to_efile`, `act_mark_efiled`, `act_record_filing_result`, `filing_line`, `efiled_line` | `037_adjust_filing_to_pcdc.sql` |
 | `vitally_private.act_return_to_signing` | `035_post_efiling_stages.sql` |
-| `public.vitally_close_unsigned` | `038_staff_identity.sql` |
 | `vitally_private.load_intake_catalogue`, `check_intake_value`, `intake_holds`, `intake_missing` | `011_intake_v2.sql` |
 | `vitally_private.works_on_case` | `013_contact_materials.sql` |
 | `public.vitally_assistance_action` | `038_staff_identity.sql` |
@@ -158,7 +164,7 @@ grep -n -E "^create (or replace )?function" supabase/migrations/*.sql
 
 Two schemas:
 
-- **`public`**: the application tables and the ten browser-callable functions.
+- **`public`**: the application tables and the twenty-four browser-callable functions.
 - **`vitally_private`**: helper functions, the migration ledger, and tables browsers must never
   reach. Every function here is `SECURITY DEFINER` with `search_path=''`, and `EXECUTE` is revoked
   from every role, including `service_role`.
@@ -208,6 +214,8 @@ erDiagram
 | `volunteer_profiles` | A volunteer's email, phone and availability (044) | Primary key `(workspace_id, person_id)`; `email` (stored trimmed and lower-case, unique per workspace), `phone`, `works` (`on_site`, `remote`, `on_site_and_remote`), `languages` (`english`, `mandarin`, `cantonese`, `other`), `other_language` (set exactly when `other` is chosen), `revision` (a stale Edit gets `CONFLICT`). Admin-only select; written only by `vitally_save_volunteer`; not published |
 | `roster_entries` | A volunteer's roles for a season (044) | Primary key `(workspace_id, person_id, season)`; `roles` from `greeter`, `intaker`, `preparer`, `reviewer`, `admin`; `added_by_person_id`; `is_new` and `photo_id_checked_at` (045). A role needs its confirmed certificates (045, [roster clearance](#roster-clearance)). Admin-only select; not published |
 | `certificates` | The certificates an admin has confirmed for a roster entry (044) | One row per certificate per entry, from `vsc`, `itqr`, `sc`, `basic`, `advanced`; `status` (only `confirmed` is written), `confirmed_at`, `confirmed_by_person_id`. Unticking deletes the row. Admin-only select; not published |
+| `posted_updates` | An update an admin posts to volunteers (049) | `kind` (`irs_policy`, `office_notice`), `title` (1 to 120 characters), `message` (1 to 2000), `irs_link` (an https link on irs.gov, IRS policy updates only), `audience` (`everyone` or `roles`) with `audience_roles`, `keep_top_until` (a New York date), `ask_confirm`, `status` (`draft`, `posted`, `unpublished`), `created_by_person_id`, `posted_by_person_id`, `posted_at`, `edited_at`, `unpublished_at`, `revision`. Written only by `vitally_save_update` and `vitally_update_action`; published to Realtime |
+| `update_reads` | Who has read and confirmed each update (049) | Primary key `(update_id, person_id)`; `read_at` (the first read), `confirmed_at` (the first confirmation). Written only by `vitally_mark_updates`; Ask everyone to read it again deletes the update's rows. No policy, so browsers read none of it directly; not published |
 | `case_labels` | A workspace's case labels (051) | Primary key `id`, unique `(workspace_id, id)`; `name` (stored trimmed, 1 to 24 characters, unique per workspace ignoring case), `color` (`sky`, `amber`, `pink`, `green`, `violet` or `slate`), `revision` (a stale edit gets `CONFLICT`), `created_by_person_id`, `updated_by_person_id`. Three starters per workspace. Staff-only; written only by `vitally_save_label`; never deleted; published to Realtime |
 | `case_label_links` | Which labels a case carries (051) | Primary key `(case_id, label_id)`; `active`, `changed_by_person_id`, `changed_at`. Removing a label sets `active` to false and adding it again sets it to true, so the row keeps who and when. Staff-only; written only by `vitally_set_case_label`; published to Realtime |
 | `contact_log` | The current version of each logged contact | One row per entry on any case: `direction`, `contacted_at` (an instant), `with_whom` (+ `other_name`), `method`, `purpose`, `outcome`, `note`, `followup_id` (null unless logged from a task), `logged_by_*`, `logged_at`, its own `revision`, `edited_at`. The outcome must fit the method. Staff-only; written only by the two contact functions; published to Realtime |
@@ -265,6 +273,8 @@ claimable cases) is a later change; see the [roadmap](production-roadmap.md#1-st
 | `assistance_items` | Nothing | All unlinked items, and items on visible cases |
 | `people` | Nothing | Everyone in the workspace, except a volunteer with no sign-in and no capabilities, whom only an admin reads (044) |
 | `volunteer_profiles`, `roster_entries`, `certificates` | Nothing | Admins only (044); not published to Realtime |
+| `posted_updates` | Nothing | Admins: every row (049). Everyone else, cleared or not, when the audience includes them: a posted update, and an unpublished one for 10 minutes after `unpublished_at` (`vitally_policy.unpublished_read_window()`), so Realtime can tell open windows; after that only admins read it. The browser reads updates through the RPCs; the policy is there for Realtime |
+| `update_reads` | Nothing | Nothing (no policy); read through `vitally_my_updates` and `vitally_posted_updates` (049) |
 | `memberships` | Own active membership | Own active membership |
 | `workspaces` | Own workspace | Own workspace |
 | `action_receipts` | Nothing (no policy, no grant) | Nothing |
@@ -285,7 +295,7 @@ policy and `vitally_private.lock_case` (which applies the same rule to writes) i
 
 ## The action API
 
-Browsers can call exactly ten functions. Each runs as its owner (`SECURITY DEFINER`), checks the
+Browsers can call exactly twenty-four functions. Each runs as its owner (`SECURITY DEFINER`), checks the
 caller itself, and returns a JSON receipt.
 
 | Function | Purpose | Returns |
@@ -298,14 +308,20 @@ caller itself, and returns a JSON receipt.
 | `vitally_close_unsigned(p_action_id uuid, p_cases jsonb, p_confirmed boolean)` | Season end (037): close the listed signing cases as Dismissed, all or nothing ([below](#season-end-close)) | `{actionId, cases: [{caseId, reference, revision}]}` |
 | `vitally_save_volunteer(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_volunteer jsonb)` | Add or edit a volunteer on the Roster (044; admins, on the ceiling; 045 adds role needs, the photo ID check and the open-work rule) | `{actionId, personId, revision}` |
 | `vitally_my_clearance()` | The caller's own clearance (045, [below](#roster-clearance)) | `{cleared, missing, capabilities, isAdmin, siteCoordinatorName}` |
+| `vitally_save_update(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_update jsonb)` | Save a draft, post it, or edit a draft, a posted update or an unpublished one (049; ceiling admins). An unpublished update stays unpublished, with its reads and `unpublished_at`; `post` changes nothing there and `askAgain` is refused (`VT007`, detail `askAgain`). `askAgain` on a posted update clears every read and confirmation | `{actionId, updateId, revision, status}` |
+| `vitally_update_action(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_type text)` | `POST` a draft, `UNPUBLISH` a posted update, or `DELETE` a draft (049; ceiling admins). A replayed delete answers `deleted` | `{actionId, updateId, revision, status}` |
+| `vitally_mark_updates(p_update_ids uuid[], p_confirm boolean)` | Record that the caller read up to 200 updates in their feed, and with `p_confirm` that they confirmed them (049; any staff member). No receipt: a repeat changes nothing | `{marked}` |
+| `vitally_my_updates()` | The caller's feed, pinned first and then newest first (049; any staff member) | `{items, unread}` |
+| `vitally_posted_updates()` | Every update in the workspace, with its live audience and counts (049; ceiling admins) | `{updates}` |
 | `vitally_save_label(p_action_id uuid, p_label_id uuid, p_expected_revision bigint, p_label jsonb)` | Create or edit a case label (051; admins only; `p_label` is `{name, color}`; no id and no revision creates, an id with its revision edits) ([below](#case-labels)) | `{actionId, labelId, revision}` |
 | `vitally_set_case_label(p_action_id uuid, p_case_id uuid, p_label_id uuid, p_on boolean)` | Put a label on a case or take it off (051; an admin or follow-up holder, or the case's preparer or reviewer) | `{actionId, caseId, labelId, on}` |
 
-None of the eight takes a person parameter (043 removed `p_person_id`). The database decides who
+
+None of them takes a person parameter (043 removed `p_person_id`). The database decides who
 the caller acts as ([below](#who-is-acting)).
 
 The exact signatures are pinned by a test ([`tests/support/rpc-signatures.mjs`](../../tests/support/rpc-signatures.mjs)),
-so adding an eleventh function or changing an argument fails the database suite until the list is
+so adding a twenty-fifth function or changing an argument fails the database suite until the list is
 updated.
 
 ### Who is acting
@@ -372,6 +388,39 @@ and the behaviour in the canonical spec
 - **`vitally_my_clearance()`** answers for the caller only: `cleared`, what is `missing` (the Form
   13615, the photo ID check, each role's missing certificates), the effective `capabilities`,
   `isAdmin` (the ceiling) and `siteCoordinatorName`.
+
+### Posted updates
+
+Since 049 a ceiling admin posts IRS policy updates and office notices, and every staff member reads
+the ones addressed to them. The behaviour is in the spec,
+[`openspec/specs/posted-updates/spec.md`](../../openspec/specs/posted-updates/spec.md).
+
+- **The audience is live.** A person is in an update's audience when they have an active account
+  (047; an invitation not yet used or a deactivated account does not count) on an active staff
+  membership, and a roster entry for the workspace's current season, and the update is for
+  everyone or for one of their roles (`vitally_private.audience_member`). Nothing is stored per
+  person, so someone added to the roster later sees earlier updates too.
+- **No clearance check.** An uncleared staff member reads their feed on Finish your setup. An
+  update holds no case data.
+- **Unread** counts the updates not read, or asking for confirmation and not confirmed. Opening the
+  Notifications panel marks what it shows read; I've read this confirms.
+- **Unpublish** takes an update out of every feed and keeps its reads, so the admin's counts stay.
+  Only a draft can be deleted, and nothing re-posts an unpublished update.
+- **After Unpublish the text stays readable for 10 minutes, then only to admins.** The audience
+  policy reads an unpublished row only while `unpublished_at` is within
+  `vitally_policy.unpublished_read_window()` (one immutable helper, the only place the value is
+  written). Realtime checks the policy when it sends a change, normally well under a second after
+  the write, so the window only has to outlast Realtime's delay, with plenty to spare. A window
+  that was asleep or offline misses the change either way (Realtime does not replay); when it
+  reconnects, or on focus or `online`, the controller re-reads `vitally_my_updates`, which holds
+  posted updates only. The feed, `vitally_mark_updates` and `update_reads` never show a non-admin an
+  unpublished update, inside the window or after it.
+- **A mistake is fixed with Edit**, before or after Unpublish. An edit of an unpublished update
+  keeps it unpublished; inside the window Realtime sends the corrected row to open audience windows,
+  which re-read their feed and show nothing; after the window it reaches nobody but admins.
+- **What stays exposed:** an update's text is readable to its audience while it is posted, and for
+  10 minutes after Unpublish (through a direct `select` with their own session, which the app never
+  makes). Unpublish can't take back what someone has already read.
 
 ### Calling it
 
@@ -470,7 +519,9 @@ and `closed` stay refused). Any close before filing (a withdrawn close at those 
 of a Hold from `review_approved` with any reason) opens a `withdrawal_notice`, assigned to the
 workspace's follow-up person like the client's notice. Its stored text is "The client withdrew; make
 sure the return is not transmitted in TaxSlayer." for reason `withdrawn`, or "The case was closed
-before filing; make sure the return is not transmitted in TaxSlayer." for any other reason.
+before filing; make sure the return is not transmitted in TaxSlayer." for any other reason, or,
+when either return was already filed (048), "The case was closed after a return was filed; make
+sure the rejected return is not transmitted again in TaxSlayer."
 Two moves at the same revision: one wins, the other gets
 the revision conflict. The preparer's own document loop during preparation is unchanged. Five
 admin-only actions and one submit rule shape the earlier stages:
@@ -605,11 +656,19 @@ The browser side is in [Front end](frontend.md#the-shaded-section-of-the-13614-c
   note at most 500, counted in characters). A text that is only whitespace is blank and is refused.
   A year must be four digits and at least 2000 here; the season bound and the household rows need the case, so the action checks those.
 - **The action.** `SAVE_PREPARER_FIELDS` (`act_save_preparer_fields`) takes `{basedOnVersion,
-  fields}` and replaces the whole set. The stage must be `preparing` or `corrections_required`
+  fields}` and replaces the visible section. The stage must be `preparing` or `corrections_required`
   (`INVALID_TRANSITION` otherwise), then `require_case_preparer` (the current preparer, as for any
   preparer action), then the version guard, then the two case rules: the disallowed year must be
-  before the case's season, and a `household<n>…` key needs a household member in the answers (at
-  most four rows). Any of those, like a bad shape, is `VALIDATION`.
+  before the case's season, and a `household<n>…` key on a row past the visible count is
+  `VALIDATION`, like a bad shape.
+- **Visible household rows.** `vitally_private.household_rows(version, answers)` (050) is the number
+  of `hh` members in the answers, capped at 4, while the catalogue shows the `hh` group for the
+  case's `intake_version` (through `intake_visible`), else 0. It mirrors `householdRows` in
+  `src/shaded-fields.mjs`, and a parity test in `tests/database-shaded.mjs` keeps them equal.
+  Household cells already stored on hidden rows are carried into the new row unchanged, so they
+  return when the client answers Yes again, and they never appear in `detail.changed`. The browser
+  never shows hidden cells: the draft, the editing copy and the case page's count go through
+  `visibleShaded`. Cells follow row numbers, not members; that limit is tracked in issue #202.
 - **The version guard.** The row is locked, and the stored version (0 when there is no row) must
   equal `basedOnVersion`, else `CONFLICT`. The case revision in the envelope is checked earlier by
   `vitally_apply_action`, so other actions moving the revision (the office recording materials, say)
@@ -636,11 +695,32 @@ with no repeats, and `p_confirmed` must be `true`.
   `CONFLICT`, and nothing changes, the receipt included. The browser reloads the list and the dialog
   reopens without that case ([Front end](frontend.md#the-season-end-dialog)).
 - **Per case:** one `CLOSE_CASE` history row (`reason` `dismissed`, `seasonEnd` true) and one client
-  line ("PCDC could not reach you, so this application was closed. Your return was not filed."),
+  line ("PCDC could not reach you, so this application was closed. Your return was not filed.", or
+  what each return is when one was already filed: [closing after a filing](#closing-after-a-filing)),
   the same closing steps as `CLOSE_CASE`, and **no** `withdrawal_notice` follow-up, so no TaxSlayer
   notice.
 - **Receipt:** `{actionId, cases: [{caseId, reference, revision}]}`, one entry per closed case with
   its new revision. A replay of the same `p_action_id` and list returns the stored receipt.
+
+## Closing after a filing
+
+A case can close after one of its returns was filed: at `rejected`, or after Return to signing
+when one return was accepted and the other rejected. The client's closing line comes from
+`vitally_private.closed_line(reason, federal_method, federal_result, state_method, state_result)`
+(048), called by `act_close_case` and `vitally_close_unsigned` with the case's four filing columns.
+
+- **Each return's outcome** is `vitally_private.return_outcome(method, result)`: `accepted`;
+  `paper` (given to the client, or a paper method with no result yet); `waiting` (e-filed, no
+  answer yet); otherwise `not_filed` (rejected, or no method). "No Pennsylvania return needed" is
+  not told apart from not filed.
+- **With a filed return** (either outcome other than `not_filed`) and reason `dismissed`,
+  `withdrawn`, `out_of_scope` or `no_need_to_file`, the line is the reason's sentence, then a
+  federal sentence, then a Pennsylvania sentence, joined by one space. For example: "PCDC could not
+  reach you, so this application was closed. Your federal return was filed and accepted. Do not
+  file it again. Your Pennsylvania return was not filed."
+- **Otherwise** (nothing filed, or reason `duplicate` or `other`) the line is 036's, unchanged.
+- The browser's status panel words a closed case from the same rule, and
+  `database-closed-after-filing.mjs` checks every combination against it.
 
 ## The contact log
 
@@ -755,13 +835,13 @@ exceptions from an application path; the browser would show them as `SERVER_ERRO
 
 ## Realtime
 
-Twenty-one tables are published to `supabase_realtime`, INSERT and UPDATE only. `007_realtime_publication.sql`
+Twenty-two tables are published to `supabase_realtime`, INSERT and UPDATE only. `007_realtime_publication.sql`
 adds twelve: `cases`, `document_requests`, `documents`, `client_events`, `workspaces`, `people`,
 `preparation_participants`, `admin_followups`, `contact_attempts`, `case_events`,
 `assistance_items`, `reviews`. `011` adds `case_contacts`, `013` adds `case_materials` and `017` adds `case_document_cards`.
 `031` adds `contact_log` and `contact_log_versions` and removes `contact_attempts`; `033` adds the two questionnaire tables and `039` adds `preparer_shaded_fields`; `051` adds `case_labels` and `case_label_links`.
-`044` adds nothing: `volunteer_profiles`, `roster_entries` and `certificates` are not published, because Realtime sends whole rows and the records are admin-only; the Roster loads on opening and after each save. `action_receipts` is not published. An applicant's window watches seven of them (`CLIENT_TABLES`),
-a staff window's all twenty-one (`STAFF_TABLES`).
+`044` adds nothing: `volunteer_profiles`, `roster_entries` and `certificates` are not published, because Realtime sends whole rows and the records are admin-only; the Roster loads on opening and after each save. `049` adds `posted_updates`, so an open window re-reads its feed when an update is posted, edited or unpublished (the audience hears of an unpublished update's changes for 10 minutes after Unpublish, the policy's window). `update_reads` is deliberately not published: reads are frequent and would wake every admin window, so the admin's table re-reads on opening, on focus and after each save instead. `action_receipts` is not published. An applicant's window watches seven of them (`CLIENT_TABLES`),
+a staff window's all twenty-two (`STAFF_TABLES`).
 
 Realtime applies each subscriber's RLS, so the same visibility rules hold for events. Deletes are
 not published because a deleted row cannot be authorized. The browser treats events as "something
@@ -897,6 +977,7 @@ What the suite covers, by file:
 | `database-redesign.mjs` | Visits, `case_document_cards` and the two card actions (017), and who may mark and move cards (018) |
 | `database-intake-default.mjs` | The column default, new applications on version 2, the seed's answers passing the field checks, and version-2 round trips (019, 020) |
 | `database-intake-v1-removed.mjs` | Migration 023: the guard's predicates and count, every workspace on 2, both `CHECK`s refusing 1, an application's fixed version, a create that carries answers refused, the dropped functions, and the seed's submitted case (no screening detail in its submit history) |
+| `database-closed-after-filing.mjs` | Closing after a filed return (048): the client's line for each reason and outcome, the staff notice after a filing, and every combination against the status panel's wording |
 | `database-season-close.mjs` | `vitally_close_unsigned`: closing signing cases as Dismissed, all or nothing, refusals, replay, the receipt, and that unlisted cases are left alone |
 | `database-realtime.mjs` | Realtime privacy between clients and for staff tables |
 | `database-store.mjs` | The browser's data adapter against the real database |

@@ -36,10 +36,15 @@ The check SHALL apply to every writer: `vitally_save_volunteer`, the seed, the r
 - **THEN** the commit is refused
 
 ### Requirement: A staff member is cleared only with a role and, if new, a photo ID check
-A person SHALL be cleared for a workspace when their roster entry for the workspace's current season has at least one role, and either the entry is not marked new or its photo ID check is recorded. A person with no roster entry for the current season, or with no roles, SHALL NOT be cleared. A cleared person's roles are in effect, because a role exists only once its certificates are confirmed.
+A person SHALL be cleared for a workspace when:
+- their roster entry for the workspace's current season has at least one role;
+- either the entry is not marked new or its photo ID check is recorded;
+- their account in that workspace is `active`.
+
+A person SHALL NOT be cleared if they have no roster entry for the current season, no roles, or no account, or if their account is `invited` or `deactivated`. A cleared person's roles are in effect, because a role exists only once its certificates are confirmed.
 
 #### Scenario: Roles and an old hand
-- **WHEN** a staff member's current-season entry has Preparer, is not marked new, and their certificates are confirmed
+- **WHEN** a staff member with an active account has a current-season entry with Preparer, is not marked new, and has their certificates confirmed
 - **THEN** they are cleared
 
 #### Scenario: No roles
@@ -47,12 +52,24 @@ A person SHALL be cleared for a workspace when their roster entry for the worksp
 - **THEN** they are not cleared
 
 #### Scenario: New without photo ID
-- **WHEN** a staff member's entry has Greeter and is marked new with no photo ID check
+- **WHEN** a staff member with an active account has an entry with Greeter that is marked new with no photo ID check
 - **THEN** they are not cleared, and once the photo ID check is recorded they are
 
 #### Scenario: Last season only
 - **WHEN** a staff member has roles only on an earlier season's entry
 - **THEN** they are not cleared
+
+#### Scenario: No account
+- **WHEN** a volunteer with no sign-in has Preparer with its certificates and is not marked new
+- **THEN** they are not cleared
+
+#### Scenario: Invited but not through the site check
+- **WHEN** a volunteer with Preparer and its certificates has an `invited` account, signs in for the first time, and then passes the site check
+- **THEN** they are not cleared before the site check, including after the sign-in, and are cleared after it
+
+#### Scenario: Deactivated
+- **WHEN** a cleared staff member's account is deactivated
+- **THEN** they are not cleared, and work cannot be assigned to them
 
 ### Requirement: The caller's capabilities come from their roles, within the roster ceiling
 For a `staff` caller, every public RPC SHALL use effective capabilities: the union of the capabilities of the caller's current-season roles, intersected with the person's `people.capabilities`. A caller with no roles SHALL have no effective capabilities. The role capabilities SHALL be:
@@ -91,7 +108,7 @@ Every SELECT policy that gives a `staff` member access to case data SHALL requir
 - filing_attempts, filing_notes, filing_returns;
 - preparation_participants, preparer_questionnaires, preparer_shaded_fields, reviewer_questionnaires, reviews.
 
-The check SHALL be the no-argument `vitally_policy.cleared_workspace_id()`, used as an uncorrelated subquery so it is evaluated once per statement. A client's access through the same policies SHALL NOT change. `people` SHALL NOT be gated, so an uncleared staff member still reads their own row and the other staff names.
+The check SHALL be the no-argument `vitally_policy.cleared_workspace_id()`, used as an uncorrelated subquery so it is evaluated once per statement. A client's access through the same policies SHALL NOT change. `people` SHALL NOT be gated, so an uncleared staff member still reads their own row and the other staff names. `posted_updates` holds no case data and SHALL NOT be gated by clearance: its audience policy (capability `posted-updates`) lets an uncleared staff member read the updates addressed to them.
 
 #### Scenario: An uncleared staff member reads nothing
 - **WHEN** a staff member who is not cleared reads each of the 23 tables
@@ -115,7 +132,7 @@ The check SHALL be the no-argument `vitally_policy.cleared_workspace_id()`, used
 
 #### Scenario: Every case-data policy is gated
 - **WHEN** the database catalog is read
-- **THEN** every policy with a staff branch, except on `people`, calls `vitally_policy.cleared_workspace_id()`
+- **THEN** every policy with a staff branch, except on `people` and `posted_updates`, calls `vitally_policy.cleared_workspace_id()`
 
 #### Scenario: Evaluated once per statement
 - **WHEN** a cleared staff member reads many rows of `cases` in one statement
@@ -167,12 +184,12 @@ It SHALL return no email, phone or other profile data. A client or an anonymous 
 - **THEN** it is refused with `FORBIDDEN`
 
 ### Requirement: An uncleared staff member sees the setup screen
-After sign-in, a `staff` member who is not cleared SHALL see only the setup screen, titled "Finish your setup for this season". It SHALL list:
+After sign-in, a `staff` member who is not cleared SHALL see only the setup screen, titled "Finish your setup for this season", and the Notifications panel. The setup screen SHALL list:
 - upload your signed Form 13615, when they have no roles;
 - photo ID, when they are new and unchecked;
 - "Ask <name>, your site coordinator", naming the default follow-up person.
 
-It SHALL have a "Check again" button. The screen SHALL re-check when Check again is pressed and when the window regains focus, and SHALL show the normal staff screens once the person is cleared. An uncleared staff member whose `people.capabilities` include `admin` SHALL also have the Volunteers link and the Roster, and no client data. When any action returns `NOT_CLEARED`, the window SHALL switch to the setup screen.
+It SHALL have a "Check again" button. The screen SHALL re-check when Check again is pressed and when the window regains focus, and SHALL show the normal staff screens once the person is cleared. The setup screen's sidebar SHALL offer Notifications, with its unread badge, and the panel SHALL show the updates addressed to them (capability `posted-updates`). The feed and badge SHALL re-read together with the clearance check. An uncleared staff member whose `people.capabilities` include `admin` SHALL also have the Volunteers link and the Roster, and the Post an update link and screen, and no client data. When any action returns `NOT_CLEARED`, the window SHALL switch to the setup screen.
 
 #### Scenario: Signing in uncleared
 - **WHEN** a staff member with no roles signs in
@@ -188,11 +205,15 @@ It SHALL have a "Check again" button. The screen SHALL re-check when Check again
 
 #### Scenario: An uncleared admin
 - **WHEN** an admin with no roles signs in
-- **THEN** they see the setup screen and the Volunteers link, can open the Roster, and see no case
+- **THEN** they see the setup screen, the Volunteers and Post an update links, can open the Roster and Post an update, and see no case
 
 #### Scenario: Clearance lost mid-session
 - **WHEN** a staff member's roles are removed while their window is open, and they press an action
 - **THEN** the window shows the setup screen
+
+#### Scenario: An uncleared volunteer reads an update
+- **WHEN** a staff member with a current-season roster entry and no roles signs in, and an update to All volunteers is posted
+- **THEN** the setup screen's sidebar shows Notifications with a badge of 1, and the panel shows the update and no case data
 
 ### Requirement: A signed-in staff member's buttons follow their effective capabilities
 The staff screens SHALL decide which of the signed-in staff member's own buttons, links and screens to offer from their effective capabilities. Lists of other people, for example filters and follow-up holders, SHALL keep using those people's `people.capabilities`. The Workload's rows and its Assign/Reassign picker (capability `volunteer-workload`) SHALL instead use those people's effective capabilities, as the database does.

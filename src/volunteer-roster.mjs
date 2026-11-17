@@ -61,8 +61,11 @@ const EMAIL_MAX = 254;
 const PHONE_MAX = 30;
 const OTHER_LANGUAGE_MAX = 40;
 
+const ACCOUNT_MISSING = Object.freeze({ none: "noAccount", invited: "notSignedIn", deactivated: "deactivated" });
+
 // Joins raw PostgREST rows into volunteers. Only people with a roster entry appear.
-export function combineVolunteers({ profiles = [], entries = [], certificates = [], people = [] }) {
+export function combineVolunteers({ profiles = [], entries = [], certificates = [], people = [], accounts = [] }) {
+  const accountById = new Map(accounts.map((a) => [a.person_id, a]));
   const profileById = new Map(profiles.map((p) => [p.person_id, p]));
   const entryById = new Map(entries.map((e) => [e.person_id, e]));
   const certsById = new Map();
@@ -79,7 +82,17 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
     const roles = [...(entry.roles ?? [])];
     const isNew = entry.is_new === true;
     const photoIdChecked = entry.photo_id_checked_at != null;
-    const cleared = roles.length > 0 && (!isNew || photoIdChecked);
+    const row = accountById.get(person.id);
+    const account = {
+      status: row?.status ?? "none",
+      revision: row ? Number(row.revision) : null,
+      activatedAt: row?.activated_at ?? null,
+      expiresAt: row?.expires_at ?? null
+    };
+    const cleared = roles.length > 0 && (!isNew || photoIdChecked) && account.status === "active";
+    // What the row waits for, in order: the Form 13615 (no roles) or the photo ID, then the account.
+    const missing = roles.length === 0 ? ["form13615"] : !isNew || photoIdChecked ? [] : ["photoId"];
+    if (account.status !== "active") missing.push(ACCOUNT_MISSING[account.status]);
     list.push({
       id: person.id,
       name: person.name,
@@ -92,11 +105,13 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
       certificates: certsById.get(person.id) ?? [],
       revision: profile.revision,
       hasSignIn: Boolean(person.user_id),
+      // The name the volunteer gave at their site check (migration 047).
+      signedInName: profile.signed_in_name ?? null,
       isNew,
       photoIdChecked,
+      account,
       cleared,
-      // The one thing a row waits for: the Form 13615 (no roles) or the photo ID.
-      missing: cleared ? [] : roles.length === 0 ? ["form13615"] : ["photoId"]
+      missing
     });
   }
   return list.sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
@@ -128,6 +143,26 @@ export function volunteerFromForm(formData) {
     isNew: formData.get("isNew") != null,
     photoIdChecked: formData.get("photoIdChecked") != null
   };
+}
+
+// Whether the drawer's form holds something the saved volunteer does not:
+// `payload` is `volunteerFromForm` of the form as it is now. Create account
+// sends the saved profile, so it waits while this is true.
+export function volunteerFormChanged(volunteer, payload) {
+  if (!volunteer) return true;
+  const same = (a, b) => JSON.stringify([...(a ?? [])].sort()) === JSON.stringify([...(b ?? [])].sort());
+  return (
+    payload.name !== (volunteer.name ?? "") ||
+    payload.email !== String(volunteer.email ?? "").toLowerCase() ||
+    (payload.phone ?? null) !== (volunteer.phone ?? null) ||
+    payload.works !== (volunteer.works || "on_site") ||
+    !same(payload.languages, volunteer.languages) ||
+    (payload.otherLanguage ?? null) !== (volunteer.languages?.includes("other") ? volunteer.otherLanguage ?? null : null) ||
+    !same(payload.roles, volunteer.roles) ||
+    !same(payload.certificates, volunteer.certificates) ||
+    payload.isNew !== (volunteer.isNew === true) ||
+    payload.photoIdChecked !== (volunteer.photoIdChecked === true)
+  );
 }
 
 // Returns the first problem as a sentence, or null when the payload may be saved.
@@ -174,6 +209,18 @@ export function roleNeedsMessage(details) {
   if (!match || !ROLE_NEEDS[match[1]]) return null;
   return `${roleLabel(match[1])} needs ${match[2].split(", ").join(" and ")}.`;
 }
+
+// The refusal reason an account action carries (the RPC's `detail`, or the
+// Edge Function's `reason`) as the drawer's sentence; null when unknown.
+const ACCOUNT_MESSAGES = Object.freeze({
+  NO_EMAIL: "Add an email first",
+  ALREADY_INVITED: "This person is already invited or signed in.",
+  USE_REACTIVATE: "This account is deactivated. Use Reactivate.",
+  EMAIL_IN_USE: "That email is already used by another sign-in. Use another email.",
+  EMAIL_ON_ROSTER: "That email belongs to a volunteer. Use another email.",
+  SELF: "You can't deactivate your own account."
+});
+export const accountMessage = (reason) => ACCOUNT_MESSAGES[String(reason ?? "")] ?? null;
 
 // The server's OPEN_WORK detail, a JSON array of labels, as the drawer's
 // sentence; null when it isn't a non-empty array of strings.

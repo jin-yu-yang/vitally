@@ -207,6 +207,19 @@ export const TEXT = Object.freeze({
   "stage.closed.client.duplicate": { en: "This application was closed. Your return continues under your other application with PCDC.", zh: "此申请已关闭。您的报税表将在您在 PCDC 的另一份申请中继续处理。" },
   "stage.closed.client.dismissed": { en: "PCDC could not reach you, so this application was closed. Your return was not filed.", zh: "PCDC 无法联系到您，因此此申请已关闭。您的报税表未递交。" },
   "stage.closed.client.withdrawn": { en: "You withdrew this application. Your return was not filed.", zh: "您已撤回此申请。您的报税表未递交。" },
+  // A close after a filing (#170): the reason's half, then one sentence per return (closedLine)
+  "closed.reason.dismissed": { en: "PCDC could not reach you, so this application was closed.", zh: "PCDC 无法联系到您，因此此申请已关闭。" },
+  "closed.reason.withdrawn": { en: "You withdrew this application.", zh: "您已撤回此申请。" },
+  "closed.reason.out_of_scope": { en: "This application was closed because the return is outside what VITA volunteers can prepare.", zh: "此申请已关闭，因为该报税表超出了 VITA 志愿者可以准备的范围。" },
+  "closed.reason.no_need_to_file": { en: "A PCDC volunteer confirmed with you that nothing more needs to be prepared this year, so this application was closed.", zh: "PCDC 志愿者已与您确认，今年没有其他需要准备的报税表，因此此申请已关闭。" },
+  "closed.return.federal.accepted": { en: "Your federal return was filed and accepted. Do not file it again.", zh: "您的联邦报税表已递交并被接受。请勿再次递交。" },
+  "closed.return.federal.waiting": { en: "Your federal return was e-filed and is waiting for an answer. Do not file it again.", zh: "您的联邦报税表已电子递交，正在等待回复。请勿再次递交。" },
+  "closed.return.federal.paper": { en: "PCDC gave you your federal return on paper. It is filed only after you mail it.", zh: "PCDC 已将您的联邦报税表纸本交给您。您寄出后才算递交。" },
+  "closed.return.federal.not_filed": { en: "Your federal return was not filed.", zh: "您的联邦报税表未递交。" },
+  "closed.return.state.accepted": { en: "Your Pennsylvania return was filed and accepted. Do not file it again.", zh: "您的宾州报税表已递交并被接受。请勿再次递交。" },
+  "closed.return.state.waiting": { en: "Your Pennsylvania return was e-filed and is waiting for an answer. Do not file it again.", zh: "您的宾州报税表已电子递交，正在等待回复。请勿再次递交。" },
+  "closed.return.state.paper": { en: "PCDC gave you your Pennsylvania return on paper. It is filed only after you mail it.", zh: "PCDC 已将您的宾州报税表纸本交给您。您寄出后才算递交。" },
+  "closed.return.state.not_filed": { en: "Your Pennsylvania return was not filed.", zh: "您的宾州报税表未递交。" },
   "stage.unknown.label": { en: "Application", zh: "申请" },
   "stage.unknown.client": { en: "This application is with the office. Contact PCDC if you have questions.", zh: "此申请正在办公室处理。如有疑问，请联系 PCDC。" },
   // Days on lists (ui.mjs relativeDay); older dates use the language's own month and day
@@ -448,6 +461,10 @@ const LEGACY_MAILED = Object.freeze({
   both: { en: "Your federal and Pennsylvania returns were mailed. A reply to a mailed return can take several weeks.", zh: "您的联邦和宾州报税表已邮寄。邮寄的报税表可能需要几周才会有回复。" },
 });
 
+// The four closing reasons that can follow a filing, and each return's outcome.
+const CLOSED_REASONS = Object.freeze(["dismissed", "withdrawn", "out_of_scope", "no_need_to_file"]);
+export const CLOSED_OUTCOMES = Object.freeze(["accepted", "waiting", "paper", "not_filed"]);
+
 export const SENTENCES = Object.freeze({
   // errors.mjs: one sentence per code (SAFE_MESSAGES)
   "You do not have access to this step.": "您无权进行这一步。",
@@ -529,6 +546,7 @@ export const SENTENCES = Object.freeze({
   "PCDC gave your returns on paper to you or the person you sent. If they aren't signed yet, sign them, then mail them yourself. A reply can take about 3 months after you mail them.": "PCDC 已将您的报税表纸本交给您或您委托的人。如果还没有签名，请先签名，然后自行邮寄。邮寄后可能需要约 3 个月才会有回复。",
   // Record filing result and a second filing: every combination filing_line and efiled_line can write
   ...filingLines(),
+  ...closedLines(),
   // The version-2 form: checkValue's fixed messages (intake-catalogue.mjs), shown in the note
   "Enter a valid email address.": "请输入有效的电子邮箱。",
   "Enter a 10-digit phone number.": "请输入 10 位数字的电话号码。",
@@ -572,6 +590,37 @@ export function filingSentences(federal, state, lang = "en") {
       ? federal ? [t(`filing.both.${federal}`, {}, lang)] : []
       : [federal && t(`filing.federal.${federal}`, {}, lang), state && t(`filing.state.${state}`, {}, lang)];
   return parts.filter(Boolean).join(!isLang(lang) || lang === "en" ? " " : "");
+}
+
+// The closed message and history line of a case closed after a return was filed:
+// the reason's half, the federal sentence, then the Pennsylvania one. Null when
+// the reason is not one of the four or no return was filed (the caller keeps
+// today's text). It takes outcomes, not a record: domain.mjs imports this file.
+export function closedLine(reason, federal, state, lang = "en") {
+  if (!CLOSED_REASONS.includes(reason)) return null;
+  if (!CLOSED_OUTCOMES.includes(federal) || !CLOSED_OUTCOMES.includes(state)) return null;
+  if (federal === "not_filed" && state === "not_filed") return null;
+  const hans = lang === "zh-Hant" ? "zh-Hans" : lang;
+  const parts = [
+    t(`closed.reason.${reason}`, {}, hans),
+    t(`closed.return.federal.${federal}`, {}, hans),
+    t(`closed.return.state.${state}`, {}, hans),
+  ];
+  const line = parts.join(!isLang(lang) || lang === "en" ? " " : "");
+  // toHant on the composed line works only because closedLines() registers every composition as a SENTENCES value, so build:hant collects it (src/hant.mjs warns against converting assembled text).
+  return lang === "zh-Hant" ? toHant(line) : line;
+}
+
+// Every closed line closedLine can write, English to 简体 (60 of them).
+function closedLines() {
+  const lines = {};
+  for (const reason of CLOSED_REASONS)
+    for (const f of CLOSED_OUTCOMES)
+      for (const s of CLOSED_OUTCOMES) {
+        const en = closedLine(reason, f, s, "en");
+        if (en) lines[en] = closedLine(reason, f, s, "zh-Hans");
+      }
+  return lines;
 }
 
 // Every history line filing_line can write (035's mailed ones included), English to 简体.

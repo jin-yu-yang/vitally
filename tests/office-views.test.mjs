@@ -178,12 +178,12 @@ test("Follow-ups shows new applications, screening, signing and e-filing", () =>
     assert.match(waiting, /Waiting for the reviewer&#39;s call with the client\./); // esc() writes ' as &#39;
     assert.doesNotMatch(waiting, /Waiting for the client to sign\./);
   }
-  // D13: the reviewer's call is done but the office has not gone over the return.
-  const over = renderFollowups([{ ...rec("G", "review_approved"), goOverOpen: true }], [], ui);
-  assert.doesNotMatch(over, /open-mark-ready-to-efile/);
-  assert.match(over, /Waiting for the office to go over the return with the client\./);
-  assert.match(over, /The office still needs to go over the return with the client\./);
-  assert.doesNotMatch(over, /Waiting for the client to sign\./);
+  // #177: while the office's go-over is open, the case is its Call the client row alone.
+  const over = renderFollowups([{ ...rec("G", "review_approved"), goOverOpen: true, openFollowups: 1 }], [], ui);
+  assert.doesNotMatch(over, /data-kind="signing"/);
+  assert.doesNotMatch(over, /Waiting for the office to go over the return with the client\./);
+  assert.match(rowOf(over, "G"), /1 open task/);
+  assert.match(rowOf(over, "G"), /data-action="open-log-call"/);
   const overDone = renderFollowups([{ ...rec("G", "review_approved"), goOverOpen: false }], [], ui);
   assert.match(overDone, /Waiting for the client to sign\./);
   assert.match(overDone, /open-mark-ready-to-efile/);
@@ -209,6 +209,22 @@ test("Follow-ups shows new applications, screening, signing and e-filing", () =>
   );
   assert.match(signing, /data-kind="signing"/);
   assert.doesNotMatch(signing, /data-kind="intake"/);
+});
+
+test("an open go-over hides the Signing row, whatever else the case waits on (#177)", () => {
+  const kinds = (record) => followupQueue([kase(record)], [], NOW).map((row) => row.kind).sort();
+  const base = { id: "g", stage: "review_approved", reviewContactStatus: "completed", goOverOpen: true, openFollowups: 1 };
+  assert.deepEqual(kinds(base), ["call"]);
+  assert.deepEqual(kinds({ ...base, reviewContactStatus: "pending" }), ["call"]);
+  assert.deepEqual(kinds({ ...base, federalMethod: "efile" }), ["call"]);
+  assert.deepEqual(kinds({ ...base, openFollowups: 2 }), ["call"]);
+  assert.match(rowOf(page([kase({ ...base, openFollowups: 2 })]), "g"), /2 open tasks/);
+  assert.deepEqual(kinds({ ...base, goOverOpen: false }), ["call", "signing"]);
+  assert.deepEqual(kinds({ ...base, goOverOpen: undefined, openFollowups: 0 }), ["signing"]);
+  const counts = queueCounts(followupQueue([kase(base)], [], NOW), officeFilters({}));
+  assert.equal(counts.signing, 0);
+  assert.equal(counts.call, 1);
+  assert.equal(counts.all, 1);
 });
 
 test("an unclaimed row offers a reminder to the office and a reason to everyone else", () => {
@@ -1301,4 +1317,63 @@ test("closeUnsignedListKey changes with the listed cases and their revisions", (
   assert.notEqual(closeUnsignedListKey([a, { ...b, revision: 5 }]), key);
   assert.notEqual(closeUnsignedListKey([a, b, waitingCase("c", "review_approved", daysAgo(3))]), key);
   assert.equal(closeUnsignedListKey([b, a, waitingCase("z", "received", daysAgo(1))]), key);
+});
+
+// ---- Invite a client (change add-account-invitations) ---------------------
+
+const INVITATIONS = [
+  { email: "newer@example.org", status: "invited", invitedAt: "2026-11-10T10:00:00Z", activatedAt: null, accountRevision: 1 },
+  { email: "older@example.org", status: "active", invitedAt: "2026-11-01T10:00:00Z", activatedAt: "2026-11-02T10:00:00Z", accountRevision: 2 },
+];
+const followupsWith = (person, ui = {}) =>
+  renderFollowups([], [], { person, now: NOW, list: "ready", invitations: INVITATIONS, ...ui });
+
+test("invite panel has an email field and Invite button", () => {
+  const html = followupsWith(sam);
+  assert.match(html, /Invite a client/);
+  assert.match(html, /<form id="invite-client-form"/);
+  assert.match(html, /<input[^>]*name="email"[^>]*type="email"/);
+  assert.match(html, /<button type="submit"[^>]*>[^<]*Invite<\/button>/);
+});
+
+test("lists clients newest first with status and Resend only while Invited", () => {
+  const html = followupsWith(sam);
+  assert.ok(html.indexOf("newer@example.org") < html.indexOf("older@example.org"));
+  assert.match(html, /newer@example\.org[\s\S]*Invited/);
+  assert.match(html, /older@example\.org[\s\S]*Active/);
+  const resends = html.match(/data-action="client-resend"[^>]*>/g) ?? [];
+  assert.equal(resends.length, 1);
+  assert.match(resends[0], /data-email="newer@example\.org"/);
+});
+
+test("an invitation never used gets Cancel next to Resend, with its email and revision", () => {
+  const html = followupsWith(sam);
+  const cancels = html.match(/<button[^>]*data-action="client-cancel"[^>]*>[^<]*</g) ?? [];
+  assert.equal(cancels.length, 1, "the active row has none");
+  assert.match(cancels[0], /data-email="newer@example\.org"/);
+  assert.match(cancels[0], /data-revision="1"/);
+  assert.match(cancels[0], />Cancel</);
+  assert.ok(html.indexOf('data-action="client-resend"') < html.indexOf('data-action="client-cancel"'), "after Resend");
+  // Invited again after it was used: Resend only.
+  const used = followupsWith(sam, {
+    invitations: [{ ...INVITATIONS[0], activatedAt: "2026-11-02T10:00:00Z", accountRevision: 4 }],
+  });
+  assert.doesNotMatch(used, /client-cancel/);
+  assert.match(used, /client-resend/);
+});
+
+test("empty list says No clients invited yet", () => {
+  assert.match(followupsWith(sam, { invitations: [] }), /No clients invited yet/);
+});
+
+test("the panel shows the typed email and the last result", () => {
+  const html = followupsWith(sam, { inviteEmail: "kept@example.org", inviteNotice: { kind: "error", text: "That email belongs to a volunteer. Use another email." } });
+  assert.match(html, /value="kept@example\.org"/);
+  assert.match(html, /role="alert"[\s\S]*That email belongs to a volunteer/);
+});
+
+test("the panel is not rendered for a non-admin office state", () => {
+  const helper = { id: "p-h", name: "Hal", capabilities: ["followup"] };
+  assert.doesNotMatch(followupsWith(helper), /Invite a client|invite-client-form/);
+  assert.doesNotMatch(followupsWith(null), /Invite a client/);
 });

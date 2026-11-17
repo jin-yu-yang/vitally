@@ -581,6 +581,30 @@ test("shaded values fill every form", () => {
   }
 });
 
+const KID = MARRIED.hh[0];
+const members = (n) => Array.from({ length: n }, (_, i) => ({ ...KID, member_id: ids(i + 1), first_name: `Kid${i + 1}` }));
+const ROWS_1_2 = { household1QualifyingChild: "yes", household2QualifyingChild: "yes" };
+const twoKept = (answer) => ({ ...MARRIED, has_household_members: answer, hh: members(2) });
+test("cells for members the client no longer shows don't print", () => {
+  for (const form of ["en", "zh-s", "zh-t"]) {
+    const { text, checks } = draft(twoKept("no"), { ...OPTIONS, form, shaded: { ...ROWS_1_2, incomeW2s: true } });
+    assert.equal(text[shadedName("household1QualifyingChild", form)], undefined, form);
+    assert.equal(text[shadedName("household2QualifyingChild", form)], undefined, form);
+    assert.ok(checks.includes(shadedName("incomeW2s", form)), form);
+  }
+});
+test("only hidden cells: the stamp says online answers only", () => {
+  assert.equal(draft(twoKept("no"), { ...OPTIONS, shaded: ROWS_1_2 }).preparerEntries, false);
+});
+test("three visible members print rows 1 to 3", () => {
+  const three = { ...MARRIED, has_household_members: "yes", hh: members(3) };
+  const shaded = { household1QualifyingChild: "yes", household2OwnSupport: "no", household3LowIncome: "na" };
+  const { text } = draft(three, { ...OPTIONS, shaded });
+  assert.equal(text[shadedName("household1QualifyingChild")], "Yes");
+  assert.equal(text[shadedName("household2OwnSupport")], "No");
+  assert.equal(text[shadedName("household3LowIncome")], "N/A");
+});
+
 test("shaded notes are kept out of text and listed with their block and page", () => {
   const shaded = { deductionNotes: "Bring the 1098.", incomeNotes: "Two jobs.", infoVin: "1HGCM82633A004352" };
   const { text, notes } = draft(MARRIED, { ...OPTIONS, shaded });

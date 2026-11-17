@@ -31,6 +31,7 @@ import {
 import { cardsFor } from "./document-cards.mjs";
 import { FORM_FILES, draftFields } from "./draft-form.mjs";
 import { FORM_14446_FILES, draft14446Fields } from "./draft-virtual-consent.mjs";
+import { exitFormSource } from "./exit-form-source.mjs";
 import { EXIT_FORM_FILE, buildExitFormPdf, exitFormFontFields, exitFormMarks, exitFormNeedsFont } from "./exit-form.mjs";
 import {
   buildDraftPdf,
@@ -42,7 +43,7 @@ import {
   fieldsNeedFont,
   readFilledCopy,
 } from "./draft-pdf.mjs";
-import { readShaded, uploadRefusal } from "./shaded-fields.mjs";
+import { readShaded, shadedCaseRules, uploadRefusal, visibleShaded } from "./shaded-fields.mjs";
 import { OPEN_FAILED, createShadedSave, editorGone, openShadedEditor } from "./shaded-editor.mjs";
 import {
   describeFocus,
@@ -65,7 +66,8 @@ import { t, SENTENCES } from "./client-text.mjs";
 import { createToastTimer } from "./toast.mjs";
 import { contactEntryFromForm, contactSummary, contactSummaries } from "./contact-log.mjs";
 import { decorateStaffCase, outcomeGroup, staffEligibility } from "./staff-views.mjs";
-import { volunteerFromForm, rolesToUntick } from "./volunteer-roster.mjs";
+import { volunteerFromForm, volunteerFormChanged, rolesToUntick } from "./volunteer-roster.mjs";
+import { actionToast, renderUpdatePreview, saveToast, updateFormFromValues } from "./update-views.mjs";
 
 // Bootstrap and DOM wiring, and nothing else. No state lives here (the
 // controller owns it), no HTML is written here (the view modules own it), and
@@ -309,6 +311,7 @@ if (!config) {
     syncContactForms();
     syncCloseUnsigned();
     syncVolunteerOther();
+    syncCreateAccount();
     showDraftLink();
     markPressed(state);
     tickCooldown(state);
@@ -466,6 +469,22 @@ if (!config) {
     const box = root.querySelector("#volunteer-language-other");
     const field = root.querySelector("#volunteer-other-language");
     if (box && field) field.hidden = !box.checked;
+  }
+
+  // Create account sends the saved profile (decision 5), so it waits while
+  // the drawer's form holds unsaved changes: off, with its hint shown. On
+  // every edit of the form, and after a redraw that put unsent text back.
+  function syncCreateAccount() {
+    const form = root.querySelector("#volunteer-form");
+    const create = form?.querySelector('[data-action="account-create"]');
+    if (!create) return;
+    const state = controller.getState();
+    const volunteerId = state.dialogContext?.volunteerId ?? null;
+    const volunteer = (state.volunteers ?? []).find((entry) => entry?.id === volunteerId) ?? null;
+    const changed = volunteerFormChanged(volunteer, volunteerFromForm(new FormData(form)));
+    create.disabled = changed || state.busy === true;
+    const hint = form.querySelector("#volunteer-account-hint");
+    if (hint) hint.hidden = !changed;
   }
 
   // Unticking a certificate unticks the roles that lose what they need, in the
@@ -1026,19 +1045,23 @@ if (!config) {
   function closeDialog(fallbackFocusSelector) {
     const dialog = controller.getState().dialog;
     // The volunteer and assign drawers open from the Volunteers page, which
-    // has no queue.
+    // has no queue; the Notifications panel from the sidebar.
     const fallback =
       fallbackFocusSelector ??
       (dialog === "assign" || dialog === "volunteer"
         ? "#main"
-        : views.DRAWERS.includes(dialog)
-          ? "#office-queue-title"
-          : null);
+        : dialog === "notifications"
+          ? '[data-action="open-notifications"]'
+          : views.DRAWERS.includes(dialog)
+            ? "#office-queue-title"
+            : null);
     // The volunteer drawer's typed text goes with it (forgetVolunteerDrafts).
     if (dialog === "volunteer") forgetVolunteerDrafts();
     // A dialog's form closes with it; ticks left unsent go too.
     for (const form of root.querySelectorAll(".modal form")) clearFormTicks(form);
     controller.closeDialog();
+    // The panel is closed: realtime reads no longer mark what it would show.
+    if (dialog === "notifications") controller.closeNotifications();
     // A render on the version-2 form can be held for a press in progress, so
     // the page is made usable here, before the keyboard goes back to it.
     for (const child of root.children) child.inert = false;
@@ -1370,6 +1393,64 @@ if (!config) {
     if (saved) closeDialog("#main");
   }
 
+  // The site check (decision 4). A wrong number keeps the name and empties
+  // the number for another try; a name the controller refuses keeps both.
+  async function submitSiteCheck(form) {
+    const values = new FormData(form);
+    const result = await controller.completeSiteCheck(
+      String(values.get("name") ?? ""),
+      String(values.get("sidn") ?? ""),
+    );
+    if (result === "wrong-site") {
+      formDrafts.delete("site-check-sidn");
+      const sidn = root.querySelector("#site-check-sidn");
+      if (sidn) {
+        sidn.value = "";
+        sidn.focus();
+      }
+    } else if (result === "invalid") {
+      root.querySelector("#site-check-name")?.focus();
+    } else if (result === "active" || result === "cancelled") {
+      formDrafts.delete("site-check-name");
+      formDrafts.delete("site-check-sidn");
+    }
+  }
+
+  // Post an update (change add-posted-updates). The form as typed is held
+  // by the controller, which does not redraw for it: only the preview is
+  // drawn again, and the link field and the role boxes shown or hidden, so
+  // the keyboard and the caret stay where they are.
+  function syncUpdateForm(form) {
+    if (!form) return;
+    const editing = Boolean(controller.getState().updateEditing);
+    const values = updateFormFromValues(new FormData(form), { editing });
+    controller.setUpdateForm(values);
+    const link = root.querySelector("#update-link-field");
+    if (link) link.hidden = values.kind !== "irs_policy";
+    const roles = root.querySelector("#update-roles");
+    if (roles) roles.hidden = values.audience !== "roles";
+    const preview = root.querySelector("#update-preview");
+    if (preview) {
+      const state = controller.getState();
+      const own = (state.people ?? []).find((person) => person?.id === state.principal?.personId);
+      preview.innerHTML = renderUpdatePreview(values, { posterName: own?.name ?? state.principal?.personName ?? "" });
+    }
+  }
+
+  // Save draft, Post update or Save changes: the submit button's value says
+  // which. The toast follows what landed; a refusal keeps what was typed.
+  async function submitUpdate(form, submitter, by) {
+    const state = controller.getState();
+    const editing = state.updateEditing ? { ...state.updateEditing } : null;
+    const values = updateFormFromValues(new FormData(form), { editing: Boolean(editing) });
+    const post = submitter?.value === "post";
+    const text = saveToast(await controller.saveUpdate(values, { post }), editing);
+    if (text) notify("success", text, by);
+    else if (controller.getState().updateFormError)
+      // The first field the form names takes the keyboard.
+      root.querySelector('#update-form [aria-invalid="true"], #update-form [aria-describedby~="update-kind-error"] input')?.focus();
+  }
+
   async function submitContact(form, by) {
     const values = Object.fromEntries(new FormData(form));
     if (values.withWhom === "other" && !String(values.otherName ?? "").trim()) {
@@ -1515,7 +1596,10 @@ if (!config) {
     const reference = record.reference ?? "";
     const row = savedShaded(record);
     const version = Number(row?.version ?? 0);
-    const fields = draftFields(state.draftAnswers ?? {}, { form: "en", reference, today: isoToday() });
+    const caseVersion = state.savedCase?.intakeVersion ?? 2;
+    // One source for the drawn answers and the household rows that filter the cells.
+    const answers = state.draftAnswers ?? record.answers ?? {};
+    const fields = draftFields(answers, { form: "en", reference, today: isoToday(), version: caseVersion });
     const PDFLib = await import("./vendor/pdf-lib.mjs");
     const [formBytes, fontFiles] = await Promise.all([
       fetchBytes(FORM_FILES.en),
@@ -1523,22 +1607,10 @@ if (!config) {
     ]);
     const bytes = await buildEditingCopy({
       PDFLib, fontkit: PDFLib.fontkit, formBytes, fontFiles, fields,
-      shaded: row?.fields ?? {}, reference, version,
+      shaded: visibleShaded(row?.fields ?? {}, answers, { version: caseVersion }), reference, version,
     });
     return { bytes, reference, version };
   }
-
-  // What readShaded needs from the case: its household size (rows past it
-  // take no cell) and its season (the year rule), else the workspace's.
-  const shadedRules = (record, workspace) => {
-    const members = Array.isArray(record?.answers?.hh) ? record.answers.hh.length : 0;
-    const season = Number.isInteger(record?.season)
-      ? record.season
-      : Number.isInteger(workspace?.currentSeason)
-        ? workspace.currentSeason
-        : undefined;
-    return { form: "en", householdSize: Math.min(members, 4), season };
-  };
 
   async function downloadShadedCopy(by) {
     const state = controller.getState();
@@ -1600,7 +1672,7 @@ if (!config) {
     // Another case was opened while the file was read: this copy was for the old one.
     const now = controller.getState();
     if (now.savedCase?.id !== record.id) return;
-    const { values, errors } = readShaded(read.raw, shadedRules(now.savedCase, now.workspace));
+    const { values, errors } = readShaded(read.raw, shadedCaseRules(now.savedCase, now.workspace));
     if (errors.length) return shadedFailure(errors.map((entry) => entry.message).join(" "));
     const refusal = uploadRefusal({ values, preview: read.preview });
     if (refusal) return shadedFailure(refusal);
@@ -1659,7 +1731,7 @@ if (!config) {
       version: Number(savedShaded(state.savedCase)?.version ?? 0),
       check: (raw) => {
         const now = controller.getState();
-        return readShaded(raw, shadedRules(now.savedCase, now.workspace));
+        return readShaded(raw, shadedCaseRules(now.savedCase, now.workspace));
       },
       save: (values, basedOnVersion) => controller.saveShadedSection(values, basedOnVersion, { from: "editor" }),
       storedVersion: () => Number(savedShaded(controller.getState().savedCase)?.version ?? 0),
@@ -1721,6 +1793,7 @@ if (!config) {
         // The 13614-C prints the saved shaded section in every form (design
         // D9); the 14446 has no shaded section and ignores it.
         form, reference, today, shaded: savedShaded(state.savedCase)?.fields ?? null,
+        version: state.savedCase?.intakeVersion ?? 2,
       });
       const PDFLib = await import("./vendor/pdf-lib.mjs");
       const [formBytes, fontFiles] = await Promise.all([
@@ -1762,13 +1835,17 @@ if (!config) {
   //
   // Staff only: built in this browser from the approval's questionnaire and
   // the case, opened in a new tab like the drafts (or offered as a link when
-  // the browser blocks the tab). Nothing is uploaded or kept.
+  // the browser blocks the tab). Nothing is uploaded or kept. What it may print
+  // is the rule in src/exit-form-source.mjs (#173): the review must be an
+  // approval with a questionnaire, and after Return to signing only the
+  // methods that still hold are ticked.
   async function viewExitForm(reviewId, by) {
     const state = controller.getState();
     if (!isStaffWindow(state.principal)) return;
     const record = state.savedCase;
-    const questionnaire = (record?.reviewerQuestionnaires ?? []).find((q) => q?.reviewId === reviewId);
-    if (!record || !questionnaire) return;
+    const review = (record?.reviews ?? []).find((r) => r?.id === reviewId);
+    const source = exitFormSource(record, review);
+    if (!record || !source) return;
     const tab = window.open("", "_blank");
     if (tab) {
       writeTab(tab, "Preparing the Exit Form…", "exit-form");
@@ -1784,7 +1861,7 @@ if (!config) {
           ? state.workspace.currentSeason
           : 2025;
       const marks = exitFormMarks(
-        questionnaire,
+        source.questionnaire,
         {
           taxYear: season,
           clientNumber: record.clientNumber ?? "",
@@ -1840,6 +1917,12 @@ if (!config) {
       formDrafts.clear();
       controller.navigate("office-volunteers");
       void controller.loadVolunteers();
+    },
+    // Likewise Post an update's table (change add-posted-updates).
+    "open-post-update": () => {
+      formDrafts.clear();
+      controller.navigate("office-updates");
+      void controller.loadPostedUpdates();
     },
     // Pressed again while on the page: a fresh draft, which is what it asks for.
     "open-add-case": async () => {
@@ -1901,6 +1984,66 @@ if (!config) {
         if (leaveAddCaseFirst("open-volunteers", target)) break;
         EXITS["open-volunteers"]();
         break;
+      case "open-post-update":
+        if (leaveAddCaseFirst("open-post-update", target)) break;
+        EXITS["open-post-update"]();
+        break;
+      // ---- posted updates (change add-posted-updates) ----
+      case "open-notifications":
+        // The panel opens at once; marking what it shows read follows.
+        openDialog("notifications", null, describeFocus(target));
+        await controller.openNotifications();
+        break;
+      case "confirm-update": {
+        const id = target.dataset.id;
+        if (await controller.confirmUpdate(id))
+          root.querySelector(`#feed-confirmed-${CSS.escape(id)}`)?.focus();
+        break;
+      }
+      case "edit-update":
+        if (controller.editUpdate(target.dataset.id)) {
+          const title = root.querySelector("#update-title");
+          title?.focus();
+          title?.scrollIntoView?.({ block: "center" });
+        }
+        break;
+      case "cancel-update-edit":
+        controller.cancelUpdateEdit();
+        root.querySelector("#update-title")?.focus();
+        break;
+      case "post-draft": {
+        const text = actionToast("POST", await controller.updateAction(target.dataset.id, "POST"));
+        if (text) {
+          root.querySelector("#posted-updates-title")?.focus();
+          notify("success", text, by);
+        }
+        break;
+      }
+      case "open-unpublish-update":
+      case "open-delete-update":
+        // A fresh confirmation: no earlier refusal in it.
+        controller.dismissError();
+        openDialog(
+          action === "open-unpublish-update" ? "unpublish-update" : "delete-update",
+          { updateId: target.dataset.id },
+          describeFocus(target),
+        );
+        break;
+      case "confirm-unpublish-update":
+      case "confirm-delete-update": {
+        // Only the confirm sends. A refusal stays in the dialog, with the
+        // table read again behind it.
+        const type = action === "confirm-unpublish-update" ? "UNPUBLISH" : "DELETE";
+        const text = actionToast(type, await controller.updateAction(target.dataset.id, type));
+        if (text) {
+          closeDialog("#posted-updates-title");
+          notify("success", text, by);
+        }
+        break;
+      }
+      case "open-update-people":
+        openDialog("update-people", { updateId: target.dataset.id }, describeFocus(target));
+        break;
       case "open-add-volunteer":
       case "open-edit-volunteer": {
         // A fresh drawer: no earlier refusal, no earlier sentence about a
@@ -1912,6 +2055,71 @@ if (!config) {
         openDialog("volunteer", id ? { volunteerId: id } : null, describeFocus(target));
         break;
       }
+      case "account-resend":
+      case "account-reactivate":
+        // Said in the drawer (a refusal) or thrown to the safety net.
+        await controller[{ "account-resend": "resendAccount", "account-reactivate": "reactivateAccount" }[action]]();
+        break;
+      case "account-create":
+        // Asks first (decision 5): nothing is sent until the question's Send.
+        // The button is off while the form has unsaved changes.
+        if (target.disabled) break;
+        openDialog("send-invitation", { volunteerId: target.dataset.volunteerId }, describeFocus(target));
+        break;
+      case "confirm-send-invitation":
+        // The drawer's Create account returns to the drawer; the panel's
+        // invite closes the question, so the keyboard goes back to the field.
+        if (controller.getState().dialogContext?.volunteerId) {
+          await controller.createAccount();
+          break;
+        }
+        focusBeforeDialog = null;
+        try {
+          await controller.inviteClient();
+        } finally {
+          root.querySelector("#invite-client-email")?.focus();
+        }
+        break;
+      case "account-cancel-invitation":
+        // Asks first: nothing is sent until the question's confirm.
+        openDialog("cancel-invitation", { volunteerId: target.dataset.volunteerId }, describeFocus(target));
+        break;
+      case "client-cancel":
+        openDialog(
+          "cancel-invitation",
+          { email: target.dataset.email ?? "", revision: Number(target.dataset.revision) },
+          describeFocus(target),
+        );
+        break;
+      case "confirm-cancel-invitation": {
+        // The drawer's returns to the drawer; the office list's closes the
+        // question, and its row is gone on success: the panel's field takes
+        // the keyboard.
+        const fromDrawer = Boolean(controller.getState().dialogContext?.volunteerId);
+        if (fromDrawer) {
+          await controller.cancelInvitation();
+          break;
+        }
+        focusBeforeDialog = null;
+        try {
+          await controller.cancelInvitation();
+        } finally {
+          root.querySelector("#invite-client-email")?.focus();
+        }
+        break;
+      }
+      case "client-resend":
+        // The office screen's Invite a client list: said in the panel, or
+        // thrown to the safety net.
+        await controller.resendClient(target.dataset.email ?? "");
+        break;
+      case "account-deactivate":
+        // Asks first: nothing is sent until the dialog's confirm.
+        openDialog("deactivate-account", { volunteerId: target.dataset.volunteerId }, describeFocus(target));
+        break;
+      case "confirm-deactivate-account":
+        await controller.deactivateAccount();
+        break;
       // The Workload (change add-volunteer-workload). The controller decides
       // who may see it and open its drawer; these only pass the press on and
       // keep the keyboard on the control that was pressed.
@@ -2450,6 +2658,10 @@ if (!config) {
 
   root.addEventListener("input", (event) => {
     const field = event.target;
+    if (field.closest?.("#update-form")) {
+      syncUpdateForm(field.form);
+      return;
+    }
     if (field.matches?.(V2_CONTROLS)) {
       // The version-2 form (spec §2.4 rule 2): the draft, quietly, then the
       // note, the rail mark and a longtext's count in place, never a redraw.
@@ -2477,6 +2689,7 @@ if (!config) {
       // is.
       else if (!field.matches("[data-action], #field-confirmed"))
         for (const [id, draft] of checkDrafts(field)) keepDraft(id, draft);
+      if (field.closest("#volunteer-form")) syncCreateAccount();
     } else if (field.name === "volunteerSearch") {
       // The Roster filters as it is typed; the redraw replaces the box, so
       // the keyboard and the caret go back into it. Mid-composition the
@@ -2505,6 +2718,10 @@ if (!config) {
 
   root.addEventListener("change", (event) => {
     const field = event.target;
+    if (field.closest?.("#update-form")) {
+      syncUpdateForm(field.form);
+      return;
+    }
     if (field.matches?.('input[type="file"][data-action="upload-shaded-copy"]')) {
       void uploadShadedCopy(field, signedInUserId());
       return;
@@ -2521,6 +2738,7 @@ if (!config) {
     }
     if (field.closest?.("#volunteer-form") && field.name === "certificate") {
       syncVolunteerRoles(field.form, field.value);
+      syncCreateAccount();
       return;
     }
     if (field.closest?.("#volunteer-form") && field.name === "language" && field.value === "other") {
@@ -2573,7 +2791,9 @@ if (!config) {
     // The volunteer drawer skips `reportValidity`, which ignores `novalidate`:
     // a half-typed `type="email"` would get the browser's bubble instead of
     // the drawer's own sentence (volunteerProblem).
-    if (form.id !== "volunteer-form" && !form.reportValidity()) return;
+    // The site check says its own "Enter your name." the same way, and Post
+    // an update's sentences sit beside its fields.
+    if (form.id !== "volunteer-form" && form.id !== "site-check-form" && form.id !== "update-form" && !form.reportValidity()) return;
     const values = new FormData(form);
     try {
       // A staff form carries its action on its own submit button and names its
@@ -2590,10 +2810,18 @@ if (!config) {
         await submitContact(form, by);
       } else if (form.id === "volunteer-form") {
         await submitVolunteer(form, by);
+      } else if (form.id === "update-form") {
+        await submitUpdate(form, event.submitter, by);
       } else if (caseControl) {
         await runCaseAction(caseControl, form, by);
       } else if (assistControl) {
         await runAssistanceAction(assistControl, form, by);
+      } else if (form.id === "invite-client-form") {
+        // Asks first (decision 5); an empty email is refused with no question.
+        focusBeforeDialog = describeFocus(event.submitter ?? form.querySelector("#invite-client-email"));
+        if (!controller.askInviteClient(String(values.get("email") ?? ""))) focusBeforeDialog = null;
+      } else if (form.id === "site-check-form") {
+        await submitSiteCheck(form);
       } else if (form.id === "close-unsigned-form") {
         await submitCloseUnsigned(form, by);
       } else if (form.id === "email-form") {

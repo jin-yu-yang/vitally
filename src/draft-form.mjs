@@ -12,7 +12,7 @@ import { CATALOGUE, findQuestion, isAnswered, memberNameParts, spouseShown, visi
 import { formatAnswer, formatDate } from "./intake-form.mjs";
 import { sourceText } from "./language.mjs";
 import { t } from "./client-text.mjs";
-import { SHADED_FIELDS, shadedName, shadedPrint } from "./shaded-fields.mjs";
+import { SHADED_FIELDS, shadedName, shadedPrint, visibleShaded } from "./shaded-fields.mjs";
 
 export const FORM_FILES = Object.freeze({
   en: "src/forms/f13614c-2025.pdf",
@@ -381,14 +381,15 @@ function commentsFor(answers, members, lang) {
  * shaded-fields.mjs) or null. Its notes are not in `text`: they come back as
  * `notes: [{ name, text, block, page }]` (`block` is the note's heading without
  * "notes", e.g. "Income") for the builder to wrap and continue; `preparerEntries`
- * is true when any shaded value is set, and words the stamp.
+ * is true when any shaded value prints (household cells on rows the client no
+ * longer shows don't print; see visibleShaded), and words the stamp.
  * Returns `{ text, checks, comments, consentPage, words, notes, preparerEntries }`, plus the `stamp`
  * and the `fileName` the builder and the page use. `words.continuedOn` keeps
  * its `{page}` for the builder, which knows the page.
  */
-export function draftFields(answers, { form = "en", reference = "", today, shaded = null } = {}) {
+export function draftFields(answers, { form = "en", reference = "", today, shaded = null, version = 2 } = {}) {
   const names = familyOf(form);
-  const visible = visibleAnswers(2, answers ?? {});
+  const visible = visibleAnswers(version, answers ?? {});
   const text = {};
   const checks = [];
   const put = (box, value) => {
@@ -458,7 +459,7 @@ export function draftFields(answers, { form = "en", reference = "", today, shade
   });
 
   const notes = [];
-  const values = shaded && typeof shaded === "object" ? shaded : {};
+  const values = visibleShaded(shaded && typeof shaded === "object" ? shaded : {}, answers ?? {}, { version });
   let preparerEntries = false;
   for (const field of SHADED_FIELDS) {
     if (!Object.hasOwn(values, field.key)) continue;

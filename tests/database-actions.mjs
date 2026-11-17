@@ -900,6 +900,13 @@ test("installed entry points deny anonymous callers and serve members", async (t
           context.contactId = (
             await f.logContact(f.siteCoordinator, contactCaseId, context.contactEntry)
           ).contactId;
+          // An entry that names targets of its own (the account entry points).
+          if (entry.context) Object.assign(context, await entry.context(f));
+          // A draft update for the update action to post (add-posted-updates).
+          const saveUpdate = RPC_SIGNATURES.find((candidate) => candidate.name === "vitally_save_update");
+          const savedUpdate = await f.siteCoordinator.rpc(saveUpdate.name, saveUpdate.args(context));
+          assert.equal(savedUpdate.error, null, "the draft update for the update action");
+          context.updateId = savedUpdate.data.updateId;
           const before = await f.stateSnapshot();
           const denied = await f.anonymous.rpc(entry.name, entry.args(context));
           assert.ok(denied.error, `${entry.name} anonymous call must fail`);
@@ -917,12 +924,17 @@ test("installed entry points deny anonymous callers and serve members", async (t
             null,
             `${entry.name} member call must succeed`,
           );
-          // Each entry answers with its own receipt shape and nothing more.
-          assert.deepEqual(
-            Object.keys(allowed.data).sort(),
-            [...entry.receiptKeys].sort(),
-            `${entry.name} receipt keys`,
-          );
+          // Each entry answers with its own receipt shape and nothing more. A
+          // list (vitally_client_invitations) answers with a non-empty array of
+          // that shape.
+          const answers = Array.isArray(allowed.data) ? allowed.data : [allowed.data];
+          assert.ok(answers.length > 0, `${entry.name} answers`);
+          for (const answer of answers)
+            assert.deepEqual(
+              Object.keys(answer).sort(),
+              [...entry.receiptKeys].sort(),
+              `${entry.name} receipt keys`,
+            );
           if (entry.receiptKeys.includes("reference"))
             assert.match(allowed.data.reference, REFERENCE_PATTERN);
         }

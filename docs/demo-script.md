@@ -160,18 +160,18 @@ When there's no time for the whole case, use the seeded cases directly:
 ## The Roster
 
 Admins only. In the office window, choose **Volunteers** in the sidebar (a preparer or reviewer has
-no such link). The seed's eight fictional volunteers are there, with no sign-in:
+no such link). The seed's eight fictional volunteers are there, with no account (the Account column reads **Not created**, and the drawer's Account section says **Status: Not created**):
 
 | Volunteer | Works | Languages | Roles | Certificates | Cleared |
 | --- | --- | --- | --- | --- | --- |
-| Maya Lindgren | On site | English | Preparer | VSC, IT&QR, Basic | Cleared |
-| Tomas Abara | Remote | English, Spanish | Reviewer | VSC, IT&QR, Advanced | Cleared |
-| Wen Tao Liu | On site | Mandarin, English | Preparer, Reviewer | VSC, IT&QR, Basic, Advanced | Cleared |
-| Priya Venkat | On site and remote, no phone | English | Intaker | VSC, IT&QR | Cleared (new, photo ID check recorded) |
-| Jordan Reyes | On site | English | Greeter | VSC | Not cleared: Photo ID check missing (new) |
-| Hana Moretti | Remote | Cantonese, Mandarin | Preparer | VSC, IT&QR, Basic | Cleared |
-| Samir Haddad | On site, no phone | English, Arabic | Admin | VSC, IT&QR, SC | Cleared |
-| Lucy Fong | On site and remote | Cantonese, English | No roles recorded | None recorded | Not cleared: Form 13615 missing |
+| Maya Lindgren | On site | English | Preparer | VSC, IT&QR, Basic | Not cleared: No account yet |
+| Tomas Abara | Remote | English, Spanish | Reviewer | VSC, IT&QR, Advanced | Not cleared: No account yet |
+| Wen Tao Liu | On site | Mandarin, English | Preparer, Reviewer | VSC, IT&QR, Basic, Advanced | Not cleared: No account yet |
+| Priya Venkat | On site and remote, no phone | English | Intaker | VSC, IT&QR | Not cleared: No account yet (new, photo ID check recorded) |
+| Jordan Reyes | On site | English | Greeter | VSC | Not cleared: Photo ID check missing, No account yet (new) |
+| Hana Moretti | Remote | Cantonese, Mandarin | Preparer | VSC, IT&QR, Basic | Not cleared: No account yet |
+| Samir Haddad | On site, no phone | English, Arabic | Admin | VSC, IT&QR, SC | Not cleared: No account yet |
+| Lucy Fong | On site and remote | Cantonese, English | No roles recorded | None recorded | Not cleared: Form 13615 missing, No account yet |
 
 Each staff account also has a row. The seed clears the four role accounts first, so they show as
 **Cleared**: Sky Chen as Admin (VSC, IT&QR), Rowan Diaz as Preparer (VSC, IT&QR, Basic), Ari Novak
@@ -188,11 +188,44 @@ What to show:
    **Cancel** unless you want the new row to stay: a re-seed removes only the eight seeded
    volunteers, never one added by hand.
 4. **Say how clearance works.** A person is **Cleared** when they have at least one role this
-   season, and, if they are new, their photo ID check is recorded. Each role needs its confirmed
+   season, if they are new, their photo ID check is recorded, and their account is active (they have
+   signed in at least once). Each role needs its confirmed
    certificates. Staff who are not cleared (no role yet, or a new volunteer without the photo ID
-   check) get no staff actions until an admin clears them. Lucy Fong has no roles, so she is waiting
+   check, or no active account) get no staff actions until an admin clears them. None of the eight
+   seeded volunteers has an account, so none is cleared. Lucy Fong has no roles, so she is waiting
    for her Form 13615. Jordan Reyes is new and his photo ID check is missing. Samir Haddad is
    recorded as Admin and has no sign-in, so he can do nothing in ViTally.
+
+## Accounts
+
+Admins only, on the local stack. Open the local mail catcher (Mailpit) at the URL the stack's
+status output prints as `MAILPIT_URL` (`http://127.0.0.1:54324` with the default ports). It shows
+every email the stack would have sent.
+
+1. **Create account.** On the Roster, open Maya Lindgren, whose Account section says **Status:
+   Not created**, and press **Create account** (it is disabled while the drawer has unsaved
+   changes). Confirm "Send a sign-in invitation to <email>?". The result reads "Account created and
+   sign-in code sent", and the Account column now reads **Invited**. The volunteer's email is a
+   fictional `@example.org` address. A wrong address can be undone with **Cancel invitation**
+   until Maya completes her sign-in; an invitation not completed in seven days is cancelled by
+   itself.
+2. **The code email and the site check.** In the mail catcher, open the new message to that
+   address: "Your ViTally code is" followed by six digits. Type the address on the sign-in screen
+   in a second window, then the code. Maya sees **Confirm your site**: enter a name and the
+   roster file's fictional `siteNumber` (`S00000000`). A wrong number says "That isn't this site's
+   number."; the fifth cancels the invitation. The account turns **Active**, the Roster shows
+   "Signed in as" the name, and because Maya has her Preparer role and certificates and is not
+   new, she is now **Cleared** and lands on the staff screen.
+   (The sign-in screen also sends a code of its own; use the newest one.)
+3. **Invite a client.** On the office screen, under **Invite a client**, type a fictional client
+   address, press **Invite** and confirm. The list shows it as **Invited**, with **Resend** and
+   **Cancel** while it is. A client has no site check.
+   The client signs in with the emailed code and sees **My applications**; the list then shows
+   **Active**. If the email didn't go out, the notice says to use Resend in a minute.
+4. **Deactivate and Reactivate.** In Maya's drawer, press **Deactivate** and confirm: her open window loses
+   access (the no-access screen), and the Account column reads **Deactivated**. Signing in again
+   doesn't bring her back. **Reactivate** restores the account. An admin can't deactivate their
+   own account.
 
 ## What the browser test covers
 
