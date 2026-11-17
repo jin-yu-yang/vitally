@@ -42,7 +42,7 @@ import {
   fieldsNeedFont,
   readFilledCopy,
 } from "./draft-pdf.mjs";
-import { readShaded, uploadRefusal } from "./shaded-fields.mjs";
+import { readShaded, shadedCaseRules, uploadRefusal, visibleShaded } from "./shaded-fields.mjs";
 import { OPEN_FAILED, createShadedSave, editorGone, openShadedEditor } from "./shaded-editor.mjs";
 import {
   describeFocus,
@@ -1595,7 +1595,10 @@ if (!config) {
     const reference = record.reference ?? "";
     const row = savedShaded(record);
     const version = Number(row?.version ?? 0);
-    const fields = draftFields(state.draftAnswers ?? {}, { form: "en", reference, today: isoToday() });
+    const caseVersion = state.savedCase?.intakeVersion ?? 2;
+    // One source for the drawn answers and the household rows that filter the cells.
+    const answers = state.draftAnswers ?? record.answers ?? {};
+    const fields = draftFields(answers, { form: "en", reference, today: isoToday(), version: caseVersion });
     const PDFLib = await import("./vendor/pdf-lib.mjs");
     const [formBytes, fontFiles] = await Promise.all([
       fetchBytes(FORM_FILES.en),
@@ -1603,22 +1606,10 @@ if (!config) {
     ]);
     const bytes = await buildEditingCopy({
       PDFLib, fontkit: PDFLib.fontkit, formBytes, fontFiles, fields,
-      shaded: row?.fields ?? {}, reference, version,
+      shaded: visibleShaded(row?.fields ?? {}, answers, { version: caseVersion }), reference, version,
     });
     return { bytes, reference, version };
   }
-
-  // What readShaded needs from the case: its household size (rows past it
-  // take no cell) and its season (the year rule), else the workspace's.
-  const shadedRules = (record, workspace) => {
-    const members = Array.isArray(record?.answers?.hh) ? record.answers.hh.length : 0;
-    const season = Number.isInteger(record?.season)
-      ? record.season
-      : Number.isInteger(workspace?.currentSeason)
-        ? workspace.currentSeason
-        : undefined;
-    return { form: "en", householdSize: Math.min(members, 4), season };
-  };
 
   async function downloadShadedCopy(by) {
     const state = controller.getState();
@@ -1680,7 +1671,7 @@ if (!config) {
     // Another case was opened while the file was read: this copy was for the old one.
     const now = controller.getState();
     if (now.savedCase?.id !== record.id) return;
-    const { values, errors } = readShaded(read.raw, shadedRules(now.savedCase, now.workspace));
+    const { values, errors } = readShaded(read.raw, shadedCaseRules(now.savedCase, now.workspace));
     if (errors.length) return shadedFailure(errors.map((entry) => entry.message).join(" "));
     const refusal = uploadRefusal({ values, preview: read.preview });
     if (refusal) return shadedFailure(refusal);
@@ -1739,7 +1730,7 @@ if (!config) {
       version: Number(savedShaded(state.savedCase)?.version ?? 0),
       check: (raw) => {
         const now = controller.getState();
-        return readShaded(raw, shadedRules(now.savedCase, now.workspace));
+        return readShaded(raw, shadedCaseRules(now.savedCase, now.workspace));
       },
       save: (values, basedOnVersion) => controller.saveShadedSection(values, basedOnVersion, { from: "editor" }),
       storedVersion: () => Number(savedShaded(controller.getState().savedCase)?.version ?? 0),
@@ -1801,6 +1792,7 @@ if (!config) {
         // The 13614-C prints the saved shaded section in every form (design
         // D9); the 14446 has no shaded section and ignores it.
         form, reference, today, shaded: savedShaded(state.savedCase)?.fields ?? null,
+        version: state.savedCase?.intakeVersion ?? 2,
       });
       const PDFLib = await import("./vendor/pdf-lib.mjs");
       const [formBytes, fontFiles] = await Promise.all([
