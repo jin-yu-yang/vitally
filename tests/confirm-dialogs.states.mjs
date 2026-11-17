@@ -75,4 +75,22 @@ export const STATES = Object.freeze({
   regenerateEn: ["dialog", { dialog: "regenerate" }],
   regenerateZh: ["dialog", { dialog: "regenerate", lang: "zh-Hans" }],
   leaveAddCase: ["dialog", { dialog: "leave-add-case", dialogContext: { to: "open-board" } }],
+  // Posted updates (change add-posted-updates): new confirmations, captured
+  // from the code that added them. The title carries HTML and quotes.
+  unpublishUpdate: [
+    "dialog",
+    {
+      dialog: "unpublish-update",
+      dialogContext: { updateId: "r-1" },
+      postedUpdates: [{ id: "r-1", status: "posted", title: 'Office <closed> & "early"', revision: 2 }],
+    },
+  ],
+  deleteUpdate: [
+    "dialog",
+    {
+      dialog: "delete-update",
+      dialogContext: { updateId: "r-2" },
+      postedUpdates: [{ id: "r-2", status: "draft", title: 'Office <closed> & "early"', revision: 1 }],
+    },
+  ],
 });
