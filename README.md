@@ -122,6 +122,9 @@ Behaviour changes go through an OpenSpec change (`openspec/changes/<name>/`), th
 that a teammate reviews and squash-merges. Bug fixes and docs go straight to a PR. Migrations are
 hand-written and never edited once applied. The rules: [`CLAUDE.md`](CLAUDE.md).
 
+Open issues are grouped into three [milestones](https://github.com/jin-yu-yang/vitally/milestones):
+**Before Dec 21**, **Before the pilot** and **Later**, matching [docs/roadmap.md](docs/roadmap.md).
+
 ## Documentation
 
 | Document | What it is |
