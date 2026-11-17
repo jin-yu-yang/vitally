@@ -44,6 +44,7 @@ const STAFF_TABLES = Object.freeze([
   "preparer_questionnaires",
   "reviewer_questionnaires",
   "preparer_shaded_fields",
+  "posted_updates",
 ]);
 export const SUBSCRIBED_TABLES = Object.freeze({
   applicant: CLIENT_TABLES,
@@ -828,6 +829,42 @@ export function createStore(client) {
     async listClientInvitations() {
       await requireStaffAccess();
       return (await call("vitally_client_invitations")) ?? [];
+    },
+
+    // Posted updates (migration 049). The RPCs enforce who may call them.
+    // The signed-in staff member's feed: {items, unread}.
+    async getUpdates() {
+      return await call("vitally_my_updates");
+    },
+
+    async markUpdates({ ids, confirm }) {
+      return await call("vitally_mark_updates", {
+        p_update_ids: ids,
+        p_confirm: Boolean(confirm),
+      });
+    },
+
+    // The admin table of posted updates and drafts.
+    async listPostedUpdates() {
+      return (await call("vitally_posted_updates")).updates;
+    },
+
+    async saveUpdate(request) {
+      return await call("vitally_save_update", {
+        p_action_id: actionId(request),
+        p_update_id: request.updateId ?? null,
+        p_expected_revision: request.expectedRevision ?? null,
+        p_update: request.update,
+      });
+    },
+
+    async updateAction(request) {
+      return await call("vitally_update_action", {
+        p_action_id: actionId(request),
+        p_update_id: request.updateId,
+        p_expected_revision: request.expectedRevision,
+        p_type: request.type,
+      });
     },
 
     async logContact(request) {
