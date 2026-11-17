@@ -14,14 +14,14 @@ reminders and closure), Realtime-driven shared state, rehearsal cases from `npm 
 hold permanent fictional rehearsal accounts for signing in by hand
 ([Signing in locally](#signing-in-locally)).
 
-**Not done, and not claimed here:** there is no hosted Supabase project, no classroom roster
-admitted to one, no configured SMTP sender, and no live email delivery — that is Task 10B, a
-user-owned step (see [Classroom and hosted setup](#6-classroom-and-hosted-setup-pending) below). There is also no public
-hosting destination yet (Task 10D): the GitHub Pages copy of `main` currently serves the app with
-no `/public-config.json` values set, so it shows the **"ViTally is not configured yet"** setup-needed
-screen, not a working sign-in form. Nothing in this document should be read as claiming otherwise.
-Every test described below runs against the isolated local stack; none of it exercises a hosted
-project or real mail delivery.
+**Hosted test environment (state on Nov 17, 2026):** a hosted Supabase project exists, with
+custom SMTP through Resend (sender `help@govitally.org`), and `main` now commits a
+`/public-config.json` pointing at it (#212). Still to do before testers can sign in: migrations
+on the hosted database, the `accounts` Edge Function and its secrets, Auth Site URL / Redirect
+URLs and the email rate limit, public sign-up off, serving the front end on the custom domain, and
+the tester roster ([Classroom and hosted setup](#6-classroom-and-hosted-setup-pending) below; the
+README's Deployment section keeps the current list). Every test described below runs against the
+isolated local stack; none of it exercises the hosted project or real mail delivery.
 
 ## 1. Runtime
 
@@ -820,9 +820,9 @@ SMTP (see below), and the `accounts` Edge Function deployed with `verify_jwt = f
 testers can receive invitations or sign-in codes. Without them, Create account and Invite create
 the account but no email arrives.
 
-Nothing in this section has happened. It is Task 10B (setup) and Task 10D (publication) —
-user-owned steps, not implementation work, and this document does not claim otherwise. What the
-user needs to provide before either can proceed.
+Since Nov 16 the Supabase project, its custom SMTP (Resend, on the `govitally.org` domain) and the
+front end's `/public-config.json` exist; the remaining steps are listed in the README's Deployment
+section. The list below is the original Task 10B / 10D checklist, kept for reference.
 
 A hosted or classroom copy never shows the fill tools, because its Supabase URL is not on the
 machine that serves it. Classroom demos type their answers, or run from a local stack.
