@@ -5,14 +5,14 @@ Update this page when a row's state changes; the [README](../README.md) only lin
 
 ## Where ViTally stands
 
-The core workflow is built, and PCDC volunteers, the admin team and the program manager have tried
-it. Three questions are still open, and the plan below is organised around them:
+The core workflow is built and has been tried by experienced PCDC volunteers, the admin team and
+the program manager. The next stage is about three things:
 
-| | Question | What it means for us |
+| | Goal | How we get there |
 | --- | --- | --- |
-| **Trust** | Is it safe enough to hold PCDC's data? | PCDC has had website security problems before. Our tests check what we expected; they don't prove safety, and most code is AI-written with limited human review. Safety has to be something PCDC can judge, not something hidden in code. |
-| **Adoption** | Does it replace enough of what PCDC already uses? | Today ViTally *adds* a platform next to Slack, OneDrive, Airtable, TaxSlayer and Outlook. It has to take over the hard parts: volunteer management from Airtable, updates and notifications from Slack. |
-| **Maintenance** | Who keeps it running after this season? | ViTally has no funding or staff, and its know-how sits with a few student developers. Without a handoff, PCDC goes back to its old workflow. |
+| **Trust** | PCDC can see for itself that its data is safe. | Much of the protection is already built in: the database checks every action, uncleared volunteers read no case data, and no uploaded files are stored. Next we make it visible: a plain-language security summary, an export PCDC keeps in SharePoint, and a rollout PCDC controls step by step. |
+| **Adoption** | ViTally replaces tools instead of adding one. | Volunteer management moves over from Airtable (roster, certificates, workload, schedule), and team updates from Slack (posted updates, notifications, a note for the team). |
+| **Maintenance** | ViTally keeps running after this season. | Clear handoff documentation so other developers can step in, and a support model agreed with PCDC. Once features settle, upkeep is mostly security updates and yearly form changes. |
 
 ### What works today
 
