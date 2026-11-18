@@ -9457,7 +9457,23 @@ test(
           undefined,
           RENDER_MS,
         );
+        // ...and says so in the drawer's polite status line (#192).
+        await waitFor(
+          p,
+          "the unticked Admin to be announced",
+          (text) => document.querySelector('#volunteer-role-notice[role="status"]')?.textContent === text,
+          "Admin was unticked: it needs IT&QR.",
+          RENDER_MS,
+        );
         await p.locator("#volunteer-certificate-itqr").check();
+        // Ticking it back unticks nothing: the sentence no longer holds, so it goes.
+        await waitFor(
+          p,
+          "the role notice to be emptied",
+          () => document.querySelector("#volunteer-role-notice")?.textContent === "",
+          undefined,
+          RENDER_MS,
+        );
         await p.locator("#volunteer-role-admin").check();
         await p.locator('#volunteer-form button[type="submit"]').click({ timeout: CLICK_MS });
         await drawerClosed(p);
