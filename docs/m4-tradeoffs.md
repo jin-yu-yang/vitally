@@ -1,7 +1,7 @@
 # M4 trade-offs: what we cut, what we refused to cut, and why
 
 M4 is graded as feature-complete: the planned feature set is merged into `main` by Wed Nov 4
-([#94](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/94)). This page records
+([#94](https://github.com/jin-yu-yang/vitally/issues/94)). This page records
 the scope decisions behind that. It names what we cut for the semester, what we refused to cut,
 and the reason for each. Everything we cut goes on the roadmap for the **February PCDC pilot**
 (Dec–Jan work), not to M5 or M6, which are for testing and hardening.
