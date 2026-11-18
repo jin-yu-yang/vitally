@@ -3784,7 +3784,20 @@ export function createController({
       noteFailure(error);
     }
     show();
+    // An uncleared admin who just saved their own row may have cleared
+    // themselves (#191): ask again, so the setup screen gives way without
+    // Check again. Not awaited, so the drawer closes on the save alone.
+    if (volunteerId && volunteerId === state.principal?.personId && awaitingClearance(state))
+      void recheckAfterOwnSave();
     return true;
+  }
+
+  // A check already out (a focus, say) was asked before the save landed, so
+  // its answer may be the old one: wait for it, then ask once more if the
+  // window is still waiting. checkClearance never rejects.
+  async function recheckAfterOwnSave() {
+    if (clearanceCheck) await clearanceCheck;
+    if (awaitingClearance(state)) await checkClearance();
   }
 
   // The drawer's Account section (change add-account-invitations): Create
