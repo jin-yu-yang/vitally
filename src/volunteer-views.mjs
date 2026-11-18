@@ -263,7 +263,10 @@ export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {} }
   const formError = ui?.formError
     ? `<p class="notice error" role="alert" id="volunteer-form-error">${icon("help")}<span>${esc(ui.formError)}</span></p>`
     : "";
-  return `<form id="volunteer-form" class="staff-form" novalidate>${fields}${formError}${drawerError(
+  // Filled by the app when a certificate change unticks roles (#192), so a
+  // screen reader hears it; empty on every draw.
+  const roleNotice = `<p class="sr-only" role="status" aria-live="polite" id="volunteer-role-notice"></p>`;
+  return `<form id="volunteer-form" class="staff-form" novalidate>${fields}${roleNotice}${formError}${drawerError(
     ui,
     VOLUNTEER_CONFLICT_HEADING,
   )}<div class="drawer-actions"><button type="submit" class="btn primary"${ui?.busy ? " disabled" : ""}>${

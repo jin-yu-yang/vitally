@@ -605,3 +605,16 @@ test("a client has no Notifications", async () => {
   const state = { principal: { access: "applicant" }, connection: "online", screen: "applications" };
   assert.doesNotMatch(page(state, "<main></main>") + clientHeader(state), /open-notifications|Notifications/);
 });
+
+test("the drawer has an empty polite status line for unticked roles (#192)", () => {
+  for (const html of [
+    volunteerDrawerBody({ volunteer: null, isNew: true, ui: {} }),
+    volunteerDrawerBody({ volunteer: volunteer(), isNew: false, ui: {} }),
+  ]) {
+    assert.match(
+      html,
+      /<p class="sr-only" role="status" aria-live="polite" id="volunteer-role-notice"><\/p>/
+    );
+    assert.equal(html.match(/id="volunteer-role-notice"/g).length, 1);
+  }
+});
