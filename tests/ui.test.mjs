@@ -24,6 +24,7 @@ import {
   emptyState,
   emptyLine,
   ICON_NAMES,
+  labelChip,
 } from "../src/ui.mjs";
 
 // `describeFocus` is the one piece of the DOM wiring that is worth testing on
@@ -624,4 +625,26 @@ test("the Workload's tab, sort header and row toggle each come back as the same 
   assert.deepEqual(focusSelectors(describeFocus(control({ action: "toggle-workload-row", rowId: "unassigned" }))), [
     '[data-action="toggle-workload-row"][data-row-id="unassigned"]',
   ]);
+});
+
+test("labelChip escapes the name, never writes a style and falls back to slate", () => {
+  const html = labelChip({ name: "<b>", color: "sky" });
+  assert.match(html, /<span class="case-label" data-color="sky">&lt;b&gt;<\/span>/);
+  assert.doesNotMatch(html, /style=/);
+  assert.match(labelChip({ name: "X", color: "red" }), /data-color="slate"/);
+  assert.match(labelChip({ name: "X", color: '" onclick="x' }), /data-color="slate"/);
+});
+
+test("labelChip adds a remove button only when asked", () => {
+  assert.doesNotMatch(labelChip({ id: "l1", name: "City Tax", color: "sky" }), /<button/);
+  const html = labelChip({ id: "l1", name: "City Tax", color: "sky" }, { removeFor: "case-a" });
+  assert.match(html, /data-action="toggle-case-label"/);
+  assert.match(html, /data-on="false"/);
+  assert.match(html, /data-label-id="l1"/);
+  assert.match(html, /aria-label="Remove label City Tax"/);
+  assert.doesNotMatch(html, /<button[^>]*disabled/);
+  assert.match(
+    labelChip({ id: "l1", name: "City Tax", color: "sky" }, { removeFor: "case-a", disabled: true }),
+    /<button[^>]*case-label-remove[^>]*disabled/,
+  );
 });

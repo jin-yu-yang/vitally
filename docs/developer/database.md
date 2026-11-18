@@ -15,6 +15,7 @@ it. Run everything described here against the local stack from [`docs/setup.md`]
 - [The shaded section of the 13614-C](#the-shaded-section-of-the-13614-c)
 - [Season-end close](#season-end-close)
 - [The contact log](#the-contact-log)
+- [Case labels](#case-labels)
 - [Check order and error codes](#check-order-and-error-codes)
 - [Concurrency and idempotency](#concurrency-and-idempotency)
 - [Realtime](#realtime)
@@ -24,7 +25,7 @@ it. Run everything described here against the local stack from [`docs/setup.md`]
 
 ## Migrations
 
-The schema is fifty plain SQL files (001 to 050) in [`supabase/migrations/`](../../supabase/migrations/), applied
+The schema is fifty-one plain SQL files (001 to 051) in [`supabase/migrations/`](../../supabase/migrations/), applied
 in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 
 | File | Adds |
@@ -79,6 +80,7 @@ in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 | `048_closed_lines_after_filing.sql` | Hand-written: a close after a filing says what was filed (issue #170, change `fix-closed-lines-after-filing`). `vitally_private.return_outcome` (one return: accepted, waiting, on paper or not filed) and a five-argument `vitally_private.closed_line` (the reason and each return's method and result) that replaces 036's `closed_line(text)`, which is dropped; `act_close_case` passes the case's filing columns and words the staff notice for a close after a filing; `vitally_close_unsigned` passes them too. No table, policy, RPC signature or Realtime change ([closing after a filing](#closing-after-a-filing)) |
 | `049_posted_updates.sql` | Hand-written: posted updates ([below](#posted-updates)). The tables `posted_updates` and `update_reads`, written only through the RPCs; the live audience `vitally_private.audience_member` and the policy helper `vitally_policy.in_update_audience`; two SELECT policies on `posted_updates` (the audience reads an unpublished update only for `vitally_policy.unpublished_read_window()`, 10 minutes, after Unpublish) and none on `update_reads`; the RPCs `vitally_save_update` and `vitally_update_action` (ceiling admins, with receipts), `vitally_mark_updates` and `vitally_my_updates` (every staff member, cleared or not) and `vitally_posted_updates` (ceiling admins); `posted_updates` joins the Realtime publication and `update_reads` does not. No clearance check: an update holds no case data |
 | `050_hidden_household_rows.sql` | Hand-written: `vitally_private.household_rows(version, answers)`, the number of household rows the case shows, and `act_save_preparer_fields` re-created from 039 to use it (#175) |
+| `051_case_labels.sql` | Hand-written: case labels ([below](#case-labels)). The tables `case_labels` (a workspace's labels: name trimmed of spaces, tabs and line breaks, 1 to 24 characters on one line, unique ignoring case, one of six colors, its own `revision`) and `case_label_links` (which labels a case carries; a link is switched off, never deleted), both staff-only and cleared-gated, with no write grant for a browser role, no grant at all for `service_role` (as on 049's tables), and both in the Realtime publication; the trigger `vitally_private.add_starter_labels` on `workspaces` (City Tax, MFS and Multi-state for each new workspace) and a one-time backfill for the existing ones; `vitally_private.check_label`; and the two RPCs `vitally_save_label` and `vitally_set_case_label`, which write the case events `ADD_CASE_LABEL` and `REMOVE_CASE_LABEL`. It redefines no earlier function and leaves `cases.revision` and `updated_at` alone |
 **Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
 never edit an applied one.** The build writes a file only when the hash differs from the newest
 catalogue migration's. The hash covers the catalogue and `LOADER_VERSION` in
@@ -129,6 +131,7 @@ do not copy them from older files:
 | `vitally_private.check_preparer_fields` | `039_preparer_shaded_fields.sql` |
 | `vitally_private.acting_person`, `contact_person`, `require_cleared`, `open_work`, the role helpers, `role_certificates_check`, `vitally_policy.cleared_workspace_id`, and the RPCs `public.vitally_assistance_action`, `vitally_create_case`, `vitally_log_contact`, `vitally_edit_contact`, `vitally_save_volunteer`, `vitally_my_clearance` | `045_volunteer_clearance.sql` |
 | `vitally_private.audience_member`, `vitally_policy.in_update_audience`, `vitally_policy.unpublished_read_window`, and the RPCs `public.vitally_save_update`, `vitally_update_action`, `vitally_mark_updates`, `vitally_my_updates`, `vitally_posted_updates` | `049_posted_updates.sql` |
+| `vitally_private.add_starter_labels`, `check_label`, and the RPCs `public.vitally_save_label`, `vitally_set_case_label` | `051_case_labels.sql` |
 | `vitally_private.add_staff_member`, `vitally_policy.is_workspace_admin` | `044_volunteer_roster_records.sql` |
 | `vitally_private.lock_case`, `lock_assistance_item`, `initialize_workspace` | `043_remove_presenter_access.sql` |
 | `vitally_private.check_staff_links`, `set_default_followup` | `038_staff_identity.sql` |
@@ -161,7 +164,7 @@ grep -n -E "^create (or replace )?function" supabase/migrations/*.sql
 
 Two schemas:
 
-- **`public`**: the application tables and the twenty-two browser-callable functions.
+- **`public`**: the application tables and the twenty-four browser-callable functions.
 - **`vitally_private`**: helper functions, the migration ledger, and tables browsers must never
   reach. Every function here is `SECURITY DEFINER` with `search_path=''`, and `EXECUTE` is revoked
   from every role, including `service_role`.
@@ -213,6 +216,8 @@ erDiagram
 | `certificates` | The certificates an admin has confirmed for a roster entry (044) | One row per certificate per entry, from `vsc`, `itqr`, `sc`, `basic`, `advanced`; `status` (only `confirmed` is written), `confirmed_at`, `confirmed_by_person_id`. Unticking deletes the row. Admin-only select; not published |
 | `posted_updates` | An update an admin posts to volunteers (049) | `kind` (`irs_policy`, `office_notice`), `title` (1 to 120 characters), `message` (1 to 2000), `irs_link` (an https link on irs.gov, IRS policy updates only), `audience` (`everyone` or `roles`) with `audience_roles`, `keep_top_until` (a New York date), `ask_confirm`, `status` (`draft`, `posted`, `unpublished`), `created_by_person_id`, `posted_by_person_id`, `posted_at`, `edited_at`, `unpublished_at`, `revision`. Written only by `vitally_save_update` and `vitally_update_action`; published to Realtime |
 | `update_reads` | Who has read and confirmed each update (049) | Primary key `(update_id, person_id)`; `read_at` (the first read), `confirmed_at` (the first confirmation). Written only by `vitally_mark_updates`; Ask everyone to read it again deletes the update's rows. No policy, so browsers read none of it directly; not published |
+| `case_labels` | A workspace's case labels (051) | Primary key `id`, unique `(workspace_id, id)`; `name` (stored trimmed of spaces, tabs and line breaks, 1 to 24 characters, no line break inside, unique per workspace ignoring case), `color` (`sky`, `amber`, `pink`, `green`, `violet` or `slate`), `revision` (a stale edit gets `CONFLICT`), `created_by_person_id`, `updated_by_person_id`. Three starters per workspace. Staff-only; written only by `vitally_save_label`; never deleted; published to Realtime |
+| `case_label_links` | Which labels a case carries (051) | Primary key `(case_id, label_id)`; `active`, `changed_by_person_id`, `changed_at`. Removing a label sets `active` to false and adding it again sets it to true, so the row keeps who and when. Staff-only; written only by `vitally_set_case_label`; published to Realtime |
 | `contact_log` | The current version of each logged contact | One row per entry on any case: `direction`, `contacted_at` (an instant), `with_whom` (+ `other_name`), `method`, `purpose`, `outcome`, `note`, `followup_id` (null unless logged from a task), `logged_by_*`, `logged_at`, its own `revision`, `edited_at`. The outcome must fit the method. Staff-only; written only by the two contact functions; published to Realtime |
 | `contact_log_versions` | Every version of every entry | Primary key `(contact_id, version)`; version 1 is written with the entry, each edit appends the next. Never updated or deleted by a function, so history cannot be rewritten. Staff-only; published to Realtime |
 | `reviews` | One review attempt of one preparation version | `status`: `active`, `corrections_requested`, `approved`, `superseded`; one active per case; `findings`, `resolution`, `client_contact_*` |
@@ -261,6 +266,8 @@ claimable cases) is a later change; see the [roadmap](production-roadmap.md#1-st
 | `document_requests`, `documents`, `client_events`, `case_contacts`, `case_document_cards` | On own cases | On visible cases (so a client's own draft's cards only after submit) |
 | `case_materials` | Nothing | On visible cases |
 | `case_events`, `preparation_participants`, `admin_followups`, `contact_log`, `contact_log_versions`, `reviews` | Nothing | On visible cases |
+| `case_labels` | Nothing | Every label of the workspace (051) |
+| `case_label_links` | Nothing | On visible cases (051) |
 | `contact_attempts` | Nothing | On visible cases (empty) |
 | `preparer_questionnaires`, `reviewer_questionnaires` | Nothing | On visible cases |
 | `assistance_items` | Nothing | All unlinked items, and items on visible cases |
@@ -288,7 +295,7 @@ policy and `vitally_private.lock_case` (which applies the same rule to writes) i
 
 ## The action API
 
-Browsers can call exactly twenty-two functions. Each runs as its owner (`SECURITY DEFINER`), checks the
+Browsers can call exactly twenty-four functions. Each runs as its owner (`SECURITY DEFINER`), checks the
 caller itself, and returns a JSON receipt.
 
 | Function | Purpose | Returns |
@@ -306,19 +313,22 @@ caller itself, and returns a JSON receipt.
 | `vitally_mark_updates(p_update_ids uuid[], p_confirm boolean)` | Record that the caller read up to 200 updates in their feed, and with `p_confirm` that they confirmed them (049; any staff member). No receipt: a repeat changes nothing | `{marked}` |
 | `vitally_my_updates()` | The caller's feed, pinned first and then newest first (049; any staff member) | `{items, unread}` |
 | `vitally_posted_updates()` | Every update in the workspace, with its live audience and counts (049; ceiling admins) | `{updates}` |
+| `vitally_save_label(p_action_id uuid, p_label_id uuid, p_expected_revision bigint, p_label jsonb)` | Create or edit a case label (051; admins only; `p_label` is `{name, color}`; no id and no revision creates, an id with its revision edits) ([below](#case-labels)) | `{actionId, labelId, revision}` |
+| `vitally_set_case_label(p_action_id uuid, p_case_id uuid, p_label_id uuid, p_on boolean)` | Put a label on a case or take it off (051; an admin or follow-up holder, or the case's preparer or reviewer) | `{actionId, caseId, labelId, on}` |
+
 
 None of them takes a person parameter (043 removed `p_person_id`). The database decides who
 the caller acts as ([below](#who-is-acting)).
 
 The exact signatures are pinned by a test ([`tests/support/rpc-signatures.mjs`](../../tests/support/rpc-signatures.mjs)),
-so adding a fourteenth function or changing an argument fails the database suite until the list is
+so adding a twenty-fifth function or changing an argument fails the database suite until the list is
 updated.
 
 ### Who is acting
 
-Six entry points act as a person: `vitally_apply_action`, `vitally_close_unsigned`,
-`vitally_assistance_action`, `vitally_create_case` (assisted mode), `vitally_log_contact` and
-`vitally_edit_contact`. None takes a person parameter. Each calls the private
+Eight entry points act as a person: `vitally_apply_action`, `vitally_close_unsigned`,
+`vitally_assistance_action`, `vitally_create_case` (assisted mode), `vitally_log_contact`,
+`vitally_edit_contact`, `vitally_save_label` and `vitally_set_case_label` (051). None takes a person parameter. Each calls the private
 `vitally_private.acting_person(member)` right after it finds the membership, **before** it
 computes the request digest and reserves the receipt, then uses the person it returns. The receipt,
 case history, participation, reviews and contact log all name the staff member's own person.
@@ -365,10 +375,10 @@ and the behaviour in the canonical spec
   commit, in any season, so one transaction may write roles and certificates in either order.
 - **Cleared** (`vitally_private.cleared`): the current-season roster entry has a role, and is not
   `is_new` or has `photo_id_checked_at` set.
-- **The read gate.** The staff branch of the 21 case-data policies also requires
+- **The read gate.** The staff branch of the 23 case-data policies (045's 21 and 051's two label policies) also requires
   `workspace_id = (select vitally_policy.cleared_workspace_id())`, run once per statement. `people`
   is not gated, so an uncleared staff member still reads the staff names.
-- **The action gate.** The six case RPCs call `vitally_private.require_cleared` right after
+- **The action gate.** The eight case RPCs (051's two label RPCs included) call `vitally_private.require_cleared` right after
   `acting_person`, before any lookup or receipt: an uncleared staff member gets `VT009`
   `NOT_CLEARED`, a replay included. A client is not checked.
 - **Effective capabilities.** The caller acts with the capabilities of their current-season roles
@@ -753,6 +763,32 @@ stage. It lives beside the case workflow, not inside it:
 
 The screens are described in [Front end: the contact log](frontend.md#the-contact-log).
 
+## Case labels
+
+Staff tag a case with short colored labels (051). A workspace has its own labels and starts with City
+Tax, MFS and Multi-state; an admin makes more.
+
+- **Who changes a label.** `vitally_save_label` is for staff with the `admin` capability. No function
+  deletes a label, a browser role has no write grant on either table, and `service_role` has no
+  grant on them at all (as on 049's tables).
+- **Who labels a case.** `vitally_set_case_label` is for staff with `admin` or `followup`, or the
+  case's current preparer or reviewer. Setting what is already set succeeds and writes nothing.
+  A closed case cannot be changed.
+- **Check order.** Both functions resolve the acting person and refuse an uncleared staff member
+  first (`VT009` `NOT_CLEARED`), then check the caller:
+  - `vitally_save_label`: `FORBIDDEN` unless an admin; the `{name, color}` payload (`VALIDATION`);
+    reserve the receipt (a replay returns it); for an edit, the label is in the workspace
+    (`NOT_FOUND`), its revision matches (`CONFLICT`) and the name is free (`VALIDATION`).
+  - `vitally_set_case_label`: `FORBIDDEN` for a client; reserve the receipt; lock the case through
+    the visibility rule (`NOT_FOUND`); `FORBIDDEN` unless the person works on the case; the label is
+    in the case's workspace (`VALIDATION`); `INVALID_TRANSITION` for a closed case.
+- **What a change writes.** A real change sets the link and adds a `case_events` row,
+  `ADD_CASE_LABEL` or `REMOVE_CASE_LABEL`. It does not touch `cases.revision` or `updated_at`, so a
+  form open on the case still saves and the case pool's order does not move. A label save writes no
+  case history.
+
+The screens are described in [Front end: case labels](frontend.md#case-labels).
+
 ## Check order and error codes
 
 Every case action runs the same checks in the same order. The order is part of the contract: it
@@ -800,13 +836,13 @@ exceptions from an application path; the browser would show them as `SERVER_ERRO
 
 ## Realtime
 
-Twenty tables are published to `supabase_realtime`, INSERT and UPDATE only. `007_realtime_publication.sql`
+Twenty-two tables are published to `supabase_realtime`, INSERT and UPDATE only. `007_realtime_publication.sql`
 adds twelve: `cases`, `document_requests`, `documents`, `client_events`, `workspaces`, `people`,
 `preparation_participants`, `admin_followups`, `contact_attempts`, `case_events`,
 `assistance_items`, `reviews`. `011` adds `case_contacts`, `013` adds `case_materials` and `017` adds `case_document_cards`.
-`031` adds `contact_log` and `contact_log_versions` and removes `contact_attempts`; `033` adds the two questionnaire tables and `039` adds `preparer_shaded_fields`.
+`031` adds `contact_log` and `contact_log_versions` and removes `contact_attempts`; `033` adds the two questionnaire tables and `039` adds `preparer_shaded_fields`; `051` adds `case_labels` and `case_label_links`.
 `044` adds nothing: `volunteer_profiles`, `roster_entries` and `certificates` are not published, because Realtime sends whole rows and the records are admin-only; the Roster loads on opening and after each save. `049` adds `posted_updates`, so an open window re-reads its feed when an update is posted, edited or unpublished (the audience hears of an unpublished update's changes for 10 minutes after Unpublish, the policy's window). `update_reads` is deliberately not published: reads are frequent and would wake every admin window, so the admin's table re-reads on opening, on focus and after each save instead. `action_receipts` is not published. An applicant's window watches seven of them (`CLIENT_TABLES`),
-a staff window's all twenty (`STAFF_TABLES`).
+a staff window's all twenty-two (`STAFF_TABLES`).
 
 Realtime applies each subscriber's RLS, so the same visibility rules hold for events. Deletes are
 not published because a deleted row cannot be authorized. The browser treats events as "something
@@ -922,7 +958,7 @@ and a case is created with no answers (`vitally_create_case` refuses any other `
 
 ## Testing
 
-The database suite (`tests/database*.mjs`, 448 tests) runs against the local stack only. Each test
+The database suite (`tests/database*.mjs`, 599 tests) runs against the local stack only. Each test
 file builds a throwaway workspace with fresh synthetic accounts through
 [`tests/support/database-fixture.mjs`](../../tests/support/database-fixture.mjs) and deletes it
 afterwards, so tests are independent and leave your rehearsal workspace alone.
@@ -946,6 +982,7 @@ What the suite covers, by file:
 | `database-season-close.mjs` | `vitally_close_unsigned`: closing signing cases as Dismissed, all or nothing, refusals, replay, the receipt, and that unlisted cases are left alone |
 | `database-realtime.mjs` | Realtime privacy between clients and for staff tables |
 | `database-store.mjs` | The browser's data adapter against the real database |
+| `database-labels.mjs` | Case labels (051): the two tables, the starter labels and the backfill, who reads them, `vitally_save_label` and `vitally_set_case_label` (authority, the check order, names and colors, a stale edit, closed cases, replay), that a label change leaves the case row alone, and Realtime |
 | `database-shaded.mjs` | The shaded section (039): the table and its RLS, `check_preparer_fields`, SAVE_PREPARER_FIELDS (authority, stages, the version guard, season and household rules, history without a client event), Realtime, and the samples |
 
 Every privileged connection passes the target guard in

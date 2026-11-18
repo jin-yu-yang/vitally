@@ -424,7 +424,8 @@ A cleared `staff` member (capability `volunteer-clearance`) SHALL be able to rea
 - participation, follow-ups and assistance items;
 - reviews, and preparer and reviewer questionnaires;
 - filing attempts, returns and notes;
-- materials, document cards, contacts and the contact log.
+- materials, document cards, contacts and the contact log;
+- case labels and the labels on each case.
 
 A cleared staff member SHALL receive the Realtime changes for those rows. A staff member who is not cleared SHALL read none of those rows and SHALL receive none of their changes. A staff member SHALL read nothing in another workspace.
 

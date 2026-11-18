@@ -1,8 +1,9 @@
 import { STAGES, CLOSING_REASONS } from "./contracts.mjs";
 import { phaseTab, describeStage, CLOSING_REASON_NAMES } from "./domain.mjs";
 import { clientLanguages, languageOptions, languageSummary, speaksLanguage, serviceLabel } from "./intake-catalogue.mjs";
-import { esc, icon, button, relativeDay, stageBadge, clientNumberTag, languageCell, loadingLine, unloadedLine, emptyState } from "./ui.mjs";
-import { listPhone, when } from "./staff-views.mjs";
+import { esc, icon, button, labelChip, relativeDay, stageBadge, clientNumberTag, languageCell, loadingLine, unloadedLine, emptyState } from "./ui.mjs";
+import { sortLabels } from "./case-labels.mjs";
+import { listPhone, rowLabels, when } from "./staff-views.mjs";
 
 export const POOL_TABS = Object.freeze([
   ["all", "All cases"],
@@ -20,7 +21,7 @@ const TAB_VALUES = Object.freeze(POOL_TABS.map(([value]) => value));
 export const POOL_STAGES = STAGES;
 export const DEFAULT_POOL_FILTERS = Object.freeze({
   poolPhase: "all", poolStage: "all", poolLanguage: "all",
-  poolService: "all", poolPreparer: "all", poolReviewer: "all", poolReason: "all",
+  poolService: "all", poolLabel: "all", poolPreparer: "all", poolReviewer: "all", poolReason: "all",
 });
 export const POOL_FILTER_KEYS = Object.freeze(Object.keys(DEFAULT_POOL_FILTERS));
 
@@ -42,7 +43,7 @@ export function poolPhase(record) {
   return phaseTab(record);
 }
 
-export function poolFilters(filters) {
+export function poolFilters(filters, labels = []) {
   const chosen = { ...DEFAULT_POOL_FILTERS };
   for (const key of POOL_FILTER_KEYS) {
     const value = String(filters?.[key] ?? "").trim();
@@ -50,6 +51,7 @@ export function poolFilters(filters) {
   }
   if (!TAB_VALUES.includes(chosen.poolPhase)) chosen.poolPhase = "all";
   if (chosen.poolStage !== "all" && !POOL_STAGES.includes(chosen.poolStage)) chosen.poolStage = "all";
+  if (chosen.poolLabel !== "all" && chosen.poolLabel !== "none" && !labels.some((l) => l.id === chosen.poolLabel)) chosen.poolLabel = "all";
   // The reason filter belongs to the Closed tab: anywhere else it is "all".
   if (chosen.poolPhase !== "closed" || !POOL_REASONS.includes(chosen.poolReason)) chosen.poolReason = "all";
   return chosen;
@@ -72,6 +74,8 @@ const matchesReason = (record, chosen) =>
 
 const matchesValue = (value, chosen, labelOf = (v) => v) =>
   chosen === "all" || labelOf(value ?? "") === labelOf(chosen);
+const matchesLabel = (record, chosen) =>
+  chosen === "all" || (chosen === "none" ? !record?.labels?.length : (record?.labels ?? []).some((l) => l.id === chosen));
 const matchesPerson = (id, chosen) =>
   chosen === "all" || (chosen === "unassigned" ? !id : id === chosen);
 
@@ -83,6 +87,7 @@ export function filterPool(cases = [], chosen, { ignorePhase = false } = {}) {
       (ignorePhase || matchesReason(record, chosen.poolReason)) &&
       speaksLanguage(clientLanguages(record?.answers), chosen.poolLanguage) &&
       matchesValue(record?.answers?.service, chosen.poolService, serviceLabel) &&
+      matchesLabel(record, chosen.poolLabel) &&
       matchesPerson(record?.preparerId, chosen.poolPreparer) &&
       matchesPerson(record?.reviewerId, chosen.poolReviewer),
   );
@@ -134,7 +139,7 @@ const who = (name, id) => (id ? esc(name ?? "Unknown") : `<span class="unassigne
 
 function poolRow(record, now, person) {
   const phase = TAB_LABELS[poolPhase(record)];
-  return `<tr class="pool-row"><th scope="row">${clientNumberTag(record)}<button class="board-reference" data-action="open-case" data-case-id="${esc(record.id)}">${esc(record.reference)}</button></th><td>${stageBadge(record.stage, "en", { record })}${
+  return `<tr class="pool-row"><th scope="row">${clientNumberTag(record)}<button class="board-reference" data-action="open-case" data-case-id="${esc(record.id)}">${esc(record.reference)}</button>${rowLabels(record)}</th><td>${stageBadge(record.stage, "en", { record })}${
     phase ? `<span class="pool-phase">${esc(phase)}</span>` : ""
   }</td><td>${listPhone(record, person, "pool-phone")}</td><td>${languageCell(languageSummary(clientLanguages(record?.answers)))}</td><td>${esc(serviceLabel(record?.answers?.service) || "—")}</td><td>${who(record.preparerName, record.preparerId)}</td><td>${who(record.reviewerName, record.reviewerId)}</td><td class="board-updated">${esc(
     record.updatedAt ? relativeDay(record.updatedAt, now) : "No updates yet",
@@ -149,7 +154,7 @@ export function renderCasePool(cases = [], people = [], ui = {}) {
   const all = Array.isArray(cases) ? cases : [];
   const now = ui.now ?? Date.now();
   const person = ui.person ?? null;
-  const chosen = poolFilters(ui.filters);
+  const chosen = poolFilters(ui.filters, ui.labels ?? []);
   const counts = poolCounts(all, chosen);
   const shown = filterPool(all, chosen).sort(
     (a, b) => (Date.parse(b?.updatedAt) || 0) - (Date.parse(a?.updatedAt) || 0),
@@ -171,7 +176,11 @@ export function renderCasePool(cases = [], people = [], ui = {}) {
     filterSelect("Closed reason", "poolReason", chosen.poolReason, REASON_OPTIONS),
   )}${filterSelect("Language", "poolLanguage", chosen.poolLanguage, languageOptions(all, "Any language"))}${filterSelect(
     "Service", "poolService", chosen.poolService, valueOptions(all, "service", "Any service", serviceLabel),
-  )}${filterSelect("Prepared by", "poolPreparer", chosen.poolPreparer, personOptions(people))}${filterSelect(
+  )}${filterSelect("Label", "poolLabel", chosen.poolLabel, [
+    ["all", "Any label"],
+    ...sortLabels(ui.labels ?? []).map((label) => [label.id, label.name]),
+    ["none", "No label"],
+  ])}${filterSelect("Prepared by", "poolPreparer", chosen.poolPreparer, personOptions(people))}${filterSelect(
     "Reviewed by", "poolReviewer", chosen.poolReviewer, personOptions(people),
   )}</div>`;
   const summary = `<p class="pool-summary"><span role="status">Showing ${shown.length} of ${all.length} cases</span> ${

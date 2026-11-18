@@ -134,10 +134,10 @@ test("the pool shows ten phase tabs with counts and pressed state", () => {
   assert.match(html, /data-value="all"[^>]*>All cases <span class="count">5<\/span><\/button>/);
 });
 
-test("five filter dropdowns each have a label and no blank choice", () => {
+test("six filter dropdowns each have a label and no blank choice", () => {
   const html = render({ poolPreparer: "p-alex" });
   const selects = [...html.matchAll(/<select[^>]*data-board-filter="(\w+)"[^>]*>(.*?)<\/select>/g)];
-  assert.deepEqual(selects.map((m) => m[1]), ["poolStage", "poolLanguage", "poolService", "poolPreparer", "poolReviewer"]);
+  assert.deepEqual(selects.map((m) => m[1]), ["poolStage", "poolLanguage", "poolService", "poolLabel", "poolPreparer", "poolReviewer"]);
   for (const [, key, options] of selects) {
     assert.match(html, new RegExp(`<label[^>]*for="field-${key}"`));
     assert.doesNotMatch(options, /Select an option/);
@@ -379,4 +379,51 @@ test("the Prepared by and Reviewed by filters skip a person with no capabilities
     assert.match(select, /<option value="p-sam">Sam<\/option>/);
     assert.doesNotMatch(select, /p-ren|Ren/);
   }
+});
+
+// ---- Case labels -----------------------------------------------------------
+const LBL = [
+  { id: "l-multi", name: "Multi-state", color: "blue", revision: 1 },
+  { id: "l-city", name: "City Tax", color: "green", revision: 1 },
+  { id: "l-mfs", name: "MFS", color: "red", revision: 1 },
+];
+const LABELED = [
+  rec("L1", "received", { labels: [{ id: "l-multi", name: "Multi-state", color: "blue" }] }),
+  rec("L2", "received", { labels: [] }),
+  rec("L3", "received"),
+];
+const POOL_ALL = { poolPhase: "all", poolStage: "all", poolLanguage: "all", poolService: "all", poolPreparer: "all", poolReviewer: "all", poolReason: "all", poolLabel: "all" };
+
+test("the pool filters by label, and counts follow", () => {
+  const byLabel = filterPool(LABELED, { ...POOL_ALL, poolLabel: "l-multi" });
+  assert.deepEqual(byLabel.map((r) => r.id), ["L1"]);
+  assert.deepEqual(filterPool(LABELED, { ...POOL_ALL, poolLabel: "none" }).map((r) => r.id), ["L2", "L3"]);
+  assert.equal(poolCounts(LABELED, { ...POOL_ALL, poolLabel: "l-multi" }).all, 1);
+});
+
+test("the Label dropdown lists Any label, each label by name, No label", () => {
+  const html = renderCasePool(LABELED, PEOPLE, { filters: {}, now: NOW, labels: LBL });
+  const select = html.match(/<label[^>]*for="field-poolLabel"[\s\S]*?<\/label>/)[0];
+  assert.match(select, /<span>Label<\/span>/);
+  assert.deepEqual([...select.matchAll(/<option[^>]*>([^<]*)</g)].map((m) => m[1]), ["Any label", "City Tax", "MFS", "Multi-state", "No label"]);
+  assert.ok(html.indexOf("field-poolService") < html.indexOf("field-poolLabel"));
+});
+
+test("choosing a label shows Clear filters, and an unknown id falls back to all", () => {
+  const html = renderCasePool(LABELED, PEOPLE, { filters: { poolLabel: "l-multi" }, now: NOW, labels: LBL });
+  assert.match(html, /Clear filters/);
+  assert.doesNotMatch(renderCasePool(LABELED, PEOPLE, { filters: {}, now: NOW, labels: LBL }), /Clear filters/);
+  assert.equal(poolFilters({ poolLabel: "unknown-id" }, LBL).poolLabel, "all");
+  assert.equal(poolFilters({ poolLabel: "none" }, LBL).poolLabel, "none");
+  assert.equal(poolFilters({ poolLabel: "l-mfs" }, LBL).poolLabel, "l-mfs");
+});
+
+test("a pool row shows read-only chips under the reference, and none when unlabelled", () => {
+  const html = renderCasePool(
+    [rec("M", "received", { labels: [{ id: "l-mfs", name: "MFS", color: "red" }] }), rec("N", "received")],
+    PEOPLE, { filters: {}, now: NOW, labels: LBL });
+  const [, mRow, nRow] = html.split('<tr class="pool-row">');
+  assert.match(mRow, /board-reference[^>]*>VT-M<\/button>[\s\S]*class="case-label"[^>]*>MFS</);
+  assert.doesNotMatch(mRow, /case-label-remove/);
+  assert.doesNotMatch(nRow, /case-label/);
 });

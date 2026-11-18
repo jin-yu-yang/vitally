@@ -6,20 +6,22 @@ import { openDatabase } from "../tools/admin/database.mjs";
 // Migrations 040 and 043 (OpenSpec changes remove-sample-case-tools and
 // remove-presenter-access): the sample-case machinery and presenter access are
 // gone from the catalog, nothing that stays depends on them, the public API is
-// exactly the six RPCs, and the private functions stay out of every client's
+// exactly the ten RPCs, and the private functions stay out of every client's
 // reach. Every check reads the catalog over a plain connection; the refused
 // inserts run in a transaction that is rolled back.
 
-// The row-security policies at 049, by table and name. 043 renames the
+// The row-security policies at 051, by table and name. 043 renames the
 // sixteen staff-only policies and drops or adds none; 044 adds the three
 // admin-only Roster policies; 047 adds the admin-only accounts policy;
 // 049 adds the two posted_updates policies (an admin's and the audience's).
-// update_reads has none.
+// 051 adds the two staff-only case label policies. update_reads has none.
 const POLICIES = Object.freeze([
   ["accounts", "admin_accounts"],
   ["admin_followups", "staff_admin_followups"],
   ["assistance_items", "staff_assistance_items"],
   ["case_contacts", "visible_case_contacts"],
+  ["case_label_links", "staff_read_case_label_links"],
+  ["case_labels", "staff_read_case_labels"],
   ["certificates", "admin_certificates"],
   ["case_document_cards", "visible_case_document_cards"],
   ["case_events", "staff_case_events"],
@@ -47,7 +49,7 @@ const POLICIES = Object.freeze([
   ["volunteer_profiles", "admin_volunteer_profiles"],
   ["workspaces", "member_workspace"],
 ]);
-// The twenty-two public RPCs after 049, by name and identity arguments.
+// The twenty-four public RPCs after 051, by name and identity arguments.
 const RPCS = Object.freeze([
   "vitally_apply_action(p_action_id uuid, p_case_id uuid, p_expected_revision bigint, p_type text, p_payload jsonb)",
   "vitally_assistance_action(p_action_id uuid, p_item_id uuid, p_expected_revision bigint, p_type text, p_note text)",
@@ -56,6 +58,8 @@ const RPCS = Object.freeze([
   "vitally_log_contact(p_action_id uuid, p_case_id uuid, p_followup_id uuid, p_entry jsonb)",
   "vitally_edit_contact(p_action_id uuid, p_contact_id uuid, p_expected_revision bigint, p_entry jsonb)",
   "vitally_save_volunteer(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_volunteer jsonb)",
+  "vitally_save_label(p_action_id uuid, p_label_id uuid, p_expected_revision bigint, p_label jsonb)",
+  "vitally_set_case_label(p_action_id uuid, p_case_id uuid, p_label_id uuid, p_on boolean)",
   "vitally_my_clearance()",
   "vitally_prepare_account(p_action_id uuid, p_op text, p_target jsonb)",
   "vitally_record_account(p_action_id uuid, p_op text, p_target jsonb, p_user_id uuid)",
@@ -181,7 +185,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
     });
 
-    await t.test("the public API is exactly twenty-two RPCs", async () => {
+    await t.test("the public API is exactly twenty-four RPCs", async () => {
       const { rows } = await sql(
         `select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as signature
            from pg_proc p where p.pronamespace='public'::regnamespace`,
