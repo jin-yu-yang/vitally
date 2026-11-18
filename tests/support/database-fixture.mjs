@@ -231,10 +231,10 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
   // Workspace setup is one serializable transaction over a people table small
   // enough that every workspace shares an index page, so test files starting
   // together see serialization failures that outlast the initializer's three
-  // retries. Every setup call — the fixture's own and the direct
-  // `initializeWorkspace` calls in tests/database.mjs — runs inside this
-  // session-level advisory lock, held on the fixture's own connection and
-  // never during a test. A deliberately concurrent pair belongs inside one
+  // retries. Every setup call — the fixture's own (including `enrich`), and the
+  // direct `initializeWorkspace` and `extendTestWorkspace` calls in
+  // tests/database.mjs — runs inside this session-level advisory lock, held on
+  // the fixture's own connection and never during a test. A deliberately concurrent pair belongs inside one
   // call so the pair still races itself (Ruling R26). Nothing in the product,
   // the initializer or the migrations changes.
   f.withSetupLock = async (body) => {
@@ -479,13 +479,17 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
   // (contracts, "Test-only people and capabilities"). Returns the added
   // people's ids keyed by person_key. After any enrichment the normal
   // initializer rejects this workspace, by design.
+  // Under the setup lock like every other setup call (#193): its serializable
+  // transaction otherwise races other files' setup and can exhaust its retries.
   f.enrich = async ({ addPeople = [], addCapabilities = [] } = {}) => {
-    const { people } = await extendTestWorkspace({
-      runManifest,
-      workspaceId: f.workspaceId,
-      addPeople,
-      addCapabilities,
-    });
+    const { people } = await f.withSetupLock(() =>
+      extendTestWorkspace({
+        runManifest,
+        workspaceId: f.workspaceId,
+        addPeople,
+        addCapabilities,
+      }),
+    );
     // The new people and the people given a capability keep matching roles
     // and confirmed certificates, so the clearance gates treat them as cleared.
     const touched = new Set([

@@ -1,7 +1,7 @@
 # posted-updates Specification
 
 ## Purpose
-TBD - created by archiving change add-posted-updates. Update Purpose after archive.
+Notifications and Post an update: short updates a ceiling admin writes for staff on the current season's roster (everyone, or chosen roles), with the audience resolved live. It covers who may write them and how they are validated, the draft, posted and unpublished states (only drafts are deleted; an unpublished update stays editable and readable to its audience for 10 minutes), the feed and its read state, which staff can read the rows, live delivery to open staff windows, the Post an update screen with its preview and table, the confirmations for Unpublish and Delete, and the Notifications entry with its unread badge in every staff sidebar.
 
 ## Requirements
 
