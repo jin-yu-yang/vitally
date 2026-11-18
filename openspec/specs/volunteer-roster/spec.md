@@ -1,7 +1,7 @@
 # volunteer-roster Specification
 
 ## Purpose
-The admin-only Roster under Volunteers: the season's list of volunteers with their contact details, ways of working, languages, recorded roles and certificate ticks, its search and role filter, and the drawer that adds and edits a volunteer. It covers who can open the screen and read its records (admins of the workspace only, through a caller-only admin check), the one RPC that writes them, the people a volunteer with no sign-in is hidden from, the backfill of existing staff, and the rule that roles and certificates are records only and grant no capability.
+The admin-only Roster under Volunteers: the season's list of volunteers with their contact details, ways of working, languages, roles, confirmed certificates and whether each is cleared, its search and role filter, and the drawer that adds and edits a volunteer. It covers who can open the screen and read its records (admins of the workspace only, through a caller-only admin check), the one RPC that writes them, the people a volunteer with no sign-in is hidden from, the backfill of existing staff, and the rule that a save cannot take away what a person's open work needs. Which roles a person may hold, and what they then may do, is the `volunteer-clearance` capability.
 
 ## Requirements
 

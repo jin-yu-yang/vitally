@@ -1,7 +1,7 @@
 # volunteer-clearance Specification
 
 ## Purpose
-TBD - created by archiving change add-volunteer-clearance. Update Purpose after archive.
+Who may work on cases this season. A role exists only once its certificates are confirmed, and a staff member is cleared only with at least one current-season role (and, if new, a photo ID check). It covers the certificates each role needs, the effective capabilities that come from a person's roles within the `people.capabilities` ceiling, the database gate that keeps an uncleared staff member from reading case data or using the case RPCs (`NOT_CLEARED`), the caller's own clearance answer, the setup screen an uncleared staff member sees, buttons that follow effective capabilities, the rule that staff assign work only to a cleared person, and the migration that removed unsupported roles.
 
 ## Requirements
 
