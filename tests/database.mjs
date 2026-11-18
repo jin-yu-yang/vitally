@@ -569,6 +569,8 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
     await t.test(
       "test enrichment is additive, idempotent, scoped and permanently blocks normal initializer",
       async () => {
+        // Each call under the setup lock, like the fixture's own setup (#193).
+        const extend = (input) => f.withSetupLock(() => extendTestWorkspace(input));
         const addition = {
           runManifest: f.runManifest,
           workspaceId: f.workspaceId,
@@ -577,13 +579,13 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
           ],
           addCapabilities: [{ personId: f.preparerId, capability: "review" }],
         };
-        const result = await extendTestWorkspace(addition);
+        const result = await extend(addition);
         const before = await f.snapshot();
-        assert.deepEqual(await extendTestWorkspace(addition), result);
+        assert.deepEqual(await extend(addition), result);
         assert.deepEqual(await f.snapshot(), before);
         await assert.rejects(
           () =>
-            extendTestWorkspace({
+            extend({
               ...addition,
               addCapabilities: [
                 { personId: f.foreignStaffId, capability: "review" },
@@ -593,7 +595,7 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
         );
         await assert.rejects(
           () =>
-            extendTestWorkspace({
+            extend({
               ...addition,
               addPeople: [
                 { key: "casey", name: "Wrong", capabilities: ["prepare"] },
@@ -603,7 +605,7 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
         );
         await assert.rejects(
           () =>
-            extendTestWorkspace({
+            extend({
               ...addition,
               addCapabilities: [
                 { personId: f.preparerId, capability: "root" },
@@ -620,7 +622,7 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
         assert.deepEqual(await f.snapshot(), before);
         await assert.rejects(
           () =>
-            extendTestWorkspace({
+            extend({
               ...addition,
               workspaceId: crypto.randomUUID(),
             }),
@@ -628,7 +630,7 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
         );
         await assert.rejects(
           () =>
-            extendTestWorkspace({
+            extend({
               ...addition,
               runManifest: { runId: f.runManifest.runId },
             }),
@@ -636,7 +638,7 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
         );
         await assert.rejects(
           () =>
-            extendTestWorkspace({ ...addition, removePeople: [f.siteCoordinatorId] }),
+            extend({ ...addition, removePeople: [f.siteCoordinatorId] }),
           rejected("VALIDATION"),
         );
         await f.sql(
@@ -645,7 +647,7 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
         );
         try {
           await assert.rejects(
-            () => extendTestWorkspace(addition),
+            () => extend(addition),
             rejected("VALIDATION"),
           );
         } finally {
