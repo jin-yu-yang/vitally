@@ -1,0 +1,47 @@
+# Dependabot opens pull requests for dependency updates. It never merges:
+# each PR runs CI and waits for a person, like any other PR.
+#
+# Not updated here, because CLAUDE.md routes their upgrades through an
+# OpenSpec change: Supabase (the CLI and @supabase/supabase-js), pdf-lib and
+# opencc-js. Major versions of everything else are left out too, since a
+# breaking upgrade also needs a change; Dependabot still opens security
+# updates for them when GitHub's security updates are turned on.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/New_York
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "Deps"
+    ignore:
+      - dependency-name: "supabase"
+      - dependency-name: "@supabase/supabase-js"
+      - dependency-name: "pdf-lib"
+      - dependency-name: "@pdf-lib/*"
+      - dependency-name: "opencc-js"
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/test-stack
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/New_York
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "CI"
+    groups:
+      actions:
+        patterns: ["*"]
