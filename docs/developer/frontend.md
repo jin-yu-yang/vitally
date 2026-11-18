@@ -504,17 +504,17 @@ in the browser from an approval's reviewer questionnaire, and nothing is uploade
   shown in the office panel and beside the volunteer's "Download Exit Form" button, and only when
   the return was corrected. The PDF itself carries no note, only the blanks. Without staff history,
   no form is offered. Fixed in
-  [#173](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/173). Still open:
-  [#203](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/203) (collect the corrected
+  [#173](https://github.com/jin-yu-yang/vitally/issues/173). Still open:
+  [#203](https://github.com/jin-yu-yang/vitally/issues/203) (collect the corrected
   values at Return to signing) and
-  [#204](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/204) (the review-contact
+  [#204](https://github.com/jin-yu-yang/vitally/issues/204) (the review-contact
   line after a Return to signing).
 - **Who may make it.** `viewExitForm` in `app.mjs` returns at once for anything but a staff window
   (`isStaffWindow`). Like the drafts, it opens a new tab and, if the browser blocks the tab,
   offers a link instead (`draftOffers`). A blocked tab's link is drawn on the Intake answers tab, so
   it can't be seen from Overview, it ends after about 60 seconds, and it doesn't exist for a
   volunteer who can't see the contact details
-  ([#122](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/122)).
+  ([#122](https://github.com/jin-yu-yang/vitally/issues/122)).
 - **What goes on it.** `exitFormMarks(questionnaire, header, today)` in
   [`src/exit-form.mjs`](../../src/exit-form.mjs) decides everything, with no DOM. Its questionnaire comes from `exitFormSource`. `buildExitFormPdf`
   then draws it on the blank template.
@@ -530,7 +530,7 @@ in the browser from an approval's reviewer questionnaire, and nothing is uploade
     draw (Chinese, or a letter like "ễ"), which is then drawn entirely in the downloaded font. The header and the
     amounts are larger than the form's 12 pt labels, the Remarks start at 12 pt, and a debit date
     is drawn at 6.5 pt because its place is small
-    ([#122](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/122)).
+    ([#122](https://github.com/jin-yu-yang/vitally/issues/122)).
 - **The template.** `src/forms/exit-form-pcdc.pdf` (`EXIT_FORM_FILE`) has no form fields, so every
   value goes at a fixed place in `EXIT_FORM_LAYOUT`, measured in points from the page's top-left
   corner. A new version of PCDC's form means measuring those places again. The local server
@@ -539,7 +539,7 @@ in the browser from an approval's reviewer questionnaire, and nothing is uploade
   it, because a Word export carries the author's name. The generated PDF's author is blank too.
 - **Fonts.** The Other Tax rows are bilingual, so every Exit Form fetches the Traditional Chinese
   Noto font, with the drafts' pinned, checked files (`draftFontFiles`). If that fails, no form is
-  made ([#122](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/122)).
+  made ([#122](https://github.com/jin-yu-yang/vitally/issues/122)).
 - **Privacy.** Nothing about a bank account is drawn, because none is stored
   (`review-and-corrections`).
 - **Tests.** `tests/exit-form-source.test.mjs` pins the source rule and the note. `tests/exit-form.test.mjs` covers the marks, builds real PDFs, and pins long Remarks
