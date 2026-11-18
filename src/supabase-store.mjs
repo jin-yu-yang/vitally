@@ -2,9 +2,10 @@ import { createAppError } from "./errors.mjs";
 import { SQLSTATE_ERROR_CODES } from "./contracts.mjs";
 import { isAuthTransportError } from "./auth.mjs";
 import { combineVolunteers } from "./volunteer-roster.mjs";
+import { sortLabels } from "./case-labels.mjs";
 
 // The one data adapter. Everything the browser knows about the database goes
-// through this file: the seven RPCs, the RLS-scoped SELECT reads,
+// through this file: the ten RPCs, the RLS-scoped SELECT reads,
 // the Realtime subscription, and the single snake_case → camelCase mapping
 // that turns rows into the objects `src/contracts.mjs` documents. No DOM, no
 // controller state, no auth. The Supabase client is injected (Ruling R33).
@@ -44,6 +45,8 @@ const STAFF_TABLES = Object.freeze([
   "preparer_questionnaires",
   "reviewer_questionnaires",
   "preparer_shaded_fields",
+  "case_labels",
+  "case_label_links",
   "posted_updates",
 ]);
 export const SUBSCRIBED_TABLES = Object.freeze({
@@ -351,6 +354,29 @@ export function createStore(client) {
 
   const call = (name, args) => settled(client.rpc(name, args));
 
+  // Case labels (staff only): the workspace's labels and the active links of
+  // the given cases, joined here. Returns a function from case id to that
+  // case's sorted `{id, name, color}` list; a link to a missing label is dropped.
+  const readCaseLabels = async (caseIds) => {
+    const labelRows = await read(client.from("case_labels").select("id,name,color"));
+    const links = await read(
+      client
+        .from("case_label_links")
+        .select("case_id,label_id")
+        .in("case_id", caseIds)
+        .eq("active", true),
+    );
+    const byId = new Map(labelRows.map((row) => [row.id, row]));
+    return (caseId) =>
+      sortLabels(
+        links
+          .filter((link) => link.case_id === caseId)
+          .map((link) => byId.get(link.label_id))
+          .filter(Boolean)
+          .map(({ id, name, color }) => ({ id, name, color })),
+      );
+  };
+
   // The `accounts` Edge Function. A non-2xx answer is a FunctionsHttpError
   // whose `context` is the Response; its `{code, reason}` body is mapped to
   // the database's own SQLSTATE shape so one mapper serves both. A transport
@@ -575,11 +601,13 @@ export function createStore(client) {
           .order("logged_at", { ascending: false })
           .order("id", { ascending: false }),
       );
+      const labelsOf = await readCaseLabels(ids);
       const forCase = (rows, id) => rows.filter((row) => row.case_id === id);
       return cases.map((record) => {
         const open = forCase(followups, record.id);
         return {
           ...record,
+          labels: labelsOf(record.id),
           participants: forCase(participants, record.id).map((row) => row.person_id),
           openFollowups: open.length,
           // D13: Mark ready to e-file waits while the office's go-over is open.
@@ -651,7 +679,9 @@ export function createStore(client) {
         ),
       };
       if (!staff) return mapClientCase(client_);
-      return mapStaffCase({
+      const labelsOf = await readCaseLabels([id]);
+      return {
+        ...mapStaffCase({
         ...client_,
         participants: await relatedRows(
           "preparation_participants",
@@ -717,7 +747,9 @@ export function createStore(client) {
             .order("recorded_at")
             .order("id"),
         ),
-      });
+        }),
+        labels: labelsOf(id),
+      };
     },
 
     async createCase(request) {
@@ -873,6 +905,32 @@ export function createStore(client) {
         p_case_id: request.caseId,
         p_followup_id: request.followupId ?? null,
         p_entry: request.entry,
+      });
+    },
+
+    async listLabels() {
+      await requireStaffAccess();
+      const rows = await read(client.from("case_labels").select("id,name,color,revision"));
+      return sortLabels(
+        rows.map(({ id, name, color, revision }) => ({ id, name, color, revision: Number(revision) })),
+      );
+    },
+
+    async saveLabel(request) {
+      return await call("vitally_save_label", {
+        p_action_id: actionId(request),
+        p_label_id: request.labelId ?? null,
+        p_expected_revision: request.expectedRevision ?? null,
+        p_label: request.label,
+      });
+    },
+
+    async setCaseLabel(request) {
+      return await call("vitally_set_case_label", {
+        p_action_id: actionId(request),
+        p_case_id: request.caseId,
+        p_label_id: request.labelId,
+        p_on: request.on === true,
       });
     },
 

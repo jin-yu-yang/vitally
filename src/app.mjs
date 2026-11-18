@@ -1947,6 +1947,12 @@ if (!config) {
     return true;
   }
 
+  // Close the label menu; the keyboard returns to the button that opened it.
+  function closeLabelMenu() {
+    controller.closeLabelMenu();
+    root.querySelector('[data-action="open-label-menu"]')?.focus();
+  }
+
   async function runNavigation(action, target, by) {
     const state = controller.getState();
     switch (action) {
@@ -2282,6 +2288,36 @@ if (!config) {
         // from its own send, not a stale one left over from a previous try.
         controller.dismissError();
         openDialog("request-corrections");
+        break;
+      // The case header's label menu (change add-case-labels). The form's own
+      // fields are read here, from the page, when Save is pressed.
+      case "open-label-menu":
+        controller.openLabelMenu(target.dataset.caseId);
+        break;
+      case "close-label-menu":
+        closeLabelMenu();
+        break;
+      case "toggle-case-label":
+        await controller.toggleCaseLabel(
+          target.dataset.caseId,
+          target.dataset.labelId,
+          target.dataset.on === "true",
+        );
+        break;
+      case "edit-label":
+        controller.startLabelEdit(target.dataset.labelId || null);
+        break;
+      case "create-label":
+        controller.startLabelEdit(null, target.dataset.name ?? "");
+        break;
+      case "save-label":
+        await controller.saveLabelEdit({
+          name: root.querySelector('[name="label-name"]')?.value ?? "",
+          color: root.querySelector('[name="label-color"]:checked')?.value ?? null,
+        });
+        break;
+      case "cancel-label-edit":
+        controller.cancelLabelEdit();
         break;
       case "set-board-filter":
         controller.setBoardFilter(target.dataset.filter, target.dataset.value);
@@ -2663,6 +2699,13 @@ if (!config) {
     } else if (field.name === "workloadSearch") {
       // The Workload and its drawer filter the same way.
       keepTyping(field, "#workload-search", () => controller.setWorkloadView({ search: field.value }));
+    } else if (field.name === "label-name") {
+      // Kept in state, quietly, so a live redraw draws the typed text again.
+      controller.setLabelDraft({ name: field.value });
+    } else if (field.name === "label-color") {
+      controller.setLabelDraft({ color: field.value });
+    } else if (field.name === "label-search") {
+      keepTyping(field, "#label-search", () => controller.setLabelSearch(field.value));
     } else if (field.name === "assignSearch") {
       keepTyping(field, "#assign-search", () => controller.setAssignSearch(field.value));
     } else if (field.name === "lookup") controller.setLookup(field.value);
@@ -2822,6 +2865,13 @@ if (!config) {
   document.addEventListener("keydown", (event) => {
     // The shaded-section editor keeps its own keyboard (shaded-editor.mjs).
     if (shadedEditor) return;
+    // The label menu: Escape closes it and the keyboard goes back to its button.
+    if (event.key === "Escape" && controller.getState().labelMenu && !controller.getState().dialog) {
+      if (event.isComposing) return; // never block an IME's own cancel
+      event.preventDefault();
+      closeLabelMenu();
+      return;
+    }
     if (event.key === "Escape" && !controller.getState().dialog) {
       if (event.isComposing) return; // never block an IME's own cancel
       // applyPeek moves the keyboard to the toggle if it was in the sidebar.

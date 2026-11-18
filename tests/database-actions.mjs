@@ -889,6 +889,12 @@ test("installed entry points deny anonymous callers and serve members", async (t
             assistanceRevision: 1,
             contactCaseId,
             contactEntry: SAMPLE_CONTACT(),
+            labelId: (
+              await f.sql(
+                "select id from public.case_labels where workspace_id=$1 order by name limit 1",
+                [f.workspaceId],
+              )
+            ).rows[0].id,
           };
           // An entry for the edit entry point to correct.
           context.contactId = (

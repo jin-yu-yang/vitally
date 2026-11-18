@@ -688,6 +688,34 @@ test("seed command against real Supabase", async (t) => {
       }
     });
 
+    await t.test("the rehearsal cases carry the starter labels", async () => {
+      const runDir = await tempRunDir();
+      try {
+        const { caseIdsByScenario } = await seedCases(client, await targetsFor(), {
+          runDir,
+        });
+        const ids = Object.values(caseIdsByScenario);
+        const links = (
+          await f.sql(
+            `select k.case_id, l.name, c.stage
+               from public.case_label_links k
+               join public.case_labels l on l.id = k.label_id
+               join public.cases c on c.id = k.case_id
+              where k.active and k.case_id = any($1::uuid[])`,
+            [ids],
+          )
+        ).rows;
+        for (const name of ["City Tax", "MFS", "Multi-state"])
+          assert.ok(links.some((r) => r.name === name), name);
+        const perCase = new Map();
+        for (const r of links) perCase.set(r.case_id, (perCase.get(r.case_id) ?? 0) + 1);
+        assert.ok([...perCase.values()].some((n) => n === 2));
+        assert.ok(links.every((r) => r.stage !== "closed"));
+      } finally {
+        await rm(runDir, { recursive: true, force: true });
+      }
+    });
+
     await t.test("a refused step names the scenario and keeps the run file", async () => {
       const runDir = await tempRunDir();
       try {

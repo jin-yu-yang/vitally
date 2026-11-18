@@ -8260,6 +8260,302 @@ async function runPermutation(t, roles) {
         );
     });
 
+    // Case labels (OpenSpec change add-case-labels): the case's preparer adds
+    // and removes a label while the office's board shows it live; an admin
+    // creates and renames one; a volunteer who works on the case does not; the
+    // pool's Label filter narrows and clears.
+    await phase("case labels: a preparer labels a case, the office creates and renames one, a bystander reads, the pool filters", async () => {
+      const within = async (what, promise, ms = ARRIVAL_MS * 3) => {
+        let timer = null;
+        try {
+          return await Promise.race([
+            promise,
+            new Promise((_, reject) => {
+              timer = setTimeout(() => reject(new Error(`${what} did not answer within ${ms} ms`)), ms);
+            }),
+          ]);
+        } finally {
+          clearTimeout(timer);
+        }
+      };
+      const prepAccount = await within(
+        "adding Kai Moreno",
+        fixture.database.staff({ key: "kai", name: "Kai Moreno", capabilities: ["prepare"] }),
+      );
+      const officeAccount = await within(
+        "adding Lena Ortiz",
+        fixture.database.staff({ key: "lena", name: "Lena Ortiz", capabilities: ["admin", "followup"] }),
+      );
+      const byAccount = await within(
+        "adding Noel Baker",
+        fixture.database.staff({ key: "noel", name: "Noel Baker", capabilities: ["prepare"] }),
+      );
+      const actorOf = (key, account) => ({ key, email: account.email, userId: account.userId });
+      const caseId = await within("building a case ready for preparation", fixture.database.readyCase());
+      const { reference } = await caseById(fixture, caseId);
+      await within("Kai's claim", fixture.database.act(prepAccount.client, caseId, "CLAIM_PREPARATION", {}));
+      const labelId = async (name) =>
+        (
+          await one(fixture, "select id from public.case_labels where workspace_id=$1 and name=$2", [
+            fixture.database.workspaceId,
+            name,
+          ])
+        )?.id ?? null;
+      const activeLabels = async () =>
+        (
+          await fixture.database.sql(
+            "select l.name from public.case_label_links k join public.case_labels l on l.id=k.label_id where k.case_id=$1 and k.active order by l.name",
+            [caseId],
+          )
+        ).rows.map((row) => row.name);
+
+      const prepWin = await openWindow(staffEngine);
+      const officeWin = await openWindow(staffEngine);
+      const byWin = await openWindow(clientEngine);
+      const prep = prepWin.page;
+      const office = officeWin.page;
+      const by = byWin.page;
+      // The chips the case header shows, by chip name (the remove button's
+      // "×" is not part of it).
+      const waitHeader = (page, who, wanted) =>
+        waitFor(
+          page,
+          `${who}'s case header to show the labels ${JSON.stringify(wanted)}`,
+          (names) => {
+            const seen = [...document.querySelectorAll(".case-label-row .case-label")].map((n) =>
+              n.firstChild.textContent.trim(),
+            );
+            return JSON.stringify(seen.sort()) === JSON.stringify([...names].sort());
+          },
+          wanted,
+          ARRIVAL_MS,
+        );
+      const waitBoard = (page, ref, wanted) =>
+        waitFor(
+          page,
+          `the board row for ${ref} to show the labels ${JSON.stringify(wanted)}`,
+          ([wantedRef, names]) => {
+            const row = [...document.querySelectorAll("tr.board-row")].find((tr) =>
+              tr.querySelector("button.board-reference")?.textContent.includes(wantedRef),
+            );
+            if (!row) return false;
+            const seen = [...row.querySelectorAll(".board-labels .case-label")].map((n) => n.textContent.trim());
+            return JSON.stringify(seen.sort()) === JSON.stringify([...names].sort());
+          },
+          [ref, wanted],
+          ARRIVAL_MS,
+        );
+      const openMenu = async (page) => {
+        await clickAction(page, "open-label-menu");
+        await page.locator(".label-menu").waitFor({ state: "visible", timeout: RENDER_MS });
+      };
+      const toggleRow = async (page, name) =>
+        pressControl(
+          page,
+          page.locator(".label-menu-row").filter({ hasText: name }).locator('[data-action="toggle-case-label"]'),
+          {
+            selector: '.label-menu-row [data-action="toggle-case-label"]',
+            text: name,
+            what: `the ${name} row in the label menu`,
+          },
+        );
+      try {
+        await loginTestUser({ page: prep, actor: actorOf("kai", prepAccount), fixture, heading: WORK_BOARD_HEADING });
+        await loginTestUser({ page: office, actor: actorOf("lena", officeAccount), fixture, heading: OFFICE_BOARD_HEADING });
+        await loginTestUser({ page: by, actor: actorOf("noel", byAccount), fixture, heading: WORK_BOARD_HEADING });
+        await watchAlerts(prep);
+        await watchAlerts(office);
+        await watchAlerts(by);
+
+        // Noel watches the case from the volunteer work board; nothing here
+        // reloads it.
+        await findOnBoard(by, reference);
+        await by.evaluate(() => {
+          window.__labelPhaseNoReload = true;
+        });
+        await waitBoard(by, reference, []);
+
+        // 1. The preparer opens the case and adds Multi-state from the menu.
+        await openCaseByReference(prep, reference);
+        await openMenu(prep);
+        await toggleRow(prep, "Multi-state");
+        await waitHeader(prep, "Kai", ["Multi-state"]);
+        assert.deepEqual(await activeLabels(), ["Multi-state"]);
+        await waitBoard(by, reference, ["Multi-state"]);
+        assert.equal(
+          await by.evaluate(() => window.__labelPhaseNoReload === true),
+          true,
+          "the second staff window reloaded to see the label",
+        );
+
+        // 2. The preparer removes it from its chip, and the office loses it.
+        await pressControl(prep, prep.locator('button[aria-label="Remove label Multi-state"]'), {
+          selector: ".case-label-remove",
+          what: "the remove button on the Multi-state chip",
+        });
+        await waitHeader(prep, "Kai", []);
+        assert.deepEqual(await activeLabels(), []);
+        await waitBoard(by, reference, []);
+
+        // 3. The site coordinator types a new name and creates it in green;
+        // it lands on the case.
+        await clickAction(office, "open-cases");
+        await waitForText(office, "Case pool", RENDER_MS);
+        await openCaseByReference(office, reference);
+        await openMenu(office);
+        await office.locator("#label-search").fill("Amended", { timeout: CLICK_MS });
+        await office.locator('[data-action="create-label"]').waitFor({ state: "visible", timeout: RENDER_MS });
+        assert.equal(
+          (await office.locator('[data-action="create-label"]').innerText()).trim(),
+          'Create "Amended"',
+        );
+        await clickAction(office, "create-label");
+        await office.locator("#label-name").waitFor({ state: "visible", timeout: RENDER_MS });
+        assert.equal(await office.locator("#label-name").inputValue(), "Amended");
+        await office.locator('.label-color-choice:has(input[value="green"])').click({ timeout: CLICK_MS });
+        await clickAction(office, "save-label");
+        await waitHeader(office, "Lena", ["Amended"]);
+        assert.deepEqual(
+          (
+            await fixture.database.sql(
+              "select color from public.case_labels where workspace_id=$1 and name='Amended'",
+              [fixture.database.workspaceId],
+            )
+          ).rows,
+          [{ color: "green" }],
+        );
+        assert.deepEqual(await activeLabels(), ["Amended"]);
+        await waitFor(
+          office,
+          "the label form to close and the list to show Amended",
+          () => !document.querySelector("#label-name") && Boolean(document.querySelector(".label-menu-row")),
+          undefined,
+          RENDER_MS,
+        );
+        await office.mouse.move(office.viewportSize().width - 10, 10);
+        await shootWithoutSidebar(office, "case-labels-created-green");
+
+        // 4. The site coordinator renames it; the chip updates, and so does
+        // the preparer's window.
+        await pressControl(office, office.locator('button[aria-label="Edit label Amended"]'), {
+          selector: '[data-action="edit-label"]',
+          what: "Edit on the Amended row",
+        });
+        await office.locator("#label-name").waitFor({ state: "visible", timeout: RENDER_MS });
+        await office.locator("#label-name").fill("Amended return", { timeout: CLICK_MS });
+        await clickAction(office, "save-label");
+        await waitHeader(office, "Lena", ["Amended return"]);
+        await waitHeader(prep, "Kai", ["Amended return"]);
+        assert.deepEqual(await activeLabels(), ["Amended return"]);
+        // The volunteer work board in the other staff window follows the rename.
+        await waitBoard(by, reference, ["Amended return"]);
+        await clickAction(office, "close-label-menu");
+
+        // Escape closes the menu and returns the keyboard to + Add a label.
+        await openMenu(office);
+        await office.keyboard.press("Escape");
+        await office.locator(".label-menu").waitFor({ state: "detached", timeout: RENDER_MS });
+        assert.equal(
+          await office.evaluate(() => document.activeElement?.matches('[data-action="open-label-menu"]') ?? false),
+          true,
+          "Escape did not return focus to + Add a label",
+        );
+
+        // 5. A volunteer who is neither the preparer nor the reviewer reads
+        // the case's chips and has no way to change them.
+        await openCaseByReference(by, reference);
+        await waitHeader(by, "Noel", ["Amended return"]);
+        assert.equal(await by.locator('[data-action="open-label-menu"]').count(), 0, "a bystander is offered + Add a label");
+        assert.equal(await by.locator(".case-label-remove").count(), 0, "a bystander is offered a remove button");
+        assert.ok(!(await by.locator("#app").innerText()).includes("+ Add a label"));
+
+        // 6. The case pool: City Tax narrows the list; Clear filters restores it.
+        const cityTaxId = await labelId("City Tax");
+        assert.ok(cityTaxId, "the story's workspace has no City Tax label");
+        const added = await within(
+          "Lena adding City Tax",
+          fixture.database.setCaseLabel(officeAccount.client, caseId, cityTaxId, true),
+        );
+        assert.equal(added.error, null);
+        await clickAction(office, "open-cases");
+        await waitForText(office, "Case pool", RENDER_MS);
+        const poolStatus = (page) =>
+          page.evaluate(() => {
+            const match = /Showing (\d+) of (\d+) cases/.exec(
+              document.querySelector('.case-pool [role="status"]')?.textContent ?? "",
+            );
+            return match ? { shown: Number(match[1]), total: Number(match[2]) } : null;
+          });
+        await waitFor(
+          office,
+          "the pool to show the case",
+          (wanted) =>
+            [...document.querySelectorAll("tr.pool-row")].some((row) => row.textContent.includes(wanted)),
+          reference,
+          RENDER_MS,
+        );
+        const before = await poolStatus(office);
+        assert.ok(
+          before && before.shown === before.total && before.total > 1,
+          `the pool starts unfiltered: ${JSON.stringify(before)}`,
+        );
+        const filterOptions = await office.locator('select[data-board-filter="poolLabel"] option').allInnerTexts();
+        assert.equal(filterOptions[0], "Any label");
+        assert.equal(filterOptions[filterOptions.length - 1], "No label");
+        assert.ok(filterOptions.includes("City Tax") && filterOptions.includes("Amended return"));
+        await waitForQuiet(office);
+        await office.locator('select[data-board-filter="poolLabel"]').selectOption({ label: "City Tax" }, { timeout: CLICK_MS });
+        await waitFor(
+          office,
+          "the pool narrowed to City Tax",
+          ([wanted, total]) => {
+            const match = /Showing (\d+) of (\d+) cases/.exec(
+              document.querySelector('.case-pool [role="status"]')?.textContent ?? "",
+            );
+            const rows = [...document.querySelectorAll("tr.pool-row")];
+            return Boolean(
+              match &&
+                Number(match[1]) < total &&
+                Number(match[1]) === rows.length &&
+                rows.some((row) => row.textContent.includes(wanted)) &&
+                rows.every((row) => row.querySelector(".board-labels")?.textContent.includes("City Tax")),
+            );
+          },
+          [reference, before.total],
+          RENDER_MS,
+        );
+        await office.mouse.move(office.viewportSize().width - 10, 10);
+        await shootWithoutSidebar(office, "case-labels-pool-city-tax");
+        await clickAction(office, "clear-pool-filters");
+        await waitFor(
+          office,
+          "the pool's filters to be cleared",
+          (total) => {
+            const match = /Showing (\d+) of (\d+) cases/.exec(
+              document.querySelector('.case-pool [role="status"]')?.textContent ?? "",
+            );
+            return Boolean(
+              match &&
+                Number(match[1]) === total &&
+                document.querySelector('select[data-board-filter="poolLabel"]')?.value === "all" &&
+                document.querySelector('[data-action="clear-pool-filters"]') === null,
+            );
+          },
+          before.total,
+          RENDER_MS,
+        );
+        assertConsoleQuiet(prepWin, { name: "Kai's staff window", allow: REFUSAL_LINES });
+        assertConsoleQuiet(officeWin, { name: "Lena's staff window", allow: REFUSAL_LINES });
+        assertConsoleQuiet(byWin, { name: "Noel's staff window", allow: REFUSAL_LINES });
+        evidence.story.caseLabels =
+          "Kai (preparer) added and removed Multi-state and Noel's work board followed live with no reload; Lena (admin) created Amended in green from the menu's search and renamed it Amended return (Kai's window followed); Noel (a volunteer on neither side) saw the chip and no Add or remove control; the pool's Label filter narrowed to City Tax and Clear filters restored it";
+      } finally {
+        await prepWin.context.close();
+        await officeWin.context.close();
+        await byWin.context.close();
+      }
+    });
+
     await phase("nothing threw, and every console line was one we asked for", async () => {
       evidence.consoleErrors = {
         // The client window's own refusals are the stale-revision conflicts
