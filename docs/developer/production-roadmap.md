@@ -50,7 +50,7 @@ of the six RPCs and the demonstration people (Alex, Morgan, Sam) are gone. See
   volunteer's open cases and lets an admin assign or reassign; its Hours this week column comes with
   the Schedule (#140). Still to do: the roster command sets
   that ceiling once; changing it, or deactivating a staff member, is not built.
-- **One person, two workspaces** ([#104](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/104)).
+- **One person, two workspaces** ([#104](https://github.com/jin-yu-yang/vitally/issues/104)).
   The screens are chosen by the acting person's capabilities (ruling R55): `admin` gets the office
   workspace, everyone else the preparation/review one. A staff account is one person and cannot
   switch. So a staff member with `admin` and `prepare` or
@@ -138,7 +138,7 @@ To build next:
   unreachable client and client withdrawal are built (036). The IRS's answer after e-filing
   (accepted, rejected, paper) is built, recorded by hand; importing the real answers is not.
 - **The signing method, asked at the right moment**
-  ([#106](https://github.com/jin-yu-yang/VITA-Management-System-Demo/issues/106)). The reviewer
+  ([#106](https://github.com/jin-yu-yang/vitally/issues/106)). The reviewer
   questionnaire requires how the client will sign Form 8879 even when the reviewer answered No to
   going over the return with them; nobody can know it before that conversation. The go-over
   follow-up's resolution is where the office learns it, so ask it there and choose the signing-plan
