@@ -363,6 +363,13 @@ test("roles that lack different certificates get a sentence each; a role lacking
   );
 });
 
+test("three or more missing certificates are listed with commas", () => {
+  assert.equal(
+    untickedRolesMessage(["preparer"], []),
+    "Preparer was unticked: it needs VSC, IT&QR, and Basic or Advanced."
+  );
+});
+
 test("nothing unticked, nothing announced", () => {
   assert.equal(untickedRolesMessage([], ["vsc"]), "");
   assert.equal(untickedRolesMessage(undefined, []), "");

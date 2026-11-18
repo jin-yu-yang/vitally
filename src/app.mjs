@@ -502,11 +502,14 @@ if (!config) {
   }
 
   // The drawer's polite status line (#192). Emptied first and filled on the
-  // next frame, so the same sentence twice in a row is still read out.
+  // next frame, so the same sentence twice in a row is still read out. A
+  // change that unticks nothing empties it, so an earlier sentence that no
+  // longer holds is not found by someone reading through the form.
   function announceUntickedRoles(form, message) {
     const notice = form.querySelector("#volunteer-role-notice");
-    if (!notice || !message) return;
+    if (!notice) return;
     notice.textContent = "";
+    if (!message) return;
     requestAnimationFrame(() => {
       const current = root.querySelector("#volunteer-role-notice");
       if (current) current.textContent = message;

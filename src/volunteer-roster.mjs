@@ -209,7 +209,7 @@ export function withoutLostRoles(payload, list, volunteerId) {
 export function untickedRolesMessage(roles, certificates) {
   const groups = new Map();
   for (const role of roles ?? []) {
-    const missing = missingFor(role, certificates).join(" and ");
+    const missing = certificateList(missingFor(role, certificates));
     if (!missing) continue;
     if (!groups.has(missing)) groups.set(missing, []);
     groups.get(missing).push(roleLabel(role));
@@ -222,6 +222,14 @@ export function untickedRolesMessage(roles, certificates) {
         : `${names} was unticked: it needs ${missing}.`;
     })
     .join(" ");
+}
+
+// Missing certificates read out as a list: "VSC and IT&QR", or with commas
+// from three on, "VSC, IT&QR, and Basic or Advanced", so the "or" inside the
+// last item is not lost among the "and"s (#216 review).
+function certificateList(items) {
+  if (items.length < 3) return items.join(" and ");
+  return `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`;
 }
 
 // The server's ROLE_NEEDS detail, "<role>: <labels joined ', '>", as the
