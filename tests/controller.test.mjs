@@ -9179,6 +9179,7 @@ test("an uncleared admin who clears themselves on their own row leaves the setup
   const checks = callCount(store, "getClearance");
   store.nextClearance = { ...UNCLEARED_ADMIN, cleared: true, missing: [], capabilities: ["admin"] };
   assert.equal(await controller.saveVolunteer(SELF_PAYLOAD), true);
+  await new Promise((resolve) => setImmediate(resolve));
   const state = controller.getState();
   assert.equal(callCount(store, "getClearance"), checks + 1, "the save asks for the clearance once");
   assert.equal(state.principal.clearance.cleared, true);
@@ -9195,6 +9196,7 @@ test("an uncleared admin's own save that leaves them uncleared keeps the setup h
   controller.openDialog("volunteer", { volunteerId: "person-sam" });
   const checks = callCount(store, "getClearance");
   assert.equal(await controller.saveVolunteer({ ...SELF_PAYLOAD, roles: [], certificates: ["vsc"] }), true);
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(callCount(store, "getClearance"), checks + 1);
   assert.equal(controller.getState().principal.clearance.cleared, false);
   controller.stop();
@@ -9209,6 +9211,7 @@ test("saving someone else's row, or one's own while cleared, asks for no clearan
   controller.openDialog("volunteer", { volunteerId: "v-1" });
   let checks = callCount(uncleared, "getClearance");
   assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(callCount(uncleared, "getClearance"), checks, "another person's row");
   controller.stop();
 
@@ -9220,7 +9223,67 @@ test("saving someone else's row, or one's own while cleared, asks for no clearan
   controller.openDialog("volunteer", { volunteerId: "person-sam" });
   checks = callCount(clearedStore, "getClearance");
   assert.equal(await controller.saveVolunteer(SELF_PAYLOAD), true);
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(callCount(clearedStore, "getClearance"), checks, "one's own row while cleared");
+  controller.stop();
+});
+
+test("an own-row save returns before the clearance answers, so the drawer can close at once", async () => {
+  const store = selfRosterStore(UNCLEARED_ADMIN);
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", { volunteerId: "person-sam" });
+  let release;
+  store.nextClearance = () => new Promise((resolve) => (release = resolve));
+  assert.equal(await controller.saveVolunteer(SELF_PAYLOAD), true, "the save answers without waiting");
+  assert.equal(controller.getState().principal.clearance.cleared, false, "the check is still out");
+  release({ ...UNCLEARED_ADMIN, cleared: true, missing: [], capabilities: ["admin"] });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(controller.getState().principal.clearance.cleared, true);
+  controller.stop();
+});
+
+test("a check already out when the own-row save lands is followed by one more", async () => {
+  const store = selfRosterStore(UNCLEARED_ADMIN);
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", { volunteerId: "person-sam" });
+  // A focus sent a check before the save: it will answer with the old state.
+  let release;
+  store.nextClearance = () => new Promise((resolve) => (release = resolve));
+  const early = controller.checkClearance();
+  const checks = callCount(store, "getClearance");
+  assert.equal(await controller.saveVolunteer(SELF_PAYLOAD), true);
+  store.nextClearance = { ...UNCLEARED_ADMIN, cleared: true, missing: [], capabilities: ["admin"] };
+  release({ ...UNCLEARED_ADMIN });
+  await early;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(callCount(store, "getClearance"), checks + 1, "one more check after the early one");
+  assert.equal(controller.getState().principal.clearance.cleared, true);
+  controller.stop();
+});
+
+test("an early check that already finds them cleared needs no second one", async () => {
+  const store = selfRosterStore(UNCLEARED_ADMIN);
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", { volunteerId: "person-sam" });
+  let release;
+  store.nextClearance = () => new Promise((resolve) => (release = resolve));
+  const early = controller.checkClearance();
+  const checks = callCount(store, "getClearance");
+  assert.equal(await controller.saveVolunteer(SELF_PAYLOAD), true);
+  release({ ...UNCLEARED_ADMIN, cleared: true, missing: [], capabilities: ["admin"] });
+  await early;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(callCount(store, "getClearance"), checks, "no second check");
+  assert.equal(controller.getState().principal.clearance.cleared, true);
   controller.stop();
 });
 
