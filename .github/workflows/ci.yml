@@ -34,9 +34,9 @@ jobs:
       DO_NOT_TRACK: "1"
       OPENSPEC_TELEMETRY: "0"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.21.0
           cache: npm
@@ -81,9 +81,9 @@ jobs:
     env:
       TZ: America/New_York
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.21.0
           cache: npm
@@ -101,9 +101,9 @@ jobs:
     env:
       TZ: America/New_York
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.21.0
           cache: npm
@@ -142,9 +142,9 @@ jobs:
           - leg: firefox-client
             skip: Chrome client and Firefox staff run the whole demonstration story
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.21.0
           cache: npm
