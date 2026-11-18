@@ -32,6 +32,7 @@ import {
   withholdInvalid,
 } from "./intake-form.mjs";
 import { cardsFor } from "./document-cards.mjs";
+import { LABEL_COLORS, labelNameTaken } from "./case-labels.mjs";
 import { createShadedSave } from "./shaded-editor.mjs";
 import { createWindowState } from "./window-state.mjs";
 import { isLang, readLanguage, writeLanguage } from "./language.mjs";
@@ -316,6 +317,12 @@ export function createController({
     authError: null,
     // Records
     cases: [],
+    // The office's case labels, and the open label menu (change
+    // add-case-labels): window-local, never persisted.
+    // labelMenu = {caseId, search,
+    //   editing: null | {labelId, revision, name, color, error}}.
+    labels: [],
+    labelMenu: null,
     // Whether each list has been read (design D6): a first load that failed
     // must never look like an empty list.
     lists: {
@@ -822,6 +829,9 @@ export function createController({
 
   async function loadList() {
     state.cases = await store.listCases();
+    // The office's labels ride with the case list, so a live refresh brings
+    // both. Only a staff window reads them. The open menu is left alone.
+    if (staffWindow()) state.labels = await store.listLabels();
     state.lists.cases = "ready";
     noteConnected();
   }
@@ -941,6 +951,7 @@ export function createController({
 
   function clearSelection() {
     opening += 1;
+    state.labelMenu = null;
     state.selectedCaseId = null;
     state.savedCase = null;
     state.draftAnswers = {};
@@ -1015,11 +1026,21 @@ export function createController({
     const touchesWorkspace = change.table === "workspaces";
     // A logged contact never touches the cases row, but it moves the case's
     // lastContactAt, which the Workload's Stalled count reads from the list.
+    // A label change moves the chips on every board row and the label options,
+    // so it re-reads the list (which brings the labels with it) too.
+    const touchesLabels =
+      change.table === "case_labels" || change.table === "case_label_links";
     const touchesList =
-      touchesWorkspace || change.table === "cases" || change.table === "contact_log";
+      touchesWorkspace ||
+      touchesLabels ||
+      change.table === "cases" ||
+      change.table === "contact_log";
+    // A label rename names no case, so it reaches the open case's header too.
     const touchesOpen =
       Boolean(state.selectedCaseId) &&
-      (touchesWorkspace || change.caseId === state.selectedCaseId);
+      (touchesWorkspace ||
+        change.table === "case_labels" ||
+        change.caseId === state.selectedCaseId);
     // An assistance item belongs to no case, so it is named by its own table
     // rather than by a case id: a claim in another window has to reach this one.
     const touchesAssistance =
@@ -1976,6 +1997,9 @@ export function createController({
     state.session = "none";
     state.principal = null;
     state.cases = [];
+    state.labels = [];
+    state.labelMenu = null;
+    pendingLabelWrites.clear();
     state.lists = {
       cases: "loading",
       assistance: "loading",
@@ -2058,6 +2082,7 @@ export function createController({
       state.addCaseShowMissing = false;
     }
     state.screen = screen;
+    state.labelMenu = null;
     state.error = null;
     state.dialog = null;
     state.dialogContext = null;
@@ -3464,6 +3489,199 @@ export function createController({
     }
   }
 
+  // The case label menu (change add-case-labels). Its state is window-local.
+  // A write whose answer never came (UNKNOWN_OUTCOME) may have landed, so the
+  // same write pressed again sends that very request with its action id; the
+  // stored receipt answers instead of a second write. Any other outcome
+  // forgets it.
+  const pendingLabelWrites = new Map();
+
+  const labelRequest = (key, make) => pendingLabelWrites.get(key) ?? make();
+
+  // One label write, shaped like `runContactWrite`: a refusal is shown and
+  // thrown, and a CONFLICT re-reads the labels first.
+  async function runLabelWrite(key, request, write) {
+    state.busy = true;
+    state.error = null;
+    show();
+    let result;
+    try {
+      result = await write(request);
+      pendingLabelWrites.delete(key);
+    } catch (error) {
+      state.busy = false;
+      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingLabelWrites.set(key, request);
+      else pendingLabelWrites.delete(key);
+      noteFailure(error);
+      if (error?.code === "CONFLICT") await loadList().catch(() => {});
+      show();
+      throw error;
+    }
+    state.busy = false;
+    noteConnected();
+    return result;
+  }
+
+  // A landed write whose re-read fails is a stale view, never a failed write.
+  async function rereadAfterLabelWrite(caseId) {
+    try {
+      await loadList();
+      if (caseId && caseId === state.selectedCaseId) await loadSelected();
+      state.error = null;
+    } catch (error) {
+      noteFailure(error);
+    }
+  }
+
+  function openLabelMenu(caseId) {
+    state.labelMenu = { caseId, search: "", editing: null };
+    show();
+  }
+
+  function closeLabelMenu() {
+    if (!state.labelMenu) return;
+    state.labelMenu = null;
+    show();
+  }
+
+  function setLabelSearch(text) {
+    if (!state.labelMenu) return;
+    state.labelMenu = { ...state.labelMenu, search: String(text ?? "") };
+    show();
+  }
+
+  // An edit keeps the revision the form opened on (like the assign drawer's
+  // basis): Save sends it, not the live list's, so a rename or recolor made
+  // elsewhere while the form is open is refused with CONFLICT.
+  function startLabelEdit(labelId = null, name = "") {
+    if (!state.labelMenu) return;
+    const current = labelId ? state.labels.find((label) => label.id === labelId) : null;
+    state.labelMenu = {
+      ...state.labelMenu,
+      editing: {
+        labelId: current ? labelId : null,
+        revision: current ? Number(current.revision) : null,
+        name: name || current?.name || "",
+        color: current?.color ?? LABEL_COLORS[0],
+        error: null,
+      },
+    };
+    show();
+  }
+
+  // What the form holds as it is typed or picked, kept so a redraw (a live
+  // refresh) draws it again. Quiet: the field already shows it, so no redraw.
+  function setLabelDraft({ name, color } = {}) {
+    const editing = state.labelMenu?.editing;
+    if (!editing) return;
+    state.labelMenu = {
+      ...state.labelMenu,
+      editing: {
+        ...editing,
+        ...(name !== undefined ? { name: String(name) } : {}),
+        ...(color !== undefined ? { color } : {}),
+      },
+    };
+  }
+
+  function cancelLabelEdit() {
+    if (!state.labelMenu?.editing) return;
+    state.labelMenu = { ...state.labelMenu, editing: null };
+    show();
+  }
+
+  async function toggleCaseLabel(caseId, labelId, on) {
+    const key = `toggle:${caseId}:${labelId}:${Boolean(on)}`;
+    const request = labelRequest(key, () => ({
+      actionId: newActionId(),
+      caseId,
+      labelId,
+      on: Boolean(on),
+    }));
+    await runLabelWrite(key, request, (sent) => store.setCaseLabel(sent));
+    await rereadAfterLabelWrite(caseId);
+    show();
+    return request;
+  }
+
+  function setLabelFormError(message) {
+    state.labelMenu = {
+      ...state.labelMenu,
+      editing: { ...state.labelMenu.editing, error: message },
+    };
+  }
+
+  // Save from the form. A create (labelId null) also puts the new label on the
+  // case the menu is open for. A bad name or color, or a name the window can
+  // see is taken, is said in the form and nothing is sent. A save whose answer
+  // never came is sent again first: the re-read list may already hold the
+  // label it created, which is no reason to refuse it.
+  async function saveLabelEdit({ name, color }) {
+    const editing = state.labelMenu?.editing;
+    if (!editing || state.busy) return false;
+    const trimmed = String(name ?? "").trim();
+    const caseId = state.labelMenu.caseId;
+    const { labelId } = editing;
+    state.labelMenu = { ...state.labelMenu, editing: { ...editing, name: trimmed, color } };
+    const key = `save:${labelId ?? "new"}:${trimmed}:${color}`;
+    if (!pendingLabelWrites.has(key)) {
+      let problem = null;
+      if (trimmed.length < 1 || trimmed.length > 24) problem = "A label name is 1 to 24 characters";
+      else if (!LABEL_COLORS.includes(color)) problem = "Pick one of the colors";
+      else if (labelNameTaken(state.labels, trimmed, labelId))
+        problem = "A label with this name already exists";
+      if (problem) {
+        setLabelFormError(problem);
+        show();
+        return false;
+      }
+    }
+    setLabelFormError(null);
+    const request = labelRequest(key, () => ({
+      actionId: newActionId(),
+      labelId,
+      expectedRevision: labelId ? editing.revision : null,
+      label: { name: trimmed, color },
+    }));
+    let saved;
+    try {
+      saved = await runLabelWrite(key, request, (sent) => store.saveLabel(sent));
+    } catch (error) {
+      // The labels were re-read on a CONFLICT; the form stays open and takes
+      // the fresh revision, so the next save is judged against what is there now.
+      if (error?.code === "CONFLICT" && state.labelMenu?.editing) {
+        const fresh = state.labels.find((label) => label.id === labelId);
+        state.labelMenu = {
+          ...state.labelMenu,
+          editing: {
+            ...state.labelMenu.editing,
+            ...(fresh ? { revision: Number(fresh.revision) } : {}),
+          },
+        };
+        setLabelFormError("This label was changed elsewhere. Check it and save again");
+        show();
+      }
+      throw error;
+    }
+    const savedId = saved?.labelId ?? labelId;
+    if (!labelId && caseId && savedId) {
+      try {
+        await toggleCaseLabel(caseId, savedId, true);
+      } catch (error) {
+        // The label exists; the form closes and the error shows.
+        if (state.labelMenu) state.labelMenu = { ...state.labelMenu, editing: null };
+        await rereadAfterLabelWrite(caseId);
+        show();
+        throw error;
+      }
+    } else {
+      await rereadAfterLabelWrite(caseId);
+    }
+    if (state.labelMenu) state.labelMenu = { ...state.labelMenu, editing: null };
+    show();
+    return true;
+  }
+
   async function logContact(caseId, entry, followupId = null) {
     return await runContactWrite(
       {
@@ -4016,6 +4234,13 @@ export function createController({
     return {
       ...state,
       cases: [...state.cases],
+      labels: state.labels.map((label) => ({ ...label })),
+      labelMenu: state.labelMenu
+        ? {
+            ...state.labelMenu,
+            editing: state.labelMenu.editing ? { ...state.labelMenu.editing } : null,
+          }
+        : null,
       lists: { ...state.lists },
       people: [...state.people],
       assistance: [...state.assistance],
@@ -4070,6 +4295,14 @@ export function createController({
     saveOfficeDraft,
     runAssistanceAction,
     logContact,
+    openLabelMenu,
+    closeLabelMenu,
+    setLabelSearch,
+    toggleCaseLabel,
+    startLabelEdit,
+    setLabelDraft,
+    cancelLabelEdit,
+    saveLabelEdit,
     loadVolunteers,
     askInviteClient,
     inviteClient,

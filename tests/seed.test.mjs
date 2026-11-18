@@ -1,12 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  SEED_SCENARIOS,
   assertLocalSeedTarget,
   requireSeedFlag,
   parseSeedArgs,
   formatSeedResult,
 } from "../tools/admin/seed-cases.mjs";
-import { ROLE_ACCOUNT_CLEARANCE, SEED_VOLUNTEERS } from "../tools/admin/seed-values.mjs";
+import {
+  CASE_LABEL_ASSIGNMENTS,
+  ROLE_ACCOUNT_CLEARANCE,
+  SEED_VOLUNTEERS,
+} from "../tools/admin/seed-values.mjs";
 import { runSeed } from "../tools/admin/seed.mjs";
 
 const code = (expected) => (error) => error.code === expected;
@@ -179,4 +184,21 @@ test("an unreadable roster is reported without seeding", async () => {
     }),
     code("SEED_ROSTER_UNREADABLE"),
   );
+});
+
+test("the seed plan labels the rehearsal cases", () => {
+  const names = CASE_LABEL_ASSIGNMENTS.flatMap((a) => a.labels);
+  for (const name of ["City Tax", "MFS", "Multi-state"])
+    assert.ok(names.includes(name), name);
+  assert.ok(CASE_LABEL_ASSIGNMENTS.some((a) => a.labels.length === 2));
+  for (const a of CASE_LABEL_ASSIGNMENTS) {
+    assert.ok(SEED_SCENARIOS.includes(a.scenario), a.scenario);
+    // A closed case refuses label changes.
+    assert.ok(
+      !["rejected", "accepted", "withdrawn"].includes(a.scenario),
+      a.scenario,
+    );
+  }
+  const scenarios = CASE_LABEL_ASSIGNMENTS.map((a) => a.scenario);
+  assert.equal(new Set(scenarios).size, scenarios.length);
 });

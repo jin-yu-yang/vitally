@@ -28,6 +28,8 @@ const STAFF_ONLY_TABLES = [
   "filing_attempts",
   "filing_returns",
   "filing_notes",
+  "case_labels",
+  "case_label_links",
 ];
 
 const CASE_ROW = Object.freeze({
@@ -643,6 +645,7 @@ test("a staff list carries the summaries a work board reads", async () => {
       ...Object.keys(mapCase(CASE_ROW)),
       "followupAssigneeIds",
       "goOverOpen",
+      "labels",
       "lastContactAt",
       "latestFixNote",
       "openFollowups",
@@ -936,6 +939,8 @@ test("a staff case read adds exactly the staff sections", async () => {
       "case_contacts",
       "case_document_cards",
       "case_events",
+      "case_label_links",
+      "case_labels",
       "case_materials",
       "cases",
       "client_events",
@@ -1428,6 +1433,8 @@ test("a subscription watches only the tables its principal may read", async () =
     "preparer_questionnaires",
     "reviewer_questionnaires",
     "preparer_shaded_fields",
+    "case_labels",
+    "case_label_links",
     "posted_updates",
   ]);
   // The applicant's channel never names a staff-only table.
@@ -1955,6 +1962,83 @@ test("a client's principal makes their invitation active; a cancelled one is no 
 test("an error from vitally_my_clearance surfaces from getPrincipal", async () => {
   const client = fakeClient({ access: "staff", rpc: async () => ({ data: null, error: { code: "VT001" } }) });
   await assert.rejects(() => createStore(client).getPrincipal(), { code: "FORBIDDEN" });
+});
+
+test("STAFF_TABLES holds the case label tables", () => {
+  assert.ok(SUBSCRIBED_TABLES.staff.includes("case_labels"));
+  assert.ok(SUBSCRIBED_TABLES.staff.includes("case_label_links"));
+});
+
+test("listCases attaches sorted labels from active links only", async () => {
+  const rows = {
+    case_labels: [
+      { id: "l-b", name: "beta", color: "sky", revision: 1 },
+      { id: "l-a", name: "Alpha", color: "pink", revision: 1 },
+      { id: "l-c", name: "Gone", color: "slate", revision: 1 },
+    ],
+    case_label_links: [
+      { case_id: "case-1", label_id: "l-b", active: true },
+      { case_id: "case-1", label_id: "l-a", active: true },
+      { case_id: "case-1", label_id: "l-c", active: false },
+    ],
+  };
+  const [row] = await createStore(fakeClient({ access: "staff", rows })).listCases();
+  assert.deepEqual(row.labels, [
+    { id: "l-a", name: "Alpha", color: "pink" },
+    { id: "l-b", name: "beta", color: "sky" },
+  ]);
+});
+
+test("listCases gives an empty labels list when the tables are empty", async () => {
+  const [row] = await createStore(fakeClient({ access: "staff" })).listCases();
+  assert.deepEqual(row.labels, []);
+});
+
+test("getCase for staff attaches sorted active labels and drops a link with no label", async () => {
+  const rows = {
+    case_labels: [
+      { id: "l-b", name: "beta", color: "sky" },
+      { id: "l-a", name: "Alpha", color: "pink" },
+      { id: "l-c", name: "Gone", color: "slate" },
+    ],
+    case_label_links: [
+      { case_id: "case-1", label_id: "l-b", active: true },
+      { case_id: "case-1", label_id: "l-a", active: true },
+      { case_id: "case-1", label_id: "l-c", active: false },
+      { case_id: "case-1", label_id: "l-missing", active: true },
+    ],
+  };
+  const record = await createStore(fakeClient({ access: "staff", rows })).getCase("case-1");
+  assert.deepEqual(record.labels, [
+    { id: "l-a", name: "Alpha", color: "pink" },
+    { id: "l-b", name: "beta", color: "sky" },
+  ]);
+});
+
+test("getCase for an applicant reads no label table", async () => {
+  const client = fakeClient({ access: "applicant" });
+  const record = await createStore(client).getCase("case-1");
+  const tables = client.reads.map((read) => read.table);
+  assert.ok(!tables.includes("case_labels"));
+  assert.ok(!tables.includes("case_label_links"));
+  assert.equal(record.labels, undefined);
+});
+
+test("listLabels returns the workspace's labels", async () => {
+  const rows = { case_labels: [{ id: "l-a", name: "Alpha", color: "pink", revision: 2, workspace_id: "w" }] };
+  const list = await createStore(fakeClient({ access: "staff", rows })).listLabels();
+  assert.deepEqual(list, [{ id: "l-a", name: "Alpha", color: "pink", revision: 2 }]);
+});
+
+test("saveLabel and setCaseLabel call their RPCs", async () => {
+  const client = fakeClient({ access: "staff" });
+  const store = createStore(client);
+  await store.saveLabel({ actionId: "a1", labelId: "l1", expectedRevision: 3, label: { name: "X", color: "sky" } });
+  await store.setCaseLabel({ actionId: "a2", caseId: "c1", labelId: "l1", on: true });
+  assert.deepEqual(client.rpcCalls, [
+    { name: "vitally_save_label", args: { p_action_id: "a1", p_label_id: "l1", p_expected_revision: 3, p_label: { name: "X", color: "sky" } } },
+    { name: "vitally_set_case_label", args: { p_action_id: "a2", p_case_id: "c1", p_label_id: "l1", p_on: true } },
+  ]);
 });
 
 test("getUpdates calls vitally_my_updates and returns its object", async () => {

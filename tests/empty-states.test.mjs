@@ -19,6 +19,8 @@ import { STATES, SENTENCES } from "./empty-states.states.mjs";
 // Both case pages' Intake answers tab gained the 13614-C shaded-section panel
 // on purpose (change add-preparer-13614c-fields). Both case headers read
 // "Signed in as" instead of "Acting as" on purpose.
+// Both case headers gained the label row ("+ Add a label") for staff who can
+// label the case, on purpose (change add-case-labels).
 // The office case page's Follow-up note changed on purpose (change let-follow-up-holders-work-any-follow-up).
 //
 // The case pages print "Updated" with formatTime, in the machine's own time

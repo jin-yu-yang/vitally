@@ -104,6 +104,33 @@ export const RPC_SIGNATURES = Object.freeze([
       },
     }),
   }),
+  // Case labels (OpenSpec change add-case-labels): staff create labels and put
+  // them on cases they can open. `context.labelId` is a starter label of the
+  // workspace; the new-label call carries a fresh name so it is unique.
+  Object.freeze({
+    name: "vitally_save_label",
+    signature: "vitally_save_label(uuid,uuid,bigint,jsonb)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["actionId", "labelId", "revision"]),
+    args: () => ({
+      p_action_id: crypto.randomUUID(),
+      p_label_id: null,
+      p_expected_revision: null,
+      p_label: { name: `L-${crypto.randomUUID().slice(0, 8)}`, color: "sky" },
+    }),
+  }),
+  Object.freeze({
+    name: "vitally_set_case_label",
+    signature: "vitally_set_case_label(uuid,uuid,uuid,boolean)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["actionId", "caseId", "labelId", "on"]),
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_case_id: context.contactCaseId,
+      p_label_id: context.labelId,
+      p_on: true,
+    }),
+  }),
   // A staff member's own clearance (OpenSpec change add-volunteer-clearance).
   Object.freeze({
     name: "vitally_my_clearance",

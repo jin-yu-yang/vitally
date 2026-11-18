@@ -391,6 +391,9 @@ export function staffScreen(state) {
         person,
         // The case header says "Signed in as" for a staff account.
         principal: state.principal,
+        // The case header's labels and its open menu.
+        labels: state.labels ?? [],
+        labelMenu: state.labelMenu ?? null,
         // The demo-tools switch: it shows the Auto-fill button on the forms.
         demoTools: state.demoTools === true,
         busy: state.busy,
@@ -451,6 +454,7 @@ export function staffScreen(state) {
           list: state.lists?.cases ?? "ready",
           person,
           filters: state.boardFilters,
+          labels: state.labels ?? [],
           now: Date.now(),
         }),
         addCaseAction,

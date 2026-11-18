@@ -89,6 +89,17 @@ export const HELP_REQUEST = Object.freeze({
   contactPreference: "Prefers calls from the main office",
 });
 
+// The starter labels the seed puts on rehearsal cases, by scenario. Only open
+// cases: a closed case (rejected, accepted, withdrawn) refuses label changes.
+export const CASE_LABEL_ASSIGNMENTS = Object.freeze([
+  Object.freeze({ scenario: "preparation_ready", labels: Object.freeze(["City Tax"]) }),
+  Object.freeze({
+    scenario: "waiting_documents",
+    labels: Object.freeze(["MFS", "Multi-state"]),
+  }),
+  Object.freeze({ scenario: "review_ready", labels: Object.freeze(["Multi-state"]) }),
+]);
+
 // The four role accounts' clearance, which `npm run seed:local` saves before
 // anything acts as one of them: the current-season role, its confirmed
 // certificates, and not new. The roles match each account's ceiling.
