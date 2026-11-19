@@ -10,9 +10,9 @@
 
 ## 3. Senders and configuration guard (design D2, D6)
 
-- [ ] 3.1 Unit tests for the sender module: Resend request shape (endpoint, auth header, from, idempotency key only when given), mail-catcher request shape, the guard (neither set, both set, no `VITALLY_SITE_URL`) naming variables and never values, the send timeout, and the result mapping (2xx, `409 invalid_idempotent_request` → sent, `409 concurrent_idempotent_requests` → not sent, other errors and network errors → not sent, logged without address or key)
-- [ ] 3.2 Write `supabase/functions/accounts/sender.mjs` to pass them
-- [ ] 3.3 Wire `index.ts`: build the sender from the environment, answer a configuration error with the existing missing-variable `SERVER_ERROR`
+- [x] 3.1 Unit tests for the sender module: Resend request shape (endpoint, auth header, from, idempotency key only when given), mail-catcher request shape, the guard (neither set, both set, no `VITALLY_SITE_URL`) naming variables and never values, the send timeout, and the result mapping (2xx, `409 invalid_idempotent_request` → sent, `409 concurrent_idempotent_requests` → not sent, other errors and network errors → not sent, logged without address or key)
+- [x] 3.2 Write `supabase/functions/accounts/sender.mjs` to pass them
+- [x] 3.3 Wire `index.ts`: build the sender from the environment, answer a configuration error with the existing missing-variable `SERVER_ERROR`
 
 ## 4. Handler (design D1, D6)
 
