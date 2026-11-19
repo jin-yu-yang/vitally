@@ -33,15 +33,15 @@
 
 ## 6. Account functions and tools
 
-- [ ] 6.1 Replace `add_staff_member` with `(ws, user, key, name)` (drop the 5-argument form, link via the mirror), and make `vitally_record_account` stop writing capabilities.
-- [ ] 6.2 Update `tools/admin/workspace-setup.mjs`: a `siteCoordinator` flag per staff entry, granted before `set_default_followup`; `siteNumber` kept for tests and the seed only.
+- [x] 6.1 Replace `add_staff_member` with `(ws, user, key, name)` (drop the 5-argument form, link via the mirror), and make `vitally_record_account` stop writing capabilities.
+- [x] 6.2 Update `tools/admin/workspace-setup.mjs`: a `siteCoordinator` flag per staff entry, granted before `set_default_followup`; `siteNumber` kept for tests and the seed only.
 - [ ] 6.3 Update `tools/admin/roster.mjs`: `siteCoordinator` validation; `capabilities` and `siteNumber` ignored with a notice; `defaultFollowup` must name a `siteCoordinator: true` entry. Update its unit tests and `tools/admin/roster.example.json`.
 - [ ] 6.4 Update `seed:local`: require `site_coordinator` to be a site coordinator; set `S00000000` when no SIDN is set; tests.
 
 ## 7. Tests that relied on the ceiling
 
-- [ ] 7.1 Update `tests/support/database-fixture.mjs`: `site_coordinator` is a site coordinator; `clearStaff` confirms `sc` for site coordinators; staff setup without capabilities.
-- [ ] 7.2 Convert every test that writes `people.capabilities` directly or calls the 5-argument `add_staff_member` (database-actions, -assistance, -documents, -staff-identity, -accounts, -clearance, -posted-updates, database.mjs) to roles. Convert each test rather than delete it, and for any test removed, name the removed code it covered.
+- [x] 7.1 Update `tests/support/database-fixture.mjs`: `site_coordinator` is a site coordinator; `clearStaff` confirms `sc` for site coordinators; staff setup without capabilities.
+- [x] 7.2 Convert every test that writes `people.capabilities` directly or calls the 5-argument `add_staff_member` (database-actions, -assistance, -documents, -staff-identity, -accounts, -clearance, -posted-updates, database.mjs) to roles. Convert each test rather than delete it, and for any test removed, name the removed code it covered.
 - [ ] 7.3 Update the catalog tests (`vitally_policy` functions, assignment functions list, grants) for the new functions and tables.
 
 ## 8. Front end
