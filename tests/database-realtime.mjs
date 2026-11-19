@@ -1010,13 +1010,13 @@ test("a volunteer with no sign-in reaches admins only", async () => {
     staffWatch = watchTable(f.preparer, bindings, "staff");
     await withDeadline(adminWatch.subscribed, "the admin channel never subscribed");
     await withDeadline(staffWatch.subscribed, "the staff channel never subscribed");
-    // A person every staff member may read, each under a fresh key.
+    // A person every staff member may read, each under a fresh key. Since 052
+    // a person with no sign-in has no capabilities and only admins read them,
+    // so each probe is a staff member with a sign-in.
     const probe = async () => {
       const key = `probe_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
-      const added = await f.enrich({
-        addPeople: [{ key, name: "Realtime probe", capabilities: ["assist"] }],
-      });
-      return { id: added[key] };
+      const added = await f.staff({ key, name: "Realtime probe", capabilities: [], cleared: false });
+      return { id: added.personId };
     };
     const byId = (change) => (row) => row.id === change.id;
     await controlUntilSeen(staffWatch, probe, byId, "the staff warm-up");
@@ -1088,13 +1088,13 @@ test("an uncleared subscriber gets no case change", async () => {
     );
     await withDeadline(clearedWatch.subscribed, "the cleared channel never subscribed");
     await withDeadline(unclearedWatch.subscribed, "the uncleared channel never subscribed");
-    // A person every staff member may read, each under a fresh key.
+    // A person every staff member may read, each under a fresh key. Since 052
+    // a person with no sign-in has no capabilities and only admins read them,
+    // so each probe is a staff member with a sign-in.
     const probe = async () => {
       const key = `probe_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
-      const added = await f.enrich({
-        addPeople: [{ key, name: "Realtime probe", capabilities: ["assist"] }],
-      });
-      return { id: added[key] };
+      const added = await f.staff({ key, name: "Realtime probe", capabilities: [], cleared: false });
+      return { id: added.personId };
     };
     const byId = (change) => (row) => row.id === change.id;
     await controlUntilSeen(unclearedWatch, probe, byId, "the uncleared warm-up");

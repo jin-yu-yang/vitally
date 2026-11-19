@@ -821,11 +821,13 @@ test("review submission waits for documents, not for office contact", async (t) 
         // Readiness answers last (contract step 7, Rulings R21 and R31): only
         // this case's preparer is told a document is still open; everybody
         // else is refused for the qualification or the assignment they lack.
+        // Review Focus 4: the Reviewer role gives `prepare` (052), so the
+        // unqualified callers below are the Admin and the Intaker.
         await assert.rejects(
           () => f.act(f.preparer, caseId, "SUBMIT_REVIEW", { questionnaire: PREPARER }),
           rejected("INVALID_TRANSITION"),
         );
-        for (const client of [f.siteCoordinator, f.reviewer])
+        for (const client of [f.siteCoordinator, f.intaker])
           await assert.rejects(
             () => f.act(client, caseId, "SUBMIT_REVIEW", { questionnaire: PREPARER }),
             rejected("INELIGIBLE"),
@@ -841,7 +843,7 @@ test("review submission waits for documents, not for office contact", async (t) 
         await f.act(f.preparer, caseId, "VERIFY_DOCUMENT", {});
         // With nothing blocking, the unqualified callers answer the same way
         // as before: the blocker never changed what they are told.
-        for (const client of [f.siteCoordinator, f.reviewer])
+        for (const client of [f.siteCoordinator, f.intaker])
           await assert.rejects(
             () => f.act(client, caseId, "SUBMIT_REVIEW", { questionnaire: PREPARER }),
             rejected("INELIGIBLE"),
@@ -856,7 +858,7 @@ test("review submission waits for documents, not for office contact", async (t) 
             () => f.act(f.preparer, caseId, "SUBMIT_REVIEW", { questionnaire: PREPARER }),
             rejected("INVALID_TRANSITION"),
           );
-          for (const client of [f.siteCoordinator, f.reviewer])
+          for (const client of [f.siteCoordinator, f.intaker])
             await assert.rejects(
               () => f.act(client, caseId, "SUBMIT_REVIEW", { questionnaire: PREPARER }),
               rejected("INELIGIBLE"),
@@ -902,7 +904,9 @@ test("review submission waits for documents, not for office contact", async (t) 
         );
         // The second hand-off orders its checks the same way: the blocker is
         // the preparer's to see, and nobody else's.
-        for (const client of [f.reviewer, f.siteCoordinator])
+        // The Admin and the Intaker hold no role with `prepare` (the Reviewer
+        // role gives it since 052).
+        for (const client of [f.intaker, f.siteCoordinator])
           await assert.rejects(
             () =>
               f.act(client, caseId, "RESUBMIT_REVIEW", {
@@ -930,7 +934,7 @@ test("review submission waits for documents, not for office contact", async (t) 
             JSON.stringify(payload),
           );
         // Only the case's own preparer answers a correction request.
-        for (const client of [f.reviewer, f.siteCoordinator])
+        for (const client of [f.intaker, f.siteCoordinator])
           await assert.rejects(
             () =>
               f.act(client, caseId, "RESUBMIT_REVIEW", {

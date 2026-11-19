@@ -34,14 +34,13 @@ const setStatus = (f, userId, status) =>
     userId,
     status,
   ]);
-const addStaffMember = (f, userId, key, name, capabilities) =>
+const addStaffMember = (f, userId, key, name) =>
   f.withSetupLock(() =>
-    f.sql("select vitally_private.add_staff_member($1,$2,$3,$4,$5::text[]) as person_id", [
+    f.sql("select vitally_private.add_staff_member($1,$2,$3,$4) as person_id", [
       f.workspaceId,
       userId,
       key,
       name,
-      capabilities,
     ]),
   );
 const readable = async (client, table) => {
@@ -90,7 +89,7 @@ test("sign-in accounts against real Supabase", async (t) => {
         assert.equal(roleAccount.person_id, personId, role);
       }
       // The identical re-run of the roster command adds no second account.
-      await addStaffMember(f, member.userId, "ada_account", "Ada Quill", ["prepare"]);
+      await addStaffMember(f, member.userId, "ada_account", "Ada Quill");
       assert.equal(await accountCount(f, member.userId), 1);
       assert.equal((await accountOf(f, member.userId)).revision, 1);
     });
@@ -381,7 +380,6 @@ test("sign-in accounts against real Supabase", async (t) => {
     const CONFLICT = "VT003";
     const INVALID_TRANSITION = "VT004";
     const VALIDATION = "VT007";
-    const CEILING = ["assist", "prepare", "receive_documents", "review"];
     const rpc = async (client, fn, args) => {
       const { data, error } = await client.rpc(fn, args);
       assert.equal(error, null, `${fn}: ${error?.code} ${error?.message} ${error?.details}`);
@@ -503,9 +501,11 @@ test("sign-in accounts against real Supabase", async (t) => {
       assert.equal(invite.reusableUserId, null, "no auth user for a new address");
     });
 
+    // 052: create chooses no capabilities; linking the person gives them their
+    // roles' capabilities (spec sign-in-accounts, "Creating an account").
     await t.test("record create links the volunteer", async () => {
       const user = await f.provision();
-      const personId = await addVolunteer(user.email, { roles: ["greeter"], certificates: ["vsc"] });
+      const personId = await addVolunteer(user.email, { roles: ["preparer"], certificates: ["vsc", "itqr", "basic"] });
       const revision = await profileRevision(personId);
       const actionId = randomUUID();
       const result = await rpc(
@@ -517,7 +517,7 @@ test("sign-in accounts against real Supabase", async (t) => {
       assert.deepEqual(await membershipOf(user.userId), { access: "staff", active: true });
       const person = await one(f, "select user_id,capabilities from public.people where id=$1", [personId]);
       assert.equal(person.user_id, user.userId);
-      assert.deepEqual([...person.capabilities].sort(), CEILING);
+      assert.deepEqual(person.capabilities, ["prepare"]);
       const account = await accountOfPerson(personId);
       assert.equal(account.user_id, user.userId);
       assert.equal(account.status, "invited");

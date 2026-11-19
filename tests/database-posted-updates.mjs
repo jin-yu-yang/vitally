@@ -258,12 +258,15 @@ test("posted updates against real Supabase", async (t) => {
       await refusedWith(f, f.anonymous, "vitally_my_updates", {}, ANONYMOUS_DENIAL);
     });
 
-    await t.test("write: an admin with no roles can post", async () => {
+    // 052: an admin with no roles is a site coordinator (the workspace admin
+    // check); the Admin role is a role.
+    await t.test("write: a site coordinator with no roles can post", async () => {
       const lead = await f.staff({
         key: "quinn_uncleared_admin",
         name: "Quinn Adair",
-        capabilities: ["admin", "followup"],
+        capabilities: [],
         cleared: false,
+        siteCoordinator: true,
       });
       const posted = await call(lead.client, SAVE, newArgs(update({ title: "Welcome back, volunteers", post: true })));
       assert.equal(posted.status, "posted");

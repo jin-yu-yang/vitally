@@ -136,7 +136,15 @@ export const RPC_SIGNATURES = Object.freeze([
     name: "vitally_my_clearance",
     signature: "vitally_my_clearance()",
     authorized: (f) => f.siteCoordinator,
-    receiptKeys: Object.freeze(["capabilities", "cleared", "isAdmin", "missing", "siteCheck", "siteCoordinatorName"]),
+    receiptKeys: Object.freeze([
+      "capabilities",
+      "cleared",
+      "isAdmin",
+      "isSiteCoordinator",
+      "missing",
+      "siteCheck",
+      "siteCoordinatorName",
+    ]),
     args: () => ({}),
   }),
   // Sign-in accounts (OpenSpec change add-account-invitations). An entry's
@@ -358,14 +366,13 @@ export const PRIVATE_SETUP_DENIALS = Object.freeze(["42501", "PGRST202", "PGRST1
 export const PRIVATE_SETUP_FUNCTIONS = Object.freeze([
   Object.freeze({
     name: "add_staff_member",
-    signature: "add_staff_member(uuid,uuid,text,text,text[])",
+    signature: "add_staff_member(uuid,uuid,text,text)",
     // A legitimate request for an account with no membership yet.
     args: (context) => ({
       p_workspace_id: context.workspaceId,
       p_user_id: context.userId,
       p_person_key: "mallory",
       p_name: "Mallory Stone",
-      p_capabilities: ["admin", "followup"],
     }),
   }),
   Object.freeze({

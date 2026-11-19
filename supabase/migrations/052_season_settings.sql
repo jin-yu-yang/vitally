@@ -12,7 +12,8 @@
 --      accounts and its history (design D4);
 --   §4 the recompute of every person's capabilities;
 --   §5 onwards, the functions: §5 site coordinators, the workspace admin
---      check and clearance (design D2, D4, D6).
+--      check and clearance (design D2, D4, D6); §6 staff setup without
+--      capabilities (design D1, D9).
 -- The migration runs in one transaction.
 
 -- ---------------------------------------------------------------------------
@@ -284,3 +285,157 @@ end;
 $$;
 revoke all on function public.vitally_my_clearance() from public,anon,authenticated,service_role;
 grant execute on function public.vitally_my_clearance() to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- §6. Staff setup takes no capabilities (design D1, D9). Linking a sign-in
+-- recomputes people.capabilities through the mirror trigger (§3).
+
+-- From 047 §4, with the capabilities argument gone: the 5-argument form is
+-- dropped, the link and the insert write no capabilities, and the identical
+-- re-run compares the key and the link only.
+drop function vitally_private.add_staff_member(uuid,uuid,text,text,text[]); -- 052
+create function vitally_private.add_staff_member(p_workspace_id uuid,p_user_id uuid,p_person_key text,p_name text) -- 052
+returns uuid language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_has_member boolean;
+ v_person_id uuid;
+ v_email text;
+ v_link uuid;
+begin
+ if p_workspace_id is null or p_user_id is null or p_person_key is null or p_name is null -- 052
+  or p_person_key !~ '^[a-z][a-z0-9_]{0,39}$'
+  or length(p_name) not between 1 and 80 then -- 052
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_workspace_id::text,0));
+ if not exists(select 1 from public.workspaces where id=p_workspace_id)
+  or not exists(select 1 from auth.users a where a.id=p_user_id)
+  or exists(select 1 from vitally_private.test_workspaces where workspace_id=p_workspace_id and test_overrides_applied) then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ if exists(select 1 from public.memberships where user_id=p_user_id and active and workspace_id<>p_workspace_id) then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ select * into v_member from public.memberships where workspace_id=p_workspace_id and user_id=p_user_id;
+ v_has_member=found;
+ if v_has_member and (v_member.access<>'staff' or not v_member.active) then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ -- Any person of the workspace with this key or this account must be exactly
+ -- this staff member. The name is the Roster's to change, so it is not compared,
+ -- and the capabilities are the mirror of the roles (052), so neither are they.
+ if exists(select 1 from public.people p where p.workspace_id=p_workspace_id
+  and (p.person_key=p_person_key or p.user_id=p_user_id)
+  and not (p.person_key=p_person_key and p.user_id is not distinct from p_user_id)) then -- 052
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ select p.id into v_person_id from public.people p where p.workspace_id=p_workspace_id and p.person_key=p_person_key;
+ if found then
+  -- Both already exist with these values: the identical re-run.
+  if not v_has_member then
+   raise sqlstate 'VT007' using message='VALIDATION';
+  end if;
+  return v_person_id;
+ end if;
+ if v_has_member then
+  -- A staff membership with no person is not a state this function completes.
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ select lower(u.email) into v_email from auth.users u where u.id=p_user_id;
+ select p.id into v_link from public.people p
+  join public.volunteer_profiles v on v.workspace_id=p.workspace_id and v.person_id=p.id
+  where p.workspace_id=p_workspace_id and p.user_id is null and v.email=v_email for update of p;
+ insert into public.memberships(workspace_id,user_id,access) values(p_workspace_id,p_user_id,'staff');
+ if v_link is not null then
+  update public.people set person_key=p_person_key,user_id=p_user_id where id=v_link; -- 052
+  update public.volunteer_profiles set revision=revision+1,updated_at=now() where workspace_id=p_workspace_id and person_id=v_link;
+  perform vitally_private.insert_active_account(p_workspace_id,p_user_id,v_link); -- 047
+  return v_link;
+ end if;
+ insert into public.people(workspace_id,person_key,name,user_id) -- 052
+  values(p_workspace_id,p_person_key,p_name,p_user_id) returning id into v_person_id; -- 052
+ insert into public.volunteer_profiles(workspace_id,person_id,email) values(p_workspace_id,v_person_id,v_email);
+ insert into public.roster_entries(workspace_id,person_id,season)
+  select p_workspace_id,v_person_id,w.current_season from public.workspaces w where w.id=p_workspace_id;
+ perform vitally_private.insert_active_account(p_workspace_id,p_user_id,v_person_id); -- 047
+ return v_person_id;
+end;
+$$;
+revoke all on function vitally_private.add_staff_member(uuid,uuid,text,text) from public,anon,authenticated,service_role;
+
+-- From 047, with one change: create links the volunteer without writing the
+-- four-capability ceiling; the mirror gives them their roles' capabilities.
+create or replace function public.vitally_record_account(p_action_id uuid,p_op text,p_target jsonb,p_user_id uuid)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_receipt public.action_receipts;
+ v_digest text;
+ v_check jsonb;
+ v_email text;
+ v_volunteer uuid;
+ v_user_email text;
+ v_result jsonb;
+begin
+ v_member=vitally_private.require_membership();
+ v_person=vitally_private.acting_person(v_member);
+ if v_member.access<>'staff' or v_person.id is null or not vitally_policy.is_workspace_admin(v_member.workspace_id) then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ if p_op='resend' then
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_member.workspace_id::text,0));
+  perform vitally_private.expire_invitations(v_member.workspace_id);
+  v_check=vitally_private.account_check(v_member.workspace_id,'resend',p_target);
+  update public.accounts a set invited_at=now(),expires_at=now()+interval '7 days',revision=revision+1,updated_at=now()
+   from auth.users u
+   where a.workspace_id=v_member.workspace_id and a.status='invited' and u.id=a.user_id
+    and a.revision=(v_check->>'accountRevision')::bigint and lower(u.email)=v_check->>'email'
+   returning to_jsonb(a.revision) into v_result;
+  return jsonb_build_object('status','invited','email',v_check->>'email','accountRevision',v_result);
+ end if;
+ if p_action_id is null or p_user_id is null or p_op is null or p_op not in ('create','invite') then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_member.workspace_id::text,0));
+ perform vitally_private.expire_invitations(v_member.workspace_id);
+ v_digest=encode(extensions.digest(jsonb_build_object('operation','RECORD_ACCOUNT','op',p_op,'target',p_target,
+  'userId',p_user_id,'personId',v_person.id)::text,'sha256'),'hex');
+ v_receipt=vitally_private.reserve_receipt(v_member,p_action_id,'RECORD_ACCOUNT',v_digest,v_person.id);
+ if v_receipt.receipt is not null then
+  return v_receipt.receipt;
+ end if;
+ v_check=vitally_private.account_check(v_member.workspace_id,p_op,p_target);
+ v_email=v_check->>'email';
+ v_volunteer=(v_check->>'volunteerId')::uuid;
+ select lower(u.email) into v_user_email from auth.users u where u.id=p_user_id;
+ if v_user_email is null or v_user_email<>v_email then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ if exists(select 1 from public.accounts a where a.user_id=p_user_id) then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='EMAIL_IN_USE';
+ end if;
+ begin
+  if p_op='create' then
+   insert into public.memberships(workspace_id,user_id,access) values(v_member.workspace_id,p_user_id,'staff');
+   update public.people set user_id=p_user_id -- 052
+    where workspace_id=v_member.workspace_id and id=v_volunteer;
+   update public.volunteer_profiles set revision=revision+1,updated_at=now()
+    where workspace_id=v_member.workspace_id and person_id=v_volunteer;
+  else
+   insert into public.memberships(workspace_id,user_id,access) values(v_member.workspace_id,p_user_id,'applicant');
+  end if;
+  insert into public.accounts(workspace_id,user_id,person_id,status,invited_at,invited_by,expires_at)
+   values(v_member.workspace_id,p_user_id,v_volunteer,'invited',now(),v_person.id,now()+interval '7 days');
+ exception when unique_violation then
+  -- Another active membership for this user (memberships_one_active_workspace)
+  -- or a row that appeared meanwhile.
+  -- An accounts (workspace_id,person_id) clash is unreachable: the advisory lock serializes the re-check.
+  raise sqlstate 'VT007' using message='VALIDATION',detail='EMAIL_IN_USE';
+ end;
+ v_result=jsonb_build_object('actionId',p_action_id,'status','invited','email',v_email,'accountRevision',1);
+ update public.action_receipts set target_id=coalesce(v_volunteer,p_user_id),receipt=v_result where id=v_receipt.id;
+ return v_result;
+end;
+$$;
+revoke all on function public.vitally_record_account(uuid,text,jsonb,uuid) from public,anon,authenticated,service_role;
+grant execute on function public.vitally_record_account(uuid,text,jsonb,uuid) to authenticated;

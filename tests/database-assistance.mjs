@@ -38,8 +38,9 @@ async function refuseAction(f, client, spec, code) {
   assert.equal(await f.receiptsFor(actionId), 0);
 }
 // Capability changes a test needs are always undone, whatever the body does.
-// The roster roles follow each change (045: a staff member acts with the
-// capabilities of their roles, within people.capabilities).
+// people.capabilities is the mirror of the person's roles (052), so a change
+// is a change of roles: `change` maps the person's capabilities to the ones
+// whose roles they get for the body.
 async function withCapabilities(f, personId, change, body) {
   const capabilitiesOf = async () =>
     (
@@ -48,15 +49,10 @@ async function withCapabilities(f, personId, change, body) {
       ])
     ).rows[0].capabilities;
   const before = await capabilitiesOf();
-  await f.sql(change, [personId]);
+  await f.clearStaff(personId, change(before));
   try {
-    await f.clearStaff(personId, await capabilitiesOf());
     await body();
   } finally {
-    await f.sql("update public.people set capabilities=$2 where id=$1", [
-      personId,
-      before,
-    ]);
     await f.clearStaff(personId, before);
   }
 }
@@ -234,7 +230,7 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
         await withCapabilities(
           f,
           f.reviewerId,
-          "update public.people set capabilities=array_append(capabilities,'assist') where id=$1",
+          (capabilities) => [...capabilities, "assist"],
           async () => {
             await refuseAssistance(f, f.reviewer, resolve, "VT001");
           },
@@ -423,10 +419,11 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
           assert.equal(response.error.code, "VT007");
         }
         // The capability the operation needs is re-checked on every replay.
+        // The Admin role gives `assist`, so the coordinator becomes a Preparer.
         await withCapabilities(
           f,
           f.siteCoordinatorId,
-          "update public.people set capabilities=array_remove(capabilities,'assist') where id=$1",
+          () => ["prepare"],
           async () => {
             const stripped = await f.siteCoordinator.rpc(
               "vitally_assistance_action",

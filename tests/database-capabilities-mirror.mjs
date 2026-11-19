@@ -191,12 +191,11 @@ test("people.capabilities mirror this season's roles against real Supabase", asy
       // The account path links the account to the volunteer (add_staff_member's
       // roster link), and the mirror then gives them their role's capabilities.
       await f.withSetupLock(() =>
-        f.sql("select vitally_private.add_staff_member($1,$2,$3,$4,$5::text[])", [
+        f.sql("select vitally_private.add_staff_member($1,$2,$3,$4)", [
           f.workspaceId,
           account.userId,
           "noor_nosignin",
           "Noor Halvorsen",
-          ["prepare"],
         ]),
       );
       assert.deepEqual(await capabilitiesOf(personId), ["prepare"]);

@@ -163,8 +163,8 @@ test("document requests, receipts and verification keep the preparer in charge",
           }),
         );
         assert.equal(foreign.error?.code, "VT002");
-        // Step 7: an admin title and a reviewer qualification are not `prepare`.
-        for (const client of [f.siteCoordinator, f.reviewer])
+        // Step 7: the Admin and Intaker roles do not give `prepare`.
+        for (const client of [f.siteCoordinator, f.intaker])
           await assert.rejects(
             () =>
               f.act(
@@ -177,27 +177,17 @@ test("document requests, receipts and verification keep the preparer in charge",
           );
         // A qualified person who is not this case's preparer is forbidden, even
         // with the capability: assignment and participation are both required.
-        await f.sql("update public.people set capabilities=$1 where id=$2", [
-          ["prepare", "review"],
-          f.reviewerId,
-        ]);
-        try {
-          await assert.rejects(
-            () =>
-              f.act(
-                f.reviewer,
-                caseId,
-                "REQUEST_DOCUMENT",
-                f.sampleRequest,
-              ),
-            rejected("FORBIDDEN"),
-          );
-        } finally {
-          await f.sql("update public.people set capabilities=$1 where id=$2", [
-            ["review"],
-            f.reviewerId,
-          ]);
-        }
+        // The Reviewer role gives `prepare` (052: no ceiling narrows it).
+        await assert.rejects(
+          () =>
+            f.act(
+              f.reviewer,
+              caseId,
+              "REQUEST_DOCUMENT",
+              f.sampleRequest,
+            ),
+          rejected("FORBIDDEN"),
+        );
         assert.deepEqual((await f.readStaffCase(caseId)).requests, []);
         // Positive control: the assigned preparer may.
         await f.act(
@@ -220,7 +210,9 @@ test("document requests, receipts and verification keep the preparer in charge",
         await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
           filename: f.sampleFilename,
         });
-        for (const client of [f.siteCoordinator, f.reviewer])
+        // The Reviewer role gives `prepare` (052), so the second unqualified
+        // caller is the Intaker.
+        for (const client of [f.siteCoordinator, f.intaker])
           await assert.rejects(
             () =>
               f.act(client, caseId, "VERIFY_DOCUMENT", {}),
@@ -838,9 +830,10 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
           rejected("INELIGIBLE"),
         );
         assert.deepEqual((await f.readStaffCase(fresh)).followups, []);
-        // Only the assigned preparer escalates.
+        // Only the assigned preparer escalates. The Admin and the Intaker hold
+        // no role with `prepare` (the Reviewer role gives it since 052).
         const third = await requestedCase(f);
-        for (const client of [f.siteCoordinator, f.reviewer])
+        for (const client of [f.siteCoordinator, f.intaker])
           await assert.rejects(
             () =>
               f.act(client, third, "ESCALATE_CONTACT", {
@@ -882,10 +875,9 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
         }
         assert.deepEqual((await f.readStaffCase(caseId)).followups, []);
         // A configured person without the capability is the same setup error.
-        await f.sql("update public.people set capabilities=$1 where id=$2", [
-          ["admin", "assist", "receive_documents"],
-          f.siteCoordinatorId,
-        ]);
+        // Follow-up access comes only with the Admin role (052), so the
+        // coordinator is made an Intaker for the check.
+        await f.clearStaff(f.siteCoordinatorId, ["assist", "receive_documents"]);
         try {
           await assert.rejects(
             () =>
@@ -895,10 +887,7 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
             rejected("VALIDATION"),
           );
         } finally {
-          await f.sql("update public.people set capabilities=$1 where id=$2", [
-            ["admin", "assist", "followup", "receive_documents"],
-            f.siteCoordinatorId,
-          ]);
+          await f.clearStaff(f.siteCoordinatorId, ["admin", "assist", "followup", "receive_documents"]);
         }
         assert.deepEqual((await f.readStaffCase(caseId)).followups, []);
         // Positive control with the workspace restored.
@@ -1032,11 +1021,8 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
         );
         // Readiness answers anyone who may act (042): a capable non-assignee
         // is told the resolved task is not available. The roster roles follow
-        // (045: a staff member acts with their roles' capabilities).
-        await f.sql("update public.people set capabilities=$1 where id=$2", [
-          ["admin", "followup", "review"],
-          f.reviewerId,
-        ]);
+        // (045: a staff member acts with their roles' capabilities; 052: and
+        // people.capabilities is their mirror).
         try {
           await f.clearStaff(f.reviewerId, ["admin", "followup", "review"]);
           await assert.rejects(
@@ -1054,10 +1040,6 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
             rejected("INVALID_TRANSITION"),
           );
         } finally {
-          await f.sql("update public.people set capabilities=$1 where id=$2", [
-            ["review"],
-            f.reviewerId,
-          ]);
           await f.clearStaff(f.reviewerId, ["review"]);
         }
         assert.equal((await taskContacts(f, followupId)).length, 4);
@@ -1157,23 +1139,23 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
       assert.equal((await taskContacts(f, task.id)).length, 0);
     });
     await t.test("follow-up work needs the capability, not the assignment (042)", async () => {
-      const dee = await f.staff({ key: "dee", name: "Dee Navarro", capabilities: ["admin", "receive_documents"] });
+      // Follow-up access comes only with the Admin role since 052, so the
+      // person without it is an Intaker.
+      const dee = await f.staff({ key: "dee", name: "Dee Navarro", capabilities: ["assist", "receive_documents"] });
       const caseId = await requestedCase(f);
       await f.act(f.preparer, caseId, "ESCALATE_CONTACT", { reason: "Office contact needed" });
       const [task] = (await f.readStaffCase(caseId)).followups;
       const payload = { followupId: task.id, outcome: "reached", note: "Spoke with the client" };
-      // Admin without follow-up access is refused.
+      // A staff member without follow-up access is refused.
       await assert.rejects(
         () => f.logContact(dee.client, caseId, SAMPLE_CONTACT(), task.id),
         rejected("FORBIDDEN"),
       );
       await assert.rejects(() => f.act(dee.client, caseId, "RESOLVE_FOLLOWUP", payload), rejected("FORBIDDEN"));
-      // So is the assignee once they no longer hold follow-up access.
+      // So is the assignee once they no longer hold follow-up access: no
+      // longer the Admin role, though still a site coordinator.
       assert.equal(task.assigneeId, f.siteCoordinatorId);
-      await f.sql("update public.people set capabilities=$1 where id=$2", [
-        ["admin", "assist", "receive_documents"],
-        f.siteCoordinatorId,
-      ]);
+      await f.clearStaff(f.siteCoordinatorId, ["assist", "receive_documents"]);
       try {
         await assert.rejects(
           () => f.logContact(f.siteCoordinator, caseId, SAMPLE_CONTACT(), task.id),
@@ -1184,10 +1166,7 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
           rejected("FORBIDDEN"),
         );
       } finally {
-        await f.sql("update public.people set capabilities=$1 where id=$2", [
-          ["admin", "followup", "assist", "receive_documents"],
-          f.siteCoordinatorId,
-        ]);
+        await f.clearStaff(f.siteCoordinatorId, ["admin", "followup", "assist", "receive_documents"]);
       }
       assert.equal((await taskContacts(f, task.id)).length, 0);
       assert.equal((await f.readStaffCase(caseId)).followups[0].status, "open");
