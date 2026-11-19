@@ -43,12 +43,12 @@ Slack). Screening stays in Airtable. Dates are targets.
 | Adoption | Roster: Form 13615 and photo ID uploads to PCDC's OneDrive link with "I've uploaded it" | [#138](https://github.com/jin-yu-yang/vitally/issues/138) | Nov 29 | Not started |
 | Adoption | Season settings, site coordinator role, Start next season | [#138](https://github.com/jin-yu-yang/vitally/issues/138) | Nov 29 | Not started |
 | Adoption | Returning-volunteer picker; Roster CSV export | [#138](https://github.com/jin-yu-yang/vitally/issues/138) | Nov 29 | Not started; picker can be cut |
-| Adoption | Clearance fixes: role changes without a reload, a self-cleared admin, screen-reader announcement | [#190](https://github.com/jin-yu-yang/vitally/issues/190) [#191](https://github.com/jin-yu-yang/vitally/issues/191) [#192](https://github.com/jin-yu-yang/vitally/issues/192) | Nov 22 | Not started |
+| Adoption | Clearance fixes: role changes without a reload, a self-cleared admin, screen-reader announcement | [#190](https://github.com/jin-yu-yang/vitally/issues/190) #191 #192 | Nov 22 | #191 and #192 **done** (Nov 18); #190 not started |
 | Adoption | Workload and Reassign | #139 | — | **Done** |
 | Adoption | Hourly volunteer schedule with a role per shift | [#140](https://github.com/jin-yu-yang/vitally/issues/140) | Dec 6 | Not started |
 | Adoption | Posted updates and notifications | #150 | — | **Done** |
 | Adoption | Note for the team on the case page | [#151](https://github.com/jin-yu-yang/vitally/issues/151) | Dec 6 | Not started; first to cut |
-| Adoption | Case labels (City Tax, MFS, Multi-state) | [#148](https://github.com/jin-yu-yang/vitally/issues/148) | Nov 22 | In review ([#206](https://github.com/jin-yu-yang/vitally/pull/206)) |
+| Adoption | Case labels (City Tax, MFS, Multi-state) | #148 | — | **Done** (Nov 17) |
 | Adoption | One account reaches both the office and the work board | [#104](https://github.com/jin-yu-yang/vitally/issues/104) | Dec 13 | Not started; can be cut |
 | Adoption | Mobile layouts for the admin screens | [#147](https://github.com/jin-yu-yang/vitally/issues/147) | Dec 20 | Not started |
 | Trust | **"Export this season's data"** to CSV, so PCDC can keep it in SharePoint | not filed | Dec 13 | What the file holds and who may export: to decide by Dec 7 |
