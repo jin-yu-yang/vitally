@@ -34,10 +34,13 @@ const linkCase = async (f, caseId, name, personId, workspaceId = f.workspaceId) 
     "insert into public.case_label_links(workspace_id,case_id,label_id,active,changed_by_person_id) values($1,$2,$3,true,$4)",
     [workspaceId, caseId, await labelId(f, name, workspaceId), personId],
   );
+// This workspace's rows only: other test files create workspaces at the same
+// time, and each new one gets the starter labels.
 const counts = async (f) =>
   (
     await f.sql(
-      "select (select count(*) from public.case_labels) as labels, (select count(*) from public.case_label_links) as links",
+      "select (select count(*) from public.case_labels where workspace_id = $1) as labels, (select count(*) from public.case_label_links where workspace_id = $1) as links",
+      [f.workspaceId],
     )
   ).rows[0];
 
