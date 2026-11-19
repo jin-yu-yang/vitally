@@ -321,6 +321,15 @@ supabase/functions/. "$VITALLY_STACK/supabase/functions/"`), and keep the exampl
 change to `supabase/functions/`, copy it again and restart the stack. The example also sets
 `[auth.rate_limit] email_sent = 1000` for this stack only, so the tests can send many sign-in
 codes (never copy it to a hosted project).
+The accounts function sends its own invitation email. On a test stack it posts to the stack's mail
+catcher (Mailpit) over HTTP instead of calling the real sender, and reads two variables:
+`VITALLY_SITE_URL` (`http://127.0.0.1:4173`, set in the example's `[edge_runtime.secrets]`) and
+`VITALLY_MAIL_CATCHER_URL`, the catcher's address on the stack network,
+`http://supabase_inbucket_<project_id>:8025`, which the example reads with `env(VITALLY_MAIL_CATCHER_URL)`.
+Export it before `supabase start`: `export VITALLY_MAIL_CATCHER_URL="http://supabase_inbucket_$VITALLY_INSTANCE:8025"`.
+These are for test stacks only and never hold `RESEND_API_KEY`. A running stack needs a stop and a
+start (without `--no-backup`) after this changes.
+
 A stack that is already running picks the template up after `supabase stop` (without
 `--no-backup`, which would delete its accounts) and `supabase start`. The hosted project needs the
 same template, set in its dashboard ([section 6](#6-classroom-and-hosted-setup-pending)).
@@ -745,6 +754,8 @@ runs:
 - The stack's `config.toml` is [`supabase/test-stack.config.example.toml`](../supabase/test-stack.config.example.toml)
   itself, with the project id `vitally-ci`, plus the code-carrying Magic Link template and the
   PostgREST 16.3 pin. CI therefore checks the committed reference, ports and all.
+  The step that starts the stack exports `VITALLY_MAIL_CATCHER_URL=http://supabase_inbucket_vitally-ci:8025`
+  first, which the config passes to the accounts function.
 - `supabase start` runs with section 3's `--exclude` list, from the stack's own folder under the
   runner's temporary directory, never the repository root. Its output, which lists the keys, goes
   to a private file; if the start fails, the job prints the container states and only the log lines

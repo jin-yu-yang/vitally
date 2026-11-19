@@ -33,6 +33,10 @@ runs:
 
     - name: Start the stack
       shell: bash
+      env:
+        # The accounts function posts its invitation email to the stack's mail catcher
+        # (Mailpit) over the stack network; the config reads this through env(...).
+        VITALLY_MAIL_CATCHER_URL: http://supabase_inbucket_vitally-ci:8025
       run: |
         if ! SUPABASE_HOME="$VITALLY_STACK/cli-home" ./node_modules/.bin/supabase start \
           --workdir "$VITALLY_STACK" \

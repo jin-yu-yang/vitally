@@ -180,6 +180,12 @@ enable_signup = false
 [edge_runtime]
 enabled = true
 
+# TEST STACKS ONLY. These reach the accounts function as environment variables.
+# They never hold RESEND_API_KEY: a test stack sends no real email.
+[edge_runtime.secrets]
+VITALLY_MAIL_CATCHER_URL = "env(VITALLY_MAIL_CATCHER_URL)"
+VITALLY_SITE_URL = "http://127.0.0.1:4173"
+
 # The accounts function checks the caller's JWT itself (it must answer an expired or
 # missing token with a clear refusal, not the gateway's), so the gateway check is
 # off. See design D4 of the add-account-invitations change.
