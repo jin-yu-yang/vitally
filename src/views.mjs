@@ -662,7 +662,7 @@ export function dialog(state) {
   }
   if (state.dialog === "close-unsigned") {
     title = "Close unsigned cases?";
-    body = closeUnsignedDialogBody({ cases: state.cases ?? [], now: Date.now() });
+    body = closeUnsignedDialogBody({ ...state, cases: state.cases ?? [], now: Date.now() });
   }
   if (state.dialog === "request-corrections") {
     title = "Ask the preparer for corrections";

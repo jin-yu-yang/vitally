@@ -16,6 +16,7 @@ import { decorateStaffCase, renderStaffCase } from "../src/staff-views.mjs";
 import { makeSampleAnswers } from "../src/sample-data.mjs";
 import { CONTACT_FIELDS } from "../src/intake-catalogue.mjs";
 import { staffScreen, dialog } from "../src/views.mjs";
+import { DIALOG_CAPABILITY } from "../src/role-gates.mjs";
 import { payloadFor } from "../src/case-actions.mjs";
 import { describeStage } from "../src/domain.mjs";
 import { nowInput } from "../src/contact-log.mjs";
@@ -1697,3 +1698,35 @@ test("Add a case stays for a staff person who lost admin, with its writes droppe
   assert.doesNotMatch(html, /save-office-draft|send-office-draft/);
   assert.match(html, /Your roles changed, so you can&#39;t send this any more\./);
 });
+
+// Every capability dialog, through dialog(): the locked flag reaches each body (#190).
+const LINE = /Your roles changed, so you can&#39;t send this any more\./;
+const dialogState = (key, capabilities) => {
+  const record = officeCase({
+    id: "c1",
+    followups: [{ id: "f1", status: "open", reason: "Ask for the missing W-2", assigneeId: "p-lee", assigneeName: "Lee" }],
+  });
+  return {
+    dialog: key,
+    principal: { access: "staff", personId: "p-lee" },
+    people: [{ id: "p-lee", name: "Lee", capabilities }],
+    savedCase: record,
+    cases: [record],
+    volunteers: [],
+    assistance: [
+      { id: "h1", title: "Help reading a letter", status: "assigned", assigneeId: "p-lee", language: "English", contactPreference: "Phone" },
+    ],
+    dialogContext: { caseId: "c1", itemId: "h1", slot: "preparer" },
+    busy: false,
+    error: null,
+    retryable: false,
+  };
+};
+
+for (const [key, needed] of Object.entries(DIALOG_CAPABILITY)) {
+  test(`the ${key} dialog drops its submit without ${needed}, and keeps it with ${needed} (#190)`, () => {
+    const other = ["admin", "followup", "assist", "review"].find((cap) => cap !== needed);
+    assert.match(dialog(dialogState(key, [other])), LINE);
+    assert.doesNotMatch(dialog(dialogState(key, [needed])), LINE);
+  });
+}
