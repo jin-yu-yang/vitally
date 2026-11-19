@@ -42,11 +42,23 @@ After the signed-in admin saves their own Roster row, the window SHALL wait for 
 - **THEN** the window shows the setup screen, and they stay on the Roster
 
 ### Requirement: Clearance re-reads are one at a time and quiet when nothing changed
-A window SHALL have at most one clearance request out. A wake event or refusal that comes while one is out SHALL share its answer. An answer with the same effective capabilities and the same `isAdmin` as before SHALL NOT redraw the window.
+A window SHALL have at most one clearance request and one wake refresh out; a wake event during a wake refresh SHALL join it. A refusal during a clearance request SHALL wait for its answer, then re-read once more. A failure of the clearance read itself SHALL NOT start another re-read. An answer with the same effective capabilities and `isAdmin` as before SHALL NOT redraw the window.
 
 #### Scenario: One request at a time
 - **WHEN** a cleared window's clearance request is still out, and the window regains focus, becomes visible, and has an action refused with `FORBIDDEN`
 - **THEN** no second clearance request is sent until the first is answered
+
+#### Scenario: Focus and visibility together
+- **WHEN** a cleared window's tab comes back and fires both focus and `visibilitychange`
+- **THEN** one clearance request is sent and each list is read once
+
+#### Scenario: A refusal during an older check
+- **WHEN** a cleared window's clearance request, sent before an admin narrowed their roles, is still out, and an action is refused with `INELIGIBLE`
+- **THEN** once that answer arrives, one more clearance request is sent, and the buttons follow the newer answer
+
+#### Scenario: The clearance read itself is refused
+- **WHEN** a cleared window's clearance read is answered with `FORBIDDEN`
+- **THEN** no further clearance request is sent
 
 #### Scenario: Nothing changed
 - **WHEN** a cleared window regains focus and the answer has the same effective capabilities and `isAdmin`

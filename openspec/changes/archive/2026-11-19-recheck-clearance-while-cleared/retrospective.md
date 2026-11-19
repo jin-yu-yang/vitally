@@ -4,6 +4,12 @@
 > Commit range: `2a305a9..c72b0f9` (archive commit follows: see git log)
 > Worktree: `D:/dev/vitally-190`, branch `recheck-clearance-while-cleared`
 
+> **Update 2026-11-19 (PR #234 review, Zeye):** two behaviours changed after this retrospective was written.
+> - design D4's "a refusal shares the check in flight" is superseded: a FORBIDDEN/INELIGIBLE refusal now waits for a check in flight and then checks once more, as an own-row save does. A failure of the clearance read itself is excluded, so ruling R2 still holds.
+> - The wake refresh is now single-flight: focus plus `visibilitychange` read each list once. This reverses the design's accepted risk of a double list read.
+>
+> The canonical requirement "Clearance re-reads are one at a time and quiet when nothing changed" and this change's delta were amended to match. The commits after `fe5a582` on PR #234 carry the fix.
+
 ---
 
 ## 0. Evidence
