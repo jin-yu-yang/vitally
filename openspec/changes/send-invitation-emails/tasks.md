@@ -16,8 +16,8 @@
 
 ## 4. Handler (design D1, D6)
 
-- [ ] 4.1 Update `tests/accounts-function.test.mjs`: a fake sender replaces `signInWithOtp`; create, invite and resend each send one invitation of the right kind to the right address, with the action id as key for create and invite and none for resend; sender failure keeps `emailSent: false` and the account; replays and refusals send nothing
-- [ ] 4.2 Change `handler.mjs` to send through `deps.sendInvitation` with the computed expiry, and drop `anonClient`
+- [x] 4.1 Update `tests/accounts-function.test.mjs`: a fake sender replaces `signInWithOtp`; create, invite and resend each send one invitation of the right kind to the right address, with the action id as key for create and invite and none for resend; sender failure keeps `emailSent: false` and the account; replays and refusals send nothing
+- [x] 4.2 Change `handler.mjs` to send through `deps.sendInvitation` with the computed expiry, and drop `anonClient`
 
 ## 5. Staff wording (design D7)
 
