@@ -105,6 +105,7 @@ const NEW_YORK = new Intl.DateTimeFormat("en-US", {
 });
 
 // "Wednesday, November 25, 2026 at 3:00 PM" read as New York time -> the instant.
+// In the fall-back hour (1:00-2:00 AM, twice) it returns the first (EDT) instant.
 export function parseNewYorkTime(text) {
   const m = /(\w+) (\d{1,2}), (\d{4}) at (\d{1,2}):(\d{2}) (AM|PM)/.exec(text);
   assert.ok(m, `Not a New York date and time: ${text}`);
@@ -123,12 +124,18 @@ export function parseNewYorkTime(text) {
 }
 
 /**
- * An invitation has the site link, no run of six digits, and an English expiry
- * line within a minute of `expiresAt` (the account row's expires_at).
+ * An invitation has the site link (also as an href), no run of six digits, no
+ * recipient address, and an English expiry line within a minute of `expiresAt`
+ * (the account row's expires_at).
  */
-export function assertInvitation(message, { siteUrl, expiresAt }) {
+export function assertInvitation(message, { email, siteUrl, expiresAt }) {
   const { text, html } = message;
   assert.ok(String(text).includes(siteUrl), `The invitation does not contain ${siteUrl}.`);
+  assert.ok(String(html).includes(`href="${siteUrl}"`), `The invitation html has no link to ${siteUrl}.`);
+  assert.ok(email, "assertInvitation needs the recipient's email.");
+  const address = String(email).trim().toLowerCase();
+  assert.ok(!String(text).toLowerCase().includes(address), "The invitation text contains the recipient's address.");
+  assert.ok(!String(html).toLowerCase().includes(address), "The invitation html contains the recipient's address.");
   assert.ok(!/\b\d{6}\b/.test(`${text}${html ?? ""}`), "The invitation contains a run of six digits.");
   const shown = /valid until (.+?) \(New York time\)/.exec(text);
   assert.ok(shown, "The invitation has no English expiry line.");

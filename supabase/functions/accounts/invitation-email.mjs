@@ -75,6 +75,7 @@ function chineseExpiry(date) {
 export function invitationEmail({ kind, siteUrl, expiresAt }) {
   const paragraphs = PARAGRAPHS[kind];
   if (!Object.hasOwn(SUBJECTS, kind)) throw new TypeError(`Unknown invitation kind: ${kind}`);
+  if (typeof siteUrl !== "string" || !siteUrl.trim()) throw new TypeError("invitationEmail needs a siteUrl");
   const link = String(siteUrl).replace(/\/+$/, "");
   const en = englishExpiry(expiresAt);
   const zh = chineseExpiry(expiresAt);

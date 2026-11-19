@@ -30,13 +30,14 @@ runs:
         # PostgREST 16.3, not the CLI's 16.2 (docs/setup.md, "Pin PostgREST to 16.3").
         printf %s v16.3 > "$stack/supabase/.temp/rest-version"
         echo "VITALLY_STACK=$stack" >> "$GITHUB_ENV"
+        # The accounts function posts its invitation email to the stack's mail catcher
+        # (Mailpit) over the stack network; the config reads this through env(...).
+        # Written here so every later CLI call in the job (status, stop) sees the same
+        # config. "vitally-ci" must match the project_id the sed above writes.
+        echo "VITALLY_MAIL_CATCHER_URL=http://supabase_inbucket_vitally-ci:8025" >> "$GITHUB_ENV"
 
     - name: Start the stack
       shell: bash
-      env:
-        # The accounts function posts its invitation email to the stack's mail catcher
-        # (Mailpit) over the stack network; the config reads this through env(...).
-        VITALLY_MAIL_CATCHER_URL: http://supabase_inbucket_vitally-ci:8025
       run: |
         if ! SUPABASE_HOME="$VITALLY_STACK/cli-home" ./node_modules/.bin/supabase start \
           --workdir "$VITALLY_STACK" \

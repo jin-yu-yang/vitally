@@ -55,14 +55,23 @@ test("trailing slash", () => {
   }
 });
 
-test("no six-digit run and no code words", () => {
+test("no six-digit run and no template placeholders", () => {
+  const dates = [
+    "2026-03-08T07:00Z", "2026-11-01T05:30Z", "2026-11-01T06:30Z", "2026-11-25T05:05Z",
+    "2026-11-25T14:05Z", "2026-12-31T23:59Z", "2027-01-01T00:00Z",
+  ];
   for (const kind of ["client", "volunteer"]) {
-    for (let i = 0; i < 20; i++) {
-      const expiresAt = new Date(Date.UTC(2026, 0, 1) + Math.floor(Math.random() * 365 * 86400000));
-      const { text, html } = invitationEmail({ kind, siteUrl: SITE, expiresAt });
-      assert.ok(!/\b\d{6}\b/.test(text + html));
-      assert.ok(!(text + html).includes("{{"));
+    for (const date of dates) {
+      const { text, html } = invitationEmail({ kind, siteUrl: SITE, expiresAt: new Date(date) });
+      assert.ok(!/\d{6}/.test(text + html), `${kind} ${date}`);
+      assert.ok(!(text + html).includes("{{"), `${kind} ${date}`);
     }
+  }
+});
+
+test("a blank or non-string site URL is refused", () => {
+  for (const siteUrl of [undefined, "", "   ", 42]) {
+    assert.throws(() => invitationEmail({ kind: "client", siteUrl, expiresAt: EXPIRES }), TypeError);
   }
 });
 

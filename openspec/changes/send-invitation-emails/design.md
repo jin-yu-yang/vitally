@@ -78,8 +78,8 @@ Constraints:
 
 ### D3: The email's text lives with the function; client English + 简体, volunteer English
 - **Choice:** a plain module (for example `supabase/functions/accounts/invitation-email.mjs`)
-  exports `invitationEmail({ kind, to, siteUrl, expiresAt })`, which returns
-  `{ subject, text, html }`.
+  exports `invitationEmail({ kind, siteUrl, expiresAt })`, which returns
+  `{ subject, text, html }`. It takes no recipient: the body prints no recipient address.
 - **The two emails differ** (copy by Hailey; the exact text is in `plan.md` Task 2):
   - **Client:** English first, then 简体, with a two-language subject. The PCDC VITA free tax site invited them to ViTally, where they answer the questions for their tax return and see which documents to bring. It also says ViTally never asks for a password, Social Security number or bank details by email. The line speaks for ViTally only until PCDC agrees (Open Questions).
   - **Volunteer:** English, with the subject "You're invited to ViTally as a PCDC VITA volunteer". They were added to the volunteer roster and their account is ready. At first sign-in they confirm their site with their name and the site's SIDN, which their site coordinator gives them; the SIDN itself never appears. If anything is still needed for the season (such as the signed Form 13615), ViTally shows what's missing before they can work on cases.

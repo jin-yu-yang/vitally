@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { senderFromEnv, FROM } from "../supabase/functions/accounts/sender.mjs";
+import { senderFromEnv, FROM, DEFAULT_TIMEOUT_MS } from "../supabase/functions/accounts/sender.mjs";
 
 const MAIL = {
   to: "ada@example.org",
@@ -183,4 +183,27 @@ test("success logs nothing", async () => {
   const rec = recorder(json(200, { id: "abc" }));
   await resendSender(rec).sendInvitation(MAIL);
   assert.equal(rec.logs.length, 0);
+});
+
+test("guard: values that are not http(s) URLs are refused, by name only", () => {
+  const cases = [
+    [{ VITALLY_MAIL_CATCHER_URL: "env(VITALLY_MAIL_CATCHER_URL)", VITALLY_SITE_URL: "https://govitally.org" }, "VITALLY_MAIL_CATCHER_URL (not an http(s) URL)", "env(VITALLY"],
+    [{ RESEND_API_KEY: "re_secret", VITALLY_SITE_URL: "govitally.org" }, "VITALLY_SITE_URL (not an http(s) URL)", "govitally.org"],
+    [{ RESEND_API_KEY: "re_secret", VITALLY_SITE_URL: "ftp://x.test" }, "VITALLY_SITE_URL (not an http(s) URL)", "x.test"],
+  ];
+  for (const [env, entry, leak] of cases) {
+    const result = senderFromEnv(envOf(env));
+    assert.equal(result.ok, false);
+    assert.ok(result.missing.includes(entry), entry);
+    assert.ok(!JSON.stringify(result).includes(leak));
+  }
+});
+
+test("guard: an https site URL is accepted", () => {
+  const result = senderFromEnv(envOf({ RESEND_API_KEY: "re_secret", VITALLY_SITE_URL: "https://govitally.org/" }));
+  assert.equal(result.ok, true);
+});
+
+test("the default send timeout is 10 seconds", () => {
+  assert.equal(DEFAULT_TIMEOUT_MS, 10000);
 });

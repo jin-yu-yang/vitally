@@ -1,6 +1,7 @@
 // Invitation email senders (design D2, D6): Resend on the hosted project, the
 // local mail catcher (Mailpit's HTTP send API) on test stacks and CI. A plain
 // module: fetch, log and the clock-free timeout are injected so Node can test it.
+export const DEFAULT_TIMEOUT_MS = 10000;
 export const FROM = "ViTally <help@govitally.org>";
 
 const RESEND_URL = "https://api.resend.com/emails";
@@ -11,7 +12,7 @@ const clean = (value) => (typeof value === "string" && value.trim() ? value.trim
 
 export function senderFromEnv(
   get,
-  { fetch = globalThis.fetch, log = console.error, timeoutMs = 10000 } = {},
+  { fetch = globalThis.fetch, log = console.error, timeoutMs = DEFAULT_TIMEOUT_MS } = {},
 ) {
   const resendKey = clean(get("RESEND_API_KEY"));
   const catcherUrl = clean(get("VITALLY_MAIL_CATCHER_URL"));
@@ -22,6 +23,16 @@ export function senderFromEnv(
   if (!resendKey && !catcherUrl) missing.push("RESEND_API_KEY or VITALLY_MAIL_CATCHER_URL");
   if (resendKey && catcherUrl) missing.push("only one of RESEND_API_KEY and VITALLY_MAIL_CATCHER_URL");
   if (!siteUrl) missing.push("VITALLY_SITE_URL");
+  const isHttp = (value) => {
+    try {
+      const { protocol } = new URL(value);
+      return protocol === "http:" || protocol === "https:";
+    } catch {
+      return false;
+    }
+  };
+  if (catcherUrl && !resendKey && !isHttp(catcherUrl)) missing.push("VITALLY_MAIL_CATCHER_URL (not an http(s) URL)");
+  if (siteUrl && !isHttp(siteUrl)) missing.push("VITALLY_SITE_URL (not an http(s) URL)");
   if (missing.length) return { ok: false, missing };
 
   const request = ({ to, subject, text, html, idempotencyKey }) => {

@@ -97,7 +97,7 @@ test("accounts Edge Function against real Supabase", async (t) => {
       assert.equal(result.body.emailSent, true);
       assert.equal(await accountStatus(volunteerId), "invited");
       const invitation = await latestInvitation(mailUrl, email, { after });
-      assertInvitation(invitation, { siteUrl: SITE_URL, expiresAt: await expiryOf(email) });
+      assertInvitation(invitation, { email, siteUrl: SITE_URL, expiresAt: await expiryOf(email) });
       const signedIn = createClient(target.apiUrl, target.publishableKey, clientOptions);
       const codeAfter = new Date(Date.now() - 2000);
       const requested = await signedIn.auth.signInWithOtp({ email, options: { shouldCreateUser: false } });
@@ -121,7 +121,7 @@ test("accounts Edge Function against real Supabase", async (t) => {
       assert.equal(invited.body.emailSent, true);
       const firstMail = await latestInvitation(mailUrl, email, { after: first });
       const firstExpiry = await expiryOf(email);
-      assertInvitation(firstMail, { siteUrl: SITE_URL, expiresAt: firstExpiry });
+      assertInvitation(firstMail, { email, siteUrl: SITE_URL, expiresAt: firstExpiry });
       // The invitation no longer goes through Auth, so there is no resend cooldown to wait out.
       const second = new Date(Date.now() - 2000);
       const resent = await call(f.siteCoordinator, { op: "resend", email });
@@ -129,8 +129,8 @@ test("accounts Edge Function against real Supabase", async (t) => {
       assert.equal(resent.body.emailSent, true);
       const secondMail = await latestInvitation(mailUrl, email, { after: second });
       const secondExpiry = await expiryOf(email);
-      assertInvitation(secondMail, { siteUrl: SITE_URL, expiresAt: secondExpiry });
-      assert.ok(new Date(secondExpiry) >= new Date(firstExpiry), "the resent invitation expires no earlier");
+      assertInvitation(secondMail, { email, siteUrl: SITE_URL, expiresAt: secondExpiry });
+      assert.ok(new Date(secondExpiry) > new Date(firstExpiry), "the resent invitation expires later");
     });
 
     await t.test("a non-admin is refused 403 and no auth user exists", async () => {

@@ -8493,6 +8493,20 @@ test("CONFLICT on deactivate says someone else changed this volunteer", async ()
   controller.stop();
 });
 
+test("reactivate whose answer is invited tells the admin to use Resend", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "deactivated", revision: 3 } }];
+  const { controller } = await accountDrawer(store);
+  store.accountAnswer = { status: "invited", emailSent: false, accountRevision: 4 };
+  assert.equal(await controller.reactivateAccount(), true);
+  assert.equal(store.writes.at(-1).type, "reactivate");
+  assert.equal(
+    controller.getState().volunteerAccountNotice.text,
+    "Account reactivated. Use Resend to send the invitation.",
+  );
+  controller.stop();
+});
+
 test("deactivate asks for confirmation first", async () => {
   const store = rosterStore();
   store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "active", revision: 3 } }];

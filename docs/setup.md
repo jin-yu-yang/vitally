@@ -327,6 +327,9 @@ catcher (Mailpit) over HTTP instead of calling the real sender, and reads two va
 `VITALLY_MAIL_CATCHER_URL`, the catcher's address on the stack network,
 `http://supabase_inbucket_<project_id>:8025`, which the example reads with `env(VITALLY_MAIL_CATCHER_URL)`.
 Export it before `supabase start`: `export VITALLY_MAIL_CATCHER_URL="http://supabase_inbucket_$VITALLY_INSTANCE:8025"`.
+The export is needed in each new shell before `supabase start` (or put it in your shell profile).
+If you forget it, the accounts function answers every Create account, Invite and Resend with
+`SERVER_ERROR`, and its log names `VITALLY_MAIL_CATCHER_URL`.
 These are for test stacks only and never hold `RESEND_API_KEY`. A running stack needs a stop and a
 start (without `--no-backup`) after this changes.
 
@@ -953,7 +956,8 @@ Set this up in this order, and never in the reverse order:
    has no code, links to the site and shows an expiry, and the invitee can sign in on the first
    try by asking for a code.
 
-**The startup check.** If `RESEND_API_KEY` or `VITALLY_SITE_URL` is missing, or both
+**The startup check.** A `VITALLY_SITE_URL` without `https://` (for example `govitally.org`) is
+refused the same way, as is a catcher URL that is not an http(s) address. If `RESEND_API_KEY` or `VITALLY_SITE_URL` is missing, or both
 `RESEND_API_KEY` and `VITALLY_MAIL_CATCHER_URL` are set, the function answers `SERVER_ERROR` before
 it creates anything. That covers Create account, Invite and Resend. Cancel, Deactivate and
 Reactivate are database calls and keep working. The function's log names the variables, never

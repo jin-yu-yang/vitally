@@ -675,10 +675,10 @@ async function runEngineGate(t, engineName) {
             assert.equal(rows.length, 1, "the invitation created no single Auth user");
             const userId = rows[0].id;
             const expiry = await fixture.database.sql(
-              "select expires_at from public.accounts where user_id=$1",
-              [userId],
+              "select expires_at from public.accounts where user_id=$1 and workspace_id=$2",
+              [userId, fixture.database.workspaceId],
             );
-            assertInvitation(invitation, { siteUrl: SITE_URL, expiresAt: expiry.rows[0].expires_at });
+            assertInvitation(invitation, { email, siteUrl: SITE_URL, expiresAt: expiry.rows[0].expires_at });
             // The invitation has no code: ask for one, as the sign-in screen does.
             const codeAfter = new Date(Date.now() - 2_000);
             const requested = await fixture
@@ -794,8 +794,8 @@ async function runEngineGate(t, engineName) {
             const { rows } = await db.sql("select id from auth.users where lower(email)=$1", [email]);
             assert.equal(rows.length, 1, "one Auth user for the invitation");
             created.push(rows[0].id);
-            const expiry = await db.sql("select expires_at from public.accounts where user_id=$1", [rows[0].id]);
-            assertInvitation(invitation, { siteUrl: SITE_URL, expiresAt: expiry.rows[0].expires_at });
+            const expiry = await db.sql("select expires_at from public.accounts where user_id=$1 and workspace_id=$2", [rows[0].id, db.workspaceId]);
+            assertInvitation(invitation, { email, siteUrl: SITE_URL, expiresAt: expiry.rows[0].expires_at });
             const codeAfter = new Date(Date.now() - 2_000);
             const requested = await fixture
               .anonClient()
