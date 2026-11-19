@@ -1,8 +1,8 @@
 ## 1. Wake events re-read the clearance
 
-- [ ] 1.1 Add `documentEvents` to the controller (default `globalThis.document`), listen for `visibilitychange` and treat it as a wake only when visible, remove it in `unlisten()`, and pass `document` from `src/app.mjs`
-- [ ] 1.2 Give `refresh` a wake flag, set by focus, visibility, `online` and reconnect but not by the refresh after an action. In a cleared window's wake refresh, `await checkClearance()` before any list read, and stop if the window is no longer cleared
-- [ ] 1.3 Controller tests: an added role on focus, a tab becoming visible, every role removed on focus (setup screen, no `listCases`), no `getClearance` after a successful action
+- [x] 1.1 Add `documentEvents` to the controller (default `globalThis.document`), listen for `visibilitychange` and treat it as a wake only when visible, remove it in `unlisten()`, and pass `document` from `src/app.mjs`
+- [x] 1.2 Give `refresh` a wake flag, set by focus, visibility, `online` and reconnect but not by the refresh after an action. In a cleared window's wake refresh, `await checkClearance()` before any list read, and stop if the window is no longer cleared
+- [x] 1.3 Controller tests: an added role on focus, a tab becoming visible, every role removed on focus (setup screen, no `listCases`), no `getClearance` after a successful action
 
 ## 2. Refusals and saving one's own row
 
