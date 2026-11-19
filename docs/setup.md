@@ -817,9 +817,11 @@ a changed file.
 ## 6. Classroom and hosted setup (pending)
 
 **Deployment prerequisite (blocking for the December test).** The hosted project needs custom
-SMTP (see below), and the `accounts` Edge Function deployed with `verify_jwt = false`, before
-testers can receive invitations or sign-in codes. Without them, Create account and Invite create
-the account but no email arrives.
+SMTP (see below) for sign-in codes, and the `accounts` Edge Function deployed with
+`verify_jwt = false` and its own invitation-email secrets (see
+[Invitation emails](#invitation-emails-the-accounts-function)), before testers can receive
+invitations or sign-in codes. Without the secrets, the function refuses Create account, Invite and
+Resend.
 
 All of this was done for the December test on Nov 17 (see [`docs/roadmap.md`](roadmap.md#deployment)).
 The list below is the original Task 10B / 10D checklist, kept for reference when the project is set
@@ -907,6 +909,53 @@ privileged test cleanup against the classroom project.**
    "$VITALLY_NODE" --env-file=.env.admin tools/admin/roster.mjs \
      --target classroom --roster .vitally-roster.json
    ```
+
+### Invitation emails (the accounts function)
+
+Create account, Invite and Resend send their own invitation email. It has no sign-in code: the
+invitee opens the site and asks for a code there. On the hosted project the function sends it
+through Resend's HTTP API, from `ViTally <help@govitally.org>`. (A local stack or CI sends to the
+local mail catcher instead; that setup is in
+[Isolated local Supabase test stack](#3-isolated-local-supabase-test-stack).)
+
+Set this up in this order, and never in the reverse order:
+
+1. **Check the database time zone.** In the SQL editor, run `show timezone;`. It must say `UTC`:
+   the seven-day expiry in the email is exact only then. If it says anything else, stop and ask
+   the team.
+2. **Create a send-only Resend key** restricted to `govitally.org`. Keep it separate from the key
+   Auth's custom SMTP uses, so either can be revoked without touching the other.
+3. **Set the function secrets** (Supabase dashboard, Edge Functions, Secrets, or
+   `supabase secrets set`):
+
+   | Secret | Value |
+   | --- | --- |
+   | `RESEND_API_KEY` | The send-only key from step 2. Never commit it or paste it into a chat. |
+   | `VITALLY_SITE_URL` | `https://govitally.org` |
+
+   Do not set `VITALLY_MAIL_CATCHER_URL` on the hosted project. The function needs exactly one of
+   the two senders.
+4. **Only then redeploy the `accounts` function** (`verify_jwt = false`, as before). The old
+   function ignores the new secrets, so setting them first leaves no gap. Redeploying first would
+   make the new function refuse every request.
+5. **Check it once.** Invite one team-owned client address and one volunteer address. Each email
+   has no code, links to the site and shows an expiry, and the invitee can sign in on the first
+   try by asking for a code.
+
+**The startup check.** If `RESEND_API_KEY` or `VITALLY_SITE_URL` is missing, or both
+`RESEND_API_KEY` and `VITALLY_MAIL_CATCHER_URL` are set, the function answers `SERVER_ERROR` before
+it creates anything. That covers Create account, Invite and Resend. Cancel, Deactivate and
+Reactivate are database calls and keep working. The function's log names the variables, never
+their values.
+
+**Shared quota.** Resend's free tier is 100 emails a day and 3,000 a month. Invitations and
+sign-in codes share it, because Auth's custom SMTP goes through the same Resend account. That is
+enough for a test with about 10 testers. The real season's sender and quota are tracked in
+[#215](https://github.com/jin-yu-yang/vitally/issues/215). When Resend refuses a send, the admin
+sees "Use Resend later" and the account still exists.
+
+**Replies.** The email says "Questions? Reply to this email." Replies to `help@govitally.org` are
+forwarded to a team member's inbox (Cloudflare Email Routing), so use fictional data in the test.
 
 ### Rosters
 

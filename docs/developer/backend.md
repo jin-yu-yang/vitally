@@ -108,7 +108,8 @@ Sign-in is Supabase Auth email one-time codes. The configuration that makes it s
 **Accounts are created only by the roster command** (below) or, since change
 `add-account-invitations`, by an admin: **Create account** in the Roster drawer (a volunteer) and
 **Invite a client** on the office screen. Both go through the `accounts` Edge Function, which
-creates the confirmed, password-free Auth user and sends the sign-in code email. The sign-in form
+creates the confirmed, password-free Auth user and sends its own invitation email, which has no
+code. The invitee opens the site and asks for a code on the sign-in screen. The sign-in form
 shows the same message for any address, so it cannot reveal who has an account.
 
 An invitation lasts seven days (Resend starts them again) and can be cancelled while it was never
@@ -123,16 +124,35 @@ RPCs are `vitally_cancel_invitation`, `vitally_expire_invitations`,
 `vitally_complete_site_check` and `vitally_activate_client_account` (migration 047; design D10 to
 D12 and D15 of the archived change).
 
-**Email delivery.** The local stack sends nothing: every email is caught by its local mailbox
-(Mailpit, `http://127.0.0.1:54324` with default ports). A hosted project needs custom SMTP (Gmail
-with an app password, or Resend with a verified domain); setup is in
-[`docs/setup.md`, classroom section](../setup.md#6-classroom-and-hosted-setup-pending).
+**Email delivery.** Two kinds of email exist, and they go different ways.
 
-**Deployment prerequisite.** Create account and Invite a client send the code email themselves, so
-the hosted project needs custom SMTP and the `accounts` function deployed with `verify_jwt = false`
-before testers can use them. Without SMTP the account is recorded but no email arrives, and the
-admin sees "Account created; the email wasn't sent. Use Resend in a minute." The checklist is in
-[`docs/setup.md` section 6](../setup.md#6-classroom-and-hosted-setup-pending).
+- **Sign-in codes** come from Supabase Auth. The local stack catches them in its local mailbox
+  (Mailpit, `http://127.0.0.1:54324` with default ports). A hosted project needs custom SMTP
+  (Gmail with an app password, or Resend with a verified domain).
+- **Invitations** are sent by the `accounts` function itself (`sender.mjs`,
+  `invitation-email.mjs`), with no code in them. `senderFromEnv` needs exactly one of
+  `RESEND_API_KEY` (Resend's HTTP API, from `ViTally <help@govitally.org>`) or
+  `VITALLY_MAIL_CATCHER_URL` (the local mail catcher's HTTP API), and always `VITALLY_SITE_URL`.
+  Anything else fails the guard: `index.ts` answers `SERVER_ERROR` before anything is created and
+  logs the variable names, never their values. Create account and Invite send
+  `Idempotency-Key: <actionId>`; Resend sends none. A send times out after 10 s and never throws.
+  Resend's `409 invalid_idempotent_request` counts as sent (the first request with that key
+  already sent it). `409 concurrent_idempotent_requests`, any other error, a network error or a
+  timeout counts as not sent. The answer stays `{ status: "invited", emailSent, accountRevision }`
+  and the account stands either way. The failure log has the error name and HTTP status, never the
+  address or a key. The expiry in the email is the function's clock plus seven days, shown in
+  `America/New_York`; the database sets the real one.
+
+The hosted secrets and the deploy order are in
+[`docs/setup.md` section 6](../setup.md#invitation-emails-the-accounts-function). The local mail
+path is in [Isolated local Supabase test stack](../setup.md#3-isolated-local-supabase-test-stack).
+
+**Deployment prerequisite.** The hosted project needs custom SMTP (for sign-in codes) and the
+`accounts` function deployed with `verify_jwt = false` and the secrets `RESEND_API_KEY` and
+`VITALLY_SITE_URL`. Set the secrets first, then redeploy, never the reverse. If the invitation
+email can't be sent, the account is recorded and the admin sees "Account created; the invitation
+email wasn't sent. Use Resend later." Invitations and sign-in codes share Resend's free quota of
+100 emails a day; the real season is tracked in #215.
 
 ## Privileged tooling
 
