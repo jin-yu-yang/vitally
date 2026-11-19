@@ -439,3 +439,174 @@ end;
 $$;
 revoke all on function public.vitally_record_account(uuid,text,jsonb,uuid) from public,anon,authenticated,service_role;
 grant execute on function public.vitally_record_account(uuid,text,jsonb,uuid) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- §7. Granting and removing site coordinators, and deactivation (design D4).
+
+-- Grant or remove site coordinator at the account revision the page read, for
+-- a site coordinator only. Order: FORBIDDEN (the caller is not a site
+-- coordinator: nothing written, no receipt), NOT_FOUND (not a person of this
+-- workspace), VALIDATION NO_ACTIVE_ACCOUNT, CONFLICT (stale revision),
+-- INVALID_TRANSITION (no change), then on removal DEFAULT_FOLLOWUP and
+-- LAST_SITE_COORDINATOR. A change raises the account's revision and records
+-- who made it. The workspace lock serializes it with deactivation, so two
+-- requests can't remove the last two site coordinators at once.
+create function public.vitally_set_site_coordinator(p_action_id uuid,p_volunteer_id uuid,p_expected_revision bigint,p_granted boolean)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_receipt public.action_receipts;
+ v_account public.accounts;
+ v_digest text;
+ v_result jsonb;
+begin
+ v_member=vitally_private.require_membership();
+ v_person=vitally_private.acting_person(v_member);
+ if v_member.access<>'staff' or v_person.id is null
+  or not vitally_private.is_site_coordinator(v_member.workspace_id,v_person.id) then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ if p_action_id is null or p_volunteer_id is null or p_expected_revision is null or p_granted is null then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_member.workspace_id::text,0));
+ v_digest=encode(extensions.digest(jsonb_build_object('operation','SET_SITE_COORDINATOR','volunteerId',p_volunteer_id,
+  'expectedRevision',p_expected_revision,'granted',p_granted,'personId',v_person.id)::text,'sha256'),'hex');
+ v_receipt=vitally_private.reserve_receipt(v_member,p_action_id,'SET_SITE_COORDINATOR',v_digest,v_person.id);
+ if v_receipt.receipt is not null then
+  return v_receipt.receipt;
+ end if;
+ if not exists(select 1 from public.people p where p.workspace_id=v_member.workspace_id and p.id=p_volunteer_id) then
+  raise sqlstate 'VT002' using message='NOT_FOUND';
+ end if;
+ select a.* into v_account from public.accounts a
+  join public.memberships m on m.workspace_id=a.workspace_id and m.user_id=a.user_id
+  where a.workspace_id=v_member.workspace_id and a.person_id=p_volunteer_id
+   and a.status='active' and m.active and m.access='staff'
+  for update of a;
+ if not found then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='NO_ACTIVE_ACCOUNT';
+ end if;
+ if v_account.revision<>p_expected_revision then
+  raise sqlstate 'VT003' using message='CONFLICT';
+ end if;
+ if v_account.is_site_coordinator=p_granted then
+  raise sqlstate 'VT004' using message='INVALID_TRANSITION';
+ end if;
+ if not p_granted then
+  if exists(select 1 from public.workspaces w
+   where w.id=v_member.workspace_id and w.default_followup_person_id=p_volunteer_id) then
+   raise sqlstate 'VT004' using message='DEFAULT_FOLLOWUP';
+  end if;
+  if not exists(select 1 from public.accounts a
+   where a.workspace_id=v_member.workspace_id and a.user_id<>v_account.user_id
+    and a.status='active' and a.is_site_coordinator) then
+   raise sqlstate 'VT004' using message='LAST_SITE_COORDINATOR';
+  end if;
+ end if;
+ update public.accounts set is_site_coordinator=p_granted,revision=revision+1,updated_at=now()
+  where workspace_id=v_member.workspace_id and user_id=v_account.user_id;
+ insert into public.site_coordinator_changes(workspace_id,person_id,granted,changed_by_person_id)
+  values(v_member.workspace_id,p_volunteer_id,p_granted,v_person.id);
+ v_result=jsonb_build_object('actionId',p_action_id,'volunteerId',p_volunteer_id,
+  'isSiteCoordinator',p_granted,'accountRevision',v_account.revision+1);
+ update public.action_receipts set target_id=p_volunteer_id,receipt=v_result where id=v_receipt.id;
+ return v_result;
+end;
+$$;
+revoke all on function public.vitally_set_site_coordinator(uuid,uuid,bigint,boolean) from public,anon,authenticated,service_role;
+grant execute on function public.vitally_set_site_coordinator(uuid,uuid,bigint,boolean) to authenticated;
+
+-- From 047, with a third parameter (design D4): after the open work check, the
+-- last active site coordinator is refused (INVALID_TRANSITION,
+-- LAST_SITE_COORDINATOR); any other site coordinator loses the mark in the
+-- same update, recorded as a removal by p_changed_by, so a reactivated account
+-- is not a site coordinator again. The 2-argument form is dropped first: a
+-- defaulted extra parameter would make 2-argument calls ambiguous.
+drop function vitally_private.deactivate_account(uuid,uuid); -- 052
+create function vitally_private.deactivate_account(p_workspace_id uuid,p_user_id uuid,p_changed_by uuid) -- 052
+returns void language plpgsql security definer set search_path='' as $$
+declare v_account public.accounts;
+ v_open_work jsonb;
+begin
+ select * into v_account from public.accounts
+  where workspace_id=p_workspace_id and user_id=p_user_id for update;
+ if not found then
+  raise sqlstate 'VT002' using message='NOT_FOUND';
+ end if;
+ if v_account.status not in ('invited','active') then
+  raise sqlstate 'VT004' using message='INVALID_TRANSITION';
+ end if;
+ if v_account.person_id is not null then
+  select jsonb_agg(w.label) into v_open_work from vitally_private.open_work(p_workspace_id,v_account.person_id) w;
+  if v_open_work is not null then
+   raise sqlstate 'VT004' using message='OPEN_WORK',detail=v_open_work::text;
+  end if;
+ end if;
+ if v_account.status='active' and v_account.is_site_coordinator -- 052
+  and not exists(select 1 from public.accounts a -- 052
+   where a.workspace_id=p_workspace_id and a.user_id<>p_user_id -- 052
+    and a.status='active' and a.is_site_coordinator) then -- 052
+  raise sqlstate 'VT004' using message='LAST_SITE_COORDINATOR'; -- 052
+ end if; -- 052
+ update public.accounts set status='deactivated',deactivated_at=now(),revision=revision+1,updated_at=now()
+  ,is_site_coordinator=false -- 052
+  where workspace_id=p_workspace_id and user_id=p_user_id;
+ if v_account.is_site_coordinator then -- 052
+  insert into public.site_coordinator_changes(workspace_id,person_id,granted,changed_by_person_id) -- 052
+   values(p_workspace_id,v_account.person_id,false,p_changed_by); -- 052
+ end if; -- 052
+ update public.memberships set active=false where workspace_id=p_workspace_id and user_id=p_user_id;
+end;
+$$;
+revoke all on function vitally_private.deactivate_account(uuid,uuid,uuid) from public,anon,authenticated,service_role; -- 052
+
+-- From 047, with one change: the acting person is passed to
+-- deactivate_account, which records them as the remover of a site coordinator.
+create or replace function public.vitally_deactivate_account(p_action_id uuid,p_volunteer_id uuid,p_expected_revision bigint) -- 052
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_receipt public.action_receipts;
+ v_account public.accounts;
+ v_digest text;
+ v_result jsonb;
+begin
+ v_member=vitally_private.require_membership();
+ v_person=vitally_private.acting_person(v_member);
+ if v_member.access<>'staff' or v_person.id is null or not vitally_policy.is_workspace_admin(v_member.workspace_id) then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ if p_action_id is null or p_volunteer_id is null or p_expected_revision is null then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_member.workspace_id::text,0));
+ v_digest=encode(extensions.digest(jsonb_build_object('operation','DEACTIVATE_ACCOUNT','volunteerId',p_volunteer_id,
+  'expectedRevision',p_expected_revision,'personId',v_person.id)::text,'sha256'),'hex');
+ v_receipt=vitally_private.reserve_receipt(v_member,p_action_id,'DEACTIVATE_ACCOUNT',v_digest,v_person.id);
+ if v_receipt.receipt is not null then
+  return v_receipt.receipt;
+ end if;
+ perform vitally_private.expire_invitations(v_member.workspace_id);
+ if not exists(select 1 from public.people p where p.workspace_id=v_member.workspace_id and p.id=p_volunteer_id) then
+  raise sqlstate 'VT002' using message='NOT_FOUND';
+ end if;
+ if p_volunteer_id=v_person.id then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='SELF';
+ end if;
+ select * into v_account from public.accounts
+  where workspace_id=v_member.workspace_id and person_id=p_volunteer_id for update;
+ if not found then
+  raise sqlstate 'VT004' using message='INVALID_TRANSITION';
+ end if;
+ if v_account.revision<>p_expected_revision then
+  raise sqlstate 'VT003' using message='CONFLICT';
+ end if;
+ perform vitally_private.deactivate_account(v_member.workspace_id,v_account.user_id,v_person.id); -- 052
+ v_result=jsonb_build_object('actionId',p_action_id,'status','deactivated','accountRevision',v_account.revision+1);
+ update public.action_receipts set target_id=p_volunteer_id,receipt=v_result where id=v_receipt.id;
+ return v_result;
+end;
+$$;
+revoke all on function public.vitally_deactivate_account(uuid,uuid,bigint) from public,anon,authenticated,service_role;
+grant execute on function public.vitally_deactivate_account(uuid,uuid,bigint) to authenticated;

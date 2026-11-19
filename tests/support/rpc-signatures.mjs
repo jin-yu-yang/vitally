@@ -220,6 +220,25 @@ export const RPC_SIGNATURES = Object.freeze([
       p_expected_revision: context.accountRevision,
     }),
   }),
+  // Making a staff member with an active account a site coordinator (change
+  // add-season-settings, design D4), at their account revision.
+  Object.freeze({
+    name: "vitally_set_site_coordinator",
+    signature: "vitally_set_site_coordinator(uuid,uuid,bigint,boolean)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["accountRevision", "actionId", "isSiteCoordinator", "volunteerId"]),
+    context: async (f) => {
+      const key = `sig_sc_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+      const { personId } = await f.staff({ key, name: "Rory Vance", capabilities: ["prepare"], cleared: false });
+      return { siteCoordinatorVolunteerId: personId, siteCoordinatorRevision: 1 };
+    },
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_volunteer_id: context.siteCoordinatorVolunteerId,
+      p_expected_revision: context.siteCoordinatorRevision,
+      p_granted: true,
+    }),
+  }),
   // The office panel's client list: an array, each element of this shape.
   Object.freeze({
     name: "vitally_client_invitations",

@@ -216,7 +216,7 @@ test("posted updates against real Supabase", async (t) => {
         [f.workspaceId, invited.personId],
       );
       assert.equal(await isMember(f, invited.personId), true, "active again");
-      await f.sql("select vitally_private.deactivate_account($1,$2)", [f.workspaceId, invited.userId]);
+      await f.sql("select vitally_private.deactivate_account($1,$2,$3)", [f.workspaceId, invited.userId, f.siteCoordinatorId]);
       assert.equal(await isMember(f, invited.personId), false, "deactivated");
       assert.deepEqual(await selectedIds(invited.client, [posted.updateId]), [], "no row once deactivated");
       assert.equal(await sizeOf(), activeSize - 1, "not counted once deactivated");

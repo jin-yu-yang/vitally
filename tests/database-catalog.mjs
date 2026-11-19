@@ -49,7 +49,7 @@ const POLICIES = Object.freeze([
   ["volunteer_profiles", "admin_volunteer_profiles"],
   ["workspaces", "member_workspace"],
 ]);
-// The twenty-four public RPCs after 051, by name and identity arguments.
+// The twenty-five public RPCs after 052, by name and identity arguments.
 const RPCS = Object.freeze([
   "vitally_apply_action(p_action_id uuid, p_case_id uuid, p_expected_revision bigint, p_type text, p_payload jsonb)",
   "vitally_assistance_action(p_action_id uuid, p_item_id uuid, p_expected_revision bigint, p_type text, p_note text)",
@@ -65,6 +65,7 @@ const RPCS = Object.freeze([
   "vitally_record_account(p_action_id uuid, p_op text, p_target jsonb, p_user_id uuid)",
   "vitally_deactivate_account(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)",
   "vitally_reactivate_account(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)",
+  "vitally_set_site_coordinator(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_granted boolean)",
   "vitally_client_invitations()",
   "vitally_cancel_invitation(p_action_id uuid, p_target jsonb, p_expected_revision bigint)",
   "vitally_expire_invitations()",
@@ -102,6 +103,7 @@ const OLD_SIGNATURES = Object.freeze([
   "public.vitally_edit_contact(uuid,uuid,bigint,uuid,jsonb)",
   "vitally_private.acting_person(public.memberships,uuid)",
   "vitally_private.initialize_workspace(uuid,uuid[],uuid[])",
+  "vitally_private.deactivate_account(uuid,uuid)",
 ]);
 const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 const pairs = (rows) => rows.map((row) => `${row[0]} ${row[1]}`).sort(byText);
@@ -185,7 +187,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
     });
 
-    await t.test("the public API is exactly twenty-four RPCs", async () => {
+    await t.test("the public API is exactly twenty-five RPCs", async () => {
       const { rows } = await sql(
         `select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as signature
            from pg_proc p where p.pronamespace='public'::regnamespace`,
