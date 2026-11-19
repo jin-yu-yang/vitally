@@ -123,7 +123,7 @@ Exact copy (Hailey, 2026-11-18):
 
   This invitation is valid until {en}. After that, ask the tax site to invite you again.
 
-  ViTally and PCDC will never ask for your password, Social Security number or bank details by email.
+  ViTally will never ask for your password, Social Security number or bank details by email.
 
   Questions? Reply to this email.
 
@@ -140,7 +140,7 @@ Exact copy (Hailey, 2026-11-18):
 
   此邀请有效期至{zh}。过期后，请联系报税站重新发送邀请。
 
-  ViTally 和 PCDC 绝不会通过电子邮件索取您的密码、社会安全号码或银行信息。
+  ViTally 绝不会通过电子邮件索取您的密码、社会安全号码或银行信息。
 
   如有疑问，请直接回复此邮件。
 
@@ -178,7 +178,7 @@ Exact copy (Hailey, 2026-11-18):
     - the subject equals the client subject;
     - the text contains "has invited you to ViTally, where you can answer the questions" before "邀请您使用 ViTally";
     - the link is printed in both blocks;
-    - the text contains "will never ask for your password" and "绝不会通过电子邮件索取".
+    - the text contains "ViTally will never ask for your password" and "ViTally 绝不会通过电子邮件索取", and does not contain "PCDC will never" or "和 PCDC" (the line speaks for ViTally only; open question in design.md).
   - `volunteer email is English with the site check and setup lines`:
     - the subject equals the volunteer subject;
     - it contains "volunteer roster", "confirm your site with your name and the site's SIDN" and "Form 13615";

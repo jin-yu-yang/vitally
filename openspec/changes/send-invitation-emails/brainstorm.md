@@ -191,3 +191,15 @@ the email; any migration.
 - **Database time zone:** `now() + interval '7 days'` is exactly 7×24 h only when the database
   session time zone is UTC. Plan Task 1 records `show timezone` on a test stack, and the hosted deploy checks it. If either isn't UTC, stop and decide with Hailey.
 - **Deploy order:** a missing or doubled secret makes the function refuse Create account, Invite and Resend. (Cancel, Deactivate and Reactivate are database RPCs and keep working.) So the secrets are set before the redeploy, never after.
+
+## Q9. Replies and the safety line (Hailey, 2026-11-18)
+
+- **"Questions? Reply to this email." stays, with no `reply_to`.** `help@govitally.org` forwards to
+  Hailey's Gmail through Cloudflare Email Routing. Replies land in a personal inbox and may carry
+  personal data. That's fine for testing with fictional data; where replies go for the real season
+  belongs to #215.
+- **The safety line speaks for ViTally only:** "ViTally will never ask for your password, Social
+  Security number or bank details by email." / "ViTally 绝不会通过电子邮件索取您的密码、社会安全号码或银行信息。"
+  Open question: may the line also speak for PCDC? Owner: Hailey, with PCDC.
+- The correction stands: Cancel, Deactivate and Reactivate are database RPCs and are not affected
+  by the function's configuration.

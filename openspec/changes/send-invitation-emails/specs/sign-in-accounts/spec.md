@@ -23,7 +23,7 @@ The sign-in link SHALL be the function's `VITALLY_SITE_URL` setting, with nothin
 ### Requirement: A client's invitation is in English and 简体, a volunteer's in English
 A client's invitation email SHALL be in English followed by 简体, with a subject in both. It SHALL say:
 - that the PCDC VITA free tax site invited them to ViTally, to answer the questions for their tax return and see which documents to bring;
-- that ViTally and PCDC never ask for a password, Social Security number or bank details by email.
+- that ViTally never asks for a password, Social Security number or bank details by email.
 
 A volunteer's invitation email SHALL be in English. It SHALL say:
 - that they were added to the PCDC VITA volunteer roster;
@@ -32,7 +32,7 @@ A volunteer's invitation email SHALL be in English. It SHALL say:
 
 #### Scenario: A client's invitation
 - **WHEN** an admin invites a fictional client
-- **THEN** one email reaches the address, in English and 简体, with the configured sign-in link, the expiry in New York time and the line that ViTally and PCDC never ask for a password, Social Security number or bank details by email, and with no six-digit run
+- **THEN** one email reaches the address, in English and 简体, with the configured sign-in link, the expiry in New York time and the line that ViTally never asks for a password, Social Security number or bank details by email, and with no six-digit run
 
 #### Scenario: A volunteer's invitation
 - **WHEN** an admin creates an account for a fictional volunteer

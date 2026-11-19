@@ -81,7 +81,7 @@ Constraints:
   exports `invitationEmail({ kind, to, siteUrl, expiresAt })`, which returns
   `{ subject, text, html }`.
 - **The two emails differ** (copy by Hailey; the exact text is in `plan.md` Task 2):
-  - **Client:** English first, then 简体, with a two-language subject. The PCDC VITA free tax site invited them to ViTally, where they answer the questions for their tax return and see which documents to bring. It also says ViTally and PCDC never ask for a password, Social Security number or bank details by email.
+  - **Client:** English first, then 简体, with a two-language subject. The PCDC VITA free tax site invited them to ViTally, where they answer the questions for their tax return and see which documents to bring. It also says ViTally never asks for a password, Social Security number or bank details by email. The line speaks for ViTally only until PCDC agrees (Open Questions).
   - **Volunteer:** English, with the subject "You're invited to ViTally as a PCDC VITA volunteer". They were added to the volunteer roster and their account is ready. At first sign-in they confirm their site with their name and the site's SIDN, which their site coordinator gives them; the SIDN itself never appears. If anything is still needed for the season (such as the signed Form 13615), ViTally shows what's missing before they can work on cases.
 - **Both say:**
   - go to `siteUrl` and sign in with the email address the message was sent to;
@@ -204,6 +204,10 @@ Constraints:
 - **[Trade-off] Delivery state is not stored.** If an email fails, the admin sees it once, and the
   Roster and the office panel still say "Invited". Accepted: Resend is always offered while invited,
   and nothing in the database changes.
+- **[Risk] Replies land in a personal inbox.** "Questions? Reply to this email." goes to
+  `help@govitally.org`, which Cloudflare Email Routing forwards to Hailey's Gmail. There is no
+  `reply_to`. Replies may carry personal data. → Accepted for the test with fictional data. Where
+  replies go for the real season belongs to #215.
 - **[Trade-off] Client email is English + 简体 only.** Accepted for the test; 繁體 is an open
   question for PCDC.
 
@@ -228,5 +232,8 @@ ignores them.
 - **繁體 in the client invitation.** Owner: Hailey, with PCDC. Many Cantonese-speaking clients read
   traditional characters. It affects only the client invitation text. If it's added, extend
   `build:hant` to the function's text, so `--check` catches drift.
+- **May the client email's safety line also speak for PCDC?** Owner: Hailey, with PCDC. Today it
+  says "ViTally will never ask…". If PCDC agrees, it becomes "ViTally and PCDC will never ask…" in
+  English and 简体. It affects only the client invitation text and the tests that match the line.
 - **Mailpit reachability and how the stack passes variables.** Owner: plan task 1. It affects only
   local and CI configuration, and whether the local sender uses HTTP or SMTP.
