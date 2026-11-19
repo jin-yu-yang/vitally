@@ -22,9 +22,9 @@
 
 ## 4. The default follow-up person may be a site coordinator
 
-- [ ] 4.1 Add `vitally_private.can_be_default_followup(ws, person)`, and use it in `set_default_followup` and `initialize_workspace`'s re-run check.
-- [ ] 4.2 Replace the `followup` assignee test in `act_escalate_contact`, `act_approve_review`, `act_withdraw` and `act_close_case`, each copied verbatim from its latest definition with the changed line marked `-- 052`. Record a `pg_get_functiondef` diff for review.
-- [ ] 4.3 Database tests: a site coordinator with no roles as default receives an escalation, a go-over follow-up, a close-before-filing notice and a withdrawal notice; a default with the Admin role and no site coordinator still does.
+- [x] 4.1 Add `vitally_private.can_be_default_followup(ws, person)`, and use it in `set_default_followup` and `initialize_workspace`'s re-run check.
+- [x] 4.2 Replace the `followup` assignee test in `act_escalate_contact`, `act_approve_review`, `act_withdraw` and `act_close_case`, each copied verbatim from its latest definition with the changed line marked `-- 052`. Record a `pg_get_functiondef` diff for review.
+- [x] 4.3 Database tests: a site coordinator with no roles as default receives an escalation, a go-over follow-up, a close-before-filing notice and a withdrawal notice; a default with the Admin role and no site coordinator still does.
 
 ## 5. vitally_save_volunteer (replaces both 045 copies)
 
