@@ -914,7 +914,7 @@ privileged test cleanup against the classroom project.**
    Supabase database certificate is signed by Supabase's own root certificate, which Node does not
    trust by default. Without it every classroom command fails with `CONNECTION_FAILED`
    (underneath, `SELF_SIGNED_CERT_IN_CHAIN`). Download it once from the Supabase dashboard:
-   Project Settings → Database → SSL Configuration → Download certificate. Save it outside the
+   the SSL Configuration section of the Database Settings page → Download certificate. Save it outside the
    repository, for example as `~/.vitally/supabase-ca.crt`, and set `NODE_EXTRA_CA_CERTS` to
    that path for every classroom command, including the roster command in step 4. Never turn
    verification off instead. If Node prints `Ignoring extra certs from …`, the path is wrong.
@@ -925,7 +925,8 @@ privileged test cleanup against the classroom project.**
    node --env-file=.env.admin tools/admin/migrate.mjs --target classroom
    ```
 
-   The variable lasts for that PowerShell window only.
+   The variable lasts for that PowerShell window only. Use the same Node as the command above (the
+   repository needs 24.21 or later; check with `node --version`), or a Windows failure can look unrelated.
 3. **Configure Auth in the Supabase dashboard:**
    - Custom SMTP (Authentication → Emails → SMTP Settings). Gmail: host `smtp.gmail.com`, port
      465, the full address as username and sender, and a Google *app password* (which requires
