@@ -8420,7 +8420,7 @@ test("create account shows the sent message and re-reads the roster", async () =
   assert.equal(await controller.createAccount(), true);
   assert.deepEqual(store.writes.at(-1), { type: "create", actionId: "action-1", volunteerId: "v-1" });
   const state = controller.getState();
-  assert.deepEqual(state.volunteerAccountNotice, { kind: "ok", text: "Account created and sign-in code sent" });
+  assert.deepEqual(state.volunteerAccountNotice, { kind: "ok", text: "Account created and invitation sent" });
   assert.equal(volunteerReads(store), reads + 1);
   assert.equal(state.volunteers[0].account.status, "invited");
   assert.equal(state.dialog, "volunteer");
@@ -8436,12 +8436,12 @@ test("email not sent shows the Resend message", async () => {
   assert.equal(await controller.createAccount(), true);
   assert.equal(
     controller.getState().volunteerAccountNotice.text,
-    "Account created; the email wasn't sent. Use Resend in a minute.",
+    "Account created; the invitation email wasn't sent. Use Resend later.",
   );
   // A replayed Resend says the same: nothing was sent this time.
   store.accountAnswer = { status: "invited", emailSent: false, accountRevision: 1, replay: true };
   assert.equal(await controller.resendAccount(), true);
-  assert.equal(controller.getState().volunteerAccountNotice.text, "The email wasn't sent. Use Resend in a minute.");
+  assert.equal(controller.getState().volunteerAccountNotice.text, "The invitation email wasn't sent. Use Resend later.");
   controller.stop();
 });
 
@@ -8490,6 +8490,20 @@ test("CONFLICT on deactivate says someone else changed this volunteer", async ()
   assert.equal(volunteerReads(store), reads + 1);
   assert.equal(state.volunteers[0].account.revision, 4);
   assert.equal(state.dialog, "volunteer");
+  controller.stop();
+});
+
+test("reactivate whose answer is invited tells the admin to use Resend", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "deactivated", revision: 3 } }];
+  const { controller } = await accountDrawer(store);
+  store.accountAnswer = { status: "invited", emailSent: false, accountRevision: 4 };
+  assert.equal(await controller.reactivateAccount(), true);
+  assert.equal(store.writes.at(-1).type, "reactivate");
+  assert.equal(
+    controller.getState().volunteerAccountNotice.text,
+    "Account reactivated. Use Resend to send the invitation.",
+  );
   controller.stop();
 });
 
@@ -8717,7 +8731,7 @@ test("invite success clears the field, shows the sent message and re-reads the l
   assert.deepEqual(store.writes.at(-1), { type: "invite", actionId: "action-1", email: "ana@example.org" });
   const state = controller.getState();
   assert.equal(state.dialog, null, "the question closed; the panel says the result");
-  assert.deepEqual(state.inviteNotice, { kind: "ok", text: "Account created and sign-in code sent" });
+  assert.deepEqual(state.inviteNotice, { kind: "ok", text: "Account created and invitation sent" });
   assert.equal(state.inviteEmail, "");
   assert.equal(inviteReads(store), reads + 1);
   assert.deepEqual(state.invitations, [INVITATION_ROW]);
@@ -8736,7 +8750,7 @@ test("invite with the email not sent says to use Resend; a retry after OFFLINE k
   controller.askInviteClient("ana@example.org");
   assert.equal(await controller.inviteClient(), true);
   assert.deepEqual(store.writes.map((entry) => entry.actionId), ["action-1", "action-1"]);
-  assert.equal(controller.getState().inviteNotice.text, "Account created; the email wasn't sent. Use Resend in a minute.");
+  assert.equal(controller.getState().inviteNotice.text, "Account created; the invitation email wasn't sent. Use Resend later.");
   controller.stop();
 });
 
@@ -8825,7 +8839,7 @@ test("resend a client sends the email and says so", async () => {
   await controller.start();
   assert.equal(await controller.resendClient("ana@example.org"), true);
   assert.deepEqual(store.writes.at(-1), { type: "resend-client", actionId: "action-9", email: "ana@example.org" });
-  assert.equal(controller.getState().inviteNotice.text, "Sign-in code sent");
+  assert.equal(controller.getState().inviteNotice.text, "Invitation sent");
   controller.stop();
 });
 
