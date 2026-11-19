@@ -5,13 +5,15 @@ import { createClient } from "@supabase/supabase-js";
 import { assertTestTarget } from "../tools/admin/test-target.mjs";
 import { openDatabase } from "../tools/admin/database.mjs";
 import { createDatabaseFixture, TEST_SITE_NUMBER } from "./support/database-fixture.mjs";
-import { latestCode } from "./support/mail-catcher.mjs";
+import { assertInvitation, latestCode, latestInvitation } from "./support/mail-catcher.mjs";
 
 // OpenSpec change add-account-invitations (design D4): the accounts Edge
 // Function against the local stack. CI runs it (test:database); the function
 // needs the edge runtime, which docs/setup.md describes.
 
 const clientOptions = { auth: { persistSession: false, autoRefreshToken: false } };
+// The function's VITALLY_SITE_URL; matches supabase/test-stack.config.example.toml's [edge_runtime.secrets].
+const SITE_URL = "http://127.0.0.1:4173";
 const SETUP = "The accounts Edge Function did not answer. Check that the Supabase edge runtime is running and the function is served (docs/setup.md).";
 
 test("accounts Edge Function against real Supabase", async (t) => {
@@ -79,9 +81,13 @@ test("accounts Edge Function against real Supabase", async (t) => {
     const authUserExists = async (email) =>
       (await f.sql("select 1 from auth.users where lower(email)=$1", [email])).rowCount > 0;
 
-    // The code signs the volunteer in; the site check (design D12) then makes
+    const expiryOf = async (email) =>
+      (await f.sql("select a.expires_at from public.accounts a join auth.users u on u.id=a.user_id where lower(u.email)=$1 and a.workspace_id=$2", [email, f.workspaceId])).rows[0]?.expires_at;
+
+    // The invitation carries no code. The volunteer asks for one, as the sign-in
+    // screen does, and it signs them in; the site check (design D12) then makes
     // the account active.
-    await t.test("create account sends a code that signs the volunteer in", async () => {
+    await t.test("create account sends an invitation, and a requested code signs the volunteer in", async () => {
       const email = newEmail();
       const volunteerId = await addVolunteer(email);
       const after = new Date(Date.now() - 2000);
@@ -90,8 +96,13 @@ test("accounts Edge Function against real Supabase", async (t) => {
       assert.equal(result.body.status, "invited");
       assert.equal(result.body.emailSent, true);
       assert.equal(await accountStatus(volunteerId), "invited");
-      const code = await latestCode(mailUrl, email, { after });
+      const invitation = await latestInvitation(mailUrl, email, { after });
+      assertInvitation(invitation, { siteUrl: SITE_URL, expiresAt: await expiryOf(email) });
       const signedIn = createClient(target.apiUrl, target.publishableKey, clientOptions);
+      const codeAfter = new Date(Date.now() - 2000);
+      const requested = await signedIn.auth.signInWithOtp({ email, options: { shouldCreateUser: false } });
+      assert.equal(requested.error, null, `signInWithOtp: ${requested.error?.message}`);
+      const code = await latestCode(mailUrl, email, { after: codeAfter });
       const { error } = await signedIn.auth.verifyOtp({ email, token: code, type: "email" });
       assert.equal(error, null, `verifyOtp: ${error?.message}`);
       assert.equal(await accountStatus(volunteerId), "invited", "invited until the site check");
@@ -102,22 +113,24 @@ test("accounts Edge Function against real Supabase", async (t) => {
       assert.equal(await accountStatus(volunteerId), "active");
     });
 
-    await t.test("invite then resend sends a second code", async () => {
+    await t.test("invite then resend sends a second invitation", async () => {
       const email = newEmail();
       const first = new Date(Date.now() - 2000);
       const invited = await call(f.siteCoordinator, { op: "invite", actionId: randomUUID(), email });
       assert.equal(invited.status, 200, JSON.stringify(invited.body));
       assert.equal(invited.body.emailSent, true);
-      const firstCode = await latestCode(mailUrl, email, { after: first });
-      // Supabase refuses a second code inside its resend cooldown (60 s by default).
-      await new Promise((resolve) => setTimeout(resolve, 61000));
+      const firstMail = await latestInvitation(mailUrl, email, { after: first });
+      const firstExpiry = await expiryOf(email);
+      assertInvitation(firstMail, { siteUrl: SITE_URL, expiresAt: firstExpiry });
+      // The invitation no longer goes through Auth, so there is no resend cooldown to wait out.
       const second = new Date(Date.now() - 2000);
       const resent = await call(f.siteCoordinator, { op: "resend", email });
       assert.equal(resent.status, 200, JSON.stringify(resent.body));
       assert.equal(resent.body.emailSent, true);
-      const secondCode = await latestCode(mailUrl, email, { after: second });
-      assert.match(secondCode, /^\d{6}$/);
-      assert.match(firstCode, /^\d{6}$/);
+      const secondMail = await latestInvitation(mailUrl, email, { after: second });
+      const secondExpiry = await expiryOf(email);
+      assertInvitation(secondMail, { siteUrl: SITE_URL, expiresAt: secondExpiry });
+      assert.ok(new Date(secondExpiry) >= new Date(firstExpiry), "the resent invitation expires no earlier");
     });
 
     await t.test("a non-admin is refused 403 and no auth user exists", async () => {
