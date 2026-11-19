@@ -874,10 +874,23 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
           );
         }
         assert.deepEqual((await f.readStaffCase(caseId)).followups, []);
-        // A configured person without the capability is the same setup error.
-        // Follow-up access comes only with the Admin role (052), so the
-        // coordinator is made an Intaker for the check.
-        await f.clearStaff(f.siteCoordinatorId, ["assist", "receive_documents"]);
+        // A configured person without the capability is the same setup error:
+        // a default who is neither a site coordinator nor holds `followup`
+        // (spec sign-in, "The roster can choose the default follow-up
+        // person"). The fixture's Intaker is neither.
+        assert.deepEqual(
+          (
+            await f.sql(
+              "select vitally_private.is_site_coordinator($1,$2) as sc, 'followup'=any(capabilities) as followup from public.people where id=$2",
+              [f.workspaceId, f.intakerId],
+            )
+          ).rows[0],
+          { sc: false, followup: false },
+        );
+        await f.sql(
+          "update public.workspaces set default_followup_person_id=$2 where id=$1",
+          [f.workspaceId, f.intakerId],
+        );
         try {
           await assert.rejects(
             () =>
@@ -887,7 +900,10 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
             rejected("VALIDATION"),
           );
         } finally {
-          await f.clearStaff(f.siteCoordinatorId, ["admin", "assist", "followup", "receive_documents"]);
+          await f.sql(
+            "update public.workspaces set default_followup_person_id=$2 where id=$1",
+            [f.workspaceId, f.siteCoordinatorId],
+          );
         }
         assert.deepEqual((await f.readStaffCase(caseId)).followups, []);
         // Positive control with the workspace restored.
