@@ -9817,3 +9817,20 @@ test("signing out while a wake check is out applies nothing to the next window s
   assert.equal(controller.getState().error, null);
   controller.stop();
 });
+
+test("an added Preparer role and an assignment show the preparation form after focus", async () => {
+  const other = { ...SETUP_CASE, reviews: [], preparerId: "person-sam", participants: ["person-sam"] };
+  const store = staffStore({
+    cases: [other],
+    clearance: { ...RILEY_CLEARED, capabilities: ["receive_documents", "assist"], isAdmin: false },
+  });
+  const { controller, events } = build({ store });
+  await controller.start();
+  await controller.selectCase("case-a");
+  assert.doesNotMatch(staffScreen(controller.getState()), /Record that preparation is complete in TaxSlayer/);
+  store.records.set("case-a", { ...other, preparerId: "person-riley", participants: ["person-riley"], revision: 2 });
+  store.nextClearance = { ...RILEY_CLEARED, capabilities: ["receive_documents", "assist", "prepare"], isAdmin: false };
+  await events.emit("focus");
+  assert.match(staffScreen(controller.getState()), /Record that preparation is complete in TaxSlayer/);
+  controller.stop();
+});

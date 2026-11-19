@@ -1648,3 +1648,52 @@ test("the office's Exit Form panel after Return to signing carries the note", ()
   );
   assert.doesNotMatch(html, /filled from the reviewer's answers/);
 });
+
+test("a close dialog for someone who lost admin keeps the reason and drops the submit (#190)", () => {
+  const state = {
+    dialog: "close-case",
+    savedCase: officeCase(),
+    principal: { access: "staff", personId: "p-lee" },
+    people: [{ id: "p-lee", name: "Lee", capabilities: ["prepare"] }],
+  };
+  const html = closeCaseDialogBody(state);
+  assert.doesNotMatch(html, /CLOSE_CASE/);
+  assert.match(html, /Your roles changed, so you can&#39;t send this any more\./);
+  assert.match(html, /Why the office is closing this case/);
+  assert.match(html, /Keep it open/);
+  assert.match(closeCaseDialogBody({ ...state, people: [{ id: "p-lee", name: "Lee", capabilities: ["admin"] }] }), /CLOSE_CASE/);
+});
+
+test("a volunteer with no capabilities still sees the drawer's Save (#190)", () => {
+  const html = dialog({
+    dialog: "volunteer",
+    principal: { access: "staff", personId: "p-lee" },
+    people: [{ id: "p-lee", name: "Lee", capabilities: [] }],
+    volunteers: [],
+    dialogContext: {},
+  });
+  assert.match(html, /Add a volunteer/);
+  assert.match(html, /type="submit"/);
+  assert.doesNotMatch(html, /roles changed/);
+});
+
+test("Add a case stays for a staff person who lost admin, with its writes dropped (#190)", () => {
+  const html = staffScreen({
+    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "alex", clearance: cleared({ isAdmin: false }) },
+    people: PEOPLE,
+    cases: [],
+    assistance: [],
+    savedCase: null,
+    screen: "office-add-case",
+    officeDraft: {},
+    draftAnswers: { tp_first_name: "Lena" },
+    openPanels: [],
+    busy: false,
+    error: null,
+    retryable: false,
+  });
+  assert.match(html, /add-case-v2/);
+  assert.match(html, /id="add-case-cancel"/);
+  assert.doesNotMatch(html, /save-office-draft|send-office-draft/);
+  assert.match(html, /Your roles changed, so you can&#39;t send this any more\./);
+});

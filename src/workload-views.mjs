@@ -5,6 +5,7 @@
 // (design D2). The numbers come from `volunteer-workload.mjs`.
 import { esc, button, icon, stageBadge, loadingLine, unloadedLine, emptyLine } from "./ui.mjs";
 import { drawerError } from "./office-views.mjs";
+import { rolesChangedLine } from "./role-gates.mjs";
 import { languagesText } from "./volunteer-views.mjs";
 import { ROLES } from "./volunteer-roster.mjs";
 import { sortRows, searchRows, taxpayerName } from "./volunteer-workload.mjs";
@@ -205,10 +206,12 @@ function hiddenNote(slot, count) {
   return `<p class="field-note assign-hidden">${esc(text)}</p>`;
 }
 
-function personItem(entry, busy) {
+function personItem(entry, busy, locked = false) {
   const choose = entry.current
     ? `<span class="assign-current">Current</span>`
-    : button(
+    : locked
+      ? ""
+      : button(
         "Choose",
         "assign-case",
         "secondary",
@@ -241,12 +244,12 @@ export function assignDrawerBody({ record = null, slot = "preparer", result = nu
   const all = result?.list ?? [];
   const shown = needle ? all.filter((entry) => String(entry.name ?? "").toLowerCase().includes(needle)) : all;
   const listHtml = shown.length
-    ? `<ul class="assign-list">${shown.map((entry) => personItem(entry, ui?.busy === true)).join("")}</ul>`
+    ? `<ul class="assign-list">${shown.map((entry) => personItem(entry, ui?.busy === true, ui?.locked === true)).join("")}</ul>`
     : emptyLine(all.length ? "Nobody matches." : `Nobody can be the ${slot} right now.`);
   return `<p class="assign-slot"><strong>${esc(what)}</strong></p><input id="assign-search" name="assignSearch" type="search" value="${esc(
     search ?? "",
   )}" placeholder="Search by name" aria-label="Search people" autocomplete="off">${hiddenNote(
     slot,
     result?.hiddenForIndependence ?? 0,
-  )}${listHtml}${drawerError(ui)}<div class="drawer-actions">${button("Cancel", "close-dialog", "text")}</div>`;
+  )}${ui?.locked ? rolesChangedLine() : ""}${listHtml}${drawerError(ui)}<div class="drawer-actions">${button("Cancel", "close-dialog", "text")}</div>`;
 }

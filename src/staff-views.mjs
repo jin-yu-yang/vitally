@@ -73,6 +73,7 @@ import {
   changedAnswers,
 } from "./questionnaires.mjs";
 import { demoFillButton } from "./demo-fill.mjs";
+import { dialogLocked, rolesChangedLine } from "./role-gates.mjs";
 import {
   CONTACT_DIRECTIONS,
   CONTACT_WITH,
@@ -1985,7 +1986,7 @@ export function correctionsDialogBody(state = {}) {
         "corrections",
       ),
     },
-    confirm: caseSubmit(
+    confirm: dialogLocked(state) ? rolesChangedLine() : caseSubmit(
       `${icon("back")} Send back for corrections`,
       "REQUEST_CORRECTIONS",
       "primary full",
@@ -2107,7 +2108,9 @@ export function logContactForm(
         "secondary",
         `data-contact-id="${esc(contact.id)}"`,
       )}</div>`
-    : `<button type="submit" class="btn primary" id="${submitId}"${busy}>Log contact</button>`;
+    : view.locked
+      ? rolesChangedLine()
+      : `<button type="submit" class="btn primary" id="${submitId}"${busy}>Log contact</button>`;
   return `<form class="staff-form contact-form" ${attrs}>${heading}${segGroup(
     "Direction",
     "direction",

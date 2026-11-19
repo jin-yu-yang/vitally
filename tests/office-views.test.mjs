@@ -1377,3 +1377,37 @@ test("the panel is not rendered for a non-admin office state", () => {
   assert.doesNotMatch(followupsWith(helper), /Invite a client|invite-client-form/);
   assert.doesNotMatch(followupsWith(null), /Invite a client/);
 });
+
+// ---------------------------------------------------------------------------
+// A form whose capability is gone keeps its text and drops its submit (#190)
+// ---------------------------------------------------------------------------
+
+test("a locked Log contact drawer drops both submits and says why", () => {
+  const html = logCallDrawerBody({ record: called([task()]), person: sam, ui: { now: NOW, locked: true }, caseId: "c1" });
+  assert.doesNotMatch(html, /RECORD_CONTACT|RESOLVE_FOLLOWUP/);
+  assert.doesNotMatch(html, /type="submit"/);
+  assert.match(html, /Your roles changed, so you can&#39;t send this any more\./);
+  assert.match(html, /<h4>Resolve this task<\/h4>/);
+});
+
+test("a locked Resolve help drawer drops its submit and says why", () => {
+  const item = { id: "h1", title: "Help with a form", status: "assigned", language: "english", contactPreference: "phone" };
+  const html = resolveHelpDrawerBody({ item, person: sam, ui: { locked: true } });
+  assert.doesNotMatch(html, /data-assistance-action="RESOLVE"/);
+  assert.match(html, /Your roles changed, so you can&#39;t send this any more\./);
+  assert.match(html, /What you helped with/);
+});
+
+test("a locked Add a case page keeps the typed answers and Cancel, and drops both writes", () => {
+  const html = renderAddCaseV2({
+    person: sam,
+    locked: true,
+    draftAnswers: { tp_first_name: "Lena" },
+    openAddSubsteps: ["about.you"],
+    people: [sam],
+  });
+  assert.doesNotMatch(html, /save-office-draft|send-office-draft/);
+  assert.match(html, /id="add-case-cancel"/);
+  assert.match(html, /value="Lena"/);
+  assert.match(html, /Your roles changed, so you can&#39;t send this any more\./);
+});

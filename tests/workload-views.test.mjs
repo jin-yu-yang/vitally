@@ -281,3 +281,10 @@ test("a holder without the role keeps a tagged row, and the cases say which role
   assert.doesNotMatch(pia, /without the role/);
   assert.doesNotMatch(casesOf(html, "v-pia"), /No prepare role/);
 });
+
+test("a locked Assign drawer drops the Choose buttons, keeps the search, and says why (#190)", () => {
+  const html = drawer(reviewing, "reviewer", "", { locked: true });
+  assert.doesNotMatch(html, /data-action="assign-case"/);
+  assert.match(html, /id="assign-search"/);
+  assert.match(html, /Your roles changed, so you can&#39;t send this any more\./);
+});

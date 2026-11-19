@@ -58,6 +58,7 @@ import {
   materialsCard,
   staffEligibility,
 } from "./staff-views.mjs";
+import { dialogLocked, rolesChangedLine } from "./role-gates.mjs";
 
 // Sam's office screens that are not one case: the Follow-ups queue. Pure
 // functions of records and one persona, exactly like `admin-views.mjs` — no
@@ -591,7 +592,9 @@ export function closeUnsignedDialogBody(state = {}) {
         "These clients didn't come back to sign. None of these returns will be transmitted in TaxSlayer.",
       )}</span></label>`,
     },
-    confirm: `<button type="submit" class="btn primary full" id="close-unsigned-submit" disabled>${icon("check")} Close as Dismissed</button>`,
+    confirm: dialogLocked(state)
+      ? rolesChangedLine()
+      : `<button type="submit" class="btn primary full" id="close-unsigned-submit" disabled>${icon("check")} Close as Dismissed</button>`,
     keep: "Keep them open",
   });
 }
@@ -649,16 +652,20 @@ export function resolveHelpDrawerBody({ item, person, ui = {} } = {}) {
     return `${drawerError(ui)}<p>This request is no longer open.</p>${button("Close", "close-dialog", "secondary")}`;
   const busy = ui?.busy ? "disabled" : "";
   const rights = adminEligibility({ item }, person);
-  const resolve = rights.resolveAssistance.allowed
+  const resolve = rights.resolveAssistance.allowed || ui?.locked
     ? `<form class="staff-form">${textarea(
         "What you helped with",
         "note",
         "",
         'required maxlength="1000" rows="3"',
         `assist-${item.id}`,
-      )}<button type="submit" class="btn primary" data-assistance-action="RESOLVE" data-item-id="${esc(
-        item.id,
-      )}" ${busy}>${icon("check")} Record this as resolved</button></form>`
+      )}${
+        ui?.locked
+          ? rolesChangedLine()
+          : `<button type="submit" class="btn primary" data-assistance-action="RESOLVE" data-item-id="${esc(
+              item.id,
+            )}" ${busy}>${icon("check")} Record this as resolved</button>`
+      }</form>`
     : explain(rights.resolveAssistance);
   return `<h3>${esc(item.title)}</h3>${drawerError(ui)}${detailRow("Language", languageLabel(item.language))}${detailRow(
     "Contact preference",
@@ -854,7 +861,8 @@ export function renderAddCaseV2(ui = {}) {
     ? ""
     : `<p class="fiction-pill">${icon("spark")} Fictional data only · ${button("Fill fictional details", "fill-assisted-intake", "text", off)}</p>`;
   const rights = adminEligibility({}, person);
-  if (!rights.assistedIntake.allowed) return `${pill}${explain(rights.assistedIntake)}`;
+  // Locked: the roles changed under typed answers, which stay.
+  if (!rights.assistedIntake.allowed && !view.locked) return `${pill}${explain(rights.assistedIntake)}`;
   const record = view.savedCase ?? null;
   const answers = view.draftAnswers ?? {};
   const page = {
@@ -893,14 +901,18 @@ export function renderAddCaseV2(ui = {}) {
   const side = `<aside class="add-case-side">${info}${materials}</aside>`;
   const bar = `<div class="add-case-bar">${button("Cancel", "open-board", "text", 'id="add-case-cancel"')}<p id="add-case-count" class="add-case-count" tabindex="-1">${esc(
     addCaseCountText(page.parts),
-  )}</p>${button("Save draft", "save-office-draft", "secondary", saving ? "disabled" : "")}<div class="add-case-confirm"><label class="checkbox-row" for="field-confirmed"><input type="checkbox" id="field-confirmed" name="confirmed" ${
+  )}</p>${view.locked ? "" : button("Save draft", "save-office-draft", "secondary", saving ? "disabled" : "")}<div class="add-case-confirm"><label class="checkbox-row" for="field-confirmed"><input type="checkbox" id="field-confirmed" name="confirmed" ${
     confirmed ? "checked" : ""
-  }><span>I have checked these answers with the client</span></label><p class="field-note">This confirms the answers on screen. It is not a signature on a tax or consent form.</p></div>${button(
-    "Send to the office",
-    "send-office-draft",
-    "primary",
-    `id="add-case-send"${addCaseSendOff({ confirmed, busy: page.busy, officeSaving: page.officeSaving }) ? " disabled" : ""}`,
-  )}</div>`;
+  }><span>I have checked these answers with the client</span></label><p class="field-note">This confirms the answers on screen. It is not a signature on a tax or consent form.</p></div>${
+    view.locked
+      ? rolesChangedLine()
+      : button(
+          "Send to the office",
+          "send-office-draft",
+          "primary",
+          `id="add-case-send"${addCaseSendOff({ confirmed, busy: page.busy, officeSaving: page.officeSaving }) ? " disabled" : ""}`,
+        )
+  }</div>`;
   // Another window saved this draft under unsaved edits: the shared choice,
   // whose two buttons the client's form already wires (reconcile-*).
   return `<div class="add-case-v2">${breadcrumb}${meta}${conflictForm(view)}${pill}<div class="add-case-layout">${form}${side}</div>${bar}</div>`;

@@ -44,6 +44,7 @@ import {
   taskContacts,
   filingPanel,
 } from "./staff-views.mjs";
+import { dialogLocked, rolesChangedLine } from "./role-gates.mjs";
 import {
   waitingReturns,
   returnedToSigning,
@@ -552,7 +553,8 @@ function receiptPanel(record, person, ui) {
 export function followupForms(record, task, person, ui = {}) {
   const busy = ui.busy ? "disabled" : "";
   const rights = adminEligibility({ caseRecord: record, followup: task }, person);
-  if (!rights.recordContact.allowed) return explain(rights.recordContact);
+  // A form whose capability is gone keeps its text (change recheck-clearance-while-cleared).
+  if (!rights.recordContact.allowed && !ui.locked) return explain(rights.recordContact);
   const resolveScope = `resolve-${task?.id ?? "task"}`;
   const hidden = `<input type="hidden" name="followupId" value="${esc(task?.id ?? "")}">`;
   return `${logContactForm(record, person, ui, {
@@ -571,12 +573,16 @@ export function followupForms(record, task, person, ui = {}) {
         "",
         'required maxlength="1000" rows="2"',
         resolveScope,
-      )}${caseSubmit(
-        `${icon("check")} Resolve this task`,
-        "RESOLVE_FOLLOWUP",
-        "primary",
-        `data-followup-id="${esc(task?.id ?? "")}" ${busy}`,
-      )}<p class="field-note">Resolving closes the office's contact task only. It does not verify a document, change the preparer, or close the case.</p></form>`;
+      )}${
+        ui.locked
+          ? rolesChangedLine()
+          : caseSubmit(
+              `${icon("check")} Resolve this task`,
+              "RESOLVE_FOLLOWUP",
+              "primary",
+              `data-followup-id="${esc(task?.id ?? "")}" ${busy}`,
+            )
+      }<p class="field-note">Resolving closes the office's contact task only. It does not verify a document, change the preparer, or close the case.</p></form>`;
 }
 
 const GO_OVER_TITLE = "Go over the return with the client";
@@ -756,7 +762,7 @@ export function closeCaseDialogBody(state = {}) {
         "close",
       )}" name="confirmed" value="true" required><span>I understand this closes the case for everyone.</span></label>`,
     },
-    confirm: caseSubmit(
+    confirm: dialogLocked(state) ? rolesChangedLine() : caseSubmit(
       `${icon("close")} Close this case`,
       "CLOSE_CASE",
       "primary full",
@@ -797,7 +803,7 @@ export function markReadyToEfileDialogBody(state = {}) {
         "ready-efile",
       )}" name="confirmed" value="true" required><span>The client signed Form 8879, or the return will be given to the client on paper.</span></label>`,
     },
-    confirm: caseSubmit(
+    confirm: dialogLocked(state) ? rolesChangedLine() : caseSubmit(
       `${icon("check")} Mark ready to e-file`,
       "MARK_READY_TO_EFILE",
       "primary full",
@@ -926,7 +932,7 @@ export function markEfiledDialogBody(state = {}) {
         "efiled",
       )}" name="confirmed" value="true" required><span>Each return was e-filed, or given to the client on paper, as chosen above.</span></label>`,
     },
-    confirm: caseSubmit(
+    confirm: dialogLocked(state) ? rolesChangedLine() : caseSubmit(
       `${icon("check")} Mark e-filed`,
       "MARK_EFILED",
       "primary full",
@@ -986,7 +992,7 @@ export function recordFilingResultDialogBody(state = {}) {
         "filing-result",
       )}" name="confirmed" value="true" required><span>These results are correct.</span></label>`,
     },
-    confirm: caseSubmit(
+    confirm: dialogLocked(state) ? rolesChangedLine() : caseSubmit(
       `${icon("check")} Record the result`,
       "RECORD_FILING_RESULT",
       "primary full",
@@ -1017,7 +1023,7 @@ export function returnToSigningDialogBody(state = {}) {
         "return-to-signing",
       )}" name="confirmed" value="true" required><span>The fix is done.</span></label>`,
     },
-    confirm: caseSubmit(
+    confirm: dialogLocked(state) ? rolesChangedLine() : caseSubmit(
       `${icon("check")} Return to signing`,
       "RETURN_TO_SIGNING",
       "primary full",
@@ -1064,7 +1070,7 @@ export function requestDocumentsDialogBody(state = {}) {
       html: "The client sees each title and message and sends the documents themselves. The case waits at Waiting for documents until you verify every one. The client is told which documents PCDC asked for.",
     },
     form: { fields: rows },
-    confirm: caseSubmit(
+    confirm: dialogLocked(state) ? rolesChangedLine() : caseSubmit(
       `${icon("file")} Ask for these documents`,
       "REQUEST_DOCUMENTS_AT_INTAKE",
       "primary full",
@@ -1094,7 +1100,7 @@ export function putOnHoldDialogBody(state = {}) {
         "hold",
       )}${confirmRow("confirmed", "hold", "I understand the case goes on hold.")}`,
     },
-    confirm: caseSubmit(
+    confirm: dialogLocked(state) ? rolesChangedLine() : caseSubmit(
       `${icon("clock")} Put on hold`,
       "PUT_ON_HOLD",
       "primary full",
@@ -1118,7 +1124,7 @@ export function resumeFromHoldDialogBody(state = {}) {
     form: {
       fields: confirmRow("confirmed", "resume", "The office got in touch with the client."),
     },
-    confirm: caseSubmit(
+    confirm: dialogLocked(state) ? rolesChangedLine() : caseSubmit(
       `${icon("phone")} Got in touch`,
       "RESUME_FROM_HOLD",
       "primary full",
