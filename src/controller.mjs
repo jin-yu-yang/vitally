@@ -279,6 +279,8 @@ export function createController({
   render,
   sessionStorage,
   windowEvents = globalThis,
+  // The document, for visibilitychange (a tab that becomes visible is a wake).
+  documentEvents = globalThis.document,
   clock = () => Date.now(),
   newActionId = () => crypto.randomUUID(),
   cooldownSeconds = 65,
@@ -874,7 +876,7 @@ export function createController({
   // The public re-fetch: the list plus whatever case is open. Used by the
   // reconnect, the window focus and the online event alike, because a
   // subscription is never the only way back.
-  async function refresh() {
+  async function refresh({ wake = false } = {}) {
     // Without a principal there is nothing to re-read, but there may still be
     // an identity to establish: a visitor whose session could not be read, or
     // who is signed in and could not be identified, gets another attempt here.
@@ -891,6 +893,14 @@ export function createController({
       // window has no realtime channel).
       if (awaitingClearance(state) && state.screen === "office-updates") await loadPostedUpdates();
       return;
+    }
+    // A wake event re-reads the clearance first: role changes never come
+    // through realtime. A failed check leaves the window cleared, so the
+    // refresh goes on; a check that finds no clearance has already dropped the
+    // work and redrawn the setup screen.
+    if (wake) {
+      await checkClearance();
+      if (awaitingClearance(state)) return;
     }
     // The feed never blocks the rest, and never fails the refresh.
     await readFeed();
@@ -979,13 +989,16 @@ export function createController({
 
   // ---- start / stop ------------------------------------------------------
 
-  const onWake = () => refresh();
+  const onWake = () => refresh({ wake: true });
+  const onVisible = () =>
+    documentEvents?.visibilityState === "visible" ? refresh({ wake: true }) : undefined;
 
   function listen() {
     if (listening) return;
     listening = true;
     windowEvents?.addEventListener?.("focus", onWake);
     windowEvents?.addEventListener?.("online", onWake);
+    documentEvents?.addEventListener?.("visibilitychange", onVisible);
   }
 
   function unlisten() {
@@ -993,6 +1006,7 @@ export function createController({
     listening = false;
     windowEvents?.removeEventListener?.("focus", onWake);
     windowEvents?.removeEventListener?.("online", onWake);
+    documentEvents?.removeEventListener?.("visibilitychange", onVisible);
   }
 
   function subscribe() {
@@ -1005,7 +1019,7 @@ export function createController({
         show();
         // Reconnecting means the browser may have missed changes entirely.
         if (status === "online" && previous !== "online" && previous !== "unknown")
-          refresh();
+          refresh({ wake: true });
       },
     });
   }

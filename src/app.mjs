@@ -136,6 +136,7 @@ if (!config) {
     render,
     sessionStorage: window.sessionStorage,
     windowEvents: window,
+    documentEvents: document,
     cooldownSeconds: config.authResendCooldownSeconds,
     localStorage: readLocalStorage(),
     languages: [...(navigator.languages ?? [navigator.language])],

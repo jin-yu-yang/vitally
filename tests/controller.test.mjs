@@ -384,6 +384,7 @@ function build(options = {}) {
   // the rebuilt page takes the keyboard back to the top.
   const renders = { count: 0, focus: [] };
   const events = options.windowEvents ?? fakeEvents();
+  const documents = options.documentEvents ?? Object.assign(fakeEvents(), { visibilityState: "visible" });
   const sessionStorage = options.sessionStorage ?? fakeSession();
   const controller = createController({
     store: options.store,
@@ -394,6 +395,7 @@ function build(options = {}) {
     },
     sessionStorage,
     windowEvents: events,
+    documentEvents: documents,
     clock: options.clock,
     newActionId: options.newActionId,
     cooldownSeconds: options.cooldownSeconds,
@@ -401,7 +403,7 @@ function build(options = {}) {
     languages: options.languages,
     demoTools: options.demoTools,
   });
-  return { controller, events, sessionStorage, renders };
+  return { controller, events, documents, sessionStorage, renders };
 }
 
 test("the controller carries the demo-tools switch it was given", () => {
@@ -7272,7 +7274,8 @@ test("posted updates: a window whose connection comes back re-reads the feed, so
   const reads = callCount(store, "getUpdates");
   await store.handlers.onConnection("online");
   await tick();
-  assert.equal(callCount(store, "getUpdates"), reads + 1);
+  // The reconnect's clearance check reads the feed too (change recheck-clearance-while-cleared).
+  assert.ok(callCount(store, "getUpdates") > reads);
   assert.deepEqual(controller.getState().updates, []);
   assert.equal(controller.getState().updatesUnread, 0);
   controller.stop();
@@ -8212,7 +8215,7 @@ test("an uncleared admin can open the Roster and is read no case", async () => {
   controller.stop();
 });
 
-test("the window's focus re-checks the clearance only while the setup screen shows", async () => {
+test("the window's focus re-checks the clearance in the setup screen and, with the work, re-reads it too", async () => {
   const store = staffStore({ clearance: { ...UNCLEARED }, cases: [{ ...SETUP_CASE }] });
   const { controller, events } = build({ store });
   await controller.start();
@@ -8226,10 +8229,10 @@ test("the window's focus re-checks the clearance only while the setup screen sho
   assert.equal(state.principal.clearance.cleared, true);
   assert.equal(state.cases.length, 1);
   assert.doesNotMatch(staffScreen(state), /Finish your setup/);
-  // A cleared window's focus re-reads the work as before, not the clearance.
+  // A cleared window's focus re-reads the clearance first, then the work.
   const caseReads = store.calls.filter((entry) => entry === "listCases").length;
   await events.emit("focus");
-  assert.equal(clearanceCalls(store) - before, 1);
+  assert.equal(clearanceCalls(store) - before, 2);
   assert.equal(store.calls.filter((entry) => entry === "listCases").length, caseReads + 1);
   state = controller.getState();
   assert.equal(state.error, null);
@@ -9491,5 +9494,89 @@ test("the label menu closes when the screen or the selected case changes", async
   controller.openLabelMenu("case-a");
   await controller.selectCase("case-a");
   assert.equal(controller.getState().labelMenu, null);
+  controller.stop();
+});
+
+test("a cleared window re-reads its clearance on focus, and shows an added role", async () => {
+  const store = staffStore({ clearance: { ...RILEY_CLEARED, capabilities: ["prepare"], isAdmin: true } });
+  const { controller, events } = build({ store });
+  await controller.start();
+  const before = clearanceCalls(store);
+  store.nextClearance = { ...RILEY_CLEARED, capabilities: ["prepare", "review"] };
+  await events.emit("focus");
+  assert.equal(clearanceCalls(store) - before, 1);
+  const own = controller.getState().people.find((p) => p.id === "person-riley");
+  assert.deepEqual(own.capabilities, ["prepare", "review"]);
+  controller.stop();
+});
+
+test("a tab that becomes visible re-reads the clearance; one that is hidden does not", async () => {
+  const store = staffStore();
+  const { controller, documents } = build({ store });
+  await controller.start();
+  const before = clearanceCalls(store);
+  documents.visibilityState = "hidden";
+  await documents.emit("visibilitychange");
+  assert.equal(clearanceCalls(store) - before, 0);
+  documents.visibilityState = "visible";
+  await documents.emit("visibilitychange");
+  assert.equal(clearanceCalls(store) - before, 1);
+  controller.stop();
+  assert.equal(documents.count("visibilitychange"), 0);
+});
+
+test("every role removed: focus shows the setup screen and reads no case list", async () => {
+  const store = staffStore({ cases: [{ ...SETUP_CASE }] });
+  const { controller, events } = build({ store });
+  await controller.start();
+  const lists = store.calls.filter((c) => c === "listCases").length;
+  store.nextClearance = { ...UNCLEARED };
+  await events.emit("focus");
+  assert.equal(controller.getState().principal.clearance.cleared, false);
+  assert.match(staffScreen(controller.getState()), /Finish your setup for this season/);
+  assert.equal(store.calls.filter((c) => c === "listCases").length, lists);
+  controller.stop();
+});
+
+test("the refresh after a successful action reads no clearance", async () => {
+  const store = staffStore({
+    assistance: [{ id: "item-1", title: "Help with the forms", status: "open", revision: 1, assigneeId: null }],
+  });
+  const { controller } = build({ store });
+  await controller.start();
+  const before = clearanceCalls(store);
+  await controller.runAssistanceAction("CLAIM", "item-1");
+  assert.equal(clearanceCalls(store) - before, 0);
+  controller.stop();
+});
+
+test("a wake check that fails keeps the work and still re-reads the lists", async () => {
+  const store = staffStore({ cases: [{ ...SETUP_CASE }] });
+  const { controller, events } = build({ store });
+  await controller.start();
+  const lists = store.calls.filter((c) => c === "listCases").length;
+  store.nextClearance = Object.assign(new Error("offline"), { code: "OFFLINE" });
+  await events.emit("focus");
+  const state = controller.getState();
+  assert.equal(state.principal.clearance.cleared, true);
+  assert.equal(state.cases.length, 1);
+  assert.ok(store.calls.filter((c) => c === "listCases").length > lists);
+  controller.stop();
+});
+
+test("signing out while a wake check is out applies nothing to the next window state", async () => {
+  const store = staffStore();
+  const { controller, events } = build({ store });
+  await controller.start();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  store.nextClearance = () => gate;
+  const wake = events.emit("focus");
+  await controller.signOut();
+  release({ ...UNCLEARED });
+  await wake;
+  assert.equal(controller.getState().principal, null);
   controller.stop();
 });
