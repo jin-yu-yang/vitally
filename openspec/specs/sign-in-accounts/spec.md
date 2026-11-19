@@ -74,11 +74,11 @@ A client who already holds a session when they are invited (or reactivated) does
 A volunteer's account SHALL NOT become `active` by use; only the site check makes it `active`.
 
 #### Scenario: A client's first sign-in
-- **WHEN** an invited client signs in with their emailed code
+- **WHEN** an invited client signs in with the code the sign-in screen sends them
 - **THEN** their account is `active`, and the office panel lists them as "Active"
 
 #### Scenario: A volunteer's first sign-in
-- **WHEN** an invited volunteer signs in with their emailed code
+- **WHEN** an invited volunteer signs in with the code the sign-in screen sends them
 - **THEN** their account is still `invited`, the Roster shows "Invited", and their window shows "Confirm your site"
 
 #### Scenario: A deactivated person signs in
@@ -317,7 +317,7 @@ A cancelled invitee's sign-in code SHALL give no access. The window SHALL say "I
 - **THEN** the volunteer has no membership and no account, the Roster shows "Not created", and the drawer's email can be changed and saved
 
 #### Scenario: A cancelled invitee signs in
-- **WHEN** the volunteer whose invitation was cancelled signs in with the emailed code
+- **WHEN** the volunteer whose invitation was cancelled signs in with a code the sign-in screen sends them
 - **THEN** they have no membership, read no case data, and every RPC refuses them
 
 #### Scenario: Refused once active

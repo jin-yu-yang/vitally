@@ -170,7 +170,10 @@ test("both files are written with mode 600, masks come first in Actions only, an
   try {
     const statusPath = path.join(dir, "status.private.json");
     const envPath = path.join(dir, ".env.test");
-    const manifestPath = path.join(dir, ".vitally-targets.json");
+    // The manifest path goes into .env.test, which refuses a backslash, so on
+    // Windows it is written with forward slashes (C:/Users/...), as a person
+    // writing .env.test there does; Node and isAbsolute accept both.
+    const manifestPath = path.join(dir, ".vitally-targets.json").replaceAll("\\", "/");
     await writeFile(statusPath, JSON.stringify(STATUS));
     const argv = ["--status", statusPath, "--instance", "vitally-ci", "--env", envPath, "--manifest", manifestPath];
 
@@ -182,8 +185,11 @@ test("both files are written with mode 600, masks come first in Actions only, an
     for (const line of actionsLog.slice(masks.length))
       for (const value of SECRET_VALUES) assert.ok(!line.includes(value), "a secret was logged");
 
-    for (const file of [envPath, manifestPath])
-      assert.equal((await stat(file)).mode & 0o777, 0o600);
+    // Windows has no Unix permission bits (stat reports 0o666 whatever was
+    // asked), so the mode is checked everywhere else; CI runs on Linux.
+    if (process.platform !== "win32")
+      for (const file of [envPath, manifestPath])
+        assert.equal((await stat(file)).mode & 0o777, 0o600);
     const written = parseEnv(await readFile(envPath, "utf8"));
     assert.equal(written.VITALLY_TARGET_MANIFEST, manifestPath);
     assert.equal(JSON.parse(await readFile(manifestPath, "utf8")).test.instanceId, "vitally-ci");
