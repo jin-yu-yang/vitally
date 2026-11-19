@@ -32,8 +32,8 @@
 
 ## 7. Docs
 
-- [ ] 7.1 `docs/setup.md`: the stack's new function variables, the hosted secrets (`RESEND_API_KEY` send-only key for govitally.org, `VITALLY_SITE_URL`), the shared 100-a-day quota, and the redeploy step
-- [ ] 7.2 `docs/developer/backend.md` and `docs/demo-script.md`: the invitation email and the new wording
+- [x] 7.1 `docs/setup.md`: the stack's new function variables, the hosted secrets (`RESEND_API_KEY` send-only key for govitally.org, `VITALLY_SITE_URL`), the shared 100-a-day quota, and the redeploy step
+- [x] 7.2 `docs/developer/backend.md` and `docs/demo-script.md`: the invitation email and the new wording
 
 ## 8. Checks
 
