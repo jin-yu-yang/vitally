@@ -1,7 +1,7 @@
 ## 1. Local mail path (design D2, open question)
 
-- [ ] 1.1 On a fresh isolated test stack, confirm the edge runtime reaches the mail catcher's send API (`POST /api/v1/send`), record the URL that works and how the stack passes `VITALLY_MAIL_CATCHER_URL` and `VITALLY_SITE_URL` to the function; if it can't, switch the local sender to SMTP to the catcher and record why
-- [ ] 1.2 Pass both variables to the function in `supabase/test-stack.config.example.toml` and `.github/actions/test-stack/action.yml`, with no `RESEND_API_KEY`
+- [x] 1.1 On a fresh isolated test stack, confirm the edge runtime reaches the mail catcher's send API (`POST /api/v1/send`), record the URL that works and how the stack passes `VITALLY_MAIL_CATCHER_URL` and `VITALLY_SITE_URL` to the function; if it can't, switch the local sender to SMTP to the catcher and record why
+- [x] 1.2 Pass both variables to the function in `supabase/test-stack.config.example.toml` and `.github/actions/test-stack/action.yml`, with no `RESEND_API_KEY`
 
 ## 2. Invitation email text (design D3, D4, D5)
 
