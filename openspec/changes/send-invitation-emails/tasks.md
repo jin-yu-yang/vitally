@@ -37,7 +37,7 @@
 
 ## 8. Checks
 
-- [ ] 8.1 `npm test`
-- [ ] 8.2 On a stack with the new function: `npm run test:database` and `npm run test:auth-browser`
-- [ ] 8.3 `npm run test:browser`, or the PR's CI story run, linked
-- [ ] 8.4 `npx openspec validate --all`
+- [x] 8.1 `npm test`
+- [x] 8.2 On a stack with the new function: `npm run test:database` and `npm run test:auth-browser`
+- [x] 8.3 `npm run test:browser`, or the PR's CI story run, linked
+- [x] 8.4 `npx openspec validate --all`
