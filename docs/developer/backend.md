@@ -135,7 +135,7 @@ D12 and D15 of the archived change).
   `VITALLY_MAIL_CATCHER_URL` (the local mail catcher's HTTP API), and always `VITALLY_SITE_URL`.
   Anything else fails the guard: `index.ts` answers `SERVER_ERROR` before anything is created and
   logs the variable names, never their values. Create account and Invite send
-  `Idempotency-Key: <actionId>`; Resend sends none. A send times out after 10 s and never throws.
+  `Idempotency-Key: <actionId>`; the Resend action sends none. A send times out after 10 s and never throws.
   Resend's `409 invalid_idempotent_request` counts as sent (the first request with that key
   already sent it). `409 concurrent_idempotent_requests`, any other error, a network error or a
   timeout counts as not sent. The answer stays `{ status: "invited", emailSent, accountRevision }`
