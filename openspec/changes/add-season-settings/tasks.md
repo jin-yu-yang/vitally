@@ -1,9 +1,9 @@
 ## 1. Migration 052: guard, snapshot and the capabilities mirror
 
-- [ ] 1.1 Write the 052 guard (design D8): count active `staff` memberships whose person has `admin` in `people.capabilities` and no current-season Admin role, and raise `VT008` with the count, changing nothing. Add a database test that the guard refuses (run its SQL against a fixture shaped that way).
-- [ ] 1.2 Snapshot every person's capabilities into `vitally_private.capabilities_before_052`. It must not be reachable by any client role.
-- [ ] 1.3 Add the mirror (design D1): a `BEFORE INSERT OR UPDATE` trigger on `people` computing role capabilities for a person with a sign-in, `{}` otherwise; an `AFTER` trigger on `roster_entries` (roles, season, person, delete) that touches the current-season person; then recompute everyone. Rewrite `effective_capabilities` to role capabilities only.
-- [ ] 1.4 Database tests: the mirror follows role changes, including the `people` realtime message; a direct write is replaced; no sign-in means `{}`; a Roster volunteer with roles and no sign-in stays hidden from non-admin staff and becomes visible with their role capabilities once they sign in.
+- [x] 1.1 Write the 052 guard (design D8): count active `staff` memberships whose person has `admin` in `people.capabilities` and no current-season Admin role, and raise `VT008` with the count, changing nothing. Add a database test that the guard refuses (run its SQL against a fixture shaped that way).
+- [x] 1.2 Snapshot every person's capabilities into `vitally_private.capabilities_before_052`. It must not be reachable by any client role.
+- [x] 1.3 Add the mirror (design D1): a `BEFORE INSERT OR UPDATE` trigger on `people` computing role capabilities for a person with a sign-in, `{}` otherwise; an `AFTER` trigger on `roster_entries` (roles, season, person, delete) that touches the current-season person; then recompute everyone. Rewrite `effective_capabilities` to role capabilities only.
+- [x] 1.4 Database tests: the mirror follows role changes, including the `people` realtime message; a direct write is replaced; no sign-in means `{}`; a Roster volunteer with roles and no sign-in stays hidden from non-admin staff and becomes visible with their role capabilities once they sign in.
 
 ## 2. Site coordinators and clearance in the database
 
