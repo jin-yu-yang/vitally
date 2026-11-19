@@ -31,5 +31,5 @@
 ## 6. Checks
 
 - [x] 6.1 `npm test`
-- [ ] 6.2 The browser story, because the views change: the PR's CI `story` jobs (both legs), not the local stack; link the run and review its screenshots
+- [x] 6.2 The browser story, because the views change: the PR's CI `story` jobs (both legs), not the local stack; link the run and review its screenshots
 - [x] 6.3 `npx openspec validate --all`
