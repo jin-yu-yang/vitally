@@ -170,7 +170,10 @@ test("both files are written with mode 600, masks come first in Actions only, an
   try {
     const statusPath = path.join(dir, "status.private.json");
     const envPath = path.join(dir, ".env.test");
-    const manifestPath = path.join(dir, ".vitally-targets.json");
+    // The manifest path goes into .env.test, which refuses a backslash, so on
+    // Windows it is written with forward slashes (C:/Users/...), as a person
+    // writing .env.test there does; Node and isAbsolute accept both.
+    const manifestPath = path.join(dir, ".vitally-targets.json").replaceAll("\\", "/");
     await writeFile(statusPath, JSON.stringify(STATUS));
     const argv = ["--status", statusPath, "--instance", "vitally-ci", "--env", envPath, "--manifest", manifestPath];
 
