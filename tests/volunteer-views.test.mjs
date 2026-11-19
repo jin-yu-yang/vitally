@@ -378,6 +378,12 @@ test("drawer account section offers Deactivate when active", () => {
   assert.doesNotMatch(section, /account-create|account-resend|account-reactivate/);
 });
 
+test("the cancel-invitation dialog says access ends, not the sign-in code", () => {
+  const html = cancelInvitationDialogBody({ volunteer: volunteer(), });
+  assert.match(html, /will be cancelled and it will no longer give them access./);
+  assert.doesNotMatch(html, /sign-in code/);
+});
+
 test("drawer account section offers Reactivate when deactivated", () => {
   const section = accountPart(drawerFor("deactivated"));
   assert.match(section, /data-action="account-reactivate"/);
@@ -390,8 +396,8 @@ test("drawer account section offers nothing for a new volunteer before saving", 
 });
 
 test("the drawer says the last account result, and the confirmation asks before deactivating", () => {
-  const ok = accountPart(drawerFor("invited", { accountNotice: { kind: "ok", text: "Account created and sign-in code sent" } }));
-  assert.match(ok, /role="status"[^>]*>.*Account created and sign-in code sent/);
+  const ok = accountPart(drawerFor("invited", { accountNotice: { kind: "ok", text: "Account created and invitation sent" } }));
+  assert.match(ok, /role="status"[^>]*>.*Account created and invitation sent/);
   const bad = accountPart(drawerFor("none", { accountNotice: { kind: "error", text: "Add an email first" } }));
   assert.match(bad, /role="alert"[^>]*>.*Add an email first/);
   const confirm = deactivateAccountDialogBody({ volunteer: volunteer() });

@@ -772,7 +772,7 @@ async function runEngineGate(t, engineName) {
             await drawer.getByRole("button", { name: "Create account", exact: true }).click();
             const confirm = admin.page.getByRole("dialog", { name: `Send a sign-in invitation to ${email}?` });
             await confirm.getByRole("button", { name: "Send", exact: true }).click();
-            await admin.page.getByText("Account created and sign-in code sent", { exact: true }).waitFor();
+            await admin.page.getByText("Account created and invitation sent", { exact: true }).waitFor();
 
             const code = await latestCode(mailUrl, email, { after, timeoutMs: 30_000 });
             const { rows } = await db.sql("select id from auth.users where lower(email)=$1", [email]);
