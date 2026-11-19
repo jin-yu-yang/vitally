@@ -6,6 +6,7 @@ import { POOL_FILTER_KEYS } from "../src/pool-views.mjs";
 import { saveStatus } from "../src/client-views.mjs";
 import { closeUnsignedDialogBody, closeUnsignedListKey } from "../src/office-views.mjs";
 import { dialog, staffScreen } from "../src/views.mjs";
+import { staffEligibility } from "../src/staff-views.mjs";
 import { CONTACT_FIELDS, findQuestion, isMemberId } from "../src/intake-catalogue.mjs";
 import { newMemberId, renderQuestion, reviewAlerts, valuesFromControls, withholdInvalid } from "../src/intake-form.mjs";
 import { fictionalAnswers, fillBlankAnswers, makeSampleAnswers } from "../src/sample-data.mjs";
@@ -9219,29 +9220,145 @@ test("an uncleared admin's own save that leaves them uncleared keeps the setup h
   controller.stop();
 });
 
-test("saving someone else's row, or one's own while cleared, asks for no clearance", async () => {
+test("saving someone else's row asks for no clearance", async () => {
   const uncleared = selfRosterStore(UNCLEARED_ADMIN);
-  let { controller } = build({ store: uncleared });
+  const { controller } = build({ store: uncleared });
   await controller.start();
   controller.navigate("office-volunteers");
   await controller.loadVolunteers();
   controller.openDialog("volunteer", { volunteerId: "v-1" });
-  let checks = callCount(uncleared, "getClearance");
+  const checks = callCount(uncleared, "getClearance");
   assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(callCount(uncleared, "getClearance"), checks, "another person's row");
   controller.stop();
+});
 
-  const clearedStore = selfRosterStore({ ...UNCLEARED_ADMIN, cleared: true, missing: [], capabilities: ["admin"] });
-  ({ controller } = build({ store: clearedStore }));
+const CLEARED_ADMIN_ONLY = Object.freeze({ ...UNCLEARED_ADMIN, cleared: true, missing: [], capabilities: ["admin"] });
+
+const openOwnRow = async (store) => {
+  const { controller } = build({ store });
   await controller.start();
   controller.navigate("office-volunteers");
   await controller.loadVolunteers();
   controller.openDialog("volunteer", { volunteerId: "person-sam" });
-  checks = callCount(clearedStore, "getClearance");
+  return controller;
+};
+
+test("saving one's own row while cleared asks for the clearance once", async () => {
+  const clearedStore = selfRosterStore({ ...CLEARED_ADMIN_ONLY });
+  const controller = await openOwnRow(clearedStore);
+  const checks = callCount(clearedStore, "getClearance");
   assert.equal(await controller.saveVolunteer(SELF_PAYLOAD), true);
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(callCount(clearedStore, "getClearance"), checks, "one's own row while cleared");
+  assert.equal(callCount(clearedStore, "getClearance"), checks + 1, "one's own row while cleared");
+  controller.stop();
+});
+
+test("saving one's own row while cleared drops a removed role's buttons", async () => {
+  const store = selfRosterStore({ ...CLEARED_ADMIN_ONLY, capabilities: ["admin", "prepare"] });
+  const controller = await openOwnRow(store);
+  assert.ok(controller.getState().people.find((p) => p.id === "person-sam").capabilities.includes("prepare"));
+  store.nextClearance = { ...CLEARED_ADMIN_ONLY, capabilities: ["admin"] };
+  assert.equal(await controller.saveVolunteer(SELF_PAYLOAD), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  const own = controller.getState().people.find((p) => p.id === "person-sam");
+  assert.equal(own.capabilities.includes("prepare"), false);
+  controller.stop();
+});
+
+test("saving one's own row with no roles shows the setup screen and stays on the Roster", async () => {
+  const store = selfRosterStore({ ...CLEARED_ADMIN_ONLY });
+  const controller = await openOwnRow(store);
+  store.nextClearance = { ...UNCLEARED_ADMIN };
+  assert.equal(await controller.saveVolunteer({ ...SELF_PAYLOAD, roles: [] }), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  const state = controller.getState();
+  assert.equal(state.principal.clearance.cleared, false);
+  assert.equal(state.screen, "office-volunteers");
+  controller.stop();
+});
+
+test("a narrowed role is noticed on an INELIGIBLE claim, and the refusal stays", async () => {
+  const store = fakeStore({
+    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "morgan" },
+    people: [
+      { id: "alex", name: "Alex", capabilities: ["prepare"] },
+      { id: "morgan", name: "Morgan", capabilities: ["prepare", "review"] },
+    ],
+    cases: [
+      { id: "case-a", reference: "VT-AAAA-BBBB", stage: "review_ready", revision: 4, answers: {}, preparerId: "alex", reviewerId: null, participants: ["alex"] },
+    ],
+  });
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.selectCase("case-a");
+  const before = clearanceCalls(store);
+  // Held, so the refusal's check is still pending when it is asked for.
+  let release;
+  store.nextClearance = () => new Promise((resolve) => (release = resolve));
+  store.failNext = Object.assign(new Error("Needs review eligibility."), { code: "INELIGIBLE" });
+  await assert.rejects(controller.runAction("CLAIM_REVIEW", {}));
+  assert.equal(clearanceCalls(store) - before, 1, "the refusal started the check");
+  const pending = controller.checkClearance();
+  release({ cleared: true, missing: [], capabilities: ["prepare"], isAdmin: false, siteCoordinatorName: null });
+  await pending;
+  const state = controller.getState();
+  assert.equal(clearanceCalls(store) - before, 1);
+  assert.equal(state.error.code, "INELIGIBLE");
+  const own = state.people.find((p) => p.id === "morgan");
+  assert.deepEqual(own.capabilities, ["prepare"]);
+  assert.equal(staffEligibility(state.savedCase, own).claimReview.allowed, false);
+  controller.stop();
+});
+
+test("assigning someone uncleared re-reads once and changes nothing", async () => {
+  const store = workloadStore();
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.setVolunteerTab("workload");
+  controller.openAssign("case-w2", "preparer");
+  const before = clearanceCalls(store);
+  const ownBefore = controller.getState().people.find((p) => p.id === "person-sam").capabilities;
+  // Held, so the refusal's check is still pending when it is asked for. The
+  // answer is unchanged.
+  let release;
+  const unchanged = store.nextClearance;
+  store.nextClearance = () => new Promise((resolve) => (release = resolve));
+  store.failNext = Object.assign(new Error("INELIGIBLE"), { code: "INELIGIBLE" });
+  await assert.rejects(controller.assignCase("v-1"), (error) => error.code === "INELIGIBLE");
+  assert.equal(clearanceCalls(store) - before, 1, "the refusal started the check");
+  const pending = controller.checkClearance();
+  release(unchanged ?? { cleared: true, missing: [], capabilities: ["admin"], isAdmin: true, siteCoordinatorName: null });
+  await pending;
+  const state = controller.getState();
+  assert.equal(clearanceCalls(store) - before, 1);
+  assert.equal(state.error.code, "INELIGIBLE");
+  assert.deepEqual(state.people.find((p) => p.id === "person-sam").capabilities, ownBefore);
+  controller.stop();
+});
+
+test("a FORBIDDEN in an uncleared window starts no extra check", async () => {
+  const store = selfRosterStore(UNCLEARED_ADMIN);
+  const controller = await openOwnRow(store);
+  const before = callCount(store, "getClearance");
+  store.failSave = Object.assign(new Error("no"), { code: "FORBIDDEN" });
+  await controller.saveVolunteer(SELF_PAYLOAD).catch(() => {});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(callCount(store, "getClearance"), before);
+  controller.stop();
+});
+
+test("a FORBIDDEN answer to the clearance read itself in a cleared window starts no second check", async () => {
+  const store = staffStore({ clearance: { ...RILEY_CLEARED, capabilities: ["prepare"] } });
+  const { controller } = build({ store });
+  await controller.start();
+  const before = clearanceCalls(store);
+  store.nextClearance = Object.assign(new Error("no"), { code: "FORBIDDEN" });
+  await controller.checkClearance();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(clearanceCalls(store) - before, 1);
   controller.stop();
 });
 
@@ -9284,7 +9401,7 @@ test("a check already out when the own-row save lands is followed by one more", 
   controller.stop();
 });
 
-test("an early check that already finds them cleared needs no second one", async () => {
+test("an early check that already finds them cleared is still followed by one more", async () => {
   const store = selfRosterStore(UNCLEARED_ADMIN);
   const { controller } = build({ store });
   await controller.start();
@@ -9299,7 +9416,7 @@ test("an early check that already finds them cleared needs no second one", async
   release({ ...UNCLEARED_ADMIN, cleared: true, missing: [], capabilities: ["admin"] });
   await early;
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(callCount(store, "getClearance"), checks, "no second check");
+  assert.equal(callCount(store, "getClearance"), checks + 1, "one more, cleared or not (#190)");
   assert.equal(controller.getState().principal.clearance.cleared, true);
   controller.stop();
 });

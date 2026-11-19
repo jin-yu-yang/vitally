@@ -662,6 +662,11 @@ export function createController({
     // A newer error replaces a shaded save's "Saved".
     state.shadedStatus = null;
     if (error?.code === "OFFLINE") state.connection = "offline";
+    // A refusal for a role or clearance reason may mean the roster changed
+    // under this cleared window (#190): re-read it. The check is shared, so a
+    // refusal of the read itself starts no second one.
+    if (staffWindow() && !awaitingClearance(state) && (error?.code === "FORBIDDEN" || error?.code === "INELIGIBLE"))
+      void checkClearance();
   }
 
   // One error at a time (design D2): a newer error replaces a failed save's.
@@ -3803,20 +3808,20 @@ export function createController({
       noteFailure(error);
     }
     show();
-    // An uncleared admin who just saved their own row may have cleared
-    // themselves (#191): ask again, so the setup screen gives way without
-    // Check again. Not awaited, so the drawer closes on the save alone.
-    if (volunteerId && volunteerId === state.principal?.personId && awaitingClearance(state))
-      void recheckAfterOwnSave();
+    // Someone who just saved their own row may have changed their own roles
+    // (#190, #191): ask again, so the setup screen gives way (or comes) and
+    // the buttons follow, without Check again. Not awaited, so the drawer
+    // closes on the save alone.
+    if (volunteerId && volunteerId === state.principal?.personId) void recheckAfterOwnSave();
     return true;
   }
 
   // A check already out (a focus, say) was asked before the save landed, so
-  // its answer may be the old one: wait for it, then ask once more if the
-  // window is still waiting. checkClearance never rejects.
+  // its answer may be the old one: wait for it, then ask once more.
+  // checkClearance never rejects.
   async function recheckAfterOwnSave() {
     if (clearanceCheck) await clearanceCheck;
-    if (awaitingClearance(state)) await checkClearance();
+    await checkClearance();
   }
 
   // The drawer's Account section (change add-account-invitations): Create
