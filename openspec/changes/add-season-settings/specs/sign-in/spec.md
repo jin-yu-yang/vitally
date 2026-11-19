@@ -1,11 +1,11 @@
 ## ADDED Requirements
 
 ### Requirement: Follow-up access always comes with admin
-A staff member whose capabilities include `followup` SHALL also have `admin`, because office follow-ups are worked on the office screens, which are admin-only (capability `office-follow-up`). The Admin role gives both (capability `volunteer-clearance`). The database SHALL refuse to store any person whose capabilities include `followup` but not `admin`, whoever writes the row.
+A staff member whose capabilities include `followup` SHALL also have `admin`, because office follow-ups are worked on the office screens, which are admin-only (capability `office-follow-up`). The Admin role gives both (capability `volunteer-clearance`). The database SHALL never store a person whose capabilities include `followup` but not `admin`, whoever writes the row: a written value is replaced by the mirror of the person's roles (capability `volunteer-clearance`), and a check constraint still refuses any row that would hold `followup` without `admin`.
 
 #### Scenario: No follow-up-only person can be stored
 - **WHEN** a person's capabilities are written as `followup` and `review` directly in the database
-- **THEN** the write is refused, and the person keeps their earlier capabilities
+- **THEN** the stored capabilities stay the mirror of the person's roles, never `followup` without `admin`, and the check constraint refusing `followup` without `admin` is still in place
 
 #### Scenario: The Admin role gives both
 - **WHEN** a signed-in volunteer is given the Admin role
