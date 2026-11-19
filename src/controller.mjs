@@ -3816,8 +3816,8 @@ export function createController({
     reactivate: { send: (request) => store.reactivateAccount(request) },
     cancel: { send: (request) => store.cancelInvitation(request), asked: "cancel-invitation" },
   });
-  const EMAIL_NOT_SENT = "The email wasn't sent. Use Resend in a minute.";
-  const CREATED_NOT_SENT = "Account created; the email wasn't sent. Use Resend in a minute.";
+  const EMAIL_NOT_SENT = "The invitation email wasn't sent. Use Resend later.";
+  const CREATED_NOT_SENT = "Account created; the invitation email wasn't sent. Use Resend later.";
   // A replayed answer (the same action id again) sent nothing this time, but
   // the first attempt did (decision 6).
   const ALREADY_SENT = "This invitation was already sent. If it didn't arrive, use Resend.";
@@ -3898,18 +3898,18 @@ export function createController({
           ? result?.replay === true
             ? ALREADY_SENT
             : sent
-              ? "Account created and sign-in code sent"
+              ? "Account created and invitation sent"
               : CREATED_NOT_SENT
           : kind === "cancel"
             ? INVITATION_CANCELLED
             : kind === "resend"
               ? sent
-                ? "Sign-in code sent"
+                ? "Invitation sent"
                 : EMAIL_NOT_SENT
               : kind === "deactivate"
                 ? "Account deactivated"
                 : result?.status === "invited"
-                  ? "Account reactivated. Use Resend to send a sign-in code."
+                  ? "Account reactivated. Use Resend to send the invitation."
                   : "Account reactivated",
     };
     try {
@@ -3998,10 +3998,10 @@ export function createController({
           ? result?.replay === true
             ? ALREADY_SENT
             : sent
-              ? "Account created and sign-in code sent"
+              ? "Account created and invitation sent"
               : CREATED_NOT_SENT
           : sent
-            ? "Sign-in code sent"
+            ? "Invitation sent"
             : EMAIL_NOT_SENT,
     };
     if (kind === "invite") state.inviteEmail = "";

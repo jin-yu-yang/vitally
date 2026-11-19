@@ -196,7 +196,7 @@ export function cancelInvitationDialogBody({ volunteer = null, email = "" } = {}
   const address = volunteer?.email ?? email;
   const who = volunteer ? `${esc(volunteer.name)} (${esc(address)})` : esc(address);
   return confirmBody({
-    lead: `The invitation for ${who} will be cancelled and its sign-in code will no longer work. ${
+    lead: `The invitation for ${who} will be cancelled and it will no longer give them access. ${
       volunteer ? "The email can be edited again, and you" : "You"
     } can invite them again later.`,
     confirm: button("Cancel invitation", "confirm-cancel-invitation", "primary full"),

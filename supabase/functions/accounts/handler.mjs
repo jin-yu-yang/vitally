@@ -1,7 +1,10 @@
 // The accounts Edge Function's request handler (OpenSpec change
-// add-account-invitations, design D4). Plain ES module: it imports nothing and
-// reads no Deno or process globals, so Node's test runner can import it and
-// index.ts supplies the clients.
+// add-account-invitations, design D4; send-invitation-emails, D1). It sends the
+// invitation email itself through deps.sendInvitation. Plain ES module: it
+// imports only its sibling invitation-email.mjs and reads no Deno or process
+// globals, so Node's test runner can import it and index.ts supplies the clients.
+
+import { invitationEmail, INVITATION_DAYS } from "./invitation-email.mjs";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -133,14 +136,19 @@ export async function handleAccountRequest(request, deps) {
       accountRevision = restarted.data.accountRevision;
     }
 
-    // The record stands even if the email fails (rate limit, cooldown): the admin can Resend.
+    // The record stands even if the email isn't sent (provider down, timeout): the admin can Resend.
+    // The expiry is the database's: seven times 24 hours from now.
     let emailSent = false;
     try {
-      const sent = await deps.anonClient.auth.signInWithOtp({
-        email: checked.email,
-        options: { shouldCreateUser: false },
+      const kind = target.volunteerId ? "volunteer" : "client";
+      const expiresAt = new Date((deps.now ?? Date.now)() + INVITATION_DAYS * 86400000);
+      const message = invitationEmail({ kind, siteUrl: deps.siteUrl, expiresAt });
+      const result = await deps.sendInvitation({
+        to: checked.email,
+        ...message,
+        idempotencyKey: op === "resend" ? undefined : actionId,
       });
-      emailSent = !sent.error;
+      emailSent = result?.sent === true;
     } catch {
       emailSent = false;
     }

@@ -10,10 +10,13 @@ import {
   submitVerificationCode,
   APP_COOLDOWN_SECONDS,
 } from "./support/browser-fixture.mjs";
-import { latestCode } from "./support/mail-catcher.mjs";
+import { assertInvitation, latestCode, latestInvitation } from "./support/mail-catcher.mjs";
 import { TEST_SITE_NUMBER } from "./support/database-fixture.mjs";
 import { redactAddresses, WORK_BOARD_HEADING } from "./support/story-pages.mjs";
 import { NEUTRAL_SEND_MESSAGE } from "../src/auth.mjs";
+
+// The function's VITALLY_SITE_URL; matches supabase/test-stack.config.example.toml's [edge_runtime.secrets].
+const SITE_URL = "http://127.0.0.1:4173";
 
 // Task 5A: the early two-engine Auth compatibility gate.
 //
@@ -632,10 +635,11 @@ async function runEngineGate(t, engineName) {
       });
 
       // Client invitations (change add-account-invitations): the admin invites
-      // an address on the office screen; the function emails the real code; the
-      // client signs in with it, and the admin's list turns Active.
+      // an address on the office screen; the function emails an invitation with
+      // no code; the client asks for a code as the sign-in screen does, signs in
+      // with it, and the admin's list turns Active.
       await t.test(
-        "an admin invites a client who signs in with the emailed code",
+        "an admin invites a client who signs in with a requested code",
         async () => {
           const mailUrl = process.env.VITALLY_TEST_MAIL_URL;
           assert.ok(
@@ -663,17 +667,29 @@ async function runEngineGate(t, engineName) {
             const row = panel.locator("tbody tr", { hasText: email });
             await row.getByText("Invited", { exact: true }).waitFor();
 
-            const code = await latestCode(mailUrl, email, { after, timeoutMs: 30_000 });
+            const invitation = await latestInvitation(mailUrl, email, { after, timeoutMs: 30_000 });
             const { rows } = await fixture.database.sql(
               "select id from auth.users where lower(email)=$1",
               [email],
             );
             assert.equal(rows.length, 1, "the invitation created no single Auth user");
             const userId = rows[0].id;
+            const expiry = await fixture.database.sql(
+              "select expires_at from public.accounts where user_id=$1 and workspace_id=$2",
+              [userId, fixture.database.workspaceId],
+            );
+            assertInvitation(invitation, { email, siteUrl: SITE_URL, expiresAt: expiry.rows[0].expires_at });
+            // The invitation has no code: ask for one, as the sign-in screen does.
+            const codeAfter = new Date(Date.now() - 2_000);
+            const requested = await fixture
+              .anonClient()
+              .auth.signInWithOtp({ email, options: { shouldCreateUser: false } });
+            assert.equal(requested.error, null, `signInWithOtp: ${requested.error?.message}`);
+            const code = await latestCode(mailUrl, email, { after: codeAfter, timeoutMs: 30_000 });
             let bodyError = null;
             try {
               // The real form with /auth/v1/otp answered by automation, so no
-              // second email goes out and the invitation's code stays valid.
+              // second email goes out and the requested code stays valid.
               await loginTestUser({
                 page: client.page,
                 actor: { key: "invited_client", email, userId },
@@ -718,7 +734,7 @@ async function runEngineGate(t, engineName) {
 
       // Volunteer accounts (change add-account-invitations, design D10, D12,
       // D13): Create account waits for a save and asks before sending; the
-      // volunteer signs in with the emailed code to "Confirm your site", a
+      // volunteer signs in with a requested code to "Confirm your site", a
       // wrong SIDN is said, the right one moves them on, and the Roster says
       // who signed in. A second invitation is cancelled from the drawer, which
       // makes its email editable again.
@@ -772,12 +788,20 @@ async function runEngineGate(t, engineName) {
             await drawer.getByRole("button", { name: "Create account", exact: true }).click();
             const confirm = admin.page.getByRole("dialog", { name: `Send a sign-in invitation to ${email}?` });
             await confirm.getByRole("button", { name: "Send", exact: true }).click();
-            await admin.page.getByText("Account created and sign-in code sent", { exact: true }).waitFor();
+            await admin.page.getByText("Account created and invitation sent", { exact: true }).waitFor();
 
-            const code = await latestCode(mailUrl, email, { after, timeoutMs: 30_000 });
+            const invitation = await latestInvitation(mailUrl, email, { after, timeoutMs: 30_000 });
             const { rows } = await db.sql("select id from auth.users where lower(email)=$1", [email]);
             assert.equal(rows.length, 1, "one Auth user for the invitation");
             created.push(rows[0].id);
+            const expiry = await db.sql("select expires_at from public.accounts where user_id=$1 and workspace_id=$2", [rows[0].id, db.workspaceId]);
+            assertInvitation(invitation, { email, siteUrl: SITE_URL, expiresAt: expiry.rows[0].expires_at });
+            const codeAfter = new Date(Date.now() - 2_000);
+            const requested = await fixture
+              .anonClient()
+              .auth.signInWithOtp({ email, options: { shouldCreateUser: false } });
+            assert.equal(requested.error, null, `signInWithOtp: ${requested.error?.message}`);
+            const code = await latestCode(mailUrl, email, { after: codeAfter, timeoutMs: 30_000 });
             await loginTestUser({
               page: volunteer.page,
               actor: { key: "invited_volunteer", email, userId: rows[0].id },

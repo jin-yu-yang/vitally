@@ -2,21 +2,25 @@
 // handler.mjs; this file only builds the Supabase clients and serves.
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { handleAccountRequest } from "./handler.mjs";
+import { senderFromEnv } from "./sender.mjs";
 
 const url = Deno.env.get("SUPABASE_URL");
 const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY");
 const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const auth = { persistSession: false };
+// Exactly one of Resend and the mail catcher, plus the site URL (design D6).
+const mail = senderFromEnv((name) => Deno.env.get(name));
 
 const missing = [
   ["SUPABASE_URL", url],
   ["SUPABASE_ANON_KEY or SUPABASE_PUBLISHABLE_KEY", anonKey],
   ["SUPABASE_SERVICE_ROLE_KEY", serviceKey],
 ].filter(([, value]) => !value).map(([name]) => name);
+if (!mail.ok) missing.push(...mail.missing);
 
-if (missing.length) {
+if (missing.length || !mail.ok) {
   // Name the variables, never their values.
-  console.error(`accounts function: missing environment variable ${missing.join(", ")}`);
+  console.error(`accounts function: environment not usable: ${missing.join(", ")}`);
   Deno.serve(() =>
     new Response(JSON.stringify({ code: "SERVER_ERROR" }), {
       status: 500,
@@ -32,7 +36,8 @@ if (missing.length) {
     userClient: (jwt: string) =>
       createClient(url!, anonKey!, { auth, global: { headers: { Authorization: `Bearer ${jwt}` } } }),
     adminClient: createClient(url!, serviceKey!, { auth }),
-    anonClient: createClient(url!, anonKey!, { auth }),
+    sendInvitation: mail.sendInvitation,
+    siteUrl: mail.siteUrl,
   };
   Deno.serve((request: Request) => handleAccountRequest(request, deps));
 }
