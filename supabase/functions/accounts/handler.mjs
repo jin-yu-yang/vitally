@@ -137,7 +137,8 @@ export async function handleAccountRequest(request, deps) {
     }
 
     // The record stands even if the email isn't sent (provider down, timeout): the admin can Resend.
-    // The expiry is the database's: seven times 24 hours from now.
+    // The expiry shown is the function's clock plus seven times 24 hours, the database's rule
+    // for expires_at; the two clocks differ by moments (the database test allows a minute).
     let emailSent = false;
     try {
       const kind = target.volunteerId ? "volunteer" : "client";

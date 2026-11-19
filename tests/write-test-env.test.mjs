@@ -182,8 +182,11 @@ test("both files are written with mode 600, masks come first in Actions only, an
     for (const line of actionsLog.slice(masks.length))
       for (const value of SECRET_VALUES) assert.ok(!line.includes(value), "a secret was logged");
 
-    for (const file of [envPath, manifestPath])
-      assert.equal((await stat(file)).mode & 0o777, 0o600);
+    // Windows has no Unix permission bits (stat reports 0o666 whatever was
+    // asked), so the mode is checked everywhere else; CI runs on Linux.
+    if (process.platform !== "win32")
+      for (const file of [envPath, manifestPath])
+        assert.equal((await stat(file)).mode & 0o777, 0o600);
     const written = parseEnv(await readFile(envPath, "utf8"));
     assert.equal(written.VITALLY_TARGET_MANIFEST, manifestPath);
     assert.equal(JSON.parse(await readFile(manifestPath, "utf8")).test.instanceId, "vitally-ci");
