@@ -8074,10 +8074,11 @@ test("a refreshed clearance with narrower capabilities narrows the person's own 
   controller.stop();
 });
 
-test("focus, visibility and a refusal while a check is out send one request", async () => {
+test("focus, visibility and a refusal while a check is out send one request, then one follow-up", async () => {
   const store = staffStore({ cases: [{ ...SETUP_CASE }] });
   const { controller, events, documents } = build({ store });
   await controller.start();
+  await controller.selectCase("case-a");
   const before = clearanceCalls(store);
   let release;
   const gate = new Promise((resolve) => {
@@ -8089,10 +8090,12 @@ test("focus, visibility and a refusal while a check is out send one request", as
   store.failNext = Object.assign(new Error("Not yours."), { code: "FORBIDDEN" });
   const refused = controller.runAction("CLAIM_PREPARATION", { caseId: "case-a" }).catch(() => {});
   await tick();
+  assert.equal(clearanceCalls(store) - before, 1, "no second request until the first is answered");
   release({ ...RILEY_CLEARED });
   await Promise.all([focus, visible, refused]);
   await tick();
-  assert.equal(clearanceCalls(store) - before, 1);
+  await tick();
+  assert.equal(clearanceCalls(store) - before, 2, "the refusal asks once more after the first answered");
   controller.stop();
 });
 
@@ -9530,7 +9533,9 @@ test("a FORBIDDEN answer to the clearance read itself in a cleared window starts
   store.nextClearance = Object.assign(new Error("no"), { code: "FORBIDDEN" });
   await controller.checkClearance();
   await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(clearanceCalls(store) - before, 1);
+  assert.equal(controller.getState().error.code, "FORBIDDEN");
   controller.stop();
 });
 
@@ -9870,6 +9875,132 @@ test("signing out while a wake check is out applies nothing to the next window s
   assert.equal(controller.getState().principal, null);
   assert.equal(store.calls.filter((c) => c === "listCases").length, lists, "no list read after the release");
   assert.equal(controller.getState().error, null);
+  controller.stop();
+});
+
+const callsOf = (store, name) => store.calls.filter((entry) => entry === name).length;
+const WAKE_LISTS = ["listCases", "listLabels", "listAssistance", "getUpdates", "getCase:case-a"];
+
+test("focus and visibilitychange together run one wake refresh", async () => {
+  const store = staffStore({
+    cases: [{ ...SETUP_CASE }],
+    assistance: [{ id: "item-1", title: "Help with the forms", status: "open", revision: 1, assigneeId: null }],
+  });
+  const { controller, events, documents } = build({ store });
+  await controller.start();
+  await controller.selectCase("case-a");
+  // What one plain focus reads, so nothing is hard-coded.
+  let mark = Object.fromEntries(WAKE_LISTS.map((name) => [name, callsOf(store, name)]));
+  const clearance = clearanceCalls(store);
+  await events.emit("focus");
+  const one = Object.fromEntries(WAKE_LISTS.map((name) => [name, callsOf(store, name) - mark[name]]));
+  assert.equal(clearanceCalls(store) - clearance, 1);
+  assert.ok(one.listCases >= 1 && one.listAssistance >= 1 && one["getCase:case-a"] >= 1, "the plain focus reads the lists");
+  mark = Object.fromEntries(WAKE_LISTS.map((name) => [name, callsOf(store, name)]));
+  const before = clearanceCalls(store);
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  store.nextClearance = () => gate;
+  const focus = events.emit("focus");
+  const visible = documents.emit("visibilitychange");
+  await tick();
+  release({ ...RILEY_CLEARED });
+  await Promise.all([focus, visible]);
+  await tick();
+  assert.equal(clearanceCalls(store) - before, 1);
+  for (const name of WAKE_LISTS) assert.equal(callsOf(store, name) - mark[name], one[name], name);
+  controller.stop();
+});
+
+test("a wake after the first has finished runs again", async () => {
+  const store = staffStore();
+  const { controller, events } = build({ store });
+  await controller.start();
+  const before = clearanceCalls(store);
+  await events.emit("focus");
+  await events.emit("focus");
+  assert.equal(clearanceCalls(store) - before, 2);
+  controller.stop();
+});
+
+test("signing out forgets a pending wake refresh, so the next user's wake runs", async () => {
+  const store = staffStore();
+  const auth = { ...idleAuth(), verifyCode: async () => {} };
+  const { controller, events } = build({ store, auth });
+  await controller.start();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  store.nextClearance = () => gate;
+  const first = events.emit("focus");
+  await tick();
+  await controller.signOut();
+  store.getPrincipal = async () => ({
+    ...STAFF_PRINCIPAL,
+    userId: "user-quinn",
+    personId: "person-quinn",
+    personName: "Quinn Harper",
+    clearance: { ...RILEY_CLEARED },
+  });
+  await controller.verifyCode("123456");
+  assert.equal(controller.getState().principal.userId, "user-quinn");
+  store.nextClearance = { ...RILEY_CLEARED };
+  const before = clearanceCalls(store);
+  await events.emit("focus");
+  assert.equal(clearanceCalls(store) - before, 1, "the new user's wake ran its own refresh");
+  release({ ...UNCLEARED });
+  await first;
+  assert.equal(controller.getState().principal.userId, "user-quinn");
+  assert.equal(controller.getState().principal.clearance.cleared, true);
+  controller.stop();
+});
+
+test("a refusal while a check is out asks again after it", async () => {
+  const store = reviewStore();
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.selectCase("case-a");
+  const before = clearanceCalls(store);
+  let release;
+  store.nextClearance = () => new Promise((resolve) => (release = resolve));
+  const early = controller.checkClearance();
+  await tick();
+  store.failNext = Object.assign(new Error("Needs review eligibility."), { code: "INELIGIBLE" });
+  await assert.rejects(controller.runAction("CLAIM_REVIEW", {}));
+  assert.equal(clearanceCalls(store) - before, 1, "no second request while the first is out");
+  store.nextClearance = { cleared: true, missing: [], capabilities: ["prepare"], isAdmin: false, siteCoordinatorName: null };
+  release({ cleared: true, missing: [], capabilities: ["prepare", "review"], isAdmin: false, siteCoordinatorName: null });
+  await early;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(clearanceCalls(store) - before, 2, "one more after the first answered");
+  const own = controller.getState().people.find((p) => p.id === "morgan");
+  assert.deepEqual(own.capabilities, ["prepare"]);
+  controller.stop();
+});
+
+test("two refusals while a check is out make one follow-up check", async () => {
+  const store = reviewStore();
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.selectCase("case-a");
+  const before = clearanceCalls(store);
+  let release;
+  store.nextClearance = () => new Promise((resolve) => (release = resolve));
+  const early = controller.checkClearance();
+  await tick();
+  for (let i = 0; i < 2; i += 1) {
+    store.failNext = Object.assign(new Error("Needs review eligibility."), { code: "INELIGIBLE" });
+    await assert.rejects(controller.runAction("CLAIM_REVIEW", {}));
+  }
+  store.nextClearance = { cleared: true, missing: [], capabilities: ["prepare"], isAdmin: false, siteCoordinatorName: null };
+  release({ cleared: true, missing: [], capabilities: ["prepare", "review"], isAdmin: false, siteCoordinatorName: null });
+  await early;
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(clearanceCalls(store) - before, 2);
   controller.stop();
 });
 

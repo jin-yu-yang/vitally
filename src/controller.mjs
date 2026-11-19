@@ -642,7 +642,9 @@ export function createController({
     localRetry = null;
   }
 
-  function noteFailure(error, { message } = {}) {
+  // `clearanceRead`: the failure is the clearance read's own, which never
+  // starts a re-check (no loop).
+  function noteFailure(error, { message, clearanceRead = false } = {}) {
     dropLocalRetry();
     state.errorCount += 1;
     // Not cleared (any action, change add-volunteer-clearance): the setup
@@ -663,10 +665,15 @@ export function createController({
     state.shadedStatus = null;
     if (error?.code === "OFFLINE") state.connection = "offline";
     // A refusal for a role or clearance reason may mean the roster changed
-    // under this cleared window (#190): re-read it. The check is shared, so a
-    // refusal of the read itself starts no second one.
-    if (staffWindow() && !awaitingClearance(state) && (error?.code === "FORBIDDEN" || error?.code === "INELIGIBLE"))
-      void checkClearance();
+    // under this cleared window (#190): re-read it. A refusal of the read
+    // itself starts none.
+    if (
+      !clearanceRead &&
+      staffWindow() &&
+      !awaitingClearance(state) &&
+      (error?.code === "FORBIDDEN" || error?.code === "INELIGIBLE")
+    )
+      void recheckAfterRefusal();
   }
 
   // One error at a time (design D2): a newer error replaces a failed save's.
@@ -686,9 +693,9 @@ export function createController({
     return controllerError(code, message);
   }
 
-  function noteLocalFailure(error, retry = null) {
+  function noteLocalFailure(error, retry = null, { clearanceRead = false } = {}) {
     replaceFailedSave();
-    noteFailure(error ?? {}, { message: error?.message ?? "Something went wrong." });
+    noteFailure(error ?? {}, { message: error?.message ?? "Something went wrong.", clearanceRead });
     setLocalRetry(retry);
     show();
   }
@@ -881,7 +888,22 @@ export function createController({
   // The public re-fetch: the list plus whatever case is open. Used by the
   // reconnect, the window focus and the online event alike, because a
   // subscription is never the only way back.
-  async function refresh({ wake = false } = {}) {
+  // A wake refresh that starts while another is in flight joins it: focus and
+  // visibilitychange come together when a tab returns. The refresh after an
+  // action neither joins nor is joined. Signing out forgets it (forgetUser).
+  let wakeRefresh = null;
+  function refresh({ wake = false } = {}) {
+    if (!wake) return runRefresh({ wake });
+    if (!wakeRefresh) {
+      const run = runRefresh({ wake }).finally(() => {
+        if (wakeRefresh === run) wakeRefresh = null;
+      });
+      wakeRefresh = run;
+    }
+    return wakeRefresh;
+  }
+
+  async function runRefresh({ wake = false } = {}) {
     // Without a principal there is nothing to re-read, but there may still be
     // an identity to establish: a visitor whose session could not be read, or
     // who is signed in and could not be identified, gets another attempt here.
@@ -1861,7 +1883,7 @@ export function createController({
       if (!answer || typeof answer !== "object" || Array.isArray(answer) || !Array.isArray(answer.capabilities))
         throw controllerError("SERVER_ERROR", "Something went wrong.");
     } catch (error) {
-      if (same()) noteLocalFailure(error, checkClearance);
+      if (same()) noteLocalFailure(error, checkClearance, { clearanceRead: true });
       // The feed re-reads with every check, answered or not.
       await readFeed();
       if (same()) show();
@@ -2042,6 +2064,8 @@ export function createController({
     dropLocalRetry();
     // The next user's first Check again asks afresh.
     clearanceCheck = null;
+    wakeRefresh = null;
+    afterRefusal = null;
     if (state.principal) windowState.clear(state.principal.userId);
     unsubscribe();
     clearSelection();
@@ -3849,6 +3873,24 @@ export function createController({
   async function recheckAfterOwnSave() {
     if (clearanceCheck) await clearanceCheck;
     await checkClearance();
+  }
+
+  // A refused action in a cleared window: a check already out was asked
+  // before the refusal, so its answer may be the old one. Wait for it, then
+  // ask once more, still only for a cleared window of the same user. Refusals
+  // while one is waiting share it. Never rejects; never awaited.
+  let afterRefusal = null;
+  function recheckAfterRefusal() {
+    if (!clearanceCheck) return checkClearance();
+    if (afterRefusal) return afterRefusal;
+    const asked = state.principal.userId;
+    const pending = (async () => {
+      await clearanceCheck;
+      if (afterRefusal === pending) afterRefusal = null;
+      if (staffWindow() && !awaitingClearance(state) && state.principal.userId === asked) await checkClearance();
+    })();
+    afterRefusal = pending;
+    return pending;
   }
 
   // The drawer's Account section (change add-account-invitations): Create
