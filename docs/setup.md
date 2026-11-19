@@ -918,6 +918,14 @@ privileged test cleanup against the classroom project.**
    repository, for example as `~/.vitally/supabase-ca.crt`, and set `NODE_EXTRA_CA_CERTS` to
    that path for every classroom command, including the roster command in step 4. Never turn
    verification off instead. If Node prints `Ignoring extra certs from …`, the path is wrong.
+   In Windows PowerShell, set the variable first, then run the same command without the prefix:
+
+   ```powershell
+   $env:NODE_EXTRA_CA_CERTS = "$HOME\.vitally\supabase-ca.crt"
+   node --env-file=.env.admin tools/admin/migrate.mjs --target classroom
+   ```
+
+   The variable lasts for that PowerShell window only.
 3. **Configure Auth in the Supabase dashboard:**
    - Custom SMTP (Authentication → Emails → SMTP Settings). Gmail: host `smtp.gmail.com`, port
      465, the full address as username and sender, and a Google *app password* (which requires
