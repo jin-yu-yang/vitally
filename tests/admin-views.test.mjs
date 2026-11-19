@@ -1696,6 +1696,10 @@ test("Add a case stays for a staff person who lost admin, with its writes droppe
   assert.match(html, /add-case-v2/);
   assert.match(html, /id="add-case-cancel"/);
   assert.doesNotMatch(html, /save-office-draft|send-office-draft/);
+  // They no longer have Follow-ups: the way back is the work board, and nothing is left to confirm.
+  assert.match(html, /Back to the work board/);
+  assert.doesNotMatch(html, /Back to Follow-ups|OFFICE · ADD A CASE/);
+  assert.doesNotMatch(html, /field-confirmed|I have checked these answers/);
   assert.match(html, /Your roles changed, so you can&#39;t send this any more\./);
 });
 

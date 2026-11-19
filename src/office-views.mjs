@@ -651,8 +651,12 @@ export function resolveHelpDrawerBody({ item, person, ui = {} } = {}) {
   if (!item || item.status !== "assigned")
     return `${drawerError(ui)}<p>This request is no longer open.</p>${button("Close", "close-dialog", "secondary")}`;
   const busy = ui?.busy ? "disabled" : "";
-  const rights = adminEligibility({ item }, person);
-  const resolve = rights.resolveAssistance.allowed || ui?.locked
+  // A lost capability keeps the form; any other refusal still says its own reason.
+  const rights = adminEligibility(
+    { item },
+    ui?.locked ? { ...person, capabilities: [...(person?.capabilities ?? []), "assist"] } : person,
+  );
+  const resolve = rights.resolveAssistance.allowed
     ? `<form class="staff-form">${textarea(
         "What you helped with",
         "note",
@@ -901,9 +905,9 @@ export function renderAddCaseV2(ui = {}) {
   const side = `<aside class="add-case-side">${info}${materials}</aside>`;
   const bar = `<div class="add-case-bar">${button("Cancel", "open-board", "text", 'id="add-case-cancel"')}<p id="add-case-count" class="add-case-count" tabindex="-1">${esc(
     addCaseCountText(page.parts),
-  )}</p>${view.locked ? "" : button("Save draft", "save-office-draft", "secondary", saving ? "disabled" : "")}<div class="add-case-confirm"><label class="checkbox-row" for="field-confirmed"><input type="checkbox" id="field-confirmed" name="confirmed" ${
+  )}</p>${view.locked ? "" : button("Save draft", "save-office-draft", "secondary", saving ? "disabled" : "")}${view.locked ? "" : `<div class="add-case-confirm"><label class="checkbox-row" for="field-confirmed"><input type="checkbox" id="field-confirmed" name="confirmed" ${
     confirmed ? "checked" : ""
-  }><span>I have checked these answers with the client</span></label><p class="field-note">This confirms the answers on screen. It is not a signature on a tax or consent form.</p></div>${
+  }><span>I have checked these answers with the client</span></label><p class="field-note">This confirms the answers on screen. It is not a signature on a tax or consent form.</p></div>`}${
     view.locked
       ? rolesChangedLine()
       : button(

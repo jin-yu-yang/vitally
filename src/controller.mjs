@@ -1858,7 +1858,7 @@ export function createController({
     let answer;
     try {
       answer = await store.getClearance();
-      if (!answer || typeof answer !== "object" || Array.isArray(answer))
+      if (!answer || typeof answer !== "object" || Array.isArray(answer) || !Array.isArray(answer.capabilities))
         throw controllerError("SERVER_ERROR", "Something went wrong.");
     } catch (error) {
       if (same()) noteLocalFailure(error, checkClearance);

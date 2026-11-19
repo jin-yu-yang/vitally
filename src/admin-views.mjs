@@ -552,9 +552,14 @@ function receiptPanel(record, person, ui) {
 // different things; the Contacts tab draws the same form, unlinked.
 export function followupForms(record, task, person, ui = {}) {
   const busy = ui.busy ? "disabled" : "";
-  const rights = adminEligibility({ caseRecord: record, followup: task }, person);
-  // A form whose capability is gone keeps its text (change recheck-clearance-while-cleared).
-  if (!rights.recordContact.allowed && !ui.locked) return explain(rights.recordContact);
+  // A form whose capability is gone keeps its text (change recheck-clearance-while-cleared),
+  // but any other refusal (resolved, cancelled) still says its own reason: judge the
+  // task as if the person still held the capability.
+  const judged = ui.locked
+    ? { ...person, capabilities: [...(person?.capabilities ?? []), "followup"] }
+    : person;
+  const rights = adminEligibility({ caseRecord: record, followup: task }, judged);
+  if (!rights.recordContact.allowed) return explain(rights.recordContact);
   const resolveScope = `resolve-${task?.id ?? "task"}`;
   const hidden = `<input type="hidden" name="followupId" value="${esc(task?.id ?? "")}">`;
   return `${logContactForm(record, person, ui, {

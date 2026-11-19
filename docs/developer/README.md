@@ -88,6 +88,8 @@ src/
   staff-views.mjs          Volunteer work board and case page; staff eligibility rules.
   admin-views.mjs          The office's case page; admin eligibility rules.
   office-views.mjs         The office's Follow-ups queue and Add a case.
+  role-gates.mjs           The dialog-to-capability table, and the "Your roles changed" line a form shows
+                           when its capability is gone while its text stays.
   pool-views.mjs           The office's case pool (every case, by phase).
   volunteer-views.mjs      The admin-only Volunteers Roster page and its Add / Edit drawer.
   volunteer-roster.mjs     The Roster's pure logic: roles, certificates, search, form reading, validation.

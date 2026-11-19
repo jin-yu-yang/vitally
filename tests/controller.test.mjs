@@ -9429,6 +9429,61 @@ test("a narrowed role is noticed on an INELIGIBLE claim, and the refusal stays",
   controller.stop();
 });
 
+const reviewStore = () =>
+  fakeStore({
+    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "morgan" },
+    people: [
+      { id: "alex", name: "Alex", capabilities: ["prepare"] },
+      { id: "morgan", name: "Morgan", capabilities: ["prepare", "review"] },
+    ],
+    cases: [
+      { id: "case-a", reference: "VT-AAAA-BBBB", stage: "review_ready", revision: 4, answers: {}, preparerId: "alex", reviewerId: null, participants: ["alex"] },
+    ],
+  });
+
+test("a FORBIDDEN action refusal alone starts a clearance check in a cleared window", async () => {
+  const store = reviewStore();
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.selectCase("case-a");
+  const before = clearanceCalls(store);
+  store.failNext = Object.assign(new Error("Not allowed."), { code: "FORBIDDEN" });
+  await assert.rejects(controller.runAction("CLAIM_REVIEW", {}));
+  assert.equal(clearanceCalls(store) - before, 1, "the refusal started the check");
+  assert.equal(controller.getState().error.code, "FORBIDDEN");
+  controller.stop();
+});
+
+test("an isAdmin-only flip is a change: it redraws and stores the new isAdmin", async () => {
+  const store = reviewStore();
+  const { controller, renders } = build({ store });
+  await controller.start();
+  store.nextClearance = { cleared: true, missing: [], capabilities: ["prepare", "review"], isAdmin: true, siteCoordinatorName: null };
+  await controller.checkClearance();
+  assert.equal(controller.getState().principal.clearance.isAdmin, true);
+  const drawn = renders.count;
+  store.nextClearance = { cleared: true, missing: [], capabilities: ["prepare", "review"], isAdmin: false, siteCoordinatorName: null };
+  await controller.checkClearance();
+  assert.ok(renders.count > drawn, "redrawn");
+  assert.equal(controller.getState().principal.clearance.isAdmin, false);
+  controller.stop();
+});
+
+test("a clearance answer without capabilities is a failed check: the window stays cleared with its work", async () => {
+  const store = reviewStore();
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.selectCase("case-a");
+  store.nextClearance = { cleared: true, missing: [], isAdmin: false };
+  await controller.checkClearance();
+  const state = controller.getState();
+  assert.equal(state.principal.clearance.cleared, true);
+  assert.ok(Array.isArray(state.principal.clearance.capabilities));
+  assert.equal(state.savedCase?.id, "case-a");
+  assert.equal(state.error.code, "SERVER_ERROR");
+  controller.stop();
+});
+
 test("assigning someone uncleared re-reads once and changes nothing", async () => {
   const store = workloadStore();
   const { controller } = build({ store });

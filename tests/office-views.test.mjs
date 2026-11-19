@@ -14,6 +14,7 @@ import {
   waitingDays,
   waitingLabel,
 } from "../src/office-views.mjs";
+import { followupForms } from "../src/admin-views.mjs";
 import { makeSampleAnswers } from "../src/sample-data.mjs";
 import { findSubstep } from "../src/intake-catalogue.mjs";
 import { visibleSubsteps } from "../src/intake-form.mjs";
@@ -1391,11 +1392,38 @@ test("a locked Log contact drawer drops both submits and says why", () => {
 });
 
 test("a locked Resolve help drawer drops its submit and says why", () => {
-  const item = { id: "h1", title: "Help with a form", status: "assigned", language: "english", contactPreference: "phone" };
+  const item = { id: "h1", title: "Help with a form", status: "assigned", assigneeId: "p-sam", language: "english", contactPreference: "phone" };
   const html = resolveHelpDrawerBody({ item, person: sam, ui: { locked: true } });
   assert.doesNotMatch(html, /data-assistance-action="RESOLVE"/);
   assert.match(html, /Your roles changed, so you can&#39;t send this any more\./);
   assert.match(html, /What you helped with/);
+});
+
+test("a locked Log contact form on a task resolved elsewhere says the true reason, not the roles line", () => {
+  const nobody = { id: "p-sam", name: "Sam", capabilities: [] };
+  const html = followupForms(called([]), task({ status: "resolved" }), nobody, { now: NOW, locked: true });
+  assert.match(html, /This task is already resolved\./);
+  assert.doesNotMatch(html, /Your roles changed/);
+  assert.doesNotMatch(html, /<h4>Resolve this task<\/h4>/);
+});
+
+test("a locked Resolve help drawer on a request held by someone else says the true reason", () => {
+  const nobody = { id: "p-sam", name: "Sam", capabilities: [] };
+  const item = { id: "h1", title: "Help with a form", status: "assigned", assigneeId: "p-lee", language: "english", contactPreference: "phone" };
+  const html = resolveHelpDrawerBody({ item, person: nobody, ui: { locked: true } });
+  assert.match(html, /Only the helper holding this request resolves it\./);
+  assert.doesNotMatch(html, /Your roles changed/);
+});
+
+test("a locked drawer where only the capability blocks keeps the form and the roles line", () => {
+  const nobody = { id: "p-sam", name: "Sam", capabilities: [] };
+  const log = logCallDrawerBody({ record: called([task()]), person: nobody, ui: { now: NOW, locked: true }, caseId: "c1" });
+  assert.match(log, /Your roles changed/);
+  assert.match(log, /<h4>Resolve this task<\/h4>/);
+  const item = { id: "h1", title: "Help with a form", status: "assigned", assigneeId: "p-sam", language: "english", contactPreference: "phone" };
+  const help = resolveHelpDrawerBody({ item, person: nobody, ui: { locked: true } });
+  assert.match(help, /Your roles changed/);
+  assert.match(help, /What you helped with/);
 });
 
 test("a locked Add a case page keeps the typed answers and Cancel, and drops both writes", () => {

@@ -438,10 +438,10 @@ export function staffScreen(state) {
     }
     if (screen === "office-add-case")
       return frame(
-        "OFFICE · ADD A CASE",
+        office ? "OFFICE · ADD A CASE" : "ADD A CASE",
         "Add a case",
         "Enter a walk-in client's answers yourself. The case has no client account: the office owns it.",
-        "Back to Follow-ups",
+        office ? "Back to Follow-ups" : "Back to the work board",
         addCasePage(state, person, people),
       );
     // Past the setup screen above, so cleared: the Workload follows the effective admin.
