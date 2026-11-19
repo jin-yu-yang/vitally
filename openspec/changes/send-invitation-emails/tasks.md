@@ -21,8 +21,8 @@
 
 ## 5. Staff wording (design D7)
 
-- [ ] 5.1 Update `tests/controller.test.mjs` and `tests/volunteer-views.test.mjs` to the new messages
-- [ ] 5.2 Change the messages in `src/controller.mjs` and the Cancel invitation dialog in `src/volunteer-views.mjs`
+- [x] 5.1 Update `tests/controller.test.mjs` and `tests/volunteer-views.test.mjs` to the new messages
+- [x] 5.2 Change the messages in `src/controller.mjs` and the Cancel invitation dialog in `src/volunteer-views.mjs`
 
 ## 6. Integration tests (design D8)
 
