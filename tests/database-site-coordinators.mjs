@@ -535,6 +535,129 @@ test("site coordinators, workspace admin and SC clearance against real Supabase"
       assert.ok((await profilesSeen(ines.client)) > 0, "the admin policy lets them read profiles");
       await setSC(sc, ines.personId, false);
     });
+
+    // ---- Design D7: the default follow-up person -----------------------------
+    // Spec sign-in, "The roster can choose the default follow-up person", and
+    // office-follow-up. Each test restores Avery as the default.
+    const setDefault = (personKey) =>
+      f.sql("select vitally_private.set_default_followup($1,$2)", [f.workspaceId, personKey]);
+    const restoreDefault = () => setDefault("site_coordinator");
+    const defaultNow = async () =>
+      (await one(f, "select default_followup_person_id as id from public.workspaces where id=$1", [f.workspaceId])).id;
+    const followupsOf = async (caseId, purpose) =>
+      (
+        await f.sql(
+          "select assignee_person_id from public.admin_followups where workspace_id=$1 and case_id=$2 and purpose=$3",
+          [f.workspaceId, caseId, purpose],
+        )
+      ).rows.map((row) => row.assignee_person_id);
+    // The four case actions that assign to the default, each checked for one
+    // new follow-up assigned to `assignee`.
+    const assignsToDefault = async (assignee, label) => {
+      // ESCALATE_CONTACT (004).
+      const escalated = await f.readyCase();
+      await f.act(f.preparer, escalated, "CLAIM_PREPARATION", {});
+      await f.act(f.preparer, escalated, "REQUEST_DOCUMENT", f.sampleRequest);
+      await f.act(f.preparer, escalated, "ESCALATE_CONTACT", { reason: "Office contact needed" });
+      assert.deepEqual(await followupsOf(escalated, "request_documents"), [assignee], `${label}: escalate`);
+      // APPROVE_REVIEW with no (033).
+      const approved = await f.approvedCase({ wentOver: false });
+      assert.deepEqual(await followupsOf(approved, "go_over_return"), [assignee], `${label}: approve no`);
+      // CLOSE_CASE before filing (048).
+      const closed = await f.approvedCase();
+      await f.act(f.siteCoordinator, closed, "CLOSE_CASE", { confirmed: true, reason: "withdrawn" });
+      assert.deepEqual(await followupsOf(closed, "withdrawal_notice"), [assignee], `${label}: close before filing`);
+      // WITHDRAW while a preparer is at work (036).
+      const withdrawn = await f.readyCase();
+      await f.act(f.preparer, withdrawn, "CLAIM_PREPARATION", {});
+      await f.act(f.applicantA, withdrawn, "WITHDRAW", { confirmed: true });
+      assert.deepEqual(await followupsOf(withdrawn, "withdrawal_notice"), [assignee], `${label}: withdraw`);
+    };
+
+    await t.test("a site coordinator with no roles is accepted as default", async () => {
+      const nell = await f.staff({
+        key: "nell_default",
+        name: "Nell Ashgrove",
+        capabilities: [],
+        cleared: false,
+        siteCoordinator: true,
+      });
+      try {
+        assert.deepEqual(
+          await one(f, "select capabilities,user_id is not null as signed_in from public.people where id=$1", [
+            nell.personId,
+          ]),
+          { capabilities: [], signed_in: true },
+        );
+        await setDefault("nell_default");
+        assert.equal(await defaultNow(), nell.personId);
+      } finally {
+        await restoreDefault();
+        await setSC(sc, nell.personId, false);
+      }
+    });
+
+    await t.test(
+      "escalate, approve-no, close-before-filing and withdraw assign to a roleless site coordinator default",
+      async () => {
+        const otto = await f.staff({
+          key: "otto_default",
+          name: "Otto Brennick",
+          capabilities: [],
+          cleared: false,
+          siteCoordinator: true,
+        });
+        try {
+          await setDefault("otto_default");
+          await assignsToDefault(otto.personId, "roleless site coordinator");
+        } finally {
+          await restoreDefault();
+          await setSC(sc, otto.personId, false);
+        }
+      },
+    );
+
+    // Spec sign-in, "A default with the Admin role but no site coordinator
+    // yet". The workspace's flags are cleared directly (the case actions run
+    // through the API, so they can't see an open transaction) and restored.
+    await t.test("a default with the Admin role and no site coordinator still works", async () => {
+      const { rows: marked } = await f.sql(
+        "select user_id from public.accounts where workspace_id=$1 and is_site_coordinator",
+        [f.workspaceId],
+      );
+      assert.ok(marked.length > 0);
+      try {
+        await f.sql("update public.accounts set is_site_coordinator=false where workspace_id=$1", [f.workspaceId]);
+        assert.equal(
+          (await one(f, "select 'followup'=any(capabilities) as followup from public.people where id=$1", [
+            f.siteCoordinatorId,
+          ])).followup,
+          true,
+          "the Admin role gives followup",
+        );
+        await restoreDefault();
+        await assignsToDefault(f.siteCoordinatorId, "Admin role, no site coordinator");
+      } finally {
+        await f.sql(
+          "update public.accounts set is_site_coordinator=true where workspace_id=$1 and user_id=any($2::uuid[])",
+          [f.workspaceId, marked.map((row) => row.user_id)],
+        );
+      }
+    });
+
+    await t.test("a default who is neither is refused", async () => {
+      const pia = await f.staff({ key: "pia_neither", name: "Pia Lindqvist", capabilities: ["assist"] });
+      assert.deepEqual(
+        await one(
+          f,
+          "select vitally_private.is_site_coordinator($1,$2) as sc,'followup'=any(capabilities) as followup from public.people where id=$2",
+          [f.workspaceId, pia.personId],
+        ),
+        { sc: false, followup: false },
+      );
+      await assert.rejects(() => setDefault("pia_neither"), (error) => error.code === "VALIDATION");
+      assert.equal(await defaultNow(), f.siteCoordinatorId, "the default does not change");
+    });
   } finally {
     await f.close();
   }

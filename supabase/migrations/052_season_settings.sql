@@ -13,7 +13,8 @@
 --   §4 the recompute of every person's capabilities;
 --   §5 onwards, the functions: §5 site coordinators, the workspace admin
 --      check and clearance (design D2, D4, D6); §6 staff setup without
---      capabilities (design D1, D9).
+--      capabilities (design D1, D9); §7 granting and removing site
+--      coordinators (design D4); §8 the default follow-up person (design D7).
 -- The migration runs in one transaction.
 
 -- ---------------------------------------------------------------------------
@@ -610,3 +611,240 @@ end;
 $$;
 revoke all on function public.vitally_deactivate_account(uuid,uuid,bigint) from public,anon,authenticated,service_role;
 grant execute on function public.vitally_deactivate_account(uuid,uuid,bigint) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- §8. The default follow-up person (design D7): a person with a sign-in who is
+-- a site coordinator or has `followup` (the Admin role). Every check of the
+-- default asks this helper: setting it, the workspace setup re-run, and the
+-- four case actions that assign work to it. Clearance is never asked.
+
+create function vitally_private.can_be_default_followup(p_workspace_id uuid,p_person_id uuid)
+returns boolean language sql stable security definer set search_path='' as $$
+ select exists(select 1 from public.people p
+  where p.workspace_id=p_workspace_id and p.id=p_person_id and p.user_id is not null
+   and (vitally_private.is_site_coordinator(p_workspace_id,p_person_id) or 'followup'=any(p.capabilities)));
+$$;
+revoke all on function vitally_private.can_be_default_followup(uuid,uuid) from public,anon,authenticated,service_role;
+
+-- From 038, with one change: the helper replaces the sign-in and `followup`
+-- test.
+create or replace function vitally_private.set_default_followup(p_workspace_id uuid,p_person_key text)
+returns uuid language plpgsql security definer set search_path='' as $$
+declare v_person public.people;
+begin
+ if p_workspace_id is null or p_person_key is null then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_workspace_id::text,0));
+ select * into v_person from public.people where workspace_id=p_workspace_id and person_key=p_person_key;
+ if not found or not vitally_private.can_be_default_followup(p_workspace_id,v_person.id) then -- 052
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ update public.workspaces set default_followup_person_id=v_person.id where id=p_workspace_id;
+ return v_person.id;
+end;
+$$;
+revoke all on function vitally_private.set_default_followup(uuid,text) from public,anon,authenticated,service_role;
+
+-- From 047, with one change: the re-run check of the current default asks the
+-- helper.
+create or replace function vitally_private.initialize_workspace(p_workspace_id uuid,p_applicants uuid[])
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_new boolean;
+ v_member record;
+ v_default uuid;
+begin
+ if p_workspace_id is null or p_applicants is null then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_workspace_id::text,0));
+ if exists(select 1 from vitally_private.test_workspaces where workspace_id=p_workspace_id and test_overrides_applied) then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ if exists(select 1 from unnest(p_applicants) u where u is null) or cardinality(p_applicants)<>(select count(distinct u) from unnest(p_applicants) u) then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ if exists(select 1 from unnest(p_applicants) u where not exists(select 1 from auth.users a where a.id=u)) then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ select not exists(select 1 from public.workspaces where id=p_workspace_id) into v_new;
+ insert into public.workspaces(id) values(p_workspace_id) on conflict do nothing;
+ select default_followup_person_id into v_default from public.workspaces where id=p_workspace_id;
+ if not v_new and not vitally_private.can_be_default_followup(p_workspace_id,v_default) then -- 052
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ for v_member in select u as id,'applicant' as access from unnest(p_applicants) u loop
+  if exists(select 1 from public.memberships where user_id=v_member.id and active and workspace_id<>p_workspace_id) then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+  if exists(select 1 from public.memberships where user_id=v_member.id and workspace_id=p_workspace_id and (access<>v_member.access or not active)) then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+  insert into public.memberships(workspace_id,user_id,access) values(p_workspace_id,v_member.id,v_member.access) on conflict do nothing;
+  perform vitally_private.insert_active_account(p_workspace_id,v_member.id,null); -- 047
+ end loop;
+ return jsonb_build_object('workspaceId',p_workspace_id);
+end;
+$$;
+revoke all on function vitally_private.initialize_workspace(uuid,uuid[]) from public,anon,authenticated,service_role;
+
+-- From 004, with one change: the assignee check asks the helper.
+create or replace function vitally_private.act_escalate_contact(p_member public.memberships,p_case public.cases,p_person public.people,p_payload jsonb)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_request public.document_requests;
+ v_assignee public.people;
+ v_followup uuid;
+begin
+ if p_case.stage not in ('preparing','corrections_required') then
+  raise sqlstate 'VT004' using message='INVALID_TRANSITION';
+ end if;
+ perform vitally_private.require_case_preparer(p_case,p_person);
+ select * into v_request from public.document_requests
+  where workspace_id=p_case.workspace_id and case_id=p_case.id
+   and id=vitally_private.payload_uuid(p_payload,'requestId') for update;
+ -- One active task per unresolved request: repeated clicks add none.
+ if v_request.status is distinct from 'open'
+  or exists(select 1 from public.admin_followups t where t.request_id=v_request.id and t.status='open') then
+  raise sqlstate 'VT004' using message='INVALID_TRANSITION';
+ end if;
+ -- The workspace's configured follow-up person, never a browser-supplied one.
+ -- A missing or unqualified default is a setup error that creates no task.
+ select p.* into v_assignee from public.people p
+  join public.workspaces w on w.id=p.workspace_id and w.default_followup_person_id=p.id
+  where w.id=p_case.workspace_id;
+ if not found or not vitally_private.can_be_default_followup(p_case.workspace_id,v_assignee.id) then -- 052
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ insert into public.admin_followups(workspace_id,case_id,request_id,assignee_person_id,reason,created_by_person_id)
+ values(p_case.workspace_id,p_case.id,v_request.id,v_assignee.id,p_payload->>'reason',p_person.id)
+ returning id into v_followup;
+ -- Contact work is internal: staff notes never become client-visible progress.
+ return jsonb_build_object('detail',jsonb_build_object('requestId',v_request.id,'followupId',v_followup,'assigneePersonId',v_assignee.id));
+end;
+$$;
+
+-- From 033, with one change: the assignee check asks the helper.
+create or replace function vitally_private.act_approve_review(p_member public.memberships,p_case public.cases,p_person public.people,p_payload jsonb)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_review public.reviews;
+ v_q jsonb=p_payload->'questionnaire'; -- 033
+ v_went_over boolean=(p_payload->'questionnaire'->>'wentOver')::boolean; -- 033
+ v_in_person boolean=p_payload->'questionnaire'->>'signMethod'='in_person'; -- 033
+ v_same_day boolean=coalesce(p_case.answers->>'service'='same_day',false); -- 033
+ v_appointment timestamp=vitally_private.payload_minute(p_payload->'questionnaire','signAppointmentAt'); -- 033
+ v_assignee public.people; -- 033
+ v_plan text; -- 033
+begin
+ if p_case.stage<>'reviewing' then
+  raise sqlstate 'VT004' using message='INVALID_TRANSITION';
+ end if;
+ perform vitally_private.require_case_reviewer(p_case,p_person);
+ v_review=vitally_private.lock_active_review(p_case,p_person);
+ perform vitally_private.check_taxslayer_date(p_case,vitally_private.payload_date(v_q,'completedOn')); -- 033
+ if v_went_over then -- 033
+  perform vitally_private.check_taxslayer_date(p_case,vitally_private.payload_date(v_q,'wentOverOn')); -- 033
+ end if; -- 033
+ -- D6: an appointment is required for an in-person signing that is not the same day, and absent otherwise.
+ if (v_in_person and not v_same_day)<>(v_appointment is not null) then -- 033
+  raise sqlstate 'VT007' using message='VALIDATION'; -- 033
+ end if; -- 033
+ insert into public.reviewer_questionnaires(workspace_id,case_id,review_id,answered_by_person_id,completed_on,pa_forgiveness,went_over,went_over_on,went_over_how,sign_method,sign_appointment_at,exit_form,remarks) -- 033
+ values(p_case.workspace_id,p_case.id,v_review.id,p_person.id,vitally_private.payload_date(v_q,'completedOn'),v_q->>'paForgiveness',v_went_over, -- 033
+  vitally_private.payload_date(v_q,'wentOverOn'),v_q->>'wentOverHow',v_q->>'signMethod',v_appointment,v_q->'exitForm',btrim(v_q->>'remarks')); -- 033
+ if not v_went_over then -- 033
+  -- D5: the office takes the conversation over. The assignee is the workspace's
+  -- configured follow-up person, found as act_escalate_contact (004) finds them.
+  select p.* into v_assignee from public.people p -- 033
+   join public.workspaces w on w.id=p.workspace_id and w.default_followup_person_id=p.id -- 033
+   where w.id=p_case.workspace_id; -- 033
+  if not found or not vitally_private.can_be_default_followup(p_case.workspace_id,v_assignee.id) then -- 052
+   raise sqlstate 'VT007' using message='VALIDATION'; -- 033
+  end if; -- 033
+  insert into public.admin_followups(workspace_id,case_id,request_id,purpose,assignee_person_id,reason,created_by_person_id) -- 033
+  values(p_case.workspace_id,p_case.id,null,'go_over_return',v_assignee.id,'Go over the return with the client: the reviewer did not.',p_person.id); -- 033
+ end if; -- 033
+ -- D10: the contact step is settled at approval, never left pending.
+ update public.reviews set status='approved',decided_at=now(),client_contact_status='completed', -- 033
+  client_contacted_at=now(),client_contact_outcome=case when v_went_over then 'reached' else null end -- 033
+  where id=v_review.id;
+ -- D11: the plan the client reads, in the design's order.
+ v_plan=case when not v_went_over then 'go_over_first' when not v_in_person then 'portal' -- 033
+  when v_same_day then 'same_day' else 'appointment' end; -- 033
+ -- The approving reviewer stays on the case: the contact task is theirs.
+ update public.cases set stage='review_approved',signing_plan=v_plan, -- 033
+  signing_appointment_at=case when v_plan='appointment' then v_appointment else null end where id=p_case.id; -- 033
+ return jsonb_build_object('detail',jsonb_build_object('reviewId',v_review.id,'preparationVersion',v_review.preparation_version),
+  'message','Your return has been checked by the reviewer. A volunteer will contact you soon to sign and file.');
+end;
+$$;
+
+-- From 036, with one change: the assignee check asks the helper.
+create or replace function vitally_private.act_withdraw(p_member public.memberships,p_case public.cases,p_person public.people,p_payload jsonb)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_assignee public.people;
+begin
+ if not (p_case.stage in ('received','screening','awaiting_documents','preparation_ready','preparing','corrections_required','review_ready','reviewing')
+   or (p_case.stage='on_hold' and p_case.hold_origin='awaiting_documents')) then
+  raise sqlstate 'VT004' using message='INVALID_TRANSITION';
+ end if;
+ if p_case.stage in ('preparing','corrections_required','reviewing')
+   and (p_case.preparer_id is not null or p_case.reviewer_id is not null) then
+  select p.* into v_assignee from public.people p
+   join public.workspaces w on w.id=p.workspace_id and w.default_followup_person_id=p.id
+   where w.id=p_case.workspace_id;
+  if not found or not vitally_private.can_be_default_followup(p_case.workspace_id,v_assignee.id) then -- 052
+   raise sqlstate 'VT007' using message='VALIDATION';
+  end if;
+ end if;
+ perform vitally_private.close_case_steps(p_case,'withdrawn');
+ if v_assignee.id is not null then
+  insert into public.admin_followups(workspace_id,case_id,request_id,purpose,assignee_person_id,reason,created_by_person_id)
+  values(p_case.workspace_id,p_case.id,null,'withdrawal_notice',v_assignee.id,'The client withdrew the application: tell the volunteer to stop work.',v_assignee.id);
+ end if;
+ return jsonb_build_object('detail','{}'::jsonb,
+  'message','You withdrew your application. Your return was not filed.');
+end;
+$$;
+
+-- From 048, with one change: the assignee check asks the helper.
+create or replace function vitally_private.act_close_case(p_member public.memberships,p_case public.cases,p_person public.people,p_payload jsonb)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_assignee public.people;
+ v_before_filing boolean:=p_case.stage in ('review_approved','ready_to_efile') -- 036
+  or (p_case.stage='on_hold' and p_case.hold_origin='review_approved'); -- 036
+begin
+ if not (p_case.stage in ('received','screening','preparation_ready','preparing','review_ready','reviewing','corrections_required','rejected','awaiting_documents','on_hold') -- 036
+   or (p_case.stage in ('review_approved','ready_to_efile') and p_payload->>'reason'='withdrawn') -- 036
+   or (p_case.stage='draft' and p_case.owner_user_id is null)) then
+  raise sqlstate 'VT004' using message='INVALID_TRANSITION';
+ end if;
+ -- Any close before filing (a withdrawal at Ready to exit or Ready to e-file, or any
+ -- reason from a signing hold) leaves a reviewed, untransmitted return, so the office
+ -- is told to make sure it is not transmitted (same assignee rule as act_withdraw). -- 036
+ if v_before_filing then -- 036
+  select p.* into v_assignee from public.people p -- 036
+   join public.workspaces w on w.id=p.workspace_id and w.default_followup_person_id=p.id -- 036
+   where w.id=p_case.workspace_id; -- 036
+  if not found or not vitally_private.can_be_default_followup(p_case.workspace_id,v_assignee.id) then -- 052
+   raise sqlstate 'VT007' using message='VALIDATION'; -- 036
+  end if; -- 036
+ end if; -- 036
+ perform vitally_private.close_case_steps(p_case,p_payload->>'reason'); -- 036
+ if v_assignee.id is not null then -- 036
+  insert into public.admin_followups(workspace_id,case_id,request_id,purpose,assignee_person_id,reason,created_by_person_id) -- 036
+  values(p_case.workspace_id,p_case.id,null,'withdrawal_notice',v_assignee.id, -- 036
+   case when p_payload->>'reason'='withdrawn' -- 036
+    then 'The client withdrew; make sure the return is not transmitted in TaxSlayer.' -- 036
+    when vitally_private.return_outcome(p_case.federal_method,p_case.federal_result)<>'not_filed' -- 048
+     or vitally_private.return_outcome(p_case.state_method,p_case.state_result)<>'not_filed' -- 048
+    then 'The case was closed after a return was filed; make sure the rejected return is not transmitted again in TaxSlayer.' -- 048
+    else 'The case was closed before filing; make sure the return is not transmitted in TaxSlayer.' end, -- 036
+   v_assignee.id); -- 036
+ end if; -- 036
+ -- The reason and note are staff context: case_events is staff-only, and the client
+ -- message says plainly that an office decision, not a filing, has changed.
+ return jsonb_build_object('detail',jsonb_build_object('reason',p_payload->>'reason') -- 036
+   ||case when p_payload ? 'note' then jsonb_build_object('note',p_payload->>'note') else '{}'::jsonb end, -- 036
+  'message',vitally_private.closed_line(p_payload->>'reason',p_case.federal_method,p_case.federal_result,p_case.state_method,p_case.state_result)); -- 048
+end;
+$$;
