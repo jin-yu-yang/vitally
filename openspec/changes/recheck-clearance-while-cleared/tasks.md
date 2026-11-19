@@ -12,12 +12,12 @@
 
 ## 3. Single-flight and the cleared → cleared answer
 
-- [ ] 3.1 In `recheckClearance`, when the window was cleared and still is: compare the effective capabilities (as sets) and `isAdmin`. With no change, store the answer and return without `readFeed` or `show`. With a change, update the own entry, apply the screen fallback (4.1), persist and `show`
-- [ ] 3.2 Controller tests: focus plus visibility plus a `FORBIDDEN` refusal while one check is out send one `getClearance`; an unchanged answer does not redraw
+- [x] 3.1 In `recheckClearance`, when the window was cleared and still is: compare the effective capabilities (as sets) and `isAdmin`. With no change, store the answer and return without `readFeed` or `show`. With a change, update the own entry, apply the screen fallback (4.1), persist and `show`
+- [x] 3.2 Controller tests: focus plus visibility plus a `FORBIDDEN` refusal while one check is out send one `getClearance`; an unchanged answer does not redraw
 
 ## 4. Screens when effective Admin changes
 
-- [ ] 4.1 In the controller, when the person is no longer effective admin and `state.screen` is `office-cases`, set it to the work board and `show(true)`. Follow-ups, the office case page, the Roster and Post an update keep their screen
+- [x] 4.1 In the controller, when the person is no longer effective admin and `state.screen` is `office-cases`, set it to the work board and `show(true)`. Follow-ups, the office case page, the Roster and Post an update keep their screen
 - [ ] 4.2 In `src/views.mjs`, keep Add a case on screen without effective `admin` (no fallback to the work board for `office-add-case`), with its draft
 - [ ] 4.3 Controller and view tests: losing Admin on Follow-ups, All cases (and no jump back on regaining Admin), an office case page, Add a case
 
