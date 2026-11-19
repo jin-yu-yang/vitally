@@ -26,9 +26,9 @@
 
 ## 6. Integration tests (design D8)
 
-- [ ] 6.1 Add `latestInvitation` to `tests/support/mail-catcher.mjs`, and make `latestCode` read only sign-in-code emails
-- [ ] 6.2 Update `tests/database-accounts-function.mjs`: the invitation has the configured link, an expiry within one minute of `expires_at` and no six-digit run; a code then requested with `signInWithOtp` signs the volunteer in; invite then resend delivers a second invitation
-- [ ] 6.3 Update the client and volunteer invitation tests in `tests/auth-browser.mjs`: read the invitation, request a real code, sign in with it on the first try
+- [x] 6.1 Add `latestInvitation` to `tests/support/mail-catcher.mjs`, and make `latestCode` read only sign-in-code emails
+- [x] 6.2 Update `tests/database-accounts-function.mjs`: the invitation has the configured link, an expiry within one minute of `expires_at` and no six-digit run; a code then requested with `signInWithOtp` signs the volunteer in; invite then resend delivers a second invitation
+- [x] 6.3 Update the client and volunteer invitation tests in `tests/auth-browser.mjs`: read the invitation, request a real code, sign in with it on the first try
 
 ## 7. Docs
 
