@@ -6,9 +6,9 @@
 
 ## 2. Refusals and saving one's own row
 
-- [ ] 2.1 In `noteFailure`, start `void checkClearance()` on `FORBIDDEN` or `INELIGIBLE` in a cleared staff window, keeping the refusal on screen
-- [ ] 2.2 Make `recheckAfterOwnSave` always re-check: wait for any check already out, then check once more, cleared or not
-- [ ] 2.3 Controller tests: a narrowed role noticed on an `INELIGIBLE` claim (refusal kept, button gone), assigning someone uncleared (one re-read, buttons unchanged), saving one's own row while cleared, saving one's own row removing every role (setup screen, stays on the Roster)
+- [x] 2.1 In `noteFailure`, start `void checkClearance()` on `FORBIDDEN` or `INELIGIBLE` in a cleared staff window, keeping the refusal on screen
+- [x] 2.2 Make `recheckAfterOwnSave` always re-check: wait for any check already out, then check once more, cleared or not
+- [x] 2.3 Controller tests: a narrowed role noticed on an `INELIGIBLE` claim (refusal kept, button gone), assigning someone uncleared (one re-read, buttons unchanged), saving one's own row while cleared, saving one's own row removing every role (setup screen, stays on the Roster)
 
 ## 3. Single-flight and the cleared → cleared answer
 
