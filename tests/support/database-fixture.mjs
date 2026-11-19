@@ -102,6 +102,29 @@ export const CERTIFICATES_FOR = Object.freeze({
   preparer: ["vsc", "itqr", "basic"],
   reviewer: ["vsc", "itqr", "advanced"],
 });
+// The roles a set of capabilities needs, and confirmed certificates for them,
+// on the workspace's current-season roster entry. `query(text, values)` runs
+// inside the caller's transaction (the roles check is deferred to commit).
+async function clearStaffWith(query, personId, capabilities, workspaceId) {
+  const roles = rolesFor(capabilities);
+  const certificates = [...new Set(roles.flatMap((role) => CERTIFICATES_FOR[role]))];
+  await query(
+    `insert into public.roster_entries(workspace_id,person_id,season,roles,is_new)
+      select $1::uuid,$2::uuid,w.current_season,$3::text[],false
+        from public.workspaces w where w.id=$1::uuid
+      on conflict (workspace_id,person_id,season)
+      do update set roles=excluded.roles,is_new=false`,
+    [workspaceId, personId, roles],
+  );
+  await query(
+    `insert into public.certificates(workspace_id,person_id,season,certificate,status,confirmed_at,confirmed_by_person_id)
+      select $1::uuid,$2::uuid,w.current_season,c,'confirmed',now(),$2::uuid
+        from public.workspaces w, unnest($3::text[]) c where w.id=$1::uuid
+      on conflict (workspace_id,person_id,season,certificate)
+      do update set status='confirmed',confirmed_at=now(),confirmed_by_person_id=excluded.confirmed_by_person_id`,
+    [workspaceId, personId, certificates],
+  );
+}
 // The person key every fixture workspace uses for its default follow-up person.
 const DEFAULT_FOLLOWUP_KEY = "site_coordinator";
 // One key for the advisory lock that keeps fixture workspace setup exclusive
@@ -717,26 +740,9 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
   // certificates for them, on the workspace's current-season roster entry, in
   // one transaction (the roles trigger is deferred to commit).
   f.clearStaff = async (personId, capabilities, workspaceId = f.workspaceId) => {
-    const roles = rolesFor(capabilities);
-    const certificates = [...new Set(roles.flatMap((role) => CERTIFICATES_FOR[role]))];
     await f.sql("begin");
     try {
-      await f.sql(
-        `insert into public.roster_entries(workspace_id,person_id,season,roles,is_new)
-          select $1::uuid,$2::uuid,w.current_season,$3::text[],false
-            from public.workspaces w where w.id=$1::uuid
-          on conflict (workspace_id,person_id,season)
-          do update set roles=excluded.roles,is_new=false`,
-        [workspaceId, personId, roles],
-      );
-      await f.sql(
-        `insert into public.certificates(workspace_id,person_id,season,certificate,status,confirmed_at,confirmed_by_person_id)
-          select $1::uuid,$2::uuid,w.current_season,c,'confirmed',now(),$2::uuid
-            from public.workspaces w, unnest($3::text[]) c where w.id=$1::uuid
-          on conflict (workspace_id,person_id,season,certificate)
-          do update set status='confirmed',confirmed_at=now(),confirmed_by_person_id=excluded.confirmed_by_person_id`,
-        [workspaceId, personId, certificates],
-      );
+      await clearStaffWith(f.sql, personId, capabilities, workspaceId);
       await f.sql("commit");
     } catch (error) {
       await f.sql("rollback").catch(() => {});
@@ -808,6 +814,24 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
       await saveRun(runManifest);
       return await f.withSetupLock(async () => {
         const result = await initializeWorkspace(setup, {
+          // The default follow-up person must hold `followup`, which is now the
+          // mirror of their roles (migration 052), so they get their roles and
+          // certificates in the setup's own transaction, before the check.
+          beforeDefaultFollowup: async (connection) => {
+            const member = setup.staff.find((m) => m.personKey === setup.defaultFollowup);
+            if (!member) return;
+            const { rows } = await connection.query(
+              "select id from public.people where workspace_id=$1 and person_key=$2",
+              [setup.workspaceId, member.personKey],
+            );
+            if (rows[0])
+              await clearStaffWith(
+                (text, values) => connection.query(text, values),
+                rows[0].id,
+                member.capabilities,
+                setup.workspaceId,
+              );
+          },
           afterInitialize: async (connection) => {
             await connection.query(
               "insert into vitally_private.test_workspaces(workspace_id,run_id) values($1,$2)",

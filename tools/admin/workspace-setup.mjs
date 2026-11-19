@@ -22,7 +22,7 @@ export async function initializeWorkspace(
     siteNumber = null,
     target = { kind: "test" },
   },
-  { afterInitialize } = {},
+  { afterInitialize, beforeDefaultFollowup } = {},
 ) {
   const client = await openDatabase(target);
   try {
@@ -47,6 +47,11 @@ export async function initializeWorkspace(
           [workspaceId, member.userId, member.personKey, member.name, member.capabilities],
         );
       }
+      // Trusted tooling hook, like afterInitialize below: SQL-only, in the same
+      // transaction, after the staff are added and before the default
+      // follow-up person is checked (which reads their capabilities, now the
+      // mirror of their roles, migration 052).
+      if (beforeDefaultFollowup) await beforeDefaultFollowup(connection, result);
       if (defaultFollowup)
         await connection.query("select vitally_private.set_default_followup($1,$2)", [
           workspaceId,
