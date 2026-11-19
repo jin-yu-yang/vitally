@@ -1,7 +1,7 @@
 # Retrospective: recheck-clearance-while-cleared
 
 > Written: 2026-11-19 (after verify passed with warnings)
-> Commit range: `2a305a9..c72b0f9` (archive commit follows)
+> Commit range: `2a305a9..c72b0f9` (archive commit follows: see git log)
 > Worktree: `D:/dev/vitally-190`, branch `recheck-clearance-while-cleared`
 
 ---
