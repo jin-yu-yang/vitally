@@ -7,9 +7,9 @@
 
 ## 2. Site coordinators and clearance in the database
 
-- [ ] 2.1 Add `accounts.is_site_coordinator` and `public.site_coordinator_changes`, with no client grants, plus a private `is_site_coordinator(ws, person)` helper (active account with the flag).
-- [ ] 2.2 Rewrite `vitally_policy.is_workspace_admin` (site coordinator, or `admin` in the mirror; active staff membership; no clearance).
-- [ ] 2.3 Rewrite `cleared()` with the SC rule, and `vitally_my_clearance()` with `isAdmin` = workspace admin, `isSiteCoordinator`, and the `siteCoordinator` missing item.
+- [x] 2.1 Add `accounts.is_site_coordinator` and `public.site_coordinator_changes`, with no client grants, plus a private `is_site_coordinator(ws, person)` helper (active account with the flag).
+- [x] 2.2 Rewrite `vitally_policy.is_workspace_admin` (site coordinator, or `admin` in the mirror; active staff membership; no clearance).
+- [x] 2.3 Rewrite `cleared()` with the SC rule, and `vitally_my_clearance()` with `isAdmin` = workspace admin, `isSiteCoordinator`, and the `siteCoordinator` missing item.
 - [ ] 2.4 Add `vitally_set_site_coordinator` (receipt, revision, refusals FORBIDDEN / NO_ACTIVE_ACCOUNT / INVALID_TRANSITION / LAST_SITE_COORDINATOR / DEFAULT_FOLLOWUP / CONFLICT, audit row) and the private `grant_site_coordinator(ws, user)` for the roster command.
 - [ ] 2.5 Rewrite `deactivate_account`: refuse the last site coordinator with LAST_SITE_COORDINATOR, after the existing OPEN_WORK check; otherwise clear the flag with an audit row. Reactivation does not restore it.
 - [ ] 2.6 Database tests: the site coordinator grant and removal rules and history; the last site coordinator can't be removed or deactivated; the default follow-up person can't lose site coordinator; a site coordinator without SC is not cleared but reaches the Roster and Season settings; `is_workspace_admin` and `vitally_my_clearance` answers; an invited volunteer given the Admin role (with VSC + IT&QR) has admin.
