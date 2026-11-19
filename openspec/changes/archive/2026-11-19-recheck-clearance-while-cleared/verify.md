@@ -43,7 +43,7 @@ The non-strict run prints "Requirement text is very long" warnings. They all bel
 
 | Capability | Sync state | Notes |
 |---|---|---|
-| `volunteer-clearance` | ✗ needs sync | 8 ADDED requirements, none yet in `openspec/specs/volunteer-clearance/spec.md`. Archive (lifecycle step 8) merges them after `main` is merged into the branch. |
+| `volunteer-clearance` | ✗ needs sync | 9 ADDED requirements, none yet in `openspec/specs/volunteer-clearance/spec.md`. Archive (lifecycle step 8) merges them after `main` is merged into the branch. |
 
 ---
 
