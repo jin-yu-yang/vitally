@@ -16,7 +16,18 @@ const MIGRATION = readFileSync(
   "utf8",
 );
 const SECTION_1 = MIGRATION.split("-- 052 §1 begin")[1].split("-- 052 §1 end")[0];
+// §1's count, copied from the section: the guard reads every workspace, so the
+// guard tests compare against this baseline, taken in the same snapshot,
+// rather than assume no other workspace has an offender.
+const OFFENDERS = `select count(*)::int as n
+  from public.memberships m
+  join public.people p on p.workspace_id=m.workspace_id and p.user_id=m.user_id
+  where m.active and m.access='staff' and 'admin'=any(p.capabilities)
+   and not exists(select 1 from public.workspaces w
+    join public.roster_entries r on r.workspace_id=w.id and r.season=w.current_season
+    where w.id=p.workspace_id and r.person_id=p.id and 'admin'=any(r.roles))`;
 
+const REPEATABLE_READ = "begin isolation level repeatable read";
 const REALTIME_DEADLINE_MS = 15_000;
 const CONTROL_ATTEMPT_MS = 2_500;
 
@@ -27,8 +38,8 @@ const refused052 = (count) => (error) =>
   /^052 refused: .*\(\d+\)$/.test(error.cause?.message ?? "") &&
   error.cause.message.endsWith(`(${count})`);
 
-async function inTransaction(f, body) {
-  await f.sql("begin");
+async function inTransaction(f, body, begin = "begin") {
+  await f.sql(begin);
   try {
     return await body();
   } finally {
@@ -72,24 +83,40 @@ test("people.capabilities mirror this season's roles against real Supabase", asy
     };
 
     await t.test("the 052 guard refuses an admin without the Admin role", async () => {
-      await inTransaction(f, async () => {
-        await setRoles(f.siteCoordinatorId, []);
-        await writeAround(
-          "update public.people set capabilities='{admin,assist,followup,receive_documents}' where workspace_id=$1 and id=$2",
-          [f.workspaceId, f.siteCoordinatorId],
-        );
-        await assert.rejects(() => f.sql(SECTION_1), refused052(1));
-      });
+      await inTransaction(
+        f,
+        async () => {
+          // The copy above still counts what §1 counts.
+          const squash = (text) => text.replace(/\s+/g, " ");
+          assert.ok(squash(SECTION_1).includes(squash(OFFENDERS.split("as n")[1])));
+          const { n: baseline } = await one(f, OFFENDERS);
+          await setRoles(f.siteCoordinatorId, []);
+          await writeAround(
+            "update public.people set capabilities='{admin,assist,followup,receive_documents}' where workspace_id=$1 and id=$2",
+            [f.workspaceId, f.siteCoordinatorId],
+          );
+          await assert.rejects(() => f.sql(SECTION_1), refused052(baseline + 1));
+        },
+        REPEATABLE_READ,
+      );
     });
 
     await t.test("the guard ignores people with no sign-in", async () => {
-      await inTransaction(f, async () => {
-        await writeAround(
-          "insert into public.people(workspace_id,person_key,name,capabilities) values($1,'gus_guard','Gus Mendel','{admin,assist,followup,receive_documents}')",
-          [f.workspaceId],
-        );
-        await f.sql(SECTION_1);
-      });
+      await inTransaction(
+        f,
+        async () => {
+          const { n: baseline } = await one(f, OFFENDERS);
+          await writeAround(
+            "insert into public.people(workspace_id,person_key,name,capabilities) values($1,'gus_guard','Gus Mendel','{admin,assist,followup,receive_documents}')",
+            [f.workspaceId],
+          );
+          // Unchanged by the admin with no sign-in: passes when nobody else
+          // offends, and otherwise refuses with the same count.
+          if (baseline === 0) await f.sql(SECTION_1);
+          else await assert.rejects(() => f.sql(SECTION_1), refused052(baseline));
+        },
+        REPEATABLE_READ,
+      );
     });
 
     await t.test("the mirror follows role changes", async () => {

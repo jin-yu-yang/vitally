@@ -7,7 +7,8 @@
 --      active staff membership holds `admin` in people.capabilities without
 --      the Admin role on their current-season roster entry;
 --   §2 the snapshot of every person's capabilities, for a rollback migration;
---   §3 the schema: the mirror helper and its two triggers;
+--   §3 the schema: effective_capabilities (role capabilities only), the
+--      mirror helper and its two triggers;
 --   §4 the recompute of every person's capabilities;
 --   §5 onwards, the functions.
 -- The migration runs in one transaction.
@@ -55,15 +56,25 @@ revoke all on table vitally_private.capabilities_before_052 from public,anon,aut
 -- §3. The mirror (design D1). 042's check (`followup` needs `admin`) stays:
 -- the Admin role gives both.
 
--- The capabilities of the person's current-season roles when they have a
--- sign-in; empty with no sign-in or no current-season entry.
-create function vitally_private.mirror_capabilities(p_workspace_id uuid,p_person_id uuid,p_user_id uuid)
+-- The effective capabilities: from 045, now the current season's role
+-- capabilities alone. people.capabilities is the mirror of the same roles, so
+-- there is no ceiling to intersect with. Replaced before §4's recompute.
+create or replace function vitally_private.effective_capabilities(p_workspace_id uuid,p_person_id uuid)
 returns text[] language sql stable security definer set search_path='' as $$
- select case when p_user_id is null then '{}'::text[] else coalesce((
-  select vitally_private.role_capabilities(r.roles)
+ select coalesce((
+  select vitally_private.role_capabilities(r.roles) -- 052
    from public.workspaces w
    join public.roster_entries r on r.workspace_id=w.id and r.season=w.current_season
-   where w.id=p_workspace_id and r.person_id=p_person_id),'{}'::text[]) end;
+   where w.id=p_workspace_id and r.person_id=p_person_id),'{}'::text[]);
+$$;
+revoke all on function vitally_private.effective_capabilities(uuid,uuid) from public,anon,authenticated,service_role;
+
+-- The effective capabilities when the person has a sign-in; empty with no
+-- sign-in or no current-season entry.
+create function vitally_private.mirror_capabilities(p_workspace_id uuid,p_person_id uuid,p_user_id uuid)
+returns text[] language sql stable security definer set search_path='' as $$
+ select case when p_user_id is null then '{}'::text[]
+  else vitally_private.effective_capabilities(p_workspace_id,p_person_id) end;
 $$;
 revoke all on function vitally_private.mirror_capabilities(uuid,uuid,uuid) from public,anon,authenticated,service_role;
 
@@ -110,18 +121,3 @@ create trigger roster_entries_mirror_capabilities
 -- §4. The recompute: every person's capabilities become the mirror.
 
 update public.people set capabilities=capabilities;
-
--- ---------------------------------------------------------------------------
--- §5. The effective capabilities: from 045, now the current season's role
--- capabilities alone. people.capabilities is the mirror of the same roles, so
--- there is no ceiling to intersect with.
-
-create or replace function vitally_private.effective_capabilities(p_workspace_id uuid,p_person_id uuid)
-returns text[] language sql stable security definer set search_path='' as $$
- select coalesce((
-  select vitally_private.role_capabilities(r.roles) -- 052
-   from public.workspaces w
-   join public.roster_entries r on r.workspace_id=w.id and r.season=w.current_season
-   where w.id=p_workspace_id and r.person_id=p_person_id),'{}'::text[]);
-$$;
-revoke all on function vitally_private.effective_capabilities(uuid,uuid) from public,anon,authenticated,service_role;
