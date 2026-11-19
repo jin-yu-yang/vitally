@@ -7275,8 +7275,7 @@ test("posted updates: a window whose connection comes back re-reads the feed, so
   const reads = callCount(store, "getUpdates");
   await store.handlers.onConnection("online");
   await tick();
-  // The reconnect's clearance check reads the feed too (change recheck-clearance-while-cleared).
-  assert.ok(callCount(store, "getUpdates") > reads);
+  assert.equal(callCount(store, "getUpdates"), reads + 1);
   assert.deepEqual(controller.getState().updates, []);
   assert.equal(controller.getState().updatesUnread, 0);
   controller.stop();
@@ -8072,6 +8071,124 @@ test("a refreshed clearance with narrower capabilities narrows the person's own 
   assert.deepEqual(byId["person-riley"].capabilities, ["prepare"]);
   assert.deepEqual(byId["person-sam"].capabilities, ["admin", "followup"]);
   assert.equal(store.calls.filter((entry) => entry === "listCases").length, caseReads, "still cleared: no reload");
+  controller.stop();
+});
+
+test("focus, visibility and a refusal while a check is out send one request", async () => {
+  const store = staffStore({ cases: [{ ...SETUP_CASE }] });
+  const { controller, events, documents } = build({ store });
+  await controller.start();
+  const before = clearanceCalls(store);
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  store.nextClearance = () => gate;
+  const focus = events.emit("focus");
+  const visible = documents.emit("visibilitychange");
+  store.failNext = Object.assign(new Error("Not yours."), { code: "FORBIDDEN" });
+  const refused = controller.runAction("CLAIM_PREPARATION", { caseId: "case-a" }).catch(() => {});
+  await tick();
+  release({ ...RILEY_CLEARED });
+  await Promise.all([focus, visible, refused]);
+  await tick();
+  assert.equal(clearanceCalls(store) - before, 1);
+  controller.stop();
+});
+
+test("an unchanged answer does not redraw", async () => {
+  const store = staffStore({ cases: [{ ...SETUP_CASE }] });
+  const { controller, renders } = build({ store });
+  await controller.start();
+  store.nextClearance = { ...RILEY_CLEARED };
+  const drawn = renders.count;
+  const reads = callCount(store, "getUpdates");
+  await controller.checkClearance();
+  assert.equal(renders.count, drawn);
+  assert.equal(callCount(store, "getUpdates"), reads);
+  controller.stop();
+});
+
+const losingAdmin = async (setup = async () => {}) => {
+  const store = staffStore({
+    cases: [{ ...SETUP_CASE }],
+    clearance: { ...RILEY_CLEARED },
+  });
+  const built = build({ store });
+  await built.controller.start();
+  await setup(built.controller);
+  store.nextClearance = { ...RILEY_CLEARED, capabilities: ["prepare"], isAdmin: true };
+  const lists = store.calls.filter((entry) => entry.startsWith("list")).length;
+  await built.controller.checkClearance();
+  assert.equal(store.calls.filter((entry) => entry.startsWith("list")).length, lists, "no list reload");
+  return { ...built, store };
+};
+
+test("losing Admin on Follow-ups keeps the screen, now the Work board", async () => {
+  const { controller } = await losingAdmin();
+  const state = controller.getState();
+  assert.equal(state.screen, "staff");
+  assert.match(staffScreen(state), /Work board/);
+  assert.doesNotMatch(staffScreen(state), /All cases/);
+  controller.stop();
+});
+
+test("losing Admin on All cases moves to the Work board, and regaining Admin does not move back", async () => {
+  const { controller, store, renders } = await losingAdmin((c) => c.navigate("office-cases"));
+  assert.equal(controller.getState().screen, "staff");
+  assert.equal(renders.focus.at(-1), true);
+  store.nextClearance = { ...RILEY_CLEARED };
+  await controller.checkClearance();
+  assert.equal(controller.getState().screen, "staff");
+  controller.stop();
+});
+
+test("losing Admin on an office case page keeps the case", async () => {
+  const { controller } = await losingAdmin((c) => c.selectCase("case-a"));
+  const state = controller.getState();
+  assert.equal(state.screen, "staff-case");
+  assert.equal(state.selectedCaseId, "case-a");
+  assert.match(staffScreen(state), /Back to the work board/);
+  controller.stop();
+});
+
+test("losing Admin on Add a case keeps the page and its answers", async () => {
+  const { controller } = await losingAdmin(async (c) => {
+    await c.openAddCase();
+    c.editAnswers({ tp_first_name: "Avery" });
+  });
+  const state = controller.getState();
+  assert.equal(state.screen, "office-add-case");
+  assert.equal(state.draftAnswers.tp_first_name, "Avery");
+  controller.stop();
+});
+
+test("a case-page draft survives losing Preparer and shows again when it returns", async () => {
+  const mine = { ...SETUP_CASE, preparerId: "person-riley", participants: ["person-riley"] };
+  const store = staffStore({
+    cases: [mine],
+    clearance: { ...RILEY_CLEARED, capabilities: ["prepare"], isAdmin: false },
+  });
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.selectCase("case-a");
+  controller.editAnswers({ tp_first_name: "Avery" });
+  const rights = () => {
+    const state = controller.getState();
+    const own = state.people.find((person) => person.id === "person-riley");
+    return staffEligibility(state.savedCase, own).preparationWork.allowed;
+  };
+  assert.equal(rights(), true);
+  store.nextClearance = { ...RILEY_CLEARED, capabilities: ["receive_documents", "assist"], isAdmin: false };
+  await controller.checkClearance();
+  assert.equal(controller.getState().dirty, true);
+  assert.equal(controller.getState().draftAnswers.tp_first_name, "Avery");
+  assert.equal(rights(), false);
+  store.nextClearance = { ...RILEY_CLEARED, capabilities: ["prepare"], isAdmin: false };
+  await controller.checkClearance();
+  assert.equal(controller.getState().dirty, true);
+  assert.equal(controller.getState().draftAnswers.tp_first_name, "Avery");
+  assert.equal(rights(), true);
   controller.stop();
 });
 

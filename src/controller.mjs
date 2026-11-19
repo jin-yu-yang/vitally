@@ -1837,6 +1837,17 @@ export function createController({
     return clearanceCheck;
   }
 
+  // The same effective capabilities (as a set) and the same ceiling flag.
+  const sameStanding = (before, after) => {
+    const had = new Set(before?.capabilities ?? []);
+    const has = new Set(after?.capabilities ?? []);
+    return (
+      had.size === has.size &&
+      [...has].every((capability) => had.has(capability)) &&
+      (before?.isAdmin === true) === (after?.isAdmin === true)
+    );
+  };
+
   async function recheckClearance() {
     if (!staffWindow()) return;
     // A cancelled site check has no membership left to ask about: the screen
@@ -1859,6 +1870,7 @@ export function createController({
     if (!same()) return;
     noteConnected();
     const was = !awaitingClearance(state);
+    const oldClearance = state.principal.clearance;
     state.principal = { ...state.principal, clearance: answer };
     // The person's own entry follows what they may do now.
     state.people = withOwnCapabilities(state.people, state.principal);
@@ -1872,6 +1884,21 @@ export function createController({
       if (!ADMIN_SETUP_SCREENS.includes(state.screen)) state.screen = homeScreen();
       // The setup screen is replaced by the work: the keyboard goes to it.
       await loadWork({ focus: true });
+      return;
+    }
+    if (now && was) {
+      // Cleared before and after: nothing to reload, and nothing to draw unless
+      // what the person may do changed. Their entry is already narrowed above.
+      if (sameStanding(oldClearance, answer)) return;
+      // All cases is Admin's; the other screens stay, and Admin coming back
+      // moves nobody.
+      let focus = false;
+      if (!answer.capabilities?.includes("admin") && state.screen === "office-cases") {
+        state.screen = homeScreen();
+        focus = true;
+      }
+      persistSession();
+      show(focus);
       return;
     }
     if (!now && was) dropWork();
