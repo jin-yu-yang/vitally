@@ -18,7 +18,7 @@ const missing = [
 ].filter(([, value]) => !value).map(([name]) => name);
 if (!mail.ok) missing.push(...mail.missing);
 
-if (missing.length) {
+if (missing.length || !mail.ok) {
   // Name the variables, never their values.
   console.error(`accounts function: missing environment variable ${missing.join(", ")}`);
   Deno.serve(() =>

@@ -131,7 +131,8 @@ const RESULTS = [
   ["429 daily_quota_exceeded is not sent", () => json(429, { name: "daily_quota_exceeded" }), false],
   ["502 with an HTML body is not sent", () => new Response("<html>Bad gateway</html>", { status: 502 }), false],
   ["an empty body is not sent", () => new Response("", { status: 500 }), false],
-  ["a 200 with an empty body is not sent", () => new Response("", { status: 200 }), false],
+  ["a 200 with an empty body is sent", () => new Response("", { status: 200 }), true],
+  ["a 200 with a non-JSON body is sent", () => new Response("OK", { status: 200 }), true],
 ];
 
 for (const [name, answer, sent] of RESULTS) {

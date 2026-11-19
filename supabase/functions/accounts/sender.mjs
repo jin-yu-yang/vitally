@@ -53,19 +53,18 @@ export function senderFromEnv(
       const [url, init] = request(mail);
       const response = await fetch(url, { ...init, method: "POST", signal: AbortSignal.timeout(timeoutMs) });
       status = response.status;
+      // A bare 2xx is acceptance, whatever the body.
+      if (response.ok) return { sent: true };
       let body;
       try {
         body = JSON.parse(await response.text());
       } catch {
         body = undefined; // non-JSON (an HTML error page) or empty
       }
-      const isObject = body !== null && typeof body === "object";
-      const name = isObject && typeof body.name === "string" && /^[a-z_]{1,64}$/i.test(body.name)
+      const name = body && typeof body.name === "string" && /^[a-z_]{1,64}$/i.test(body.name)
         ? body.name
         : undefined;
-      if (isObject && (response.ok || (status === 409 && name === "invalid_idempotent_request"))) {
-        return { sent: true };
-      }
+      if (status === 409 && name === "invalid_idempotent_request") return { sent: true };
       log(`accounts function: invitation email not sent (${name ?? "error"}, status ${status})`);
       return { sent: false };
     } catch (error) {
