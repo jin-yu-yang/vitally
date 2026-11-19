@@ -8,9 +8,11 @@
 --      the Admin role on their current-season roster entry;
 --   §2 the snapshot of every person's capabilities, for a rollback migration;
 --   §3 the schema: effective_capabilities (role capabilities only), the
---      mirror helper and its two triggers;
+--      mirror helper and its two triggers; the site coordinator flag on
+--      accounts and its history (design D4);
 --   §4 the recompute of every person's capabilities;
---   §5 onwards, the functions.
+--   §5 onwards, the functions: §5 site coordinators, the workspace admin
+--      check and clearance (design D2, D4, D6).
 -- The migration runs in one transaction.
 
 -- ---------------------------------------------------------------------------
@@ -117,7 +119,168 @@ create trigger roster_entries_mirror_capabilities
  after insert or update of roles,season,person_id or delete on public.roster_entries
  for each row execute function vitally_private.roster_entries_mirror_capabilities();
 
+-- The site coordinator flag (design D4): kept across seasons, on the account,
+-- so it lasts while the account is active. Migration 052 marks nobody.
+alter table public.accounts add column is_site_coordinator boolean not null default false;
+
+-- Every grant and removal, one row each. A null changed_by_person_id is the
+-- roster command. No signed-in user reads or writes it directly; the person
+-- keys are deferred, as 047's are, so a workspace delete can cascade in any
+-- order.
+create table public.site_coordinator_changes (
+ id uuid primary key default gen_random_uuid(),
+ workspace_id uuid not null references public.workspaces(id) on delete cascade,
+ person_id uuid not null,
+ granted boolean not null,
+ changed_by_person_id uuid,
+ changed_at timestamptz not null default now(),
+ foreign key (workspace_id,person_id) references public.people(workspace_id,id) on delete cascade deferrable initially deferred,
+ foreign key (workspace_id,changed_by_person_id) references public.people(workspace_id,id) deferrable initially deferred
+);
+create index site_coordinator_changes_person on public.site_coordinator_changes(workspace_id,person_id,changed_at);
+alter table public.site_coordinator_changes enable row level security;
+revoke all on public.site_coordinator_changes from public,anon,authenticated,service_role;
+
 -- ---------------------------------------------------------------------------
 -- §4. The recompute: every person's capabilities become the mirror.
 
 update public.people set capabilities=capabilities;
+
+-- ---------------------------------------------------------------------------
+-- §5. Site coordinators, the workspace admin check and clearance (design D2,
+-- D4, D6).
+
+-- Whether the person is a site coordinator of the workspace: their account
+-- there is active and marked. The season, the roster and roles don't matter.
+create function vitally_private.is_site_coordinator(p_workspace_id uuid,p_person_id uuid)
+returns boolean language sql stable security definer set search_path='' as $$
+ select exists(select 1 from public.accounts a
+  where a.workspace_id=p_workspace_id and a.person_id=p_person_id
+   and a.status='active' and a.is_site_coordinator);
+$$;
+revoke all on function vitally_private.is_site_coordinator(uuid,uuid) from public,anon,authenticated,service_role;
+
+-- The roster command's grant (design D4): marks the active staff account of a
+-- user as site coordinator. Idempotent: a grant to someone who already is one
+-- changes nothing and records nothing. A real change raises the account's
+-- revision and records a grant with no person named as its maker. VALIDATION
+-- (NO_ACTIVE_ACCOUNT) for a user with no active staff account in the
+-- workspace. It never removes.
+create function vitally_private.grant_site_coordinator(p_workspace_id uuid,p_user_id uuid)
+returns void language plpgsql security definer set search_path='' as $$
+declare v_account public.accounts;
+begin
+ select a.* into v_account from public.accounts a
+  join public.memberships m on m.workspace_id=a.workspace_id and m.user_id=a.user_id
+  where a.workspace_id=p_workspace_id and a.user_id=p_user_id
+   and a.status='active' and a.person_id is not null and m.active and m.access='staff'
+  for update of a;
+ if v_account.user_id is null then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='NO_ACTIVE_ACCOUNT';
+ end if;
+ if v_account.is_site_coordinator then
+  return;
+ end if;
+ update public.accounts set is_site_coordinator=true,revision=revision+1,updated_at=now()
+  where workspace_id=p_workspace_id and user_id=p_user_id;
+ insert into public.site_coordinator_changes(workspace_id,person_id,granted,changed_by_person_id)
+  values(p_workspace_id,v_account.person_id,true,null);
+end;
+$$;
+revoke all on function vitally_private.grant_site_coordinator(uuid,uuid) from public,anon,authenticated,service_role;
+
+-- From 044, with a new body (design D2): a workspace admin is the caller with
+-- an active staff membership and either the Admin role this season (`admin`
+-- in the people.capabilities mirror) or an active site coordinator account.
+-- No clearance check: an uncleared admin still reaches the Roster.
+create or replace function vitally_policy.is_workspace_admin(p_workspace_id uuid)
+returns boolean language sql stable security definer set search_path='' as $$
+ select exists(select 1 from public.memberships m
+  join public.people p on p.workspace_id=m.workspace_id and p.user_id=m.user_id
+  where m.workspace_id=p_workspace_id and m.user_id=(select auth.uid()) and m.active and m.access='staff'
+   and ('admin'=any(p.capabilities) -- 052
+    or exists(select 1 from public.accounts a -- 052
+     where a.workspace_id=m.workspace_id and a.user_id=m.user_id -- 052
+      and a.status='active' and a.is_site_coordinator))); -- 052
+$$;
+revoke all on function vitally_policy.is_workspace_admin(uuid) from public,anon,authenticated,service_role;
+grant execute on function vitally_policy.is_workspace_admin(uuid) to authenticated;
+
+-- From 047, with one change (design D6): a site coordinator also needs the SC
+-- certificate confirmed this season.
+create or replace function vitally_private.cleared(p_workspace_id uuid,p_person_id uuid)
+returns boolean language sql stable security definer set search_path='' as $$
+ select coalesce((
+  select cardinality(r.roles)>0 and (not r.is_new or r.photo_id_checked_at is not null)
+   and (not vitally_private.is_site_coordinator(w.id,r.person_id) -- 052
+    or 'sc'=any(vitally_private.confirmed_certificates(w.id,r.person_id,r.season))) -- 052
+   from public.workspaces w
+   join public.roster_entries r on r.workspace_id=w.id and r.season=w.current_season
+   where w.id=p_workspace_id and r.person_id=p_person_id),false)
+  and exists(select 1 from public.accounts a
+   where a.workspace_id=p_workspace_id and a.person_id=p_person_id and a.status='active');
+$$;
+revoke all on function vitally_private.cleared(uuid,uuid) from public,anon,authenticated,service_role;
+
+-- From 047, with three changes (design D2, D6): `isAdmin` is the workspace
+-- admin check, `isSiteCoordinator` is new, and a site coordinator with a
+-- current-season entry and no confirmed SC has the SC item after the role
+-- items.
+create or replace function public.vitally_my_clearance()
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_entry public.roster_entries;
+ v_held text[];
+ v_missing jsonb='[]'::jsonb;
+ v_role text;
+ v_lacks text[];
+ v_coordinator text;
+ v_site_coordinator boolean; -- 052
+begin
+ v_member=vitally_private.require_membership();
+ if v_member.access<>'staff' then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ select * into v_person from public.people
+  where workspace_id=v_member.workspace_id and user_id=v_member.user_id;
+ if v_person.id is null then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ v_site_coordinator=vitally_private.is_site_coordinator(v_person.workspace_id,v_person.id); -- 052
+ select r.* into v_entry from public.roster_entries r
+  join public.workspaces w on w.id=r.workspace_id and w.current_season=r.season
+  where r.workspace_id=v_person.workspace_id and r.person_id=v_person.id;
+ if v_entry.person_id is null or cardinality(v_entry.roles)=0 then
+  v_missing=v_missing||jsonb_build_array(jsonb_build_object('kind','form13615'));
+ end if;
+ if v_entry.person_id is not null and v_entry.is_new and v_entry.photo_id_checked_at is null then
+  v_missing=v_missing||jsonb_build_array(jsonb_build_object('kind','photoId'));
+ end if;
+ if v_entry.person_id is not null then
+  v_held=vitally_private.confirmed_certificates(v_entry.workspace_id,v_entry.person_id,v_entry.season);
+  foreach v_role in array v_entry.roles loop
+   v_lacks=vitally_private.missing_certificates(v_role,v_held);
+   if cardinality(v_lacks)>0 then
+    v_missing=v_missing||jsonb_build_array(jsonb_build_object('kind','role','role',v_role,'certificates',to_jsonb(v_lacks)));
+   end if;
+  end loop;
+  if v_site_coordinator and not ('sc'=any(v_held)) then -- 052
+   v_missing=v_missing||jsonb_build_array(jsonb_build_object('kind','siteCoordinator','certificates',jsonb_build_array('SC'))); -- 052
+  end if; -- 052
+ end if;
+ select d.name into v_coordinator from public.workspaces w
+  join public.people d on d.workspace_id=w.id and d.id=w.default_followup_person_id
+  where w.id=v_person.workspace_id;
+ return jsonb_build_object(
+  'cleared',vitally_private.cleared(v_person.workspace_id,v_person.id),
+  'missing',v_missing,
+  'capabilities',to_jsonb(vitally_private.effective_capabilities(v_person.workspace_id,v_person.id)),
+  'isAdmin',vitally_policy.is_workspace_admin(v_person.workspace_id), -- 052
+  'isSiteCoordinator',v_site_coordinator, -- 052
+  'siteCoordinatorName',to_jsonb(v_coordinator),
+  'siteCheck',exists(select 1 from public.accounts a where a.workspace_id=v_person.workspace_id and a.user_id=v_member.user_id and a.status='invited'));
+end;
+$$;
+revoke all on function public.vitally_my_clearance() from public,anon,authenticated,service_role;
+grant execute on function public.vitally_my_clearance() to authenticated;
