@@ -901,10 +901,32 @@ privileged test cleanup against the classroom project.**
 2. **Apply the migrations:**
 
    ```sh
-   "$VITALLY_NODE" --env-file=.env.admin tools/admin/migrate.mjs --target classroom
+   NODE_EXTRA_CA_CERTS="$HOME/.vitally/supabase-ca.crt" \
+     "$VITALLY_NODE" --env-file=.env.admin tools/admin/migrate.mjs --target classroom
    ```
 
-   Expected output: `Approved classroom migrations applied.`
+   Expected output: `Approved classroom migrations applied.` It applies only the files not yet
+   recorded, in one transaction, and never runs the seed. To see which are applied, run
+   `select name from vitally_private.schema_migrations order by name;` in the SQL editor
+   (`supabase migration list` does not show them).
+
+   **The database certificate.** The admin tools verify the database's TLS certificate, and the
+   Supabase database certificate is signed by Supabase's own root certificate, which Node does not
+   trust by default. Without it every classroom command fails with `CONNECTION_FAILED`
+   (underneath, `SELF_SIGNED_CERT_IN_CHAIN`). Download it once from the Supabase dashboard:
+   the SSL Configuration section of the Database Settings page → Download certificate. Save it outside the
+   repository, for example as `~/.vitally/supabase-ca.crt`, and set `NODE_EXTRA_CA_CERTS` to
+   that path for every classroom command, including the roster command in step 4. Never turn
+   verification off instead. If Node prints `Ignoring extra certs from …`, the path is wrong.
+   In Windows PowerShell, set the variable first, then run the same command without the prefix:
+
+   ```powershell
+   $env:NODE_EXTRA_CA_CERTS = "$HOME\.vitally\supabase-ca.crt"
+   node --env-file=.env.admin tools/admin/migrate.mjs --target classroom
+   ```
+
+   The variable lasts for that PowerShell window only. Use the same Node as the command above (the
+   repository needs 24.21 or later; check with `node --version`), or a Windows failure can look unrelated.
 3. **Configure Auth in the Supabase dashboard:**
    - Custom SMTP (Authentication → Emails → SMTP Settings). Gmail: host `smtp.gmail.com`, port
      465, the full address as username and sender, and a Google *app password* (which requires
@@ -920,7 +942,8 @@ privileged test cleanup against the classroom project.**
    one approved test-client address, send that client one real code, and only then add the class:
 
    ```sh
-   "$VITALLY_NODE" --env-file=.env.admin tools/admin/roster.mjs \
+   NODE_EXTRA_CA_CERTS="$HOME/.vitally/supabase-ca.crt" \
+     "$VITALLY_NODE" --env-file=.env.admin tools/admin/roster.mjs \
      --target classroom --roster .vitally-roster.json
    ```
 
