@@ -16,6 +16,7 @@ import { decorateStaffCase, renderStaffCase } from "../src/staff-views.mjs";
 import { makeSampleAnswers } from "../src/sample-data.mjs";
 import { CONTACT_FIELDS } from "../src/intake-catalogue.mjs";
 import { staffScreen, dialog } from "../src/views.mjs";
+import { DIALOG_CAPABILITY } from "../src/role-gates.mjs";
 import { payloadFor } from "../src/case-actions.mjs";
 import { describeStage } from "../src/domain.mjs";
 import { nowInput } from "../src/contact-log.mjs";
@@ -1648,3 +1649,88 @@ test("the office's Exit Form panel after Return to signing carries the note", ()
   );
   assert.doesNotMatch(html, /filled from the reviewer's answers/);
 });
+
+test("a close dialog for someone who lost admin keeps the reason and drops the submit (#190)", () => {
+  const state = {
+    dialog: "close-case",
+    savedCase: officeCase(),
+    principal: { access: "staff", personId: "p-lee" },
+    people: [{ id: "p-lee", name: "Lee", capabilities: ["prepare"] }],
+  };
+  const html = closeCaseDialogBody(state);
+  assert.doesNotMatch(html, /CLOSE_CASE/);
+  assert.match(html, /Your roles changed, so you can&#39;t send this any more\./);
+  assert.match(html, /Why the office is closing this case/);
+  assert.match(html, /Keep it open/);
+  assert.match(closeCaseDialogBody({ ...state, people: [{ id: "p-lee", name: "Lee", capabilities: ["admin"] }] }), /CLOSE_CASE/);
+});
+
+test("a volunteer with no capabilities still sees the drawer's Save (#190)", () => {
+  const html = dialog({
+    dialog: "volunteer",
+    principal: { access: "staff", personId: "p-lee" },
+    people: [{ id: "p-lee", name: "Lee", capabilities: [] }],
+    volunteers: [],
+    dialogContext: {},
+  });
+  assert.match(html, /Add a volunteer/);
+  assert.match(html, /type="submit"/);
+  assert.doesNotMatch(html, /roles changed/);
+});
+
+test("Add a case stays for a staff person who lost admin, with its writes dropped (#190)", () => {
+  const html = staffScreen({
+    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "alex", clearance: cleared({ isAdmin: false }) },
+    people: PEOPLE,
+    cases: [],
+    assistance: [],
+    savedCase: null,
+    screen: "office-add-case",
+    officeDraft: {},
+    draftAnswers: { tp_first_name: "Lena" },
+    openPanels: [],
+    busy: false,
+    error: null,
+    retryable: false,
+  });
+  assert.match(html, /add-case-v2/);
+  assert.match(html, /id="add-case-cancel"/);
+  assert.doesNotMatch(html, /save-office-draft|send-office-draft/);
+  // They no longer have Follow-ups: the way back is the work board, and nothing is left to confirm.
+  assert.match(html, /Back to the work board/);
+  assert.doesNotMatch(html, /Back to Follow-ups|OFFICE · ADD A CASE/);
+  assert.doesNotMatch(html, /field-confirmed|I have checked these answers/);
+  assert.match(html, /Your roles changed, so you can&#39;t send this any more\./);
+});
+
+// Every capability dialog, through dialog(): the locked flag reaches each body (#190).
+const LINE = /Your roles changed, so you can&#39;t send this any more\./;
+const dialogState = (key, capabilities) => {
+  const record = officeCase({
+    id: "c1",
+    followups: [{ id: "f1", status: "open", reason: "Ask for the missing W-2", assigneeId: "p-lee", assigneeName: "Lee" }],
+  });
+  return {
+    dialog: key,
+    principal: { access: "staff", personId: "p-lee" },
+    people: [{ id: "p-lee", name: "Lee", capabilities }],
+    savedCase: record,
+    cases: [record],
+    volunteers: [],
+    assistance: [
+      { id: "h1", title: "Help reading a letter", status: "assigned", assigneeId: "p-lee", language: "English", contactPreference: "Phone" },
+    ],
+    dialogContext: { caseId: "c1", itemId: "h1", slot: "preparer" },
+    busy: false,
+    error: null,
+    retryable: false,
+  };
+};
+
+for (const [key, needed] of Object.entries(DIALOG_CAPABILITY)) {
+  test(`the ${key} dialog drops its submit without ${needed}, and keeps it with ${needed} (#190)`, () => {
+    const other = ["admin", "followup", "assist", "review"].find((cap) => cap !== needed);
+    assert.match(dialog(dialogState(key, [other])), LINE);
+    assert.doesNotMatch(dialog(dialogState(key, [needed])), LINE);
+  });
+}

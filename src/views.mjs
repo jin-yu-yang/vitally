@@ -28,6 +28,7 @@ import {
   resolveHelpDrawerBody,
   closeUnsignedDialogBody,
 } from "./office-views.mjs";
+import { addCaseLocked, dialogLocked } from "./role-gates.mjs";
 import { renderCasePool } from "./pool-views.mjs";
 import {
   renderRoster,
@@ -380,7 +381,12 @@ export function staffScreen(state) {
   // A volunteer whose window was left on an office screen gets the work board.
   // Post an update follows the ceiling only, as the controller does.
   const allowed = (name) =>
-    name === "office-updates" ? volunteers : office || (name === "office-volunteers" && volunteers);
+    name === "office-updates"
+      ? volunteers
+      : // Add a case stays for a staff person who lost admin: its submits drop instead.
+        office ||
+        (name === "office-volunteers" && volunteers) ||
+        (name === "office-add-case" && state.principal?.access === "staff");
   const screen =
     OFFICE_SCREENS.includes(state.screen) && !allowed(state.screen) ? "staff" : state.screen;
   const main = (() => {
@@ -432,10 +438,10 @@ export function staffScreen(state) {
     }
     if (screen === "office-add-case")
       return frame(
-        "OFFICE · ADD A CASE",
+        office ? "OFFICE · ADD A CASE" : "ADD A CASE",
         "Add a case",
         "Enter a walk-in client's answers yourself. The case has no client account: the office owns it.",
-        "Back to Follow-ups",
+        office ? "Back to Follow-ups" : "Back to the work board",
         addCasePage(state, person, people),
       );
     // Past the setup screen above, so cleared: the Workload follows the effective admin.
@@ -527,6 +533,7 @@ function addCasePage(state, person, people) {
     retryable: state.retryable,
     people,
     demoTools: state.demoTools === true,
+    locked: addCaseLocked(state),
   });
 }
 
@@ -655,7 +662,7 @@ export function dialog(state) {
   }
   if (state.dialog === "close-unsigned") {
     title = "Close unsigned cases?";
-    body = closeUnsignedDialogBody({ cases: state.cases ?? [], now: Date.now() });
+    body = closeUnsignedDialogBody({ ...state, cases: state.cases ?? [], now: Date.now() });
   }
   if (state.dialog === "request-corrections") {
     title = "Ask the preparer for corrections";
@@ -683,7 +690,13 @@ export function dialog(state) {
   } else if (DRAWERS.includes(state.dialog)) {
     const people = state.people ?? [];
     const person = people.find((entry) => entry.id === state.principal?.personId) ?? null;
-    const ui = { busy: state.busy, error: state.error, retryable: state.retryable, now: Date.now() };
+    const ui = {
+      busy: state.busy,
+      error: state.error,
+      retryable: state.retryable,
+      now: Date.now(),
+      locked: dialogLocked(state),
+    };
     // Before log-call: the last branch below assumes resolve-help.
     if (state.dialog === "assign") {
       const context = state.dialogContext ?? {};

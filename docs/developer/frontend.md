@@ -84,7 +84,8 @@ Dependency rules that keep the pieces testable:
    publishable key from the config.
 4. It creates `auth` ([`auth.mjs`](../../src/auth.mjs)), `store`
    ([`supabase-store.mjs`](../../src/supabase-store.mjs)) and the controller, passing `render`,
-   `window.sessionStorage` and `window` (for online/focus events).
+   `window.sessionStorage` and `window` (for online/focus events) and `document` (for `visibilitychange`, which wakes a hidden tab
+   when it becomes visible).
 5. The controller restores the session, reads the membership, loads the right data, subscribes
    to Realtime, and renders.
 

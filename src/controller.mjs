@@ -279,6 +279,8 @@ export function createController({
   render,
   sessionStorage,
   windowEvents = globalThis,
+  // The document, for visibilitychange (a tab that becomes visible is a wake).
+  documentEvents = globalThis.document,
   clock = () => Date.now(),
   newActionId = () => crypto.randomUUID(),
   cooldownSeconds = 65,
@@ -640,7 +642,9 @@ export function createController({
     localRetry = null;
   }
 
-  function noteFailure(error, { message } = {}) {
+  // `clearanceRead`: the failure is the clearance read's own, which never
+  // starts a re-check (no loop).
+  function noteFailure(error, { message, clearanceRead = false } = {}) {
     dropLocalRetry();
     state.errorCount += 1;
     // Not cleared (any action, change add-volunteer-clearance): the setup
@@ -660,6 +664,16 @@ export function createController({
     // A newer error replaces a shaded save's "Saved".
     state.shadedStatus = null;
     if (error?.code === "OFFLINE") state.connection = "offline";
+    // A refusal for a role or clearance reason may mean the roster changed
+    // under this cleared window (#190): re-read it. A refusal of the read
+    // itself starts none.
+    if (
+      !clearanceRead &&
+      staffWindow() &&
+      !awaitingClearance(state) &&
+      (error?.code === "FORBIDDEN" || error?.code === "INELIGIBLE")
+    )
+      void recheckAfterRefusal();
   }
 
   // One error at a time (design D2): a newer error replaces a failed save's.
@@ -679,9 +693,9 @@ export function createController({
     return controllerError(code, message);
   }
 
-  function noteLocalFailure(error, retry = null) {
+  function noteLocalFailure(error, retry = null, { clearanceRead = false } = {}) {
     replaceFailedSave();
-    noteFailure(error ?? {}, { message: error?.message ?? "Something went wrong." });
+    noteFailure(error ?? {}, { message: error?.message ?? "Something went wrong.", clearanceRead });
     setLocalRetry(retry);
     show();
   }
@@ -874,7 +888,22 @@ export function createController({
   // The public re-fetch: the list plus whatever case is open. Used by the
   // reconnect, the window focus and the online event alike, because a
   // subscription is never the only way back.
-  async function refresh() {
+  // A wake refresh that starts while another is in flight joins it: focus and
+  // visibilitychange come together when a tab returns. The refresh after an
+  // action neither joins nor is joined. Signing out forgets it (forgetUser).
+  let wakeRefresh = null;
+  function refresh({ wake = false } = {}) {
+    if (!wake) return runRefresh({ wake });
+    if (!wakeRefresh) {
+      const run = runRefresh({ wake }).finally(() => {
+        if (wakeRefresh === run) wakeRefresh = null;
+      });
+      wakeRefresh = run;
+    }
+    return wakeRefresh;
+  }
+
+  async function runRefresh({ wake = false } = {}) {
     // Without a principal there is nothing to re-read, but there may still be
     // an identity to establish: a visitor whose session could not be read, or
     // who is signed in and could not be identified, gets another attempt here.
@@ -891,6 +920,19 @@ export function createController({
       // window has no realtime channel).
       if (awaitingClearance(state) && state.screen === "office-updates") await loadPostedUpdates();
       return;
+    }
+    // A wake event re-reads the clearance first: role changes never come
+    // through realtime. A failed check leaves the window cleared, so the
+    // refresh goes on; a check that finds no clearance has already dropped the
+    // work and redrawn the setup screen.
+    if (wake) {
+      const asked = state.principal.userId;
+      const wasStaff = staffWindow();
+      await checkClearance();
+      // Signed out, or another user signed in, while the check was out.
+      if (!state.principal || state.principal.userId !== asked) return;
+      if (staffWindow() !== wasStaff) return;
+      if (awaitingClearance(state)) return;
     }
     // The feed never blocks the rest, and never fails the refresh.
     await readFeed();
@@ -979,13 +1021,16 @@ export function createController({
 
   // ---- start / stop ------------------------------------------------------
 
-  const onWake = () => refresh();
+  const onWake = () => refresh({ wake: true });
+  const onVisible = () =>
+    documentEvents?.visibilityState === "visible" ? refresh({ wake: true }) : undefined;
 
   function listen() {
     if (listening) return;
     listening = true;
     windowEvents?.addEventListener?.("focus", onWake);
     windowEvents?.addEventListener?.("online", onWake);
+    documentEvents?.addEventListener?.("visibilitychange", onVisible);
   }
 
   function unlisten() {
@@ -993,6 +1038,7 @@ export function createController({
     listening = false;
     windowEvents?.removeEventListener?.("focus", onWake);
     windowEvents?.removeEventListener?.("online", onWake);
+    documentEvents?.removeEventListener?.("visibilitychange", onVisible);
   }
 
   function subscribe() {
@@ -1005,7 +1051,7 @@ export function createController({
         show();
         // Reconnecting means the browser may have missed changes entirely.
         if (status === "online" && previous !== "online" && previous !== "unknown")
-          refresh();
+          refresh({ wake: true });
       },
     });
   }
@@ -1813,6 +1859,17 @@ export function createController({
     return clearanceCheck;
   }
 
+  // The same effective capabilities (as a set) and the same ceiling flag.
+  const sameStanding = (before, after) => {
+    const had = new Set(before?.capabilities ?? []);
+    const has = new Set(after?.capabilities ?? []);
+    return (
+      had.size === has.size &&
+      [...has].every((capability) => had.has(capability)) &&
+      (before?.isAdmin === true) === (after?.isAdmin === true)
+    );
+  };
+
   async function recheckClearance() {
     if (!staffWindow()) return;
     // A cancelled site check has no membership left to ask about: the screen
@@ -1823,10 +1880,10 @@ export function createController({
     let answer;
     try {
       answer = await store.getClearance();
-      if (!answer || typeof answer !== "object" || Array.isArray(answer))
+      if (!answer || typeof answer !== "object" || Array.isArray(answer) || !Array.isArray(answer.capabilities))
         throw controllerError("SERVER_ERROR", "Something went wrong.");
     } catch (error) {
-      if (same()) noteLocalFailure(error, checkClearance);
+      if (same()) noteLocalFailure(error, checkClearance, { clearanceRead: true });
       // The feed re-reads with every check, answered or not.
       await readFeed();
       if (same()) show();
@@ -1835,6 +1892,7 @@ export function createController({
     if (!same()) return;
     noteConnected();
     const was = !awaitingClearance(state);
+    const oldClearance = state.principal.clearance;
     state.principal = { ...state.principal, clearance: answer };
     // The person's own entry follows what they may do now.
     state.people = withOwnCapabilities(state.people, state.principal);
@@ -1848,6 +1906,21 @@ export function createController({
       if (!ADMIN_SETUP_SCREENS.includes(state.screen)) state.screen = homeScreen();
       // The setup screen is replaced by the work: the keyboard goes to it.
       await loadWork({ focus: true });
+      return;
+    }
+    if (now && was) {
+      // Cleared before and after: nothing to reload, and nothing to draw unless
+      // what the person may do changed. Their entry is already narrowed above.
+      if (sameStanding(oldClearance, answer)) return;
+      // All cases is Admin's; the other screens stay, and Admin coming back
+      // moves nobody.
+      let focus = false;
+      if (!answer.capabilities?.includes("admin") && state.screen === "office-cases") {
+        state.screen = homeScreen();
+        focus = true;
+      }
+      persistSession();
+      show(focus);
       return;
     }
     if (!now && was) dropWork();
@@ -1991,6 +2064,8 @@ export function createController({
     dropLocalRetry();
     // The next user's first Check again asks afresh.
     clearanceCheck = null;
+    wakeRefresh = null;
+    afterRefusal = null;
     if (state.principal) windowState.clear(state.principal.userId);
     unsubscribe();
     clearSelection();
@@ -3784,20 +3859,38 @@ export function createController({
       noteFailure(error);
     }
     show();
-    // An uncleared admin who just saved their own row may have cleared
-    // themselves (#191): ask again, so the setup screen gives way without
-    // Check again. Not awaited, so the drawer closes on the save alone.
-    if (volunteerId && volunteerId === state.principal?.personId && awaitingClearance(state))
-      void recheckAfterOwnSave();
+    // Someone who just saved their own row may have changed their own roles
+    // (#190, #191): ask again, so the setup screen gives way (or comes) and
+    // the buttons follow, without Check again. Not awaited, so the drawer
+    // closes on the save alone.
+    if (volunteerId && volunteerId === state.principal?.personId) void recheckAfterOwnSave();
     return true;
   }
 
   // A check already out (a focus, say) was asked before the save landed, so
-  // its answer may be the old one: wait for it, then ask once more if the
-  // window is still waiting. checkClearance never rejects.
+  // its answer may be the old one: wait for it, then ask once more.
+  // checkClearance never rejects.
   async function recheckAfterOwnSave() {
     if (clearanceCheck) await clearanceCheck;
-    if (awaitingClearance(state)) await checkClearance();
+    await checkClearance();
+  }
+
+  // A refused action in a cleared window: a check already out was asked
+  // before the refusal, so its answer may be the old one. Wait for it, then
+  // ask once more, still only for a cleared window of the same user. Refusals
+  // while one is waiting share it. Never rejects; never awaited.
+  let afterRefusal = null;
+  function recheckAfterRefusal() {
+    if (!clearanceCheck) return checkClearance();
+    if (afterRefusal) return afterRefusal;
+    const asked = state.principal.userId;
+    const pending = (async () => {
+      await clearanceCheck;
+      if (afterRefusal === pending) afterRefusal = null;
+      if (staffWindow() && !awaitingClearance(state) && state.principal.userId === asked) await checkClearance();
+    })();
+    afterRefusal = pending;
+    return pending;
   }
 
   // The drawer's Account section (change add-account-invitations): Create
