@@ -5,8 +5,8 @@
 
 ## 2. Invitation email text (design D3, D4, D5)
 
-- [ ] 2.1 Unit tests for `invitationEmail({ kind, siteUrl, expiresAt })` with Hailey's copy (plan Task 2): client English + 简体 with a two-language subject and the safety line, volunteer English with the roster, site check and setup lines and no SIDN value, the link, the expiry in New York time (English and Chinese formats, a date across a DST change), no six-digit run, nothing personal from the request, HTML escaping
-- [ ] 2.2 Write `supabase/functions/accounts/invitation-email.mjs` to pass them
+- [x] 2.1 Unit tests for `invitationEmail({ kind, siteUrl, expiresAt })` with Hailey's copy (plan Task 2): client English + 简体 with a two-language subject and the safety line, volunteer English with the roster, site check and setup lines and no SIDN value, the link, the expiry in New York time (English and Chinese formats, a date across a DST change), no six-digit run, nothing personal from the request, HTML escaping
+- [x] 2.2 Write `supabase/functions/accounts/invitation-email.mjs` to pass them
 
 ## 3. Senders and configuration guard (design D2, D6)
 
