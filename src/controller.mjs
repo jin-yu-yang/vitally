@@ -899,7 +899,12 @@ export function createController({
     // refresh goes on; a check that finds no clearance has already dropped the
     // work and redrawn the setup screen.
     if (wake) {
+      const asked = state.principal.userId;
+      const wasStaff = staffWindow();
       await checkClearance();
+      // Signed out, or another user signed in, while the check was out.
+      if (!state.principal || state.principal.userId !== asked) return;
+      if (staffWindow() !== wasStaff) return;
       if (awaitingClearance(state)) return;
     }
     // The feed never blocks the rest, and never fails the refresh.

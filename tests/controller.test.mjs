@@ -9575,8 +9575,11 @@ test("signing out while a wake check is out applies nothing to the next window s
   store.nextClearance = () => gate;
   const wake = events.emit("focus");
   await controller.signOut();
+  const lists = store.calls.filter((c) => c === "listCases").length;
   release({ ...UNCLEARED });
   await wake;
   assert.equal(controller.getState().principal, null);
+  assert.equal(store.calls.filter((c) => c === "listCases").length, lists, "no list read after the release");
+  assert.equal(controller.getState().error, null);
   controller.stop();
 });
