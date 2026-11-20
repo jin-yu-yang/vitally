@@ -118,7 +118,7 @@ client is active at first sign-in, or at their first read or action if they alre
 when invited (`vitally_activate_client_account`). Expiry never cancels an invitation whose
 membership is in use, and a cancellation that fails is skipped and logged instead of breaking the
 read. A volunteer stays invited until they pass the **site check**:
-they enter their name and the site's SIDN, which the roster command sets as `siteNumber`; five
+they enter their name and the site's SIDN, which a site coordinator sets on **Season settings** (052; it stays in `vitally_private.site_numbers`); five
 wrong numbers cancel the invitation. Until then they are not cleared and read no case data. The
 RPCs are `vitally_cancel_invitation`, `vitally_expire_invitations`,
 `vitally_complete_site_check` and `vitally_activate_client_account` (migration 047; design D10 to
@@ -187,28 +187,27 @@ The roster is a JSON file (a `.vitally-roster*.json` file, ignored by version co
 {
   "workspaceId": "replace-with-a-uuid",
   "staff": [
-    { "email": "site-coordinator@example.org", "name": "Sky Chen (site coordinator)", "personKey": "site_coordinator", "capabilities": ["admin", "followup", "assist", "receive_documents"] },
-    { "email": "preparer@example.org", "name": "Rowan Diaz (preparer)", "personKey": "preparer", "capabilities": ["prepare"] },
-    { "email": "reviewer@example.org", "name": "Ari Novak (reviewer)", "personKey": "reviewer", "capabilities": ["review"] },
-    { "email": "intaker@example.org", "name": "Kai Mensah (intaker)", "personKey": "intaker", "capabilities": ["receive_documents", "assist"] }
+    { "email": "site-coordinator@example.org", "name": "Sky Chen (site coordinator)", "personKey": "site_coordinator", "siteCoordinator": true },
+    { "email": "preparer@example.org", "name": "Rowan Diaz (preparer)", "personKey": "preparer" },
+    { "email": "reviewer@example.org", "name": "Ari Novak (reviewer)", "personKey": "reviewer" },
+    { "email": "intaker@example.org", "name": "Kai Mensah (intaker)", "personKey": "intaker" }
   ],
   "defaultFollowup": "site_coordinator",
-  "siteNumber": "S00000000",
   "applicants": ["client-a@example.org"]
 }
 ```
 
 | Field | Rule |
 | --- | --- |
-| `staff` | Required, at least one entry. Each entry has `email`, `name`, `personKey` and `capabilities`. `capabilities` is non-empty, from `prepare`, `review`, `admin`, `followup`, `receive_documents`, `assist`; an entry with `followup` must also have `admin` (042). `personKey` is lower-case letters, digits and underscores, and unique on the roster (the keys `alex`, `morgan` and `sam` are no longer reserved) |
-| `defaultFollowup` | Required: the `personKey` of a `staff` entry that has `followup`. It becomes the workspace's default follow-up person (who new follow-ups and withdrawal notices go to) |
-| `siteNumber` | Optional: the site's SIDN, `S` and eight digits (spaces, hyphens and case ignored). A volunteer types it at their first sign-in (the site check). Stored where no signed-in user can read it. Only a roster file kept out of the repository holds the real one; the example's `S00000000` is fictional |
+| `staff` | Required, at least one entry. Each entry has `email`, `name` and `personKey`, and optionally `siteCoordinator: true`, which makes that person a site coordinator (052). It grants and never removes: leaving it off does not demote anyone, and a site coordinator is changed on the Roster and Season settings. A person with no roles starts with no capabilities; roles come from the Roster (045) and `people.capabilities` mirrors them. `personKey` is lower-case letters, digits and underscores, and unique on the roster (the keys `alex`, `morgan` and `sam` are no longer reserved). The old `capabilities` key is accepted, ignored and reported (`capabilities is no longer used and was ignored; roles on the Roster decide what each person can do.`) |
+| `defaultFollowup` | Required: the `personKey` of a `staff` entry with `siteCoordinator: true`. It becomes the workspace's default follow-up person (who new follow-ups and withdrawal notices go to). A key that names anyone else is refused |
+| `siteNumber` | Accepted, ignored and reported since 052 (`siteNumber is no longer used and was ignored; set the SIDN on Season settings.`). The SIDN is set on Season settings by a site coordinator, one row per workspace, stored in `vitally_private.site_numbers` where no signed-in user can read it. `seed:local` sets the fictional `S00000000` when no SIDN is set |
 | `presenters` | Removed in #136. An old roster that still has it runs, and the command prints "presenters is no longer used and was ignored; those addresses get no access." A former presenter address cannot sign in; an open window shows "This account has no access" |
 
 For each staff entry the command creates the Auth account as it does for any address, then, inside
 `initializeWorkspace`'s one serializable transaction, calls `add_staff_member` (and
-`set_default_followup` once, when given). Since 044, if a volunteer with no sign-in on the Roster has the same email as the account (compared lower-case), the command links that person instead of adding a new one: it sets the key, capabilities and sign-in from the file, keeps the Roster's name, and reports each link by key (`preparer was linked to a volunteer already on the Roster.`, with a second sentence when the Roster's name was kept and differs from the file's). It never prints an address. Linking trusts an email an admin typed, so check the report. Otherwise staff are **new** people, who also get an empty Roster entry. Re-running the same roster is safe; different values for an existing key or account are
-refused, and changing a staff member's capabilities is not supported. Memberships, people and the
+`set_default_followup` once, when given). Since 044, if a volunteer with no sign-in on the Roster has the same email as the account (compared lower-case), the command links that person instead of adding a new one: it sets the key and sign-in from the file, keeps the Roster's name, and reports each link by key (`preparer was linked to a volunteer already on the Roster.`, with a second sentence when the Roster's name was kept and differs from the file's). It never prints an address. Linking trusts an email an admin typed, so check the report. Otherwise staff are **new** people, who also get an empty Roster entry. Re-running the same roster is safe; different values for an existing key or account are
+refused. `siteCoordinator: true` on an existing member grants the site coordinator role; nothing in the file removes it. Memberships, people and the
 default are atomic, but the Auth account is created first, outside the transaction: a failed run can
 leave a confirmed account with no membership, and a re-run completes it. The command never prints an
 address; a problem is reported by position, such as `staff[1].capabilities`.

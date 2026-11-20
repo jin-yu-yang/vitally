@@ -57,7 +57,8 @@ erDiagram
 - **Membership** (`public.memberships`): which workspace the account belongs to, and whether it
   is an `applicant` (a client) or `staff` (a staff member's own account).
 - **Person** (`public.people`): a staff member with capabilities. Every staff action is done as
-  the account's own person, and the database checks that person's capabilities.
+  the account's own person, and the database checks that person's capabilities, which mirror
+  their roles this season (052).
 
 There is no presenter access and there are no demonstration people (Alex, Morgan, Sam): #136
 removed them. A former presenter address cannot sign in, and a window that was open shows "This
