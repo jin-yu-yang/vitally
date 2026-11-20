@@ -47,23 +47,23 @@
 
 ## 4. Store and contracts
 
-- [ ] 4.1 Add `markUploadSent(actionId, document)`, `markUploadReviewed(actionId, volunteerId, revision, document)` and `countUploadsToReview()` to the store contract (`src/contracts.mjs`), the Supabase store (`src/supabase-store.mjs`) and any loopback or test store that implements the contract.
-- [ ] 4.2 Have `combineVolunteers` carry `form13615SentAt` and `photoIdSentAt`, and add unit tests for it.
+- [x] 4.1 Add `markUploadSent(actionId, document)`, `markUploadReviewed(actionId, volunteerId, revision, document)` and `countUploadsToReview()` to the store contract (`src/contracts.mjs`), the Supabase store (`src/supabase-store.mjs`) and any loopback or test store that implements the contract.
+- [x] 4.2 Have `combineVolunteers` carry `form13615SentAt` and `photoIdSentAt`, and add unit tests for it.
 
 ## 5. The setup screen
 
-- [ ] 5.1 Write failing unit tests for the setup items in four states: link and not sent; link and sent; no link and not sent; no link and sent. Role and SC items stay unchanged.
-- [ ] 5.2 Render Upload, the ask line, I've uploaded it and the waiting state in `src/setup-views.mjs` and `src/clearance.mjs` (design D6), using the New York short date.
-- [ ] 5.3 Add a controller action that marks the document sent (fresh action id, and the same id on a retry), re-reads the clearance and shows a refusal or failure on the setup screen. Add a unit test for it.
+- [x] 5.1 Write failing unit tests for the setup items in four states: link and not sent; link and sent; no link and not sent; no link and sent. Role and SC items stay unchanged.
+- [x] 5.2 Render Upload, the ask line, I've uploaded it and the waiting state in `src/setup-views.mjs` and `src/clearance.mjs` (design D6), using the New York short date.
+- [x] 5.3 Add a controller action that marks the document sent (fresh action id, and the same id on a retry), re-reads the clearance and shows a refusal or failure on the setup screen. Add a unit test for it.
 
 ## 6. The Roster
 
-- [ ] 6.1 Write failing unit tests for:
+- [x] 6.1 Write failing unit tests for:
   - `SHOW_VIEWS` and `filterVolunteers` with `show`, alone and with Role and search;
   - the row's "to review" text;
   - the drawer's sent lines and Mark reviewed buttons.
-- [ ] 6.2 Add the Show dropdown to the toolbar, `show` to `setVolunteerFilter`, the row text, and the drawer lines (design D7).
-- [ ] 6.3 Add a controller action for Mark reviewed:
+- [x] 6.2 Add the Show dropdown to the toolbar, `show` to `setVolunteerFilter`, the row text, and the drawer lines (design D7).
+- [x] 6.3 Add a controller action for Mark reviewed:
   - it calls the store with the drawer's revision and adopts the returned revision;
   - it keeps unsaved edits;
   - it re-reads the Roster and the count;
@@ -73,13 +73,13 @@
 
 ## 7. The sidebar count
 
-- [ ] 7.1 Write failing unit tests for the Volunteers link: "Volunteers · 3" with aria-label "Volunteers, 3 uploads to review", "Volunteers, 1 upload to review" at 1, plain at 0, and absent for a non-admin.
-- [ ] 7.2 Read the count for a workspace-admin window at each point in design D8. A failure keeps the last count. Render it in `src/views.mjs`.
-- [ ] 7.3 Grep `tests/browser.mjs` and `tests/auth-browser.mjs` for lookups of the Volunteers link by name, and fix any that the new name would break.
+- [x] 7.1 Write failing unit tests for the Volunteers link: "Volunteers · 3" with aria-label "Volunteers, 3 uploads to review", "Volunteers, 1 upload to review" at 1, plain at 0, and absent for a non-admin.
+- [x] 7.2 Read the count for a workspace-admin window at each point in design D8. A failure keeps the last count. Render it in `src/views.mjs`.
+- [x] 7.3 Grep `tests/browser.mjs` and `tests/auth-browser.mjs` for lookups of the Volunteers link by name, and fix any that the new name would break.
 
 ## 8. Browser test
 
-- [ ] 8.1 Add a separate top-level `test(...)` in `tests/browser.mjs` beside "A site coordinator changes Season settings" (not in the story). The flow:
+- [x] 8.1 Add a separate top-level `test(...)` in `tests/browser.mjs` beside "A site coordinator changes Season settings" (not in the story). The flow:
   1. A not-new, uncleared volunteer sees Upload (the link is set first) and presses I've uploaded it, and sees "Waiting for review".
   2. The admin's sidebar shows "Volunteers · 1", and Show → Uploads to review lists the volunteer.
   3. The admin ticks certificates and a role and saves.
@@ -91,5 +91,5 @@
 
 ## 9. Checks and docs
 
-- [ ] 9.1 Run `npm test`, `npx openspec validate --all` and `npm run build:hant -- --check` (expected unchanged: staff text only). Run `npm run build:intake` and confirm it leaves nothing to commit.
-- [ ] 9.2 Update the developer docs that list RPCs or migrations (`docs/developer/`), if they name 052's functions. Add the hosted step to the PR body draft: `node --env-file=.env.admin tools/admin/migrate.mjs --target classroom` with `NODE_EXTRA_CA_CERTS`, the same day as the merge. Add "Refs #193 (item 7 done)".
+- [x] 9.1 Run `npm test`, `npx openspec validate --all` and `npm run build:hant -- --check` (expected unchanged: staff text only). Run `npm run build:intake` and confirm it leaves nothing to commit.
+- [x] 9.2 Update the developer docs that list RPCs or migrations (`docs/developer/`), if they name 052's functions. Add the hosted step to the PR body draft: `node --env-file=.env.admin tools/admin/migrate.mjs --target classroom` with `NODE_EXTRA_CA_CERTS`, the same day as the merge. Add "Refs #193 (item 7 done)".
