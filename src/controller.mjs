@@ -488,6 +488,8 @@ export function createController({
   // The Roster save whose outcome is unknown, likewise the very request sent
   // (`saveVolunteer`). Window memory only: a reload starts without it.
   let pendingVolunteerSave = null;
+  // An upload send whose answer never came (change add-clearance-uploads).
+  let pendingUploadSend = null;
   // An account action whose answer never came, kept with the revision it was
   // sent at, so pressing the same button again sends the same action id.
   let pendingAccountAction = null;
@@ -2296,6 +2298,7 @@ export function createController({
     state.volunteerTab = "roster";
     state.workload = freshWorkloadView();
     pendingVolunteerSave = null;
+    pendingUploadSend = null;
     pendingAccountAction = null;
     pendingInviteAction = null;
     state.updates = [];
@@ -3991,6 +3994,40 @@ export function createController({
   // instead of a second save (which an Add's own email would refuse). It skips
   // the window's checks, which the re-read list may now fail on the save's own
   // result. Changed values are a new save, with a new action id.
+  // "I've uploaded it" on the setup screen (change add-clearance-uploads,
+  // design D6). A send whose answer never came may have landed, so, as
+  // saveVolunteer does, pressing it again for the same document sends the same
+  // action id and the stored receipt answers. Refusals are said on the screen.
+  const UPLOAD_REFUSALS = Object.freeze({
+    PHOTO_ID_NOT_NEEDED: "Your photo ID doesn't need sending any more.",
+    NO_ROSTER_ENTRY: "You're not on this season's roster yet. Ask your site coordinator.",
+  });
+  async function markUploadSent(document) {
+    if (state.busy || !staffWindow()) return false;
+    const request =
+      pendingUploadSend?.request.document === document
+        ? pendingUploadSend.request
+        : { actionId: newActionId(), document };
+    pendingUploadSend = null;
+    state.busy = true;
+    state.error = null;
+    show();
+    try {
+      await store.markUploadSent(request);
+    } catch (error) {
+      state.busy = false;
+      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingUploadSend = { request };
+      const known = error?.code === "VALIDATION" ? UPLOAD_REFUSALS[error?.cause?.message] : null;
+      noteFailure(error, { message: known ?? (error?.code === "OFFLINE" ? undefined : "Something went wrong.") });
+      show();
+      return false;
+    }
+    state.busy = false;
+    await checkClearance();
+    show();
+    return true;
+  }
+
   async function saveVolunteer(values) {
     if (state.busy) return false;
     const volunteerId = state.dialogContext?.volunteerId ?? null;
@@ -4687,6 +4724,7 @@ export function createController({
     cancelShadedReview,
     retryLast,
     checkClearance,
+    markUploadSent,
     navigate,
     togglePanel,
     setLookup,

@@ -10419,3 +10419,93 @@ test("season settings: another refusal is the window's own error, and the page r
   assert.equal(settingsReads(store), 2);
   controller.stop();
 });
+
+// ---------------------------------------------------------------------------
+// Setup screen uploads (change add-clearance-uploads, design D6)
+// ---------------------------------------------------------------------------
+
+const uploadStore = () => {
+  const store = staffStore({ clearance: { ...UNCLEARED_VOLUNTEER, uploadUrl: null } });
+  store.sends = [];
+  store.failSend = null;
+  store.markUploadSent = async (request) => {
+    store.calls.push("markUploadSent");
+    store.sends.push(request);
+    if (store.failSend) {
+      const error = store.failSend;
+      store.failSend = null;
+      throw error;
+    }
+    return { actionId: request.actionId, document: request.document, sentAt: "2026-11-20T15:00:00Z" };
+  };
+  return store;
+};
+
+test("markUploadSent sends and re-checks the clearance", async () => {
+  const store = uploadStore();
+  const { controller } = build({ store, newActionId: () => "action-up" });
+  await controller.start();
+  const before = callCount(store, "getClearance");
+  await controller.markUploadSent("form13615");
+  assert.deepEqual(store.sends, [{ document: "form13615", actionId: "action-up" }]);
+  assert.equal(callCount(store, "getClearance"), before + 1);
+  assert.equal(controller.getState().busy, false);
+  assert.equal(controller.getState().error, null);
+  controller.stop();
+});
+
+test("markUploadSent retries a lost send with the same action id", async () => {
+  const store = uploadStore();
+  let next = 0;
+  const { controller } = build({ store, newActionId: () => `action-${(next += 1)}` });
+  await controller.start();
+  store.failSend = domainError("OFFLINE");
+  await controller.markUploadSent("form13615");
+  await controller.markUploadSent("form13615");
+  assert.equal(store.sends.length, 2);
+  assert.equal(store.sends[1].actionId, store.sends[0].actionId);
+  // A send that was answered is not repeated: the next press is new.
+  await controller.markUploadSent("form13615");
+  assert.notEqual(store.sends[2].actionId, store.sends[0].actionId);
+  controller.stop();
+});
+
+test("markUploadSent says a refusal in plain words", async () => {
+  const store = uploadStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.failSend = Object.assign(domainError("VALIDATION"), { cause: { message: "PHOTO_ID_NOT_NEEDED" } });
+  await controller.markUploadSent("photoId");
+  assert.equal(controller.getState().error.message, "Your photo ID doesn't need sending any more.");
+  assert.equal(controller.getState().busy, false);
+  store.failSend = Object.assign(domainError("VALIDATION"), { cause: { message: "NO_ROSTER_ENTRY" } });
+  await controller.markUploadSent("form13615");
+  assert.equal(
+    controller.getState().error.message,
+    "You're not on this season's roster yet. Ask your site coordinator.",
+  );
+  store.failSend = domainError("SERVER_ERROR");
+  await controller.markUploadSent("form13615");
+  assert.equal(controller.getState().error.message, "Something went wrong.");
+  controller.stop();
+});
+
+test("markUploadSent: busy blocks a second press", async () => {
+  const store = uploadStore();
+  const { controller } = build({ store });
+  await controller.start();
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  const send = store.markUploadSent;
+  store.markUploadSent = async (request) => {
+    await gate;
+    return send(request);
+  };
+  const first = controller.markUploadSent("form13615");
+  assert.equal(controller.getState().busy, true);
+  assert.equal(await controller.markUploadSent("form13615"), false);
+  release();
+  await first;
+  assert.equal(store.sends.length, 1);
+  controller.stop();
+});

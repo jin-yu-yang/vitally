@@ -56,7 +56,7 @@ test("the setup screen for an unchecked photo ID says so", () => {
 });
 
 test("with no site coordinator name the setup screen leaves the Ask line out", () => {
-  const html = setupScreen(staffState({ siteCoordinatorName: null }));
+  const html = setupScreen(staffState({ siteCoordinatorName: null, uploadUrl: "https://example.org/certificates" }));
   assert.doesNotMatch(html, /Ask /);
   assert.doesNotMatch(html, /site coordinator/);
   assert.match(html, /data-action="check-clearance"/);
@@ -161,4 +161,70 @@ test("a staff window with siteCheck shows the site check instead of the setup sc
   assert.match(cancelled, /data-action="sign-out"/);
   // Without siteCheck: the setup screen as before.
   assert.match(staffScreen(staffState({ siteCheck: false })), /Finish your setup for this season/);
+});
+
+// Uploads (change add-clearance-uploads, design D6).
+const URL13615 = "https://example.org/certificates";
+const withItem = (sentAt, uploadUrl = URL13615) =>
+  setupScreen(staffState({ missing: [{ kind: "form13615", sentAt }], uploadUrl }));
+
+test("setup uploads: offers Upload and I've uploaded it", () => {
+  const html = withItem(null);
+  assert.match(html, /<a [^>]*href="https:\/\/example\.org\/certificates"/);
+  assert.match(html, /<a [^>]*target="_blank"/);
+  assert.match(html, /<a [^>]*rel="noopener"/);
+  assert.match(html, />Upload<\/a>/);
+  assert.match(html, /data-action="mark-upload-sent"\s+data-document="form13615"[^>]*>I've uploaded it</);
+});
+
+test("setup uploads: shows the waiting state once sent", () => {
+  const html = withItem("2026-11-20T15:00:00Z");
+  assert.match(html, /Waiting for review · sent Nov 20/);
+  assert.doesNotMatch(html, /mark-upload-sent/);
+  assert.match(html, />Upload<\/a>/);
+});
+
+test("setup uploads: asks the site coordinator with no link", () => {
+  const html = withItem(null, null);
+  assert.match(html, /Ask your site coordinator how to send it\./);
+  assert.doesNotMatch(html, /<a /);
+  assert.match(html, /mark-upload-sent/);
+});
+
+test("setup uploads: no link and sent", () => {
+  const html = withItem("2026-11-20T15:00:00Z", null);
+  assert.match(html, /Ask your site coordinator how to send it\./);
+  assert.match(html, /Waiting for review · sent Nov 20/);
+  assert.doesNotMatch(html, /mark-upload-sent/);
+});
+
+test("setup uploads: shows the New York day", () => {
+  assert.match(withItem("2026-11-21T03:30:00Z"), /sent Nov 20/);
+});
+
+test("setup uploads: escapes the upload link", () => {
+  const html = withItem(null, 'https://example.org/a?x=1&y="2"');
+  assert.ok(html.includes('href="https://example.org/a?x=1&amp;y=&quot;2&quot;"'));
+});
+
+test("setup uploads: disables the button while busy", () => {
+  const state = staffState({ missing: [{ kind: "photoId", sentAt: null }], uploadUrl: null });
+  state.busy = true;
+  const html = setupScreen(state);
+  assert.match(html, /data-document="photoId"[^>]*disabled/);
+});
+
+test("setup uploads: role and SC items are unchanged", () => {
+  const html = setupScreen(
+    staffState({
+      missing: [
+        { kind: "role", role: "preparer", certificates: ["VSC", "Basic"] },
+        { kind: "siteCoordinator" },
+      ],
+      uploadUrl: URL13615,
+    }),
+  );
+  assert.match(html, /Preparer needs VSC and Basic\./);
+  assert.match(html, /Site coordinators need the SC certificate\./);
+  assert.doesNotMatch(html, /mark-upload-sent|Upload<\/a>/);
 });

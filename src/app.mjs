@@ -2685,6 +2685,9 @@ if (!config) {
       case "check-clearance":
         await controller.checkClearance();
         break;
+      case "mark-upload-sent":
+        await controller.markUploadSent(target.dataset.document);
+        break;
       case "dismiss-error":
         controller.dismissError();
         break;
