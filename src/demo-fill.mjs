@@ -90,6 +90,19 @@ export function demoValues(now = Date.now()) {
   });
 }
 
+/**
+ * What the Return to signing dialog is filled with: the confirmation, and one
+ * Exit Form group (Federal first, else State) for a return that still has its
+ * method to choose. The rest is left empty, as the dialog's values are optional.
+ */
+export function returnToSigningDemoValues(values, prefix) {
+  const out = { confirmed: values.confirmed };
+  if (prefix === null) return out;
+  for (const [name, value] of Object.entries(values))
+    if (name.startsWith(`${prefix}.`)) out[name] = value;
+  return out;
+}
+
 // A choice the form already draws with a default (the signing method from the
 // client's service) keeps it: the form knows better than a fixed value.
 const KEEP_IF_CHOSEN = Object.freeze(["signMethod"]);
@@ -102,7 +115,13 @@ const KEEP_IF_CHOSEN = Object.freeze(["signMethod"]);
 export function fillForm(button, now = Date.now()) {
   const scope = button?.closest("form, .modal, [role=dialog]");
   if (!scope) return 0;
-  const values = demoValues(now);
+  let values = demoValues(now);
+  if (scope.querySelector('[id^="field-return-to-signing-"]')) {
+    const open = ["federal", "state"].find((prefix) =>
+      scope.querySelector(`input[type="radio"][name="${prefix}.method"]`),
+    );
+    values = returnToSigningDemoValues(values, open ?? null);
+  }
   const changed = [];
   for (const field of scope.querySelectorAll("input[name], select[name], textarea[name]")) {
     if (!Object.hasOwn(values, field.name) || field.disabled) continue;

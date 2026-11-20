@@ -43,7 +43,9 @@ import {
   logContactForm,
   taskContacts,
   filingPanel,
+  exitGroup,
 } from "./staff-views.mjs";
+import { LOCAL_TYPES } from "./questionnaires.mjs";
 import { dialogLocked, rolesChangedLine } from "./role-gates.mjs";
 import {
   waitingReturns,
@@ -1007,6 +1009,26 @@ export function recordFilingResultDialogBody(state = {}) {
   });
 }
 
+// The optional corrected Exit Form values: a group for each return the case
+// has a method for (a settled one has its method fixed), the five Local groups
+// and Remarks. Every group starts closed and empty; nothing is prefilled.
+function returnExitFields(record) {
+  const scope = "return-to-signing";
+  const returns = [
+    ["Federal", "federal", record.federalMethod, record.federalResult],
+    ["State", "state", record.stateMethod, record.stateResult],
+  ]
+    .filter(([, , method]) => method)
+    .map(([title, prefix, method, result]) =>
+      exitGroup(title, prefix, { scope, fixedMethod: result !== "rejected" ? method : null }),
+    );
+  return `<p class="hint">Optional: the corrected Exit Form values. Leave a part empty to fill it in by hand.</p>${returns.join(
+    "",
+  )}${LOCAL_TYPES.map(([type, label]) => exitGroup(`Local: ${label}`, `local.${type}`, { scope })).join(
+    "",
+  )}${textarea("Remarks (optional)", "remarks", "", 'maxlength="2000" rows="3"', scope)}`;
+}
+
 /** The return-to-signing confirmation: the client is told to sign again. */
 export function returnToSigningDialogBody(state = {}) {
   const record = state.savedCase ?? {};
@@ -1020,7 +1042,7 @@ export function returnToSigningDialogBody(state = {}) {
       html: "The client will be told: PCDC corrected your return. You need to sign it again. This can't be undone.",
     },
     form: {
-      fields: `<label class="checkbox-row" for="${fieldId(
+      fields: `${returnExitFields(record)}<label class="checkbox-row" for="${fieldId(
         "confirmed",
         "return-to-signing",
       )}"><input type="checkbox" id="${fieldId(

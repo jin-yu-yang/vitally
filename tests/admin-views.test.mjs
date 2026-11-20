@@ -1757,3 +1757,27 @@ for (const [key, needed] of Object.entries(DIALOG_CAPABILITY)) {
     assert.doesNotMatch(dialog(dialogState(key, [needed])), LINE);
   });
 }
+
+test("Return to signing dialog: groups for the case's returns, settled method fixed", () => {
+  const html = returnToSigningDialogBody({
+    savedCase: { reference: "VT-AAAA-BBBB", federalMethod: "efile", federalResult: "rejected", stateMethod: "efile", stateResult: "accepted" },
+  });
+  assert.match(html, /Optional: the corrected Exit Form values\. Leave a part empty to fill it in by hand\./);
+  assert.match(html, /data-exit-group="federal"/);
+  assert.match(html, /name="federal\.method" value="paper"/);
+  assert.match(html, /data-exit-group="state"/);
+  assert.match(html, /<input type="hidden" name="state\.method" value="efile">/);
+  assert.doesNotMatch(html, /type="radio"[^>]*name="state\.method"/);
+  assert.match(html, /How it was filed: E-file/);
+  for (const type of ["NPT", "BIRT", "EET", "SIT", "PAIBWTR"]) assert.match(html, new RegExp(`data-exit-group="local\\.${type}"`));
+  assert.match(html, /<textarea[^>]*name="remarks"/);
+  assert.doesNotMatch(html, /<details[^>]*\bopen\b/);
+  assert.match(html, /<span>The fix is done\.<\/span>/);
+});
+
+test("Return to signing dialog: no State group without a state method", () => {
+  const html = returnToSigningDialogBody({ savedCase: { federalMethod: "efile", federalResult: "rejected", stateMethod: null } });
+  assert.doesNotMatch(html, /data-exit-group="state"/);
+  assert.match(html, /data-exit-group="federal"/);
+});
+
