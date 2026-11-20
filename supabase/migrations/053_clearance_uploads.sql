@@ -11,7 +11,9 @@
 --   §4 vitally_save_volunteer(): a save clears the sent dates it acts on (design D4).
 --   §5 vitally_mark_upload_reviewed(): an admin marks a sent document reviewed
 --      (design D3).
--- Re-appliable: the columns use `if not exists`, the function `create or replace`.
+-- Applied once, like every migration. The columns' `if not exists` is there only
+-- so the unmerged branch could re-apply 053 on a throwaway test stack; hosted
+-- applies it once. Do not re-run it anywhere else.
 
 -- 053 §1
 alter table public.roster_entries
