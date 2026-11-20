@@ -25,7 +25,7 @@ foundation for production too; see [key decisions](#key-decisions-and-trade-offs
 | --- | --- | --- |
 | Browser app | `index.html`, `src/` | Screens, navigation, forms, live updates. Predicts permissions to hide buttons; decides nothing. |
 | Supabase Auth (GoTrue) | Supabase | Email one-time-code sign-in. Accounts exist only for approved addresses. |
-| PostgREST | Supabase | Exposes tables (read-only for browsers) and the twenty-four RPC functions over HTTP. |
+| PostgREST | Supabase | Exposes tables (read-only for browsers) and the twenty-six RPC functions over HTTP. |
 | PostgreSQL | Supabase | Schema, row-level security, and all workflow logic in `SECURITY DEFINER` functions. |
 | Realtime | Supabase | Pushes INSERT/UPDATE events on twenty-two tables, filtered by the same row-level security. |
 | `server.mjs` | Local machine | Serves the static files and `/public-config.json` locally. Any static host can replace it. |
