@@ -191,6 +191,17 @@ test("vitally_mark_upload_sent against real Supabase", async (t) => {
       assert.equal(await f.receiptsFor(id), 1);
     });
 
+    await t.test("an action id used for form13615 is refused for photoId, with no extra receipt", async () => {
+      const m = await unclearedMember("snd_reuse", "Dov Lancaster");
+      await setEntry(m, "is_new=true,photo_id_checked_at=null");
+      const id = randomUUID();
+      await sent(m.client, "form13615", id);
+      const { error } = await send(m.client, "photoId", id);
+      assert.equal(error?.code, "VT007");
+      assert.equal(await f.receiptsFor(id), 1);
+      assert.equal((await entryOf(m)).photo_id_sent_at, null);
+    });
+
     await t.test("photoId is refused when the entry is not new", async () => {
       const m = await unclearedMember("snd_notnew", "Emil Farraday");
       await setEntry(m, "is_new=false,photo_id_checked_at=null");
@@ -277,6 +288,283 @@ test("vitally_mark_upload_sent against real Supabase", async (t) => {
         },
       });
       assert.equal(error?.code, "VT003");
+    });
+  } finally {
+    await f.close();
+  }
+});
+
+// Migration 053 §4 and §5: Save clears the sent dates it acts on (design D4),
+// and vitally_mark_upload_reviewed clears one on an admin's say-so (design D3).
+test("reviewing sent uploads against real Supabase", async (t) => {
+  const f = await createDatabaseFixture();
+  try {
+    const admin = await f.staff({
+      key: "rev_admin",
+      name: "Rhea Valdez",
+      capabilities: ["admin"],
+      siteCoordinator: true,
+    });
+    const { current_season: season } = (
+      await f.sql("select current_season from public.workspaces where id=$1", [f.workspaceId])
+    ).rows[0];
+    const entryOf = async (m) =>
+      (
+        await f.sql("select * from public.roster_entries where workspace_id=$1 and person_id=$2 and season=$3", [
+          f.workspaceId,
+          m.personId,
+          season,
+        ])
+      ).rows[0];
+    const setEntry = (m, set) =>
+      f.sql(`update public.roster_entries set ${set} where workspace_id=$1 and person_id=$2 and season=$3`, [
+        f.workspaceId,
+        m.personId,
+        season,
+      ]);
+    const certsOf = async (m) =>
+      (
+        await f.sql(
+          "select certificate from public.certificates where workspace_id=$1 and person_id=$2 and season=$3 and status='confirmed' order by 1",
+          [f.workspaceId, m.personId, season],
+        )
+      ).rows.map((r) => r.certificate);
+    const revisionOf = async (m) =>
+      Number((await f.sql("select revision from public.volunteer_profiles where person_id=$1", [m.personId])).rows[0].revision);
+    const send = async (m, document) => {
+      const { error } = await m.client.rpc("vitally_mark_upload_sent", { p_action_id: randomUUID(), p_document: document });
+      assert.equal(error, null, `send ${document}: ${error?.code} ${error?.message}`);
+    };
+    const uncleared = (key, name) => f.staff({ key, name, capabilities: [], cleared: false });
+    // Save as the admin with the stored state of the volunteer, plus `change`.
+    const save = async (m, change = {}) => {
+      const profile = (await f.sql("select * from public.volunteer_profiles where person_id=$1", [m.personId])).rows[0];
+      const entry = await entryOf(m);
+      const volunteer = {
+        name: "Fictional Person",
+        email: profile.email,
+        phone: profile.phone,
+        works: profile.works,
+        languages: profile.languages,
+        otherLanguage: profile.other_language,
+        roles: entry.roles,
+        certificates: await certsOf(m),
+        isNew: entry.is_new,
+        photoIdChecked: entry.photo_id_checked_at !== null,
+        ...change,
+      };
+      const { data, error } = await admin.client.rpc("vitally_save_volunteer", {
+        p_action_id: randomUUID(),
+        p_volunteer_id: m.personId,
+        p_expected_revision: Number(profile.revision),
+        p_volunteer: volunteer,
+      });
+      assert.equal(error, null, `save: ${error?.code} ${error?.message} ${error?.details}`);
+      return data;
+    };
+    const review = (m, document, { actionId = randomUUID(), revision } = {}) =>
+      admin.client.rpc("vitally_mark_upload_reviewed", {
+        p_action_id: actionId,
+        p_volunteer_id: m.personId,
+        p_expected_revision: revision,
+        p_document: document,
+      });
+    const reviewed = async (m, document, opts) => {
+      const revision = opts?.revision ?? (await revisionOf(m));
+      const { data, error } = await review(m, document, { ...opts, revision });
+      assert.equal(error, null, `review: ${error?.code} ${error?.message} ${error?.details}`);
+      return data;
+    };
+
+    await t.test("a role change clears the 13615 date", async () => {
+      const m = await f.staff({ key: "rev_role", name: "Sol Abernathy", capabilities: ["prepare"] });
+      await send(m, "form13615");
+      assert.ok((await entryOf(m)).form_13615_sent_at);
+      await save(m, { roles: ["greeter", "preparer"] });
+      assert.equal((await entryOf(m)).form_13615_sent_at, null);
+    });
+
+    await t.test("a certificate change clears the 13615 date: tick VSC only", async () => {
+      const m = await uncleared("rev_cert", "Tess Whitmore");
+      await send(m, "form13615");
+      await save(m, { certificates: ["vsc"] });
+      assert.equal((await entryOf(m)).form_13615_sent_at, null);
+    });
+
+    await t.test("confirming an uploaded certificate clears it", async () => {
+      const m = await uncleared("rev_uploaded", "Uri Danforth");
+      await f.sql(
+        "insert into public.certificates(workspace_id,person_id,season,certificate,status) values($1,$2,$3,'vsc','uploaded')",
+        [f.workspaceId, m.personId, season],
+      );
+      await send(m, "form13615");
+      await save(m, { certificates: ["vsc"] });
+      assert.equal((await entryOf(m)).form_13615_sent_at, null);
+      assert.deepEqual(await certsOf(m), ["vsc"]);
+    });
+
+    await t.test("a phone-only save keeps it", async () => {
+      const m = await f.staff({ key: "rev_phone", name: "Vera Lindgren", capabilities: ["prepare"] });
+      await send(m, "form13615");
+      const before = (await entryOf(m)).form_13615_sent_at;
+      await save(m, { phone: "555-0142" });
+      assert.deepEqual((await entryOf(m)).form_13615_sent_at, before);
+    });
+
+    await t.test("ticking Photo ID checked clears the photo ID date", async () => {
+      const m = await uncleared("rev_photo", "Wade Okonkwo");
+      await setEntry(m, "is_new=true,photo_id_checked_at=null");
+      await send(m, "photoId");
+      assert.ok((await entryOf(m)).photo_id_sent_at);
+      await save(m, { isNew: true, photoIdChecked: true });
+      const entry = await entryOf(m);
+      assert.equal(entry.photo_id_sent_at, null);
+      assert.ok(entry.photo_id_checked_at);
+    });
+
+    await t.test("unticking New volunteer clears the photo ID date", async () => {
+      const m = await uncleared("rev_notnew", "Xena Fairbanks");
+      await setEntry(m, "is_new=true,photo_id_checked_at=null");
+      await send(m, "photoId");
+      await save(m, { isNew: false, photoIdChecked: false });
+      assert.equal((await entryOf(m)).photo_id_sent_at, null);
+    });
+
+    await t.test("a save that keeps Photo ID checked keeps a later photo date", async () => {
+      const m = await uncleared("rev_keep", "Yan Castellano");
+      await setEntry(m, "is_new=true,photo_id_checked_at=now(),photo_id_sent_at='2026-11-18T15:30:00Z'");
+      await save(m, { isNew: true, photoIdChecked: true, phone: "555-0143" });
+      assert.equal((await entryOf(m)).photo_id_sent_at.getTime(), Date.parse("2026-11-18T15:30:00Z"));
+    });
+
+    await t.test("Mark reviewed clears the Form 13615 date and keeps roles and certificates", async () => {
+      const m = await f.staff({ key: "rev_m13", name: "Zora Pemberton", capabilities: ["prepare"] });
+      await send(m, "form13615");
+      const rolesBefore = (await entryOf(m)).roles;
+      const certsBefore = await certsOf(m);
+      await reviewed(m, "form13615");
+      const entry = await entryOf(m);
+      assert.equal(entry.form_13615_sent_at, null);
+      assert.deepEqual(entry.roles, rolesBefore);
+      assert.deepEqual(await certsOf(m), certsBefore);
+    });
+
+    await t.test("Mark reviewed clears the photo ID date", async () => {
+      const m = await uncleared("rev_mphoto", "Abel Rosenthal");
+      await setEntry(m, "is_new=true,photo_id_checked_at=null");
+      await send(m, "photoId");
+      await reviewed(m, "photoId");
+      assert.equal((await entryOf(m)).photo_id_sent_at, null);
+    });
+
+    await t.test("Mark reviewed raises the revision", async () => {
+      const m = await uncleared("rev_mrev", "Bryn Hollister");
+      await send(m, "form13615");
+      const before = await revisionOf(m);
+      const answer = await reviewed(m, "form13615");
+      assert.equal(answer.personId, m.personId);
+      assert.equal(answer.revision, before + 1);
+      assert.equal(await revisionOf(m), before + 1);
+    });
+
+    await t.test("Mark reviewed with nothing waiting succeeds and changes nothing", async () => {
+      const m = await uncleared("rev_nothing", "Cade Whitlow");
+      const before = await revisionOf(m);
+      const answer = await reviewed(m, "form13615");
+      assert.equal(answer.revision, before);
+      assert.equal(await revisionOf(m), before);
+    });
+
+    await t.test("Mark reviewed with a stale revision is refused CONFLICT", async () => {
+      const m = await uncleared("rev_stale", "Dina Marchetti");
+      await send(m, "form13615");
+      const stale = await revisionOf(m);
+      await send(m, "form13615");
+      await f.sql("update public.volunteer_profiles set revision=revision+1 where person_id=$1", [m.personId]);
+      const actionId = randomUUID();
+      const { error } = await review(m, "form13615", { actionId, revision: stale });
+      assert.equal(error?.code, "VT003");
+      assert.ok((await entryOf(m)).form_13615_sent_at, "a refusal changes nothing");
+      assert.equal(await f.receiptsFor(actionId), 0);
+    });
+
+    await t.test("Mark reviewed for an unknown volunteer is refused NOT_FOUND", async () => {
+      const { error } = await admin.client.rpc("vitally_mark_upload_reviewed", {
+        p_action_id: randomUUID(),
+        p_volunteer_id: randomUUID(),
+        p_expected_revision: 1,
+        p_document: "form13615",
+      });
+      assert.equal(error?.code, "VT002");
+    });
+
+    await t.test("Mark reviewed by a non-admin is refused FORBIDDEN with no receipt", async () => {
+      const m = await uncleared("rev_forbid", "Eli Thackeray");
+      await send(m, "form13615");
+      const actionId = randomUUID();
+      const { error } = await f.preparer.rpc("vitally_mark_upload_reviewed", {
+        p_action_id: actionId,
+        p_volunteer_id: m.personId,
+        p_expected_revision: await revisionOf(m),
+        p_document: "form13615",
+      });
+      assert.equal(error?.code, "VT001");
+      assert.ok((await entryOf(m)).form_13615_sent_at);
+      assert.equal(await f.receiptsFor(actionId), 0);
+    });
+
+    await t.test("Mark reviewed with a repeated action id returns the same answer", async () => {
+      const m = await uncleared("rev_replay", "Faye Underhill");
+      await send(m, "form13615");
+      const actionId = randomUUID();
+      const revision = await revisionOf(m);
+      const one = await reviewed(m, "form13615", { actionId, revision });
+      const two = await reviewed(m, "form13615", { actionId, revision });
+      assert.deepEqual(two, one);
+      assert.equal(await f.receiptsFor(actionId), 1);
+      assert.equal(await revisionOf(m), revision + 1);
+    });
+
+    await t.test("Mark reviewed with an unknown document is refused VALIDATION", async () => {
+      const m = await uncleared("rev_unknown", "Gil Ashworth");
+      const actionId = randomUUID();
+      const { error } = await review(m, "w9", { actionId, revision: await revisionOf(m) });
+      assert.equal(error?.code, "VT007");
+      assert.equal(await f.receiptsFor(actionId), 0);
+    });
+
+    await t.test("a non-admin reads no roster entries", async () => {
+      const { data, error } = await f.preparer.from("roster_entries").select("*");
+      assert.equal(error, null);
+      assert.deepEqual(data, []);
+    });
+
+    await t.test("the count ignores other seasons", async () => {
+      const m = await uncleared("rev_season", "Hale Ingram");
+      await f.sql(
+        "insert into public.roster_entries(workspace_id,person_id,season,roles,is_new,photo_id_sent_at) values($1,$2,$3,'{}',true,now())",
+        [f.workspaceId, m.personId, season - 1],
+      );
+      const waiting = "form_13615_sent_at.not.is.null,photo_id_sent_at.not.is.null";
+      const { count, error } = await admin.client
+        .from("roster_entries")
+        .select("person_id", { count: "exact", head: true })
+        .eq("season", season)
+        .or(waiting);
+      assert.equal(error, null);
+      const countWhere = async (extra, params) =>
+        Number(
+          (
+            await f.sql(
+              `select count(*) c from public.roster_entries where workspace_id=$1 and (form_13615_sent_at is not null or photo_id_sent_at is not null)${extra}`,
+              [f.workspaceId, ...params],
+            )
+          ).rows[0].c,
+        );
+      const all = await countWhere("", []);
+      const current = await countWhere(" and season=$2", [season]);
+      assert.equal(count, current);
+      assert.ok(all > current, "the past-season entry is in the table but not in the count");
     });
   } finally {
     await f.close();
