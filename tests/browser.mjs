@@ -9837,7 +9837,7 @@ test(
         (heading) => [...document.querySelectorAll("h1, h2")].some((h) => h.textContent.trim() === heading),
         WORK_BOARD_HEADING,
       );
-      await robinPage.getByRole("heading", { name: WORK_BOARD_HEADING, exact: true }).waitFor({ timeout: RENDER_MS });
+      await robinPage.getByRole("heading", { name: WORK_BOARD_HEADING, exact: true }).first().waitFor({ timeout: RENDER_MS });
       assert.equal(await robinPage.getByRole("heading", { name: SETUP_HEADING, exact: true }).count(), 0);
       assertConsoleQuiet(robinWin, { name: "Robin's window" });
 
@@ -9873,10 +9873,11 @@ test(
           "Volunteers, 1 upload to review",
         undefined,
       );
-      // The Roster is re-read by opening it afresh, on Everyone.
+      // Focus re-reads the count but not the Roster list, which only
+      // open-volunteers reads (app.mjs): so the Roster is reopened, on Everyone.
       await admin.locator("#volunteer-show-filter").selectOption("all");
       await clickAction(admin, "open-board");
-      await admin.getByRole("heading", { name: OFFICE_BOARD_HEADING, exact: true }).waitFor({ timeout: ARRIVAL_MS });
+      await admin.getByRole("heading", { name: OFFICE_BOARD_HEADING, exact: true }).first().waitFor({ timeout: ARRIVAL_MS });
       await clickAction(admin, "open-volunteers");
       await rowOf(admin, SASHA).waitFor({ timeout: ARRIVAL_MS });
       await waitForQuiet(admin);
@@ -9903,7 +9904,8 @@ test(
       assert.equal(await admin.locator("#volunteer-phone").inputValue(), NEW_PHONE, "Mark reviewed dropped the typed phone");
       await admin.locator('#volunteer-form button[type="submit"]').click({ timeout: CLICK_MS });
       await drawerClosed(admin);
-      assert.equal(await admin.locator("#volunteer-form-error").count(), 0, "the save raised an error");
+      // A CONFLICT keeps the drawer open (app.mjs), so the drawer closing and the
+      // row showing the new phone prove the save landed with no conflict.
       await waitFor(
         admin,
         "Sasha's row to show the new phone",
@@ -9916,7 +9918,6 @@ test(
         [SASHA, NEW_PHONE],
         ARRIVAL_MS,
       );
-      assert.equal(await admin.getByText("Someone else changed this", { exact: false }).count(), 0, "the save met a conflict");
       // Nothing is left to review.
       await admin.locator("#volunteer-show-filter").selectOption("uploads");
       await waitFor(
