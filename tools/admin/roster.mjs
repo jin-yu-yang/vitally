@@ -34,16 +34,10 @@ function addresses(raw, field, { required = false } = {}) {
   });
 }
 
-// Mirrors vitally_private.add_staff_member (latest in migration 044) so the operator gets
-// a clear message before any account is created; the database refuses them again.
-export const STAFF_CAPABILITIES = Object.freeze([
-  "prepare",
-  "review",
-  "admin",
-  "followup",
-  "receive_documents",
-  "assist",
-]);
+// Mirrors vitally_private.add_staff_member so the operator gets a clear message
+// before any account is created; the database refuses them again. A person's
+// capabilities come from their roles on the Roster (migration 052), so an old
+// entry's `capabilities` is ignored (see rosterNotes) and not checked.
 const PERSON_KEY = /^[a-z][a-z0-9_]{0,39}$/;
 
 function parseStaff(raw) {
@@ -53,9 +47,9 @@ function parseStaff(raw) {
   return raw.map((entry, index) => {
     const where = `staff[${index}]`;
     if (!entry || typeof entry !== "object" || Array.isArray(entry))
-      throw invalid(`${where} must be an object with email, name, personKey and capabilities.`);
+      throw invalid(`${where} must be an object with email, name and personKey.`);
     const [email] = addresses([entry.email], where);
-    const { personKey, name, capabilities } = entry;
+    const { personKey, name } = entry;
     if (
       typeof personKey !== "string" ||
       !PERSON_KEY.test(personKey)
@@ -66,41 +60,24 @@ function parseStaff(raw) {
       );
     if (typeof name !== "string" || name.length < 1 || name.length > 80)
       throw invalid(`${where}.name must be 1 to 80 characters.`);
-    if (
-      !Array.isArray(capabilities) ||
-      capabilities.length === 0 ||
-      capabilities.some((capability) => !STAFF_CAPABILITIES.includes(capability))
-    )
-      throw invalid(
-        `${where}.capabilities must be a non-empty list of: ${STAFF_CAPABILITIES.join(", ")}.`,
-      );
-    if (capabilities.includes("followup") && !capabilities.includes("admin"))
-      throw invalid(`${where}.capabilities must include admin when they include followup.`);
+    // Optional: true makes the person a site coordinator (design D9).
+    const siteCoordinator = "siteCoordinator" in entry ? entry.siteCoordinator : false;
+    if (typeof siteCoordinator !== "boolean")
+      throw invalid(`${where}.siteCoordinator must be true or false.`);
     if (keys.has(personKey)) throw invalid(`${where}.personKey is already on the roster.`);
     keys.add(personKey);
-    return { email, name, personKey, capabilities: [...new Set(capabilities)] };
+    return { email, name, personKey, siteCoordinator };
   });
 }
 
+// The default follow-up person must be a site coordinator (design D9): the
+// database also accepts someone with the Admin role, but the roster grants no
+// roles, so only a siteCoordinator entry is sure to pass there.
 function parseDefaultFollowup(raw, staff) {
   const member = typeof raw === "string" ? staff.find((entry) => entry.personKey === raw) : undefined;
-  if (!member)
-    throw invalid("defaultFollowup must name the personKey of a staff entry on this roster.");
-  if (!member.capabilities.includes("followup"))
-    throw invalid("defaultFollowup must name a staff entry that has the followup capability.");
+  if (!member?.siteCoordinator)
+    throw invalid("defaultFollowup must name a staff entry with siteCoordinator: true.");
   return raw;
-}
-
-// The site's SIDN, which a volunteer types at their first sign-in (change
-// add-account-invitations, design D12): optional; S and eight digits, spaces
-// and hyphens ignored. Only a roster file kept out of the repository holds the
-// real one.
-const SIDN = /^S[0-9]{8}$/;
-function parseSiteNumber(raw) {
-  if (raw === undefined || raw === null) return null;
-  const sidn = typeof raw === "string" ? raw.replace(/[\s-]/g, "").toUpperCase() : "";
-  if (!SIDN.test(sidn)) throw invalid("siteNumber must be the site's SIDN: S followed by eight digits.");
-  return sidn;
 }
 
 export function parseRoster(raw) {
@@ -114,7 +91,6 @@ export function parseRoster(raw) {
   const staff = parseStaff(raw.staff);
   if (staff.length === 0) throw invalid("The roster needs at least one staff member.");
   const defaultFollowup = parseDefaultFollowup(raw.defaultFollowup, staff);
-  const siteNumber = parseSiteNumber(raw.siteNumber);
   const seen = new Set();
   for (const [field, list] of [
     ["staff", staff.map((member) => member.email)],
@@ -130,10 +106,13 @@ export function parseRoster(raw) {
     applicants,
     staff,
     defaultFollowup,
-    siteNumber,
+    notices: rosterNotes(raw),
   };
 }
 
+// One line for each old key the roster still has, which is accepted and
+// ignored. `capabilities` is reported once, however many entries have it. The
+// SIDN is set on Season settings (design D9), so a re-run never overwrites it.
 export function rosterNotes(raw) {
   const notes = [];
   if (raw && typeof raw === "object") {
@@ -141,6 +120,15 @@ export function rosterNotes(raw) {
       notes.push("sampleCaseOwners is no longer used and was ignored.");
     if ("presenters" in raw)
       notes.push("presenters is no longer used and was ignored; those addresses get no access.");
+    if (
+      Array.isArray(raw.staff) &&
+      raw.staff.some((entry) => entry && typeof entry === "object" && "capabilities" in entry)
+    )
+      notes.push(
+        "capabilities is no longer used and was ignored; roles on the Roster decide what each person can do.",
+      );
+    if ("siteNumber" in raw)
+      notes.push("siteNumber is no longer used and was ignored; set the SIDN on Season settings.");
   }
   return notes;
 }
@@ -214,14 +202,13 @@ export async function applyRoster(
   const setup = await initialize({
     workspaceId: roster.workspaceId,
     applicantUserIds: roster.applicants.map((address) => ids.get(address)),
-    staff: roster.staff.map(({ email, personKey, name, capabilities }) => ({
+    staff: roster.staff.map(({ email, personKey, name, siteCoordinator }) => ({
       userId: ids.get(email),
       personKey,
       name,
-      capabilities,
+      siteCoordinator,
     })),
     defaultFollowup: roster.defaultFollowup,
-    siteNumber: roster.siteNumber,
   });
   return {
     workspaceId: roster.workspaceId,
@@ -261,7 +248,7 @@ async function main() {
     throw failure("ROSTER_UNREADABLE", "The roster file could not be read as JSON.");
   }
   const roster = parseRoster(raw);
-  for (const note of rosterNotes(raw)) console.log(note);
+  for (const note of roster.notices) console.log(note);
   const approved = await assertTarget(target);
   const admin = createClient(approved.apiUrl, approved.adminKey, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },

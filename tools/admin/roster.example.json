@@ -5,28 +5,24 @@
       "email": "site-coordinator@example.org",
       "name": "Sky Chen (site coordinator)",
       "personKey": "site_coordinator",
-      "capabilities": ["admin", "followup", "assist", "receive_documents"]
+      "siteCoordinator": true
     },
     {
       "email": "preparer@example.org",
       "name": "Rowan Diaz (preparer)",
-      "personKey": "preparer",
-      "capabilities": ["prepare"]
+      "personKey": "preparer"
     },
     {
       "email": "reviewer@example.org",
       "name": "Ari Novak (reviewer)",
-      "personKey": "reviewer",
-      "capabilities": ["review"]
+      "personKey": "reviewer"
     },
     {
       "email": "intaker@example.org",
       "name": "Kai Mensah (intaker)",
-      "personKey": "intaker",
-      "capabilities": ["receive_documents", "assist"]
+      "personKey": "intaker"
     }
   ],
   "defaultFollowup": "site_coordinator",
-  "siteNumber": "S00000000",
   "applicants": ["client-a@example.org"]
 }

@@ -129,6 +129,18 @@ export async function resolveSeedTargets(client, { workspaceId, clientAEmail }) 
       "The roster's first applicant has no client account in this workspace.",
     );
   targets.clientA = { userId: clients[0].id };
+  // The Site Coordinator acts as a site coordinator (change add-season-settings,
+  // design D9): it sets the SIDN below, and only a site coordinator may set
+  // the Admin role that clearing the role accounts gives.
+  const { rows: coordinators } = await client.query(
+    "select vitally_private.is_site_coordinator($1,$2) as yes",
+    [workspaceId, targets.siteCoordinator.personId],
+  );
+  if (!coordinators[0]?.yes)
+    throw failure(
+      "SEED_SETUP",
+      'The "site_coordinator" account must be a site coordinator. Give it "siteCoordinator: true" in the roster file and re-run the roster command.',
+    );
   const { rows: workspaces } = await client.query(
     "select default_followup_person_id from public.workspaces where id = $1",
     [workspaceId],
@@ -425,12 +437,13 @@ const union = (a, b) => [...new Set([...a, ...b])];
 // the case RPCs refuse staff who are not cleared.
 export async function clearRoleAccounts(client, { workspaceId, actorUserId }) {
   let saved = 0;
-  for (const [key, want] of Object.entries(SEED_VALUES.ROLE_ACCOUNT_CLEARANCE)) {
+  for (const [key, wanted] of Object.entries(SEED_VALUES.ROLE_ACCOUNT_CLEARANCE)) {
     const { rows: people } = await client.query(
       `select p.id, p.name, v.email, v.phone, v.works, v.languages,
               v.other_language, v.revision,
               e.roles as entry_roles, e.is_new,
               e.photo_id_checked_at is not null as photo_id_checked,
+              vitally_private.is_site_coordinator(p.workspace_id, p.id) as site_coordinator,
               array(select c.certificate from public.certificates c
                      where c.workspace_id = p.workspace_id and c.person_id = p.id
                        and c.season = w.current_season and c.status = 'confirmed') as confirmed
@@ -446,6 +459,11 @@ export async function clearRoleAccounts(client, { workspaceId, actorUserId }) {
     );
     const person = people[0];
     if (!person) continue;
+    // Any role account that is a site coordinator is cleared only with SC
+    // confirmed (add-season-settings, D6). Added to what it has, as above.
+    const want = person.site_coordinator
+      ? { ...wanted, certificates: union(wanted.certificates, ["sc"]) }
+      : wanted;
     if (
       person.entry_roles &&
       person.is_new === false &&
@@ -473,6 +491,26 @@ export async function clearRoleAccounts(client, { workspaceId, actorUserId }) {
     saved += 1;
   }
   return saved;
+}
+
+// The fictional SIDN the seed sets when the workspace has none, so a local
+// invitation's site check can pass (change add-season-settings, D9).
+export const SEED_SITE_NUMBER = "S00000000";
+
+// Sets SEED_SITE_NUMBER through Season settings' own RPC, acting as the Site
+// Coordinator, only when no SIDN is set: one set in the app, or by an earlier
+// run, is never changed. Answers whether it set one. Local only.
+export async function ensureSiteNumber(client, { workspaceId, actorUserId }) {
+  const { rows } = await client.query(
+    "select 1 from vitally_private.site_numbers where workspace_id=$1",
+    [workspaceId],
+  );
+  if (rows.length) return false;
+  await callRpc(client, actorUserId, "vitally_set_site_number", {
+    p_action_id: randomUUID(),
+    p_sidn: SEED_SITE_NUMBER,
+  });
+  return true;
 }
 
 // Adds the rehearsal volunteers to the Roster. A re-run first removes the
@@ -528,6 +566,10 @@ export async function seedWorkspace({
     const targets = await resolveSeedTargets(client, {
       workspaceId,
       clientAEmail,
+    });
+    await ensureSiteNumber(client, {
+      workspaceId,
+      actorUserId: targets.siteCoordinator.userId,
     });
     // First, so the case seed's role accounts are cleared when they act.
     await clearRoleAccounts(client, {
