@@ -28,8 +28,8 @@
 
 ## 5. vitally_save_volunteer (replaces both 045 copies)
 
-- [ ] 5.1 Rewrite `vitally_save_volunteer`: `is_workspace_admin` admin check; Admin-role changes need a site coordinator (FORBIDDEN, ADMIN_ROLE); the open-work rule on role capabilities with no ceiling; the default follow-up row met by a site coordinator. The header comment says it replaces Part 3's and Part 6's definitions in 045 (#193 item 3).
-- [ ] 5.2 Database tests: a non-site-coordinator adding or removing the Admin role is refused; other roles still work; an uncleared site coordinator ticks their own certificates; the open-work scenarios for a site coordinator default.
+- [x] 5.1 Rewrite `vitally_save_volunteer`: `is_workspace_admin` admin check; Admin-role changes need a site coordinator (FORBIDDEN, ADMIN_ROLE); the open-work rule on role capabilities with no ceiling; the default follow-up row met by a site coordinator. The header comment says it replaces Part 3's and Part 6's definitions in 045 (#193 item 3).
+- [x] 5.2 Database tests: a non-site-coordinator adding or removing the Admin role is refused; other roles still work; an uncleared site coordinator ticks their own certificates; the open-work scenarios for a site coordinator default.
 
 ## 6. Account functions and tools
 
