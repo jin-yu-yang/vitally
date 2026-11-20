@@ -9238,9 +9238,10 @@ test(
           name: ROLE_NAMES.siteCoordinator,
           phone: "",
           otherLanguage: "",
-          // The fixture's Admin role and the certificates it needs; not new,
-          // so neither New volunteer nor Photo ID checked (clearStaff).
-          ticked: ["volunteer-role-admin", "volunteer-certificate-vsc", "volunteer-certificate-itqr"],
+          // The fixture's Admin role and the certificates it needs, and SC as
+          // a site coordinator (change add-season-settings, D6); not new, so
+          // neither New volunteer nor Photo ID checked (clearStaff).
+          ticked: ["volunteer-role-admin", "volunteer-certificate-vsc", "volunteer-certificate-itqr", "volunteer-certificate-sc"],
           otherShown: false,
         },
         "Edit opened again with the text or ticks typed before Cancel",
@@ -9404,6 +9405,9 @@ test(
           name: SELF_NAME,
           capabilities: ["admin", "followup"],
           cleared: false,
+          // Only a site coordinator reaches the Roster and changes the Admin
+          // role (change add-season-settings); a ceiling-only admin does not.
+          siteCoordinator: true,
         });
         // Where the keyboard is, by what the element is (never its text).
         const focusNow = (p) =>
@@ -9431,6 +9435,8 @@ test(
         });
         focus.signedInToSetup = await focusNow(p);
         await waitForText(p, "Upload your signed Form 13615.");
+        // A site coordinator also needs the SC certificate (change add-season-settings, D6).
+        await waitForText(p, "Site coordinators need the SC certificate.");
         await waitForText(p, `Ask ${ROLE_NAMES.siteCoordinator}, your site coordinator.`);
         assert.equal(await p.getByRole("heading", { name: OFFICE_BOARD_HEADING, exact: true }).count(), 0, "an uncleared admin sees the board");
         assert.equal(await p.locator('[data-action="open-cases"]').count(), 0, "an uncleared admin is offered All cases");
@@ -9441,10 +9447,11 @@ test(
         await p.getByRole("heading", { name: SETUP_HEADING, exact: true }).waitFor({ timeout: RENDER_MS });
         assert.equal(await p.getByRole("heading", { name: OFFICE_BOARD_HEADING, exact: true }).count(), 0);
 
-        // Their own row: not cleared, waiting for the Form 13615 (no roles).
+        // Their own row: not cleared, waiting for the Form 13615 (no roles)
+        // and, as a site coordinator, the SC certificate.
         await clickAction(p, "open-volunteers");
         await rowOf(p, SELF_NAME).waitFor({ timeout: ARRIVAL_MS });
-        assert.equal((await cleared(rowOf(p, SELF_NAME)).innerText()).trim(), "Not cleared Form 13615 missing");
+        assert.equal((await cleared(rowOf(p, SELF_NAME)).innerText()).trim(), "Not cleared Form 13615 missing, SC certificate missing");
         await pressControl(p, rowOf(p, SELF_NAME).locator('[data-action="open-edit-volunteer"]'), {
           selector: '[data-action="open-edit-volunteer"]',
           what: "their own Edit button",
@@ -9480,6 +9487,7 @@ test(
           RENDER_MS,
         );
         await p.locator("#volunteer-role-admin").check();
+        await p.locator("#volunteer-certificate-sc").check();
         await p.locator('#volunteer-form button[type="submit"]').click({ timeout: CLICK_MS });
         await drawerClosed(p);
         await waitFor(
@@ -9524,6 +9532,130 @@ test(
         t.diagnostic(`clearance-focus ${JSON.stringify(focus)}`);
         assertConsoleQuiet(win, { name: "the uncleared admin's window" });
       });
+    } finally {
+      await fixture.close();
+    }
+  },
+);
+
+// Season settings (change add-season-settings) have their own test, outside
+// the story and its time limit, like the Roster's: it adds no phase to either
+// order. Chrome only, on a fixture of its own (its SIDN is its own, so nothing
+// is restored). The Site Coordinator saves a fictional certificate link and
+// changes the SIDN; the Preparer, who is not an admin, is not offered the
+// screen. Fictional values only.
+test(
+  "A site coordinator changes Season settings",
+  { timeout: 300_000 },
+  async () => {
+    const fixture = await createBrowserFixture();
+    const CERTIFICATE_LINK = "https://example.org/certificates";
+    const SIDN = "S00000001";
+    const alertMark = (page) => page.evaluate(() => (window.__vitallyAlerts ?? []).length);
+    const toastSince = (page, text, mark) =>
+      waitFor(
+        page,
+        `the toast ${JSON.stringify(text)}`,
+        ([wanted, from]) =>
+          (window.__vitallyAlerts ?? []).slice(from).some((line) => line.startsWith("toast: ") && line.includes(wanted)),
+        [text, mark],
+        ARRIVAL_MS,
+      );
+    try {
+      const engine = await fixture.launch("chrome");
+      const adminWin = await engine.newPage({ viewport: DESKTOP });
+      const admin = adminWin.page;
+      await guardToast(admin);
+      await loginTestUser({ page: admin, actor: fixture.actor("siteCoordinator"), fixture, heading: OFFICE_BOARD_HEADING });
+      assert.equal(await readSignedInAs(admin), ROLE_NAMES.siteCoordinator);
+      await watchAlerts(admin);
+
+      // 1. Open Season settings: a site coordinator gets the inputs.
+      await clickAction(admin, "open-season-settings");
+      await admin.getByRole("heading", { name: "Season settings", exact: true }).waitFor({ timeout: ARRIVAL_MS });
+      const link = admin.getByLabel("Certificate and photo ID upload link", { exact: true });
+      await link.waitFor({ timeout: ARRIVAL_MS });
+      await waitForQuiet(admin);
+
+      // 2. Save the certificate link.
+      await link.fill(CERTIFICATE_LINK);
+      let mark = await alertMark(admin);
+      await pressControl(admin, admin.locator('#season-settings-form button[type="submit"]'), {
+        selector: "button",
+        what: "Save",
+      });
+      await toastSince(admin, "Season settings saved", mark);
+      await waitForQuiet(admin);
+      assert.equal(await admin.getByLabel("Certificate and photo ID upload link", { exact: true }).inputValue(), CERTIFICATE_LINK);
+      const { rows: stored } = await fixture.database.sql(
+        "select certificate_upload_url from public.season_settings where workspace_id=$1",
+        [fixture.database.workspaceId],
+      );
+      assert.deepEqual(stored.map((row) => row.certificate_upload_url), [CERTIFICATE_LINK], "the stored certificate link");
+
+      // 3. Change the SIDN: the row says it is set, never the number.
+      await clickAction(admin, "open-change-sidn");
+      await waitFor(
+        admin,
+        "the Change the SIDN dialog",
+        () => Boolean(document.querySelector("#sidn-form")) && (document.querySelector(".modal")?.innerText ?? "").includes("Change the SIDN"),
+        undefined,
+        RENDER_MS,
+      );
+      await admin.getByLabel("SIDN", { exact: true }).fill(SIDN);
+      mark = await alertMark(admin);
+      await pressControl(admin, admin.locator('#sidn-form button[type="submit"]'), { selector: "button", what: "Save" });
+      await toastSince(admin, "SIDN updated", mark);
+      await waitFor(admin, "the dialog to close", () => !document.querySelector("#sidn-form"), undefined, ARRIVAL_MS);
+      await waitFor(
+        admin,
+        "the SIDN row to say Set · updated",
+        () => (document.querySelector("#sidn-status")?.textContent ?? "").startsWith("Set · updated "),
+        undefined,
+        ARRIVAL_MS,
+      );
+      assert.equal(
+        (await admin.locator("#app").innerText()).includes(SIDN),
+        false,
+        "the screen shows the SIDN",
+      );
+
+      // 4. A screenshot at both evidence widths, with no sideways scroll.
+      if (await admin.locator("#toast.visible").count()) await clearToast(admin);
+      await waitFor(admin, "the toast to close", () => !document.querySelector("#toast.visible"), undefined, ARRIVAL_MS);
+      // At the evidence widths the sidebar is an overlay over the page: it is
+      // closed by its own toggle for the shot, as the story's
+      // shootWithoutSidebar does.
+      await waitForQuiet(admin);
+      await admin.locator('[data-action="toggle-sidebar"]').click({ timeout: CLICK_MS });
+      await waitFor(
+        admin,
+        "the sidebar to be closed",
+        () => document.querySelector('[data-action="toggle-sidebar"]')?.getAttribute("aria-expanded") === "false",
+        undefined,
+        RENDER_MS,
+      );
+      await waitForQuiet(admin);
+      await admin.evaluate(() => window.scrollTo(0, 0));
+      const shot = await capture(admin, SHOTS, "season-settings");
+      assert.equal(
+        shot.overflow.scrollWidth,
+        shot.overflow.clientWidth,
+        `season-settings: the page scrolls sideways at ${MOBILE_WIDTH}px`,
+      );
+      assertConsoleQuiet(adminWin, { name: "the Site Coordinator's Season settings window" });
+
+      // 5. Somebody without admin is not offered Season settings.
+      const preparer = await engine.newPage({ viewport: DESKTOP });
+      await guardToast(preparer.page);
+      await loginTestUser({ page: preparer.page, actor: fixture.actor("preparer"), fixture, heading: WORK_BOARD_HEADING });
+      assert.equal(await readSignedInAs(preparer.page), ROLE_NAMES.preparer);
+      assert.equal(
+        await preparer.page.locator('[data-action="open-season-settings"]').count(),
+        0,
+        "the Preparer is offered Season settings",
+      );
+      assertConsoleQuiet(preparer, { name: "the Preparer's window" });
     } finally {
       await fixture.close();
     }
