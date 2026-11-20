@@ -52,7 +52,7 @@ test("combine keeps only people with a roster entry", () => {
     id: "p1", name: "ana Lopez", email: "ana@x.org", phone: null, works: "remote",
     languages: ["english", "other"], otherLanguage: "Tagalog", roles: ["preparer"],
     certificates: ["vsc", "basic"], revision: 3, hasSignIn: true, signedInName: null,
-    isNew: false, photoIdChecked: false,
+    isNew: false, photoIdChecked: false, form13615SentAt: null, photoIdSentAt: null,
     account: { status: "active", revision: 2, activatedAt: null, expiresAt: null }, isSiteCoordinator: false,
     cleared: true, missing: []
   });
@@ -112,6 +112,18 @@ test("cleared follows roles and the photo ID check of the current season", () =>
   assert.deepEqual([returning.cleared, returning.missing], [true, []]);
   // No roles wins over an unchecked photo ID: one thing is shown.
   assert.deepEqual(one({ roles: [], is_new: true }).missing, ["form13615"]);
+});
+
+test("combine carries the sent dates", () => {
+  const one = (entry) => combineVolunteers({
+    profiles: [profile("p1")], people: [people[1]], certificates: [], accounts: [],
+    entries: [{ person_id: "p1", season: 2026, roles: [], ...entry }]
+  })[0];
+  const sent = one({ form_13615_sent_at: "2026-11-20T15:00:00Z" });
+  assert.equal(sent.form13615SentAt, "2026-11-20T15:00:00Z");
+  assert.equal(sent.photoIdSentAt, null);
+  const photo = one({ photo_id_sent_at: "2026-11-19T15:00:00Z" });
+  assert.deepEqual([photo.form13615SentAt, photo.photoIdSentAt], [null, "2026-11-19T15:00:00Z"]);
 });
 
 test("an uploaded certificate is not a certificate", () => {

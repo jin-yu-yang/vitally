@@ -114,6 +114,9 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
       signedInName: profile.signed_in_name ?? null,
       isNew,
       photoIdChecked,
+      // When the volunteer said they sent each document (migration 053); null before.
+      form13615SentAt: entry.form_13615_sent_at ?? null,
+      photoIdSentAt: entry.photo_id_sent_at ?? null,
       account,
       isSiteCoordinator,
       cleared,
