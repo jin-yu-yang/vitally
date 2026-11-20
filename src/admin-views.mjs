@@ -46,6 +46,7 @@ import {
   exitGroup,
 } from "./staff-views.mjs";
 import { LOCAL_TYPES } from "./questionnaires.mjs";
+import { plannedMethod } from "./exit-form-source.mjs";
 import { dialogLocked, rolesChangedLine } from "./role-gates.mjs";
 import {
   waitingReturns,
@@ -847,11 +848,11 @@ const RESULT_WORDS = Object.freeze({ accepted: "accepted", given_to_client: "on 
 const ON_PAPER = "On paper (given to the client to mail)";
 
 // One radio with the line the client will be told under it.
-const choice = (name, value, label, line, scope) =>
+const choice = (name, value, label, line, scope, checked = false) =>
   `<label class="checkbox-row" for="${fieldId(`${name}-${value}`, scope)}"><input type="radio" id="${fieldId(
     `${name}-${value}`,
     scope,
-  )}" name="${name}" value="${value}" required><span>${esc(label)}${
+  )}" name="${name}" value="${value}"${checked ? " checked" : ""} required><span>${esc(label)}${
     line ? `<br><small class="muted">The client will be told: ${esc(line)}</small>` : ""
   }</span></label>`;
 
@@ -894,17 +895,22 @@ function efiledChoices(record) {
       )}: ${word}. Nothing to file again.</p>`;
     })
     .join("");
+  // Start on the method planned at Return to signing, only when every rejected return has one.
+  const plannedBy = Object.fromEntries(rejected.map((kind) => [kind, plannedMethod(record, kind)]));
+  if (!rejected.every((kind) => plannedBy[kind])) for (const kind of rejected) plannedBy[kind] = null;
   const groups = rejected
     .map((kind) => {
       const title = kind === "federal" ? "Federal return" : "Pennsylvania return";
       const lines = rejected.length === 1;
+      const planned = plannedBy[kind];
       return `<fieldset class="filing-choice"><legend>${title} (rejected): how was it filed this time?</legend>${choice(
         `method-${kind}`,
         "efile",
         "E-filed",
         lines ? FILED_LINES[kind].efile : "",
         "efiled",
-      )}${choice(`method-${kind}`, "paper", ON_PAPER, lines ? FILED_LINES[kind].paper : "", "efiled")}</fieldset>`;
+        planned === "efile",
+      )}${choice(`method-${kind}`, "paper", ON_PAPER, lines ? FILED_LINES[kind].paper : "", "efiled", planned === "paper")}</fieldset>`;
     })
     .join("");
   const both =

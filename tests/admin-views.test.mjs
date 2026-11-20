@@ -1781,3 +1781,45 @@ test("Return to signing dialog: no State group without a state method", () => {
   assert.match(html, /data-exit-group="federal"/);
 });
 
+
+// Mark e-filed starts on the method planned at Return to signing (#203).
+const plannedCase = (over = {}, groups = {}) =>
+  officeCase({
+    stage: "review_approved",
+    ...BOTH_EFILED,
+    federalResult: "accepted",
+    stateResult: "rejected",
+    returnToSigningExitForms: [{ id: "x1", exitForm: { federal: null, state: null, local: [], ...groups }, remarks: "Fixed", createdAt: "2026-11-02T15:00:00.000Z" }],
+    internalHistory: [{ id: "e1", action: "RETURN_TO_SIGNING", actorPersonId: "sam", createdAt: "2026-11-02T15:00:00.000Z", detail: { exitFormId: "x1" } }],
+    ...over,
+  });
+const checkedRadios = (html) => [...html.matchAll(/<input[^>]*type="radio"[^>]*>/g)].map((m) => m[0]).filter((t) => /\schecked/.test(t));
+
+test("the planned paper method is preselected", () => {
+  const html = markEfiledDialogBody({ savedCase: plannedCase({}, { state: { method: "paper" } }) });
+  const checked = checkedRadios(html);
+  assert.equal(checked.length, 1);
+  assert.match(checked[0], /name="method-state"[^>]*value="paper"/);
+});
+
+test("nothing is preselected without a row", () => {
+  const html = markEfiledDialogBody({ savedCase: plannedCase({ returnToSigningExitForms: [] }) });
+  assert.deepEqual(checkedRadios(html), []);
+});
+
+test("two rejected returns select the matching combination", () => {
+  const html = markEfiledDialogBody({
+    savedCase: plannedCase({ federalResult: "rejected" }, { federal: { method: "efile" }, state: { method: "paper" } }),
+  });
+  const checked = checkedRadios(html);
+  assert.equal(checked.length, 2);
+  assert.ok(checked.some((t) => /name="method-federal"[^>]*value="efile"/.test(t)));
+  assert.ok(checked.some((t) => /name="method-state"[^>]*value="paper"/.test(t)));
+});
+
+test("one planned, one not: nothing is preselected", () => {
+  const html = markEfiledDialogBody({
+    savedCase: plannedCase({ federalResult: "rejected" }, { state: { method: "paper" } }),
+  });
+  assert.deepEqual(checkedRadios(html), []);
+});
