@@ -591,6 +591,35 @@ test("reviewing sent uploads against real Supabase", async (t) => {
       assert.equal(await f.receiptsFor(actionId), 0);
     });
 
+    // Spec: a workspace admin marks reviewed cleared or not. The uncleared
+    // admin is a site coordinator with no roles (as in the volunteer-roster tests).
+    await t.test("an uncleared workspace admin may mark reviewed", async () => {
+      const lead = await f.staff({
+        key: "rev_uncleared_admin",
+        name: "Gale Okonkwo",
+        capabilities: [],
+        cleared: false,
+        siteCoordinator: true,
+      });
+      const { data: clearance, error: clearanceError } = await lead.client.rpc("vitally_my_clearance");
+      assert.equal(clearanceError, null);
+      assert.equal(clearance.cleared, false, "the admin is not cleared");
+      assert.equal(clearance.isAdmin, true, "but is a workspace admin");
+      const m = await uncleared("rev_by_uncleared", "Hollis Brennan");
+      await send(m, "form13615");
+      const before = await revisionOf(m);
+      const { data, error } = await lead.client.rpc("vitally_mark_upload_reviewed", {
+        p_action_id: randomUUID(),
+        p_volunteer_id: m.personId,
+        p_expected_revision: before,
+        p_document: "form13615",
+      });
+      assert.equal(error, null, `review: ${error?.code} ${error?.message} ${error?.details}`);
+      assert.equal(data.personId, m.personId);
+      assert.equal(data.revision, before + 1);
+      assert.equal((await entryOf(m)).form_13615_sent_at, null);
+    });
+
     await t.test("Mark reviewed with a repeated action id returns the same answer", async () => {
       const m = await uncleared("rev_replay", "Faye Underhill");
       await send(m, "form13615");
