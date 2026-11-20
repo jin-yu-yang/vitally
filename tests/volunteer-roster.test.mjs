@@ -4,7 +4,7 @@ import {
   ROLES, CERTIFICATES, WORKS, LANGUAGES,
   combineVolunteers, filterVolunteers, volunteerFromForm, volunteerProblem,
   ROLE_NEEDS, missingFor, withoutLostRoles, roleNeedsMessage, openWorkMessage, rolesToUntick, untickedRolesMessage,
-  accountMessage, volunteerFormChanged
+  accountMessage, volunteerFormChanged, roleBoxesToUntick
 } from "../src/volunteer-roster.mjs";
 
 const people = [
@@ -419,4 +419,22 @@ test("combineVolunteers: someone who is not a site coordinator needs no SC", () 
   const v = withAccount({ status: "active", revision: 1 });
   assert.equal(v.isSiteCoordinator, false);
   assert.deepEqual([v.cleared, v.missing], [true, []]);
+});
+
+// The drawer's role boxes as the page sees them: {value, checked, disabled}.
+const box = (value, extra = {}) => ({ value, checked: true, disabled: false, ...extra });
+
+test("a disabled Admin tick keeps its saved state when IT&QR is unticked", () => {
+  const admin = box("admin", { disabled: true });
+  const intaker = box("intaker");
+  const drop = roleBoxesToUntick([admin, intaker], ["vsc"], "itqr");
+  assert.deepEqual(drop, [intaker]);
+  // Only what is unticked is announced: no "Admin was unticked".
+  assert.equal(untickedRolesMessage(drop.map((b) => b.value), ["vsc"]), "Intaker was unticked: it needs IT&QR.");
+  assert.deepEqual(roleBoxesToUntick([admin], [], "vsc"), []);
+});
+
+test("an enabled Admin tick is still unticked when it loses a certificate", () => {
+  const admin = box("admin");
+  assert.deepEqual(roleBoxesToUntick([admin, box("greeter", { checked: false })], ["vsc"], "itqr"), [admin]);
 });

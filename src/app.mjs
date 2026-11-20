@@ -66,7 +66,7 @@ import { t, SENTENCES } from "./client-text.mjs";
 import { createToastTimer } from "./toast.mjs";
 import { contactEntryFromForm, contactSummary, contactSummaries } from "./contact-log.mjs";
 import { decorateStaffCase, outcomeGroup, staffEligibility } from "./staff-views.mjs";
-import { volunteerFromForm, volunteerFormChanged, rolesToUntick, untickedRolesMessage } from "./volunteer-roster.mjs";
+import { volunteerFromForm, volunteerFormChanged, roleBoxesToUntick, untickedRolesMessage } from "./volunteer-roster.mjs";
 import { actionToast, renderUpdatePreview, saveToast, updateFormFromValues } from "./update-views.mjs";
 
 // Bootstrap and DOM wiring, and nothing else. No state lives here (the
@@ -489,17 +489,17 @@ if (!config) {
   }
 
   // Unticking a certificate unticks the roles that lose what they need, in the
-  // form (rolesToUntick decides; the save would drop them anyway).
+  // form (roleBoxesToUntick decides; the save would drop them anyway). A
+  // disabled box keeps its saved state and is not announced.
   function syncVolunteerRoles(form, changed) {
-    const roles = [...form.querySelectorAll('input[name="role"]:checked')];
+    const roles = [...form.querySelectorAll('input[type="checkbox"][name="role"]')];
     const certificates = [...form.querySelectorAll('input[name="certificate"]:checked')].map((box) => box.value);
-    const drop = rolesToUntick(roles.map((box) => box.value), certificates, changed);
-    for (const box of roles) {
-      if (!drop.includes(box.value)) continue;
+    const drop = roleBoxesToUntick(roles, certificates, changed);
+    for (const box of drop) {
       box.checked = false;
       for (const [id, draft] of checkDrafts(box)) keepDraft(id, draft);
     }
-    announceUntickedRoles(form, untickedRolesMessage(drop, certificates));
+    announceUntickedRoles(form, untickedRolesMessage(drop.map((box) => box.value), certificates));
   }
 
   // The drawer's polite status line (#192). Emptied first and filled on the
