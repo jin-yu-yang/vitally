@@ -1650,6 +1650,29 @@ test("the office's Exit Form panel after Return to signing carries the note", ()
   assert.doesNotMatch(html, /filled from the reviewer's answers/);
 });
 
+test("the office's Exit Form panel after Return to signing with stored values says so", () => {
+  const exitForm = { federal: { method: "efile", result: "refund", amount: "10.00", refundBy: "check" }, state: null, local: [] };
+  const returned = officeCase({
+    stage: "review_approved",
+    preparationVersion: 1,
+    reviewerId: "morgan",
+    reviews: [{ id: "review-1", preparationVersion: 1, status: "approved", reviewerId: "morgan", decidedAt: "2026-10-17T15:00:00.000Z" }],
+    reviewerQuestionnaires: [{ id: "rq-1", reviewId: "review-1", exitForm: { federal: null, state: null, local: [] } }],
+    federalMethod: "efile",
+    stateMethod: null,
+    federalResult: "rejected",
+    stateResult: null,
+    returnToSigningExitForms: [{ id: "x1", exitForm, remarks: "Fixed" }],
+    internalHistory: [{ id: "e1", action: "RETURN_TO_SIGNING", actorPersonId: "sam", createdAt: "2026-11-02T15:00:00.000Z", detail: { exitFormId: "x1" } }],
+  });
+  const html = renderAdminCase(returned, { person: SAM });
+  const note = /data-role="exit-form-corrected">([^<]*)</.exec(html);
+  assert.ok(note, "the note renders");
+  assert.ok(note[1].includes("filled from the corrected values recorded on November 2, 2026."), note[1]);
+  assert.doesNotMatch(note[1], /Fill in by hand/);
+  assert.doesNotMatch(html, /filled from the reviewer's answers/);
+});
+
 test("a close dialog for someone who lost admin keeps the reason and drops the submit (#190)", () => {
   const state = {
     dialog: "close-case",
