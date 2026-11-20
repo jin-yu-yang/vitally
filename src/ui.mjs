@@ -450,3 +450,11 @@ export function labelChip({ id = "", name, color }, { removeFor = null, disabled
       : `<button type="button" class="case-label-remove" data-action="toggle-case-label" data-case-id="${esc(removeFor)}" data-label-id="${esc(id)}" data-on="false" aria-label="Remove label ${esc(name)}"${disabled ? " disabled" : ""}>×</button>`;
   return `<span class="case-label" data-color="${shown}">${esc(name)}${remove}</span>`;
 }
+
+// The day a document was sent, in New York time ("Nov 20"), for the setup
+// screen and the Roster's drawer (change add-clearance-uploads).
+export const SENT_DAY = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  month: "short",
+  day: "numeric",
+});

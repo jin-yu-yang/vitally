@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   ROLES, CERTIFICATES, WORKS, LANGUAGES,
-  combineVolunteers, filterVolunteers, volunteerFromForm, volunteerProblem,
+  combineVolunteers, filterVolunteers, SHOW_VIEWS, volunteerFromForm, volunteerProblem,
   ROLE_NEEDS, missingFor, withoutLostRoles, roleNeedsMessage, openWorkMessage, rolesToUntick, untickedRolesMessage,
   accountMessage, volunteerFormChanged, roleBoxesToUntick
 } from "../src/volunteer-roster.mjs";
@@ -449,4 +449,31 @@ test("a disabled Admin tick keeps its saved state when IT&QR is unticked", () =>
 test("an enabled Admin tick is still unticked when it loses a certificate", () => {
   const admin = box("admin");
   assert.deepEqual(roleBoxesToUntick([admin, box("greeter", { checked: false })], ["vsc"], "itqr"), [admin]);
+});
+
+const sent = (id, form13615SentAt, photoIdSentAt, roles = ["preparer"]) => ({
+  id, name: id, email: `${id}@x.test`, phone: null, roles, form13615SentAt, photoIdSentAt,
+});
+const uploadList = [
+  sent("a", "2026-11-20T15:00:00Z", null),
+  sent("b", null, "2026-11-20T15:00:00Z", ["reviewer"]),
+  sent("c", null, null),
+];
+
+test("filterVolunteers keeps uploads to review", () => {
+  assert.deepEqual(filterVolunteers(uploadList, { show: "uploads" }).map((v) => v.id), ["a", "b"]);
+  assert.deepEqual(filterVolunteers(uploadList, { show: "all" }).map((v) => v.id), ["a", "b", "c"]);
+});
+
+test("show combines with role and search", () => {
+  assert.deepEqual(filterVolunteers(uploadList, { show: "uploads", role: "reviewer" }).map((v) => v.id), ["b"]);
+  assert.deepEqual(filterVolunteers(uploadList, { show: "uploads", search: "a@x" }).map((v) => v.id), ["a"]);
+});
+
+test("an unknown show value keeps everyone", () => {
+  assert.equal(filterVolunteers(uploadList, { show: "nonsense" }).length, 3);
+});
+
+test("SHOW_VIEWS lists Everyone then Uploads to review", () => {
+  assert.deepEqual(SHOW_VIEWS.map((v) => [v.value, v.label]), [["all", "Everyone"], ["uploads", "Uploads to review"]]);
 });

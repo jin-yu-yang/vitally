@@ -1,15 +1,10 @@
-import { esc, button, icon } from "./ui.mjs";
+import { esc, button, icon, SENT_DAY } from "./ui.mjs";
 import { missingLines, uploadItems } from "./clearance.mjs";
 
 export { awaitingClearance } from "./clearance.mjs";
 
 // Finish your setup (change add-volunteer-clearance, design D10): what an
 // uncleared staff member sees instead of the work. Staff text, English only.
-const SENT_DAY = new Intl.DateTimeFormat("en-US", {
-  timeZone: "America/New_York",
-  month: "short",
-  day: "numeric",
-});
 
 // One upload item (change add-clearance-uploads, design D6): its line, then
 // Upload (or who to ask), then I've uploaded it or the waiting state.

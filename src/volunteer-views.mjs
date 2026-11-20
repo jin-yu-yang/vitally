@@ -1,9 +1,9 @@
 // The admin-only Roster (change add-volunteer-roster-records, design D9): the
 // Volunteers page and its Add / Edit drawer. Staff screens stay English. Each
 // row says whether the volunteer is cleared (change add-volunteer-clearance).
-import { esc, button, icon, loadingLine, unloadedLine, emptyLine, confirmBody } from "./ui.mjs";
+import { esc, button, icon, SENT_DAY, loadingLine, unloadedLine, emptyLine, confirmBody } from "./ui.mjs";
 import { drawerError } from "./office-views.mjs";
-import { ROLES, CERTIFICATES, WORKS, LANGUAGES, filterVolunteers } from "./volunteer-roster.mjs";
+import { ROLES, CERTIFICATES, WORKS, LANGUAGES, SHOW_VIEWS, filterVolunteers } from "./volunteer-roster.mjs";
 
 const when = (condition, html) => (condition ? html : "");
 const labelOf = (list, value) => list.find((entry) => entry.value === value)?.label ?? value;
@@ -47,12 +47,23 @@ const accountLabel = (volunteer) => ACCOUNT_LABELS[volunteer?.account?.status ??
 const signedInAs = (volunteer, className) =>
   volunteer?.signedInName ? `<span class="${className}">Signed in as ${esc(volunteer.signedInName)}</span>` : "";
 
-const clearedCell = (volunteer) =>
-  volunteer.cleared === true
-    ? `<span class="volunteer-cleared">Cleared</span>`
-    : `<span class="volunteer-not-cleared">Not cleared</span> <span class="muted">${esc(
-        (volunteer.missing ?? []).map((item) => MISSING_TEXT[item] ?? item).join(", "),
-      )}</span>`;
+// What a volunteer said they sent and nobody has marked reviewed yet.
+const toReview = (volunteer) =>
+  [
+    volunteer.form13615SentAt != null ? "Form 13615 to review" : "",
+    volunteer.photoIdSentAt != null ? "Photo ID to review" : "",
+  ].filter(Boolean);
+
+const clearedCell = (volunteer) => {
+  const status =
+    volunteer.cleared === true
+      ? `<span class="volunteer-cleared">Cleared</span>`
+      : `<span class="volunteer-not-cleared">Not cleared</span> <span class="muted">${esc(
+          (volunteer.missing ?? []).map((item) => MISSING_TEXT[item] ?? item).join(", "),
+        )}</span>`;
+  const review = toReview(volunteer);
+  return review.length ? `${status} <span class="volunteer-to-review">${esc(review.join(", "))}</span>` : status;
+};
 
 function volunteerRow(volunteer) {
   const contact = [volunteer.email, volunteer.phone].filter(Boolean).join(" · ");
@@ -75,13 +86,17 @@ function volunteerRow(volunteer) {
 
 function toolbar(filters) {
   const role = filters.role || "all";
+  const show = SHOW_VIEWS.find((entry) => entry.value === filters.show)?.value ?? "all";
+  const showOptions = SHOW_VIEWS.map(
+    (entry) => `<option value="${esc(entry.value)}"${entry.value === show ? " selected" : ""}>${esc(entry.label)}</option>`,
+  ).join("");
   const options = [{ value: "all", label: "All roles" }, ...ROLES]
     .map(
       (entry) =>
         `<option value="${esc(entry.value)}"${entry.value === role ? " selected" : ""}>${esc(entry.label)}</option>`,
     )
     .join("");
-  return `<div class="volunteer-toolbar"><label class="field pool-filter" for="volunteer-role-filter"><span>Role</span><select id="volunteer-role-filter" data-volunteer-filter="role">${options}</select></label><input id="volunteer-search" name="volunteerSearch" type="search" value="${esc(
+  return `<div class="volunteer-toolbar"><label class="field pool-filter" for="volunteer-role-filter"><span>Role</span><select id="volunteer-role-filter" data-volunteer-filter="role">${options}</select></label><label class="field pool-filter" for="volunteer-show-filter"><span>Show</span><select id="volunteer-show-filter" data-volunteer-filter="show">${showOptions}</select></label><input id="volunteer-search" name="volunteerSearch" type="search" value="${esc(
     filters.search ?? "",
   )}" placeholder="Search name, email or phone" aria-label="Search volunteers" autocomplete="off"></div>`;
 }
@@ -97,7 +112,7 @@ export function renderRoster(volunteers, { list = "ready", filters = {} } = {}) 
   if (list === "loading") return `${open}${loadingLine("Loading volunteers…")}</section>`;
   if (list === "failed") return `${open}${unloadedLine("The volunteers couldn't load.")}</section>`;
   const all = Array.isArray(volunteers) ? volunteers : [];
-  const chosen = { search: filters.search ?? "", role: filters.role || "all" };
+  const chosen = { search: filters.search ?? "", role: filters.role || "all", show: filters.show || "all" };
   const shown = filterVolunteers(all, chosen);
   const body = shown.length
     ? `<div class="board-table-wrap"><table class="board-table people-table"><thead><tr><th scope="col">Volunteer</th><th scope="col">Roles</th><th scope="col">Certificates</th><th scope="col">Languages</th><th scope="col">Account</th><th scope="col">Cleared</th><th scope="col">Edit</th></tr></thead><tbody>${shown
@@ -129,6 +144,19 @@ const tickRow = (name, text, on) =>
   `<label class="checkbox-row small" for="volunteer-${name}"><input type="checkbox" name="${name}" id="volunteer-${name}"${
     on ? " checked" : ""
   }><span>${esc(text)}</span></label>`;
+
+// A "sent" line in the drawer with its Mark reviewed (design D7). The date is
+// the New York day; an unreadable one leaves the line without it.
+function sentLine(sentAt, name, document) {
+  const day = new Date(sentAt);
+  const date = Number.isNaN(day.getTime()) ? "" : ` ${SENT_DAY.format(day)}`;
+  return `<p class="volunteer-sent" data-document="${document}"><span>${name} sent${esc(date)}</span> ${button(
+    "Mark reviewed",
+    "mark-upload-reviewed",
+    "secondary",
+    `data-document="${document}"`,
+  )}</p>`;
+}
 
 // The drawer's Account section: the status and the one or two actions it
 // allows. A volunteer who is not saved yet has none. `notice` is the last
@@ -273,7 +301,7 @@ export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {}, 
   )}${when(
     !canChangeAdmin,
     `<p class="field-note" id="volunteer-admin-note">Only site coordinators change the Admin role.</p>`,
-  )}</fieldset><fieldset class="check-group"><legend>Certificates</legend>${ticks(
+  )}</fieldset>${when(!isNew && v.form13615SentAt != null, sentLine(v.form13615SentAt, "Form 13615", "form13615"))}<fieldset class="check-group"><legend>Certificates</legend>${ticks(
     "certificate",
     CERTIFICATES,
     v.certificates ?? [],
@@ -282,7 +310,7 @@ export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {}, 
     "isNew",
     "New volunteer",
     isNew ? true : v.isNew === true,
-  )}${tickRow("photoIdChecked", "Photo ID checked", v.photoIdChecked === true)}</fieldset>${when(!isNew && volunteer, accountSection(v, ui?.accountNotice, { viewerIsSiteCoordinator: canChangeAdmin }))}`;
+  )}${tickRow("photoIdChecked", "Photo ID checked", v.photoIdChecked === true)}${when(!isNew && v.photoIdSentAt != null, sentLine(v.photoIdSentAt, "Photo ID", "photoId"))}</fieldset>${when(!isNew && volunteer, accountSection(v, ui?.accountNotice, { viewerIsSiteCoordinator: canChangeAdmin }))}`;
   const formError = ui?.formError
     ? `<p class="notice error" role="alert" id="volunteer-form-error">${icon("help")}<span>${esc(ui.formError)}</span></p>`
     : "";

@@ -10525,3 +10525,95 @@ test("markUploadSent: a refusal drops an earlier action's Try again", async () =
   assert.equal(controller.getState().retryable, false);
   controller.stop();
 });
+
+// ---- Mark reviewed (change add-clearance-uploads, design D7) ----
+
+const uploadReviewStore = () => {
+  const store = rosterStore();
+  store.failReview = null;
+  store.markUploadReviewed = async (request) => {
+    store.calls.push("markUploadReviewed");
+    store.writes.push({ type: "markUploadReviewed", ...request });
+    if (store.failReview) {
+      const error = store.failReview;
+      store.failReview = null;
+      throw error;
+    }
+    // The review bumps the row's revision, as the database does.
+    store.volunteers = store.volunteers.map((entry) =>
+      entry.id === request.volunteerId ? { ...entry, revision: entry.revision + 1 } : entry,
+    );
+    return { actionId: request.actionId, personId: request.volunteerId, revision: 5 };
+  };
+  return store;
+};
+
+const openReviewDrawer = async (store, ids = ["action-1", "action-2"]) => {
+  const built = build({ store, newActionId: () => ids.shift() });
+  await built.controller.start();
+  built.controller.navigate("office-volunteers");
+  await built.controller.loadVolunteers();
+  built.controller.openDialog("volunteer", { volunteerId: "v-1" });
+  return built;
+};
+
+test("Mark reviewed sends the drawer volunteer's revision", async () => {
+  const store = uploadReviewStore();
+  const { controller } = await openReviewDrawer(store);
+  const text = await controller.markUploadReviewed("form13615");
+  assert.equal(text, "Marked reviewed");
+  assert.deepEqual(store.writes.at(-1), {
+    type: "markUploadReviewed",
+    actionId: "action-1",
+    volunteerId: "v-1",
+    expectedRevision: 4,
+    document: "form13615",
+  });
+  assert.equal(controller.getState().busy, false);
+  controller.stop();
+});
+
+test("Mark reviewed re-reads the Roster", async () => {
+  const store = uploadReviewStore();
+  const { controller } = await openReviewDrawer(store);
+  const reads = volunteerReads(store);
+  await controller.markUploadReviewed("photoId");
+  assert.equal(volunteerReads(store), reads + 1);
+  assert.equal(controller.getState().volunteers.find((entry) => entry.id === "v-1").revision, 5);
+  controller.stop();
+});
+
+test("Mark reviewed keeps the drawer open and the next Save sends the new revision", async () => {
+  const store = uploadReviewStore();
+  const { controller } = await openReviewDrawer(store);
+  controller.getState(); // the drawer's typed values live in the page (app.mjs drafts); the controller must not touch them
+  const before = controller.getState();
+  const { dialog, dialogContext } = before;
+  await controller.markUploadReviewed("form13615");
+  const after = controller.getState();
+  assert.equal(after.dialog, dialog);
+  assert.deepEqual(after.dialogContext, dialogContext);
+  assert.equal(after.volunteerFormError, before.volunteerFormError);
+  assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
+  assert.equal(store.writes.at(-1).type, "saveVolunteer");
+  assert.equal(store.writes.at(-1).expectedRevision, 5);
+  controller.stop();
+});
+
+test("a CONFLICT on Mark reviewed says VOLUNTEER_CONFLICT_MESSAGE and re-reads", async () => {
+  const store = uploadReviewStore();
+  const { controller } = await openReviewDrawer(store);
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, revision: 9 }];
+  store.failReview = Object.assign(new Error("stale"), { code: "CONFLICT" });
+  const reads = volunteerReads(store);
+  assert.equal(await controller.markUploadReviewed("form13615"), null);
+  const state = controller.getState();
+  assert.equal(state.error.code, "CONFLICT");
+  assert.equal(state.error.message, VOLUNTEER_CONFLICT_MESSAGE);
+  assert.equal(state.retryable, false);
+  assert.equal(state.busy, false);
+  assert.equal(state.dialog, "volunteer");
+  assert.equal(volunteerReads(store), reads + 1);
+  assert.equal(state.volunteers[0].revision, 9);
+  controller.stop();
+});
