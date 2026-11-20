@@ -114,6 +114,14 @@ begin
  if v_receipt.receipt is not null then
   return v_receipt.receipt;
  end if;
+ -- The lock order vitally_save_volunteer and vitally_mark_upload_reviewed
+ -- share: the volunteer's profile row first, then the roster entry, so a send
+ -- and an admin's Save or Mark reviewed on the same volunteer cannot deadlock.
+ perform 1 from public.volunteer_profiles
+  where workspace_id=v_person.workspace_id and person_id=v_person.id for update;
+ if not found then
+  raise sqlstate 'VT002' using message='NOT_FOUND';
+ end if;
  select r.* into v_entry from public.roster_entries r
   join public.workspaces w on w.id=r.workspace_id and w.current_season=r.season
   where r.workspace_id=v_person.workspace_id and r.person_id=v_person.id for update of r;
@@ -131,11 +139,9 @@ begin
   update public.roster_entries set photo_id_sent_at=v_sent
    where workspace_id=v_entry.workspace_id and person_id=v_entry.person_id and season=v_entry.season;
  end if;
+ -- The profile row is locked above, so this update finds it.
  update public.volunteer_profiles set revision=revision+1,updated_at=now()
   where workspace_id=v_person.workspace_id and person_id=v_person.id;
- if not found then -- 053
-  raise sqlstate 'VT002' using message='NOT_FOUND'; -- 053
- end if; -- 053
  v_result=jsonb_build_object('actionId',p_action_id,'document',p_document,'sentAt',v_sent);
  update public.action_receipts set target_id=v_person.id,receipt=v_result where id=v_receipt.id;
  return v_result;

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createDatabaseFixture } from "./support/database-fixture.mjs";
+import { openDatabase } from "../tools/admin/database.mjs";
 
 // OpenSpec change add-clearance-uploads (design D1, D5), migration 053: the
 // sent dates on roster entries and the clearance answer's sentAt, uploadUrl and
@@ -299,6 +300,58 @@ test("vitally_mark_upload_sent against real Supabase", async (t) => {
         },
       });
       assert.equal(error?.code, "VT003");
+    });
+
+    // The shared lock order (Save, Mark reviewed, the send): the volunteer's
+    // profile row, then the roster entry. Another connection holds the
+    // profile; the send waits on it holding nothing of the entry, so a third
+    // connection can still lock the entry at once.
+    await t.test("the send locks the profile before the roster entry", async () => {
+      const m = await unclearedMember("snd_lockorder", "Nell Quarrington");
+      const holder = await openDatabase({ kind: "test" });
+      const prober = await openDatabase({ kind: "test" });
+      let open = false;
+      try {
+        await holder.query("begin");
+        open = true;
+        await holder.query(
+          "select 1 from public.volunteer_profiles where workspace_id=$1 and person_id=$2 for update",
+          [f.workspaceId, m.personId],
+        );
+        // A PostgREST builder is lazy: `then` sends it now.
+        const pending = send(m.client, "form13615").then((answer) => answer);
+        let waiting = false;
+        for (let i = 0; i < 100 && !waiting; i += 1) {
+          waiting = (
+            await f.sql(
+              "select exists(select 1 from pg_stat_activity where wait_event_type='Lock' and query ilike '%vitally_mark_upload_sent%' and pid<>pg_backend_pid()) as w",
+            )
+          ).rows[0].w;
+          if (!waiting) await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        assert.equal(waiting, true, "the send waits on the profile's row lock");
+        await prober.query("begin");
+        const probe = await prober
+          .query(
+            "select 1 from public.roster_entries where workspace_id=$1 and person_id=$2 and season=$3 for update nowait",
+            [f.workspaceId, m.personId, season],
+          )
+          .then(
+            () => null,
+            (error) => error,
+          );
+        await prober.query("rollback");
+        assert.equal(probe, null, `the entry is free while the send waits: ${probe?.code} ${probe?.message}`);
+        await holder.query("commit");
+        open = false;
+        const { error } = await pending;
+        assert.equal(error, null, `the send lands once the profile is free: ${error?.code}`);
+        assert.ok((await entryOf(m)).form_13615_sent_at);
+      } finally {
+        if (open) await holder.query("rollback");
+        await holder.end();
+        await prober.end();
+      }
     });
   } finally {
     await f.close();
