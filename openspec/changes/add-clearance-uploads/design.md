@@ -56,7 +56,8 @@
     - `p_document` must be `form13615` or `photoId`, and `p_action_id` must be given. Otherwise the call is refused `VALIDATION`.
     - A caller with no current-season entry is refused `VALIDATION` with detail `NO_ROSTER_ENTRY`.
     - A `photoId` call on an entry that is not new, or is already checked, is refused `VALIDATION` with detail `PHOTO_ID_NOT_NEEDED`.
-    - Every refusal comes before the receipt is reserved, so it writes nothing and stores no receipt.
+    - `FORBIDDEN` and the malformed-input `VALIDATION` come before the receipt. `NO_ROSTER_ENTRY` and `PHOTO_ID_NOT_NEEDED` come after it, so a lost-answer retry returns the stored result even if the entry changed since (ruling R5 during apply). A refusal after the reservation still writes nothing and stores no receipt, because the transaction rolls back.
+  - **Locks:** after the receipt, it locks the caller's `volunteer_profiles` row, then the roster entry. That is the same order as `vitally_save_volunteer`, so the two cannot deadlock. A staff caller with no profile row is refused `NOT_FOUND` (final review, during apply).
   - **Receipt:** it reserves `MARK_UPLOAD_SENT`, with a digest over the operation, document and person. The same action id returns the stored result.
   - **Writes:**
     - It sets the document's column to `now()`. Sending again under a new action id updates the date.

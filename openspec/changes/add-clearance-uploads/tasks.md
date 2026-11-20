@@ -87,7 +87,7 @@
   5. A new volunteer sends the photo ID, the admin presses Mark reviewed, and the row leaves the filter.
 
   Use fictional data.
-- [ ] 8.2 Run only this test locally if memory allows, with stacks stopped after. Otherwise rely on the PR's CI story legs and review their screenshots.
+- [x] 8.2 Run only this test locally if memory allows, with stacks stopped after. Otherwise rely on the PR's CI story legs and review their screenshots.
 
 ## 9. Checks and docs
 
