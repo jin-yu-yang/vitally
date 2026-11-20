@@ -10666,6 +10666,7 @@ test("Mark reviewed does nothing outside the volunteer dialog", async () => {
 
 // ---- The sidebar count (change add-clearance-uploads, design D8) ----
 
+const settled = () => new Promise((resolve) => setTimeout(resolve, 5));
 const countReads = (store) => store.calls.filter((entry) => entry === "countUploadsToReview").length;
 
 test("an admin window reads the count with its data", async () => {
@@ -10777,9 +10778,11 @@ test("Save and Mark reviewed re-read the count", async () => {
   assert.equal(controller.getState().uploadsToReview, 2);
   store.uploadsCount = 1;
   await controller.markUploadReviewed("form13615");
+  await settled();
   assert.equal(controller.getState().uploadsToReview, 1);
   store.uploadsCount = 0;
   assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
+  await settled();
   assert.equal(controller.getState().uploadsToReview, 0);
   controller.stop();
 });
@@ -10791,6 +10794,51 @@ test("reading the Roster's list re-reads the count", async () => {
   store.uploadsCount = 7;
   controller.navigate("office-volunteers");
   await controller.loadVolunteers();
+  await settled();
   assert.equal(controller.getState().uploadsToReview, 7);
+  controller.stop();
+});
+
+test("the Roster's list does not wait for the count, and a late count redraws", async () => {
+  const store = rosterStore();
+  const { controller, renders } = build({ store });
+  await controller.start();
+  let release;
+  store.countUploadsToReview = () => new Promise((resolve) => (release = () => resolve(9)));
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  assert.equal(controller.getState().lists.volunteers, "ready", "the list finished with the count still out");
+  const drawn = renders.count;
+  release();
+  await settled();
+  assert.equal(controller.getState().uploadsToReview, 9);
+  assert.ok(renders.count > drawn);
+  controller.stop();
+});
+
+test("signing out forgets the count", async () => {
+  const store = adminStaffStore();
+  store.uploadsCount = 3;
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(controller.getState().uploadsToReview, 3);
+  await controller.signOut();
+  assert.equal(controller.getState().uploadsToReview, 0);
+  controller.stop();
+});
+
+test("losing the workspace admin standing resets the count", async () => {
+  const store = adminStaffStore();
+  store.uploadsCount = 3;
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(controller.getState().uploadsToReview, 3);
+  store.nextClearance = { cleared: true, missing: [], capabilities: ["prepare"], isAdmin: false };
+  await controller.checkClearance();
+  assert.equal(controller.getState().uploadsToReview, 0);
+  store.nextClearance = { cleared: true, missing: [], capabilities: ["admin"], isAdmin: true };
+  store.uploadsCount = 3;
+  await controller.checkClearance();
+  assert.equal(controller.getState().uploadsToReview, 3);
   controller.stop();
 });

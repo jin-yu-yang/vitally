@@ -1195,8 +1195,12 @@ export function createController({
       if (state.lists.volunteers !== "ready") state.lists.volunteers = "failed";
       throw error;
     } finally {
-      // After the list, and whatever the list did: the count is its own read.
-      await readUploadsCount();
+      // After the list, and whatever the list did: the count is its own read,
+      // started here and not waited for, so the list's callers never wait on it.
+      if (staffWindow() && ceilingAdmin(state.principal)) {
+        const asked = state.principal.userId;
+        void redrawIfUploadsChanged(() => staffWindow() && state.principal?.userId === asked);
+      }
     }
   }
 
@@ -2122,6 +2126,8 @@ export function createController({
     const was = !awaitingClearance(state);
     const oldClearance = state.principal.clearance;
     state.principal = { ...state.principal, clearance: answer };
+    // No longer a workspace admin: a later regain must not flash an old number.
+    if (!ceilingAdmin(state.principal)) state.uploadsToReview = 0;
     // The person's own entry follows what they may do now.
     state.people = withOwnCapabilities(state.people, state.principal);
     // An earlier failed check's notice is answered.
@@ -2339,6 +2345,7 @@ export function createController({
     pendingInviteAction = null;
     state.updates = [];
     state.updatesUnread = 0;
+    state.uploadsToReview = 0;
     endNotifications();
     state.postedUpdates = [];
     state.updateForm = emptyUpdateForm();
