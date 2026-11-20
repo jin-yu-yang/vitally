@@ -59,6 +59,10 @@ export const CASE_ACTIONS = Object.freeze([
   // RECORD_FILING_RESULT carries { confirmed, results: { federal?, state? },
   // fixNote? } with each result { result, date, code? }.
   "RECORD_FILING_RESULT",
+  // Migration 054: { confirmed, exitForm?, remarks? }. The old { confirmed }
+  // payload is unchanged. exitForm and remarks, when present, are stored in
+  // return_to_signing_exit_forms (remarks 1-2000 trimmed, exitForm as
+  // check_exit_form allows).
   "RETURN_TO_SIGNING",
   "REMIND",
   // Change add-hold-and-closing (migration 036). REQUEST_DOCUMENTS_AT_INTAKE
@@ -153,7 +157,9 @@ export const isStaffWindow = (principal) => principal?.access === "staff";
 //   changedAt }], for both principals.
 // Staff case additionally includes participants, reviews, followups,
 // internalHistory and materials: [{ item, receivedAt, recordedByPersonId }].
-// These are never loaded by the applicant adapter.
+// Also returnToSigningExitForms: [{ id, caseId, enteredByPersonId, createdAt,
+// exitForm, remarks }], oldest first, [] when none; absent from client
+// records. These are never loaded by the applicant adapter.
 // Action: { actionId, caseId, expectedRevision, type, payload }
 //   SUBMIT_REVIEW and APPROVE_REVIEW payloads are { questionnaire };
 //   RESUBMIT_REVIEW's is { questionnaire, resolution }.
