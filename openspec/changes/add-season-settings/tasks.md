@@ -48,8 +48,8 @@
 
 - [x] 8.1 `src/supabase-store.mjs`: season settings read and writes, the site coordinator write, `is_site_coordinator` in the accounts select. `src/clearance.mjs`: `siteCoordinator()`, and the SC line in `missingLines`.
 - [x] 8.2 `src/volunteer-roster.mjs` / `src/volunteer-views.mjs`: the SC rule in "Ready for the season" ("SC certificate missing"); the Admin tick disabled for non-site-coordinators with its hint; the refusal sentences for ADMIN_ROLE and LAST_SITE_COORDINATOR.
-- [ ] 8.3 New `src/season-settings-views.mjs`, with unit tests: the season card, the SIDN row and Change dialog, the Site coordinators card with picker and history, and the read-only variant.
-- [ ] 8.4 Wire `office-settings` into `src/views.mjs` (sidebar link, `CEILING_SCREENS`) and `src/controller.mjs` (screen list, `ADMIN_SETUP_SCREENS`, `screenAllowed`, actions, read on open, error sentences). Add CSS in the existing staff stylesheet.
+- [x] 8.3 New `src/season-settings-views.mjs`, with unit tests: the season card, the SIDN row and Change dialog, the Site coordinators card with picker and history, and the read-only variant.
+- [x] 8.4 Wire `office-settings` into `src/views.mjs` (sidebar link, `CEILING_SCREENS`) and `src/controller.mjs` (screen list, `ADMIN_SETUP_SCREENS`, `screenAllowed`, actions, read on open, error sentences). Add CSS in the existing staff stylesheet.
 
 ## 9. Browser story
 
