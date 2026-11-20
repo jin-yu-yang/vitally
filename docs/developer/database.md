@@ -314,7 +314,7 @@ they belong.
 | `vitally_edit_contact(p_action_id uuid, p_contact_id uuid, p_expected_revision bigint, p_entry jsonb)` | Edit a logged contact; appends a version | `{actionId, contactId, caseId, revision}` |
 | `vitally_close_unsigned(p_action_id uuid, p_cases jsonb, p_confirmed boolean)` | Season end (037): close the listed signing cases as Dismissed, all or nothing ([below](#season-end-close)) | `{actionId, cases: [{caseId, reference, revision}]}` |
 | `vitally_save_volunteer(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_volunteer jsonb)` | Add or edit a volunteer on the Roster (044; workspace admins, that is a site coordinator or the Admin role this season; only a site coordinator changes the Admin role; 045 adds role needs, the photo ID check and the open-work rule) | `{actionId, personId, revision}` |
-| `vitally_my_clearance()` | The caller's own clearance (045, [below](#roster-clearance); 053 adds the sent dates, the upload link and empty capabilities when not cleared) | `{cleared, missing, capabilities, isAdmin, isSiteCoordinator, siteCoordinatorName, uploadUrl}`; `missing` items for `form13615` and `photoId` carry `sentAt` (053) |
+| `vitally_my_clearance()` | The caller's own clearance (045, [below](#roster-clearance); 053 adds the sent dates, the upload link and empty capabilities when not cleared) | `{cleared, missing, capabilities, isAdmin, isSiteCoordinator, siteCoordinatorName, siteCheck, uploadUrl}`; `missing` items for `form13615` and `photoId` carry `sentAt` (053) |
 | `vitally_mark_upload_sent(p_action_id uuid, p_document text)` | The caller says they sent their own `form13615` or `photoId` (053; any staff member with a current-season entry, cleared or not; [below](#clearance-uploads)) | `{actionId, document, sentAt}` |
 | `vitally_mark_upload_reviewed(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_document text)` | A workspace admin clears a volunteer's sent date (053; [below](#clearance-uploads)) | `{actionId, personId, revision}` |
 | `vitally_save_update(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_update jsonb)` | Save a draft, post it, or edit a draft, a posted update or an unpublished one (049; workspace admins). An unpublished update stays unpublished, with its reads and `unpublished_at`; `post` changes nothing there and `askAgain` is refused (`VT007`, detail `askAgain`). `askAgain` on a posted update clears every read and confirmation | `{actionId, updateId, revision, status}` |
@@ -399,7 +399,8 @@ and the behaviour in the canonical spec
   mirrors the roles (see [Season settings and site coordinators](#season-settings-and-site-coordinators)).
 - **`vitally_my_clearance()`** answers for the caller only: `cleared`, what is `missing` (the Form
   13615, the photo ID check, each role's missing certificates), the effective `capabilities`,
-  `isAdmin` (workspace admin, since 052), `isSiteCoordinator` and `siteCoordinatorName`. A rostered
+  `isAdmin` (workspace admin, since 052), `isSiteCoordinator`, `siteCoordinatorName` and
+  `siteCheck` (true while the caller's account is still `invited`). A rostered
   site coordinator also needs the SC certificate to be cleared. Since 053 the `form13615` and
   `photoId` missing items carry `sentAt`, there is a top-level `uploadUrl`, and `capabilities` is
   `[]` whenever `cleared` is false (#193).
