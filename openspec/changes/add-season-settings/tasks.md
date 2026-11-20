@@ -16,9 +16,9 @@
 
 ## 3. Season settings in the database
 
-- [ ] 3.1 Add `public.season_settings`, one row per workspace (kept across seasons), with no client grants and not in realtime. The SIDN stays in `vitally_private.site_numbers`.
-- [ ] 3.2 Add `vitally_season_settings()` (workspace admin; never the SIDN), `vitally_save_season_settings` (site coordinator; `https://` validation; revision; receipt) and `vitally_set_site_number` (site coordinator; SIDN format; answers set/updatedAt only).
-- [ ] 3.3 Database tests: only site coordinators write; admins read; FORBIDDEN for others; link validation; CONFLICT; receipt replay; no public RPC, table or policy returns the SIDN.
+- [x] 3.1 Add `public.season_settings`, one row per workspace (kept across seasons), with no client grants and not in realtime. The SIDN stays in `vitally_private.site_numbers`.
+- [x] 3.2 Add `vitally_season_settings()` (workspace admin; never the SIDN), `vitally_save_season_settings` (site coordinator; `https://` validation; revision; receipt) and `vitally_set_site_number` (site coordinator; SIDN format; answers set/updatedAt only).
+- [x] 3.3 Database tests: only site coordinators write; admins read; FORBIDDEN for others; link validation; CONFLICT; receipt replay; no public RPC, table or policy returns the SIDN.
 
 ## 4. The default follow-up person may be a site coordinator
 
