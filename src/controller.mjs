@@ -4041,6 +4041,11 @@ export function createController({
   // design D6). A send whose answer never came may have landed, so, as
   // saveVolunteer does, pressing it again for the same document sends the same
   // action id and the stored receipt answers. Refusals are said on the screen.
+  // A refusal's reason is the database's detail (`cause.details`; its message
+  // is VALIDATION), and it means the screen is stale (a photo ID no longer
+  // needed, an entry removed): the clearance is asked again. After a send, a
+  // check already out (a focus fired by the same click, say) was asked before
+  // the send landed, so, as saveVolunteer does, it is followed by one more.
   const UPLOAD_REFUSALS = Object.freeze({
     PHOTO_ID_NOT_NEEDED: "Your photo ID doesn't need sending any more.",
     NO_ROSTER_ENTRY: "You're not on this season's roster yet. Ask your site coordinator.",
@@ -4062,13 +4067,14 @@ export function createController({
       // An earlier action's Try again does not belong beside this refusal.
       state.retryable = false;
       if (UNKNOWN_OUTCOME.includes(error?.code)) pendingUploadSend = { request };
-      const known = error?.code === "VALIDATION" ? UPLOAD_REFUSALS[error?.cause?.message] : null;
+      const known = error?.code === "VALIDATION" ? UPLOAD_REFUSALS[String(error?.cause?.details ?? "")] : null;
       noteFailure(error, { message: known ?? (error?.code === "OFFLINE" ? undefined : "Something went wrong.") });
       show();
+      if (error?.code === "VALIDATION") void recheckAfterOwnSave();
       return false;
     }
     state.busy = false;
-    await checkClearance();
+    await recheckAfterOwnSave();
     show();
     return true;
   }

@@ -10482,11 +10482,11 @@ test("markUploadSent says a refusal in plain words", async () => {
   const store = uploadStore();
   const { controller } = build({ store });
   await controller.start();
-  store.failSend = Object.assign(domainError("VALIDATION"), { cause: { message: "PHOTO_ID_NOT_NEEDED" } });
+  store.failSend = Object.assign(domainError("VALIDATION"), { cause: { message: "VALIDATION", details: "PHOTO_ID_NOT_NEEDED" } });
   await controller.markUploadSent("photoId");
   assert.equal(controller.getState().error.message, "Your photo ID doesn't need sending any more.");
   assert.equal(controller.getState().busy, false);
-  store.failSend = Object.assign(domainError("VALIDATION"), { cause: { message: "NO_ROSTER_ENTRY" } });
+  store.failSend = Object.assign(domainError("VALIDATION"), { cause: { message: "VALIDATION", details: "NO_ROSTER_ENTRY" } });
   await controller.markUploadSent("form13615");
   assert.equal(
     controller.getState().error.message,
@@ -10495,6 +10495,61 @@ test("markUploadSent says a refusal in plain words", async () => {
   store.failSend = domainError("SERVER_ERROR");
   await controller.markUploadSent("form13615");
   assert.equal(controller.getState().error.message, "Something went wrong.");
+  controller.stop();
+});
+
+test("markUploadSent: a VALIDATION refusal re-reads the clearance, so a stale item goes", async () => {
+  const store = uploadStore();
+  store.nextClearance = { ...UNCLEARED_VOLUNTEER, missing: [{ kind: "form13615" }, { kind: "photoId", sentAt: null }] };
+  const { controller } = build({ store });
+  await controller.start();
+  const before = callCount(store, "getClearance");
+  // Someone ticked Photo ID checked meanwhile: the send is refused, and the
+  // re-read answer no longer lists the photo ID.
+  store.nextClearance = { ...UNCLEARED_VOLUNTEER, missing: [{ kind: "form13615" }] };
+  store.failSend = Object.assign(domainError("VALIDATION"), {
+    cause: { message: "VALIDATION", details: "PHOTO_ID_NOT_NEEDED" },
+  });
+  assert.equal(await controller.markUploadSent("photoId"), false);
+  await new Promise((resolve) => setImmediate(resolve));
+  const state = controller.getState();
+  assert.equal(callCount(store, "getClearance"), before + 1, "the refusal asks for the clearance again");
+  assert.deepEqual(
+    state.principal.clearance.missing.map((item) => item.kind),
+    ["form13615"],
+  );
+  assert.equal(state.error.message, "Your photo ID doesn't need sending any more.", "the refusal stays said");
+  controller.stop();
+});
+
+test("markUploadSent: a check already out when the send lands is followed by one more", async () => {
+  const store = uploadStore();
+  const { controller } = build({ store });
+  await controller.start();
+  const before = callCount(store, "getClearance");
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  const sentAt = "2026-11-20T15:00:00Z";
+  let asked = 0;
+  store.nextClearance = () => {
+    asked += 1;
+    // The first (a focus, say) was asked before the send; the next one after it.
+    return asked === 1 ? gate : { ...UNCLEARED_VOLUNTEER, missing: [{ kind: "form13615", sentAt }] };
+  };
+  const focus = controller.checkClearance();
+  const sent = controller.markUploadSent("form13615");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(store.calls.includes("markUploadSent"), "the send went out");
+  release({ ...UNCLEARED_VOLUNTEER, missing: [{ kind: "form13615", sentAt: null }] });
+  assert.equal(await sent, true);
+  await focus;
+  const state = controller.getState();
+  assert.equal(callCount(store, "getClearance"), before + 2, "the held check, then one more");
+  assert.ok(
+    store.calls.lastIndexOf("getClearance") > store.calls.indexOf("markUploadSent"),
+    "a clearance read after the send",
+  );
+  assert.equal(state.principal.clearance.missing[0].sentAt, sentAt, "the later answer is shown");
   controller.stop();
 });
 
@@ -10528,7 +10583,7 @@ test("markUploadSent: a refusal drops an earlier action's Try again", async () =
   store.failNext = domainError("OFFLINE");
   await assert.rejects(controller.runAction("CLAIM_PREPARATION", {}));
   assert.equal(controller.getState().retryable, true);
-  store.failSend = Object.assign(domainError("VALIDATION"), { cause: { message: "PHOTO_ID_NOT_NEEDED" } });
+  store.failSend = Object.assign(domainError("VALIDATION"), { cause: { message: "VALIDATION", details: "PHOTO_ID_NOT_NEEDED" } });
   await controller.markUploadSent("photoId");
   assert.equal(controller.getState().retryable, false);
   controller.stop();
