@@ -1,21 +1,21 @@
 ## 1. Migration 053: columns and the clearance answer
 
-- [ ] 1.1 Write failing database tests in a new `tests/database-clearance-uploads.mjs`:
+- [x] 1.1 Write failing database tests in a new `tests/database-clearance-uploads.mjs`:
   - `vitally_my_clearance()` carries `sentAt` (null) on the `form13615` and `photoId` items;
   - `uploadUrl` is the certificate link for a rostered caller;
   - `uploadUrl` is null with no link, and null with no current-season entry;
   - `capabilities` is `[]` for a not-cleared caller who has roles.
-- [ ] 1.2 Convert the #193 test in `tests/database-clearance.mjs` ("a new volunteer without a photo ID check is not cleared"): the `unchecked` half asserts `capabilities` `[]`, and its comment is rewritten. Do not delete it.
-- [ ] 1.3 Create `supabase/migrations/053_clearance_uploads.sql` with:
+- [x] 1.2 Convert the #193 test in `tests/database-clearance.mjs` ("a new volunteer without a photo ID check is not cleared"): the `unchecked` half asserts `capabilities` `[]`, and its comment is rewritten. Do not delete it.
+- [x] 1.3 Create `supabase/migrations/053_clearance_uploads.sql` with:
   - the two `roster_entries` columns;
   - the new `vitally_my_clearance()` body, with `sentAt`, `uploadUrl` and empty capabilities when uncleared, and changed lines marked `-- 053`.
 
   Re-grep `clearance.capabilities` and `withOwnCapabilities` first, and confirm that no uncleared path depends on them.
-- [ ] 1.4 Run `npm run db:migrate:test` and the two database files. The 1.1–1.2 tests pass.
+- [x] 1.4 Run `npm run db:migrate:test` and the two database files. The 1.1–1.2 tests pass.
 
 ## 2. Migration 053: the volunteer's "sent" RPC
 
-- [ ] 2.1 Write failing tests for `vitally_mark_upload_sent`:
+- [x] 2.1 Write failing tests for `vitally_mark_upload_sent`:
   - it marks only the caller's own entry;
   - sending again updates the date;
   - a repeated action id returns the same answer;
@@ -26,12 +26,12 @@
   - a cleared caller may send a 13615;
   - `sentAt` then appears in `vitally_my_clearance()`;
   - the send raises the revision, so an admin's stale save gets `CONFLICT`.
-- [ ] 2.2 Add `vitally_mark_upload_sent(uuid,text)` to 053 (design D2), with its revoke and grant.
-- [ ] 2.3 Run the database file. 2.1 passes.
+- [x] 2.2 Add `vitally_mark_upload_sent(uuid,text)` to 053 (design D2), with its revoke and grant.
+- [x] 2.3 Run the database file. 2.1 passes.
 
 ## 3. Migration 053: Save clears, and Mark reviewed
 
-- [ ] 3.1 Write failing tests:
+- [x] 3.1 Write failing tests:
   - Save clears `form_13615_sent_at` on a role change, and on a certificate change (including an `uploaded` row being confirmed);
   - a phone-only save keeps it;
   - ticking Photo ID checked clears `photo_id_sent_at`;
@@ -41,9 +41,9 @@
   - Mark reviewed with a stale revision gets `CONFLICT`, an unknown volunteer gets `NOT_FOUND`, and a non-admin gets `FORBIDDEN` with no receipt;
   - a repeated action id returns the same answer;
   - a non-admin reading `roster_entries` gets no rows.
-- [ ] 3.2 Add the new `vitally_save_volunteer(...)` body to 053: 052's body, with only the clearing in the entry write (design D4), marked `-- 053`.
-- [ ] 3.3 Add `vitally_mark_upload_reviewed(uuid,uuid,bigint,text)` to 053 (design D3), with its revoke and grant.
-- [ ] 3.4 Run `npm run db:migrate:test` on a stack that already has main's migrations, then the full `npm run test:database` at concurrency 1. Everything passes.
+- [x] 3.2 Add the new `vitally_save_volunteer(...)` body to 053: 052's body, with only the clearing in the entry write (design D4), marked `-- 053`.
+- [x] 3.3 Add `vitally_mark_upload_reviewed(uuid,uuid,bigint,text)` to 053 (design D3), with its revoke and grant.
+- [x] 3.4 Run `npm run db:migrate:test` on a stack that already has main's migrations, then the full `npm run test:database` at concurrency 1. Everything passes.
 
 ## 4. Store and contracts
 
