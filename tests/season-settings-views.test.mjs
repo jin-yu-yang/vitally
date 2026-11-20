@@ -142,7 +142,6 @@ test("busy disables the page's buttons", () => {
   // Save, Change…, Add, and Remove on each of the two rows; idle, only Add (nothing picked).
   assert.equal((html.match(/<button[^>]* disabled/g) ?? []).length, 5);
   assert.equal((renderSeasonSettings(view(), { canEdit: true, ui: {} }).match(/<button[^>]* disabled/g) ?? []).length, 1);
-
 });
 
 test("escaping: names, emails and links render as text", () => {

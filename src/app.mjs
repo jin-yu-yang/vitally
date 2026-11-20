@@ -547,6 +547,15 @@ if (!config) {
   // board control's claim select the next without passing `open-case`. A page
   // with no case open changes nothing, so the board's own forms keep theirs
   // and a list and back to the same case keeps the case's.
+  // Add is enabled only while a person is picked (and the page is not busy);
+  // a restored draft sets the picker without a change event, so this runs
+  // after the drafts are restored as well as on change.
+  function syncSiteCoordinatorAdd() {
+    const pick = root.querySelector("#sc-pick");
+    const add = root.querySelector('[data-action="add-site-coordinator"]');
+    if (pick && add) add.disabled = pick.value === "" || pick.disabled;
+  }
+
   function restoreFormDrafts() {
     dropStaleCloseConfirmation();
     const userId = signedInUserId();
@@ -558,6 +567,7 @@ if (!config) {
     if (caseId !== null) draftsCase = caseId;
     for (const [id, value] of formDrafts)
       restoreDraft(root.querySelector(`#${CSS.escape(id)}`), value);
+    syncSiteCoordinatorAdd();
     // A collapsed Exit Form group holding something typed is opened again, so
     // the field a refusal names is in view (design D7).
     const exitGroups = [...root.querySelectorAll("details.q-exit-group:not([open])")];
@@ -2809,9 +2819,7 @@ if (!config) {
       return;
     }
     if (field.id === "sc-pick") {
-      // Add stays disabled until a person is picked.
-      const add = field.form?.querySelector('[data-action="add-site-coordinator"]');
-      if (add) add.disabled = field.value === "";
+      syncSiteCoordinatorAdd();
       return;
     }
     if (field.matches?.("select[data-board-filter]")) {
