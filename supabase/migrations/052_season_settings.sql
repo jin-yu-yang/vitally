@@ -9,13 +9,13 @@
 --   §2 the snapshot of every person's capabilities, for a rollback migration;
 --   §3 the schema: effective_capabilities (role capabilities only), the
 --      mirror helper and its two triggers; the site coordinator flag on
---      accounts and its history (design D4);
+--      accounts and its history (design D4); the Season settings row (D5);
 --   §4 the recompute of every person's capabilities;
 --   §5 onwards, the functions: §5 site coordinators, the workspace admin
 --      check and clearance (design D2, D4, D6); §6 staff setup without
 --      capabilities (design D1, D9); §7 granting and removing site
 --      coordinators (design D4); §8 the default follow-up person (design D7);
---      §9 the Roster save (design D2, D3, D7).
+--      §9 the Roster save (design D2, D3, D7); §10 Season settings (D5).
 -- The migration runs in one transaction.
 
 -- ---------------------------------------------------------------------------
@@ -143,6 +143,23 @@ create table public.site_coordinator_changes (
 create index site_coordinator_changes_person on public.site_coordinator_changes(workspace_id,person_id,changed_at);
 alter table public.site_coordinator_changes enable row level security;
 revoke all on public.site_coordinator_changes from public,anon,authenticated,service_role;
+
+-- Season settings (design D5): one row per workspace, kept across seasons, so
+-- Start next season keeps the links. Nothing about the season is stored; the
+-- label comes from workspaces.current_season. The SIDN is not here: it stays
+-- in 047's vitally_private.site_numbers. Row security is on with no policy and
+-- no client grant; only the §10 functions read or write it. The updater is a
+-- historical scalar, as receipts' actors are, so no person key holds it.
+create table public.season_settings (
+ workspace_id uuid primary key references public.workspaces(id) on delete cascade,
+ certificate_upload_url text check (length(certificate_upload_url) between 1 and 500),
+ client_documents_url text check (length(client_documents_url) between 1 and 500),
+ revision bigint not null default 1,
+ updated_at timestamptz not null default now(),
+ updated_by_person_id uuid
+);
+alter table public.season_settings enable row level security;
+revoke all on public.season_settings from public,anon,authenticated,service_role;
 
 -- ---------------------------------------------------------------------------
 -- §4. The recompute: every person's capabilities become the mirror.
@@ -1087,3 +1104,209 @@ end;
 $$;
 revoke all on function public.vitally_save_volunteer(uuid,uuid,bigint,jsonb) from public,anon,authenticated,service_role;
 grant execute on function public.vitally_save_volunteer(uuid,uuid,bigint,jsonb) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- §10. Season settings (design D5): the read for a workspace admin, the links
+-- save and the SIDN save for a site coordinator. The SIDN is never returned:
+-- the read and the SIDN save say only whether it is set and when it changed.
+
+-- One upload link as sent: null, JSON null, or a string that is empty after
+-- trimming is no link (null); otherwise the trimmed string must be an
+-- `https://` address with no spaces, at most 500 characters. VALIDATION names
+-- the field (p_field) when it is not.
+create function vitally_private.season_link(p_value jsonb,p_field text)
+returns text language plpgsql immutable security definer set search_path='' as $$
+declare v_link text;
+begin
+ if p_value is null or jsonb_typeof(p_value)='null' then
+  return null;
+ end if;
+ if jsonb_typeof(p_value)<>'string' then
+  raise sqlstate 'VT007' using message='VALIDATION',detail=p_field;
+ end if;
+ v_link=regexp_replace(p_value #>> '{}','^\s+|\s+$','','g');
+ if v_link='' then
+  return null;
+ end if;
+ if length(v_link)>500 or v_link !~* '^https://\S+$' then
+  raise sqlstate 'VT007' using message='VALIDATION',detail=p_field;
+ end if;
+ return v_link;
+end;
+$$;
+revoke all on function vitally_private.season_link(jsonb,text) from public,anon,authenticated,service_role;
+
+-- The settings part of the read and the links save's answer: the current
+-- season, the two links and the revision. An absent row is nulls at revision 0.
+create function vitally_private.season_settings_answer(p_workspace_id uuid)
+returns jsonb language sql stable security definer set search_path='' as $$
+ select jsonb_build_object('season',w.current_season,
+  'certificateUploadUrl',s.certificate_upload_url,
+  'clientDocumentsUrl',s.client_documents_url,
+  'revision',coalesce(s.revision,0))
+ from public.workspaces w
+ left join public.season_settings s on s.workspace_id=w.id
+ where w.id=p_workspace_id;
+$$;
+revoke all on function vitally_private.season_settings_answer(uuid) from public,anon,authenticated,service_role;
+
+-- The Season settings page in one read, for a workspace admin (FORBIDDEN for
+-- anyone else): the settings part; siteNumber {set, updatedAt}, never the
+-- number; canEdit (the caller is a site coordinator); the site coordinators
+-- (an active, marked account) by name, each with their email, since (their
+-- latest grant), onRoster (a current-season roster entry) and account
+-- revision; the candidates for the picker (an active staff account that is not
+-- a site coordinator); and the history, newest first, at most 50 lines.
+create function public.vitally_season_settings()
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_workspace uuid;
+begin
+ v_member=vitally_private.require_membership();
+ v_person=vitally_private.acting_person(v_member);
+ if v_member.access<>'staff' or v_person.id is null
+  or not vitally_policy.is_workspace_admin(v_member.workspace_id) then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ v_workspace=v_member.workspace_id;
+ return vitally_private.season_settings_answer(v_workspace)
+  || jsonb_build_object(
+   'siteNumber',(select jsonb_build_object('set',n.workspace_id is not null,'updatedAt',n.updated_at)
+    from (select 1) one left join vitally_private.site_numbers n on n.workspace_id=v_workspace),
+   'canEdit',vitally_private.is_site_coordinator(v_workspace,v_person.id),
+   'siteCoordinators',coalesce((select jsonb_agg(jsonb_build_object(
+     'volunteerId',p.id,'name',p.name,'email',v.email,
+     'since',(select max(c.changed_at) from public.site_coordinator_changes c
+      where c.workspace_id=v_workspace and c.person_id=p.id and c.granted),
+     'onRoster',exists(select 1 from public.roster_entries r join public.workspaces w on w.id=r.workspace_id
+      where r.workspace_id=v_workspace and r.person_id=p.id and r.season=w.current_season),
+     'accountRevision',a.revision) order by p.name,p.id)
+    from public.accounts a
+    join public.people p on p.workspace_id=a.workspace_id and p.id=a.person_id
+    left join public.volunteer_profiles v on v.workspace_id=p.workspace_id and v.person_id=p.id
+    where a.workspace_id=v_workspace and a.status='active' and a.is_site_coordinator),'[]'::jsonb),
+   'candidates',coalesce((select jsonb_agg(jsonb_build_object('volunteerId',p.id,'name',p.name) order by p.name,p.id)
+    from public.accounts a
+    join public.memberships m on m.workspace_id=a.workspace_id and m.user_id=a.user_id
+    join public.people p on p.workspace_id=a.workspace_id and p.id=a.person_id
+    where a.workspace_id=v_workspace and a.status='active' and not a.is_site_coordinator
+     and m.active and m.access='staff'),'[]'::jsonb),
+   'history',coalesce((select jsonb_agg(jsonb_build_object('personName',h.person_name,'granted',h.granted,
+     'changedByName',h.changed_by_name,'changedAt',h.changed_at) order by h.changed_at desc,h.id desc)
+    from (select c.id,c.granted,c.changed_at,p.name as person_name,b.name as changed_by_name
+     from public.site_coordinator_changes c
+     join public.people p on p.workspace_id=c.workspace_id and p.id=c.person_id
+     left join public.people b on b.workspace_id=c.workspace_id and b.id=c.changed_by_person_id
+     where c.workspace_id=v_workspace
+     order by c.changed_at desc,c.id desc limit 50) h),'[]'::jsonb));
+end;
+$$;
+revoke all on function public.vitally_season_settings() from public,anon,authenticated,service_role;
+grant execute on function public.vitally_season_settings() to authenticated;
+
+-- Saves both upload links at the revision the page read, for a site
+-- coordinator only. Order: FORBIDDEN (nothing written, no receipt), VALIDATION
+-- (a missing argument, settings not an object, or a link that fails
+-- season_link, naming the field), then under the workspace lock the receipt
+-- (a replay returns the stored answer) and CONFLICT (a stale revision; with no
+-- row the revision is 0, and a save at 0 inserts it). A link left out or empty
+-- is stored as none. Answers with the settings part of the read.
+create function public.vitally_save_season_settings(p_action_id uuid,p_expected_revision bigint,p_settings jsonb)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_receipt public.action_receipts;
+ v_settings public.season_settings;
+ v_certificate text;
+ v_documents text;
+ v_digest text;
+ v_result jsonb;
+begin
+ v_member=vitally_private.require_membership();
+ v_person=vitally_private.acting_person(v_member);
+ if v_member.access<>'staff' or v_person.id is null
+  or not vitally_private.is_site_coordinator(v_member.workspace_id,v_person.id) then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ if p_action_id is null or p_expected_revision is null or p_settings is null
+  or jsonb_typeof(p_settings)<>'object' then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ v_certificate=vitally_private.season_link(p_settings->'certificateUploadUrl','certificateUploadUrl');
+ v_documents=vitally_private.season_link(p_settings->'clientDocumentsUrl','clientDocumentsUrl');
+ perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_member.workspace_id::text,0));
+ v_digest=encode(extensions.digest(jsonb_build_object('operation','SAVE_SEASON_SETTINGS',
+  'expectedRevision',p_expected_revision,'certificateUploadUrl',v_certificate,'clientDocumentsUrl',v_documents,
+  'personId',v_person.id)::text,'sha256'),'hex');
+ v_receipt=vitally_private.reserve_receipt(v_member,p_action_id,'SAVE_SEASON_SETTINGS',v_digest,v_person.id);
+ if v_receipt.receipt is not null then
+  return v_receipt.receipt;
+ end if;
+ select * into v_settings from public.season_settings where workspace_id=v_member.workspace_id for update;
+ if coalesce(v_settings.revision,0)<>p_expected_revision then
+  raise sqlstate 'VT003' using message='CONFLICT';
+ end if;
+ if v_settings.workspace_id is null then
+  insert into public.season_settings(workspace_id,certificate_upload_url,client_documents_url,updated_by_person_id)
+   values(v_member.workspace_id,v_certificate,v_documents,v_person.id);
+ else
+  update public.season_settings set certificate_upload_url=v_certificate,client_documents_url=v_documents,
+   revision=revision+1,updated_at=now(),updated_by_person_id=v_person.id
+   where workspace_id=v_member.workspace_id;
+ end if;
+ v_result=vitally_private.season_settings_answer(v_member.workspace_id);
+ update public.action_receipts set target_id=v_member.workspace_id,receipt=v_result where id=v_receipt.id;
+ return v_result;
+end;
+$$;
+revoke all on function public.vitally_save_season_settings(uuid,bigint,jsonb) from public,anon,authenticated,service_role;
+grant execute on function public.vitally_save_season_settings(uuid,bigint,jsonb) to authenticated;
+
+-- Sets (or replaces) the workspace's SIDN, for a site coordinator only.
+-- Order: FORBIDDEN (nothing written, no receipt), VALIDATION (no action id),
+-- VALIDATION SIDN_FORMAT (not S and eight digits once 047's normalize_sidn
+-- drops spaces and hyphens and upper-cases it), then under the workspace lock
+-- the receipt and 047's set_site_number. Answers {set: true, updatedAt} only.
+-- The number is kept out of the request digest as well as the answer: a
+-- digest of nine characters of this shape is easily reversed, and receipts are
+-- readable by the service role. So a replay of an action id answers with its
+-- stored receipt whatever number it carries.
+create function public.vitally_set_site_number(p_action_id uuid,p_sidn text)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_receipt public.action_receipts;
+ v_sidn text;
+ v_digest text;
+ v_result jsonb;
+begin
+ v_member=vitally_private.require_membership();
+ v_person=vitally_private.acting_person(v_member);
+ if v_member.access<>'staff' or v_person.id is null
+  or not vitally_private.is_site_coordinator(v_member.workspace_id,v_person.id) then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ if p_action_id is null then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ v_sidn=vitally_private.normalize_sidn(p_sidn);
+ if v_sidn !~ '^S[0-9]{8}$' then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='SIDN_FORMAT';
+ end if;
+ perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_member.workspace_id::text,0));
+ v_digest=encode(extensions.digest(jsonb_build_object('operation','SET_SITE_NUMBER',
+  'personId',v_person.id)::text,'sha256'),'hex');
+ v_receipt=vitally_private.reserve_receipt(v_member,p_action_id,'SET_SITE_NUMBER',v_digest,v_person.id);
+ if v_receipt.receipt is not null then
+  return v_receipt.receipt;
+ end if;
+ perform vitally_private.set_site_number(v_member.workspace_id,v_sidn);
+ select jsonb_build_object('set',true,'updatedAt',n.updated_at) into v_result
+  from vitally_private.site_numbers n where n.workspace_id=v_member.workspace_id;
+ update public.action_receipts set target_id=v_member.workspace_id,receipt=v_result where id=v_receipt.id;
+ return v_result;
+end;
+$$;
+revoke all on function public.vitally_set_site_number(uuid,text) from public,anon,authenticated,service_role;
+grant execute on function public.vitally_set_site_number(uuid,text) to authenticated;
