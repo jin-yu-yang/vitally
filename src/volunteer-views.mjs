@@ -29,6 +29,7 @@ export const languagesText = (volunteer) => {
 const MISSING_TEXT = Object.freeze({
   form13615: "Form 13615 missing",
   photoId: "Photo ID check missing",
+  scCertificate: "SC certificate missing",
   noAccount: "No account yet",
   notSignedIn: "Hasn't signed in yet",
   deactivated: "Account deactivated",
@@ -106,14 +107,21 @@ export function renderRoster(volunteers, { list = "ready", filters = {} } = {}) 
   return `${open}${toolbar(chosen)}${body}<p class="board-foot" role="status">${shown.length} of ${all.length} volunteers</p></section>`;
 }
 
-const ticks = (name, list, chosen, { full = false } = {}) =>
+// `locked` maps a value to the id of the note that says why its box is
+// disabled. A disabled box is not sent with the form, so a ticked one is
+// carried by a hidden input: its saved value goes back unchanged.
+const ticks = (name, list, chosen, { full = false, locked = {} } = {}) =>
   list
     .map((entry) => {
       const id = `volunteer-${name}-${entry.value}`;
       const text = full && entry.full !== entry.label ? `${entry.label} · ${entry.full}` : entry.label;
+      const note = locked[entry.value];
+      const on = chosen.includes(entry.value);
       return `<label class="checkbox-row small" for="${id}"><input type="checkbox" name="${name}" value="${esc(
         entry.value,
-      )}"${chosen.includes(entry.value) ? " checked" : ""} id="${id}"><span>${esc(text)}</span></label>`;
+      )}"${on ? " checked" : ""} id="${id}"${note ? ` disabled aria-describedby="${note}"` : ""}><span>${esc(
+        text,
+      )}</span></label>${when(note && on, `<input type="hidden" name="${name}" value="${esc(entry.value)}">`)}`;
     })
     .join("");
 
@@ -208,10 +216,12 @@ export function cancelInvitationDialogBody({ volunteer = null, email = "" } = {}
  * The Add / Edit drawer's body. Add has no volunteer; an Edit whose volunteer
  * is no longer listed says so and offers Close, never a blank form.
  *
- * @param {object} args `{volunteer, isNew, ui}` — `ui` is
- *   `{busy, error, retryable, formError}`.
+ * @param {object} args `{volunteer, isNew, ui, canChangeAdmin}` — `ui` is
+ *   `{busy, error, retryable, formError}`. `canChangeAdmin` is false for a
+ *   caller who is not a site coordinator: the Admin tick is then disabled,
+ *   showing its saved state (change add-season-settings).
  */
-export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {} } = {}) {
+export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {}, canChangeAdmin = true } = {}) {
   if (!isNew && !volunteer)
     return `${drawerError(ui, VOLUNTEER_CONFLICT_HEADING)}<p>This volunteer could not be opened. Close this and try again.</p>${button(
       "Close",
@@ -250,6 +260,10 @@ export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {} }
     "role",
     ROLES,
     v.roles ?? [],
+    { locked: canChangeAdmin ? {} : { admin: "volunteer-admin-note" } },
+  )}${when(
+    !canChangeAdmin,
+    `<p class="field-note" id="volunteer-admin-note">Only site coordinators change the Admin role.</p>`,
   )}</fieldset><fieldset class="check-group"><legend>Certificates</legend>${ticks(
     "certificate",
     CERTIFICATES,

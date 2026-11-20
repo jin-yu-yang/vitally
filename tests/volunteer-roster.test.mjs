@@ -53,7 +53,7 @@ test("combine keeps only people with a roster entry", () => {
     languages: ["english", "other"], otherLanguage: "Tagalog", roles: ["preparer"],
     certificates: ["vsc", "basic"], revision: 3, hasSignIn: true, signedInName: null,
     isNew: false, photoIdChecked: false,
-    account: { status: "active", revision: 2, activatedAt: null, expiresAt: null },
+    account: { status: "active", revision: 2, activatedAt: null, expiresAt: null }, isSiteCoordinator: false,
     cleared: true, missing: []
   });
   assert.deepEqual(list[1].account, { status: "invited", revision: 1, activatedAt: null, expiresAt: null });
@@ -373,4 +373,50 @@ test("three or more missing certificates are listed with commas", () => {
 test("nothing unticked, nothing announced", () => {
   assert.equal(untickedRolesMessage([], ["vsc"]), "");
   assert.equal(untickedRolesMessage(undefined, []), "");
+});
+
+// A site coordinator (accounts.is_site_coordinator) is cleared only with SC
+// confirmed this season (design D6).
+const coordinator = (certificates, extra = {}) => combineVolunteers({
+  profiles: [profile("p1")], people: [people[1]],
+  certificates: certificates.map((certificate) => ({ person_id: "p1", season: 2026, certificate, status: "confirmed" })),
+  entries: [{ person_id: "p1", season: 2026, roles: ["admin"], ...extra }],
+  accounts: [{ person_id: "p1", status: "active", revision: 1, is_site_coordinator: true }]
+})[0];
+
+test("combineVolunteers: a site coordinator without SC is not cleared, with scCertificate", () => {
+  const v = coordinator(["vsc", "itqr"]);
+  assert.equal(v.isSiteCoordinator, true);
+  assert.deepEqual([v.cleared, v.missing], [false, ["scCertificate"]]);
+});
+
+test("combineVolunteers: a site coordinator with SC confirmed is cleared", () => {
+  const v = coordinator(["vsc", "itqr", "sc"]);
+  assert.deepEqual([v.cleared, v.missing], [true, []]);
+});
+
+test("combineVolunteers: an uploaded SC does not clear a site coordinator", () => {
+  const v = combineVolunteers({
+    profiles: [profile("p1")], people: [people[1]],
+    certificates: [{ person_id: "p1", season: 2026, certificate: "sc", status: "uploaded" }],
+    entries: [{ person_id: "p1", season: 2026, roles: ["greeter"] }],
+    accounts: [{ person_id: "p1", status: "active", revision: 1, is_site_coordinator: true }]
+  })[0];
+  assert.deepEqual([v.cleared, v.missing], [false, ["scCertificate"]]);
+});
+
+test("the SC item follows the photo ID and comes before the account reason", () => {
+  const v = combineVolunteers({
+    profiles: [profile("p1")], people: [people[1]], certificates: [],
+    entries: [{ person_id: "p1", season: 2026, roles: ["admin"], is_new: true }],
+    accounts: [{ person_id: "p1", status: "invited", revision: 1, is_site_coordinator: true }]
+  })[0];
+  assert.deepEqual(v.missing, ["photoId", "scCertificate", "notSignedIn"]);
+  assert.deepEqual(coordinator([], { roles: [] }).missing, ["form13615", "scCertificate"]);
+});
+
+test("combineVolunteers: someone who is not a site coordinator needs no SC", () => {
+  const v = withAccount({ status: "active", revision: 1 });
+  assert.equal(v.isSiteCoordinator, false);
+  assert.deepEqual([v.cleared, v.missing], [true, []]);
 });

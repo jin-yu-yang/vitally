@@ -89,9 +89,14 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
       activatedAt: row?.activated_at ?? null,
       expiresAt: row?.expires_at ?? null
     };
-    const cleared = roles.length > 0 && (!isNew || photoIdChecked) && account.status === "active";
-    // What the row waits for, in order: the Form 13615 (no roles) or the photo ID, then the account.
+    // A site coordinator also needs SC confirmed this season (change add-season-settings, D6).
+    const isSiteCoordinator = row?.is_site_coordinator === true;
+    const scMissing = isSiteCoordinator && !(certsById.get(person.id) ?? []).includes("sc");
+    const cleared = roles.length > 0 && (!isNew || photoIdChecked) && !scMissing && account.status === "active";
+    // What the row waits for, in order: the Form 13615 (no roles) or the photo
+    // ID, a site coordinator's SC certificate, then the account.
     const missing = roles.length === 0 ? ["form13615"] : !isNew || photoIdChecked ? [] : ["photoId"];
+    if (scMissing) missing.push("scCertificate");
     if (account.status !== "active") missing.push(ACCOUNT_MISSING[account.status]);
     list.push({
       id: person.id,
@@ -110,6 +115,7 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
       isNew,
       photoIdChecked,
       account,
+      isSiteCoordinator,
       cleared,
       missing
     });

@@ -40,7 +40,7 @@ import {
 } from "./volunteer-views.mjs";
 import { volunteerTabs, renderWorkload, assignDrawerBody, assignDrawerTitle, DEFAULT_WORKLOAD_SORT } from "./workload-views.mjs";
 import { workloadRows, unassignedCases, candidates } from "./volunteer-workload.mjs";
-import { awaitingClearance, ceilingAdmin } from "./clearance.mjs";
+import { awaitingClearance, ceilingAdmin, siteCoordinator } from "./clearance.mjs";
 import { setupScreen, siteCheckScreen } from "./setup-views.mjs";
 import {
   renderNotificationsPanel,
@@ -722,6 +722,7 @@ export function dialog(state) {
       body = volunteerDrawerBody({
         volunteer,
         isNew: !volunteerId,
+        canChangeAdmin: siteCoordinator(state.principal),
         ui: {
           ...ui,
           formError: state.volunteerFormError ?? null,

@@ -120,6 +120,11 @@ const STAFF_CONTACT_CONFLICT_MESSAGE =
 const STAFF_VOLUNTEER_CONFLICT_MESSAGE =
   "Someone else changed this volunteer. Close this and open it again to see their changes.";
 export const VOLUNTEER_CONFLICT_MESSAGE = STAFF_VOLUNTEER_CONFLICT_MESSAGE;
+// Site coordinators (change add-season-settings): a save that changes the
+// Admin role by someone who is not one, and deactivating the last one.
+const STAFF_ADMIN_ROLE_MESSAGE = "Only site coordinators change the Admin role.";
+const STAFF_LAST_SITE_COORDINATOR_MESSAGE =
+  "At least one site coordinator must remain. Make someone else a site coordinator first.";
 // Post an update (change add-posted-updates): the table is read again and
 // the form keeps what was typed. Staff-only, so named STAFF_.
 const STAFF_UPDATE_CONFLICT_MESSAGE = "Someone changed this update. Check the table and try again.";
@@ -3834,7 +3839,9 @@ export function createController({
           ? roleNeedsMessage(cause.details)
           : error?.code === "INVALID_TRANSITION" && cause?.message === "OPEN_WORK"
             ? openWorkMessage(request.volunteer.name || "This volunteer", cause.details)
-            : null;
+            : error?.code === "FORBIDDEN" && cause?.message === "ADMIN_ROLE"
+              ? STAFF_ADMIN_ROLE_MESSAGE
+              : null;
       if (sentence) {
         state.volunteerFormError = sentence;
         await readVolunteers().catch(() => {});
@@ -3961,11 +3968,13 @@ export function createController({
       const sentence =
         cause?.message === "OPEN_WORK"
           ? openWorkMessage(current.name || "This volunteer", cause.details)
-          : error?.code === "CONFLICT"
-            ? null
-            : kind === "cancel" && error?.code === "INVALID_TRANSITION"
-              ? cancelRefusal(error)
-              : accountMessage(cause?.details);
+          : error?.code === "INVALID_TRANSITION" && cause?.message === "LAST_SITE_COORDINATOR"
+            ? STAFF_LAST_SITE_COORDINATOR_MESSAGE
+            : error?.code === "CONFLICT"
+              ? null
+              : kind === "cancel" && error?.code === "INVALID_TRANSITION"
+                ? cancelRefusal(error)
+                : accountMessage(cause?.details);
       if (sentence) {
         state.volunteerAccountNotice = { kind: "error", text: sentence };
         await readVolunteers().catch(() => {});

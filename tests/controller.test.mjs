@@ -10020,3 +10020,42 @@ test("an added Preparer role and an assignment show the preparation form after f
   assert.match(staffScreen(controller.getState()), /Record that preparation is complete in TaxSlayer/);
   controller.stop();
 });
+
+test("an ADMIN_ROLE refusal says only site coordinators change the Admin role, in the form", async () => {
+  const store = rosterStore();
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", { volunteerId: "v-1" });
+  store.failSave = Object.assign(new Error("Not allowed."), {
+    code: "FORBIDDEN",
+    cause: { code: "VT001", message: "ADMIN_ROLE" },
+  });
+  const reads = volunteerReads(store);
+  assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), false);
+  const state = controller.getState();
+  assert.equal(state.volunteerFormError, "Only site coordinators change the Admin role.");
+  assert.equal(state.error, null);
+  assert.equal(state.busy, false);
+  assert.equal(state.dialog, "volunteer");
+  assert.equal(volunteerReads(store), reads + 1);
+  controller.stop();
+});
+
+test("LAST_SITE_COORDINATOR on deactivate says one must remain, in the drawer", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "active", revision: 3 } }];
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("deactivate-account", { volunteerId: "v-1" });
+  store.failAccount = accountRefusal("INVALID_TRANSITION", "LAST_SITE_COORDINATOR", null);
+  assert.equal(await controller.deactivateAccount(), false);
+  const state = controller.getState();
+  assert.deepEqual(state.volunteerAccountNotice, {
+    kind: "error",
+    text: "At least one site coordinator must remain. Make someone else a site coordinator first.",
+  });
+  assert.equal(state.dialog, "volunteer", "back in the drawer, which says it");
+  assert.equal(state.error, null);
+  controller.stop();
+});

@@ -791,7 +791,7 @@ export function createStore(client) {
         read(
           client
             .from("accounts")
-            .select("workspace_id,user_id,person_id,status,revision,activated_at,expires_at"),
+            .select("workspace_id,user_id,person_id,status,revision,activated_at,expires_at,is_site_coordinator"),
         ),
       ]);
       return combineVolunteers({ profiles, entries, certificates, people, accounts });
@@ -855,6 +855,37 @@ export function createStore(client) {
         p_action_id: actionId(request),
         p_volunteer_id: request.volunteerId,
         p_expected_revision: request.expectedRevision,
+      });
+    },
+
+    // Season settings (migration 052). The RPCs enforce who may call them:
+    // any workspace admin reads, only a site coordinator writes.
+    async getSeasonSettings() {
+      return await call("vitally_season_settings");
+    },
+
+    async saveSeasonSettings(request) {
+      return await call("vitally_save_season_settings", {
+        p_action_id: actionId(request),
+        p_expected_revision: request.expectedRevision,
+        p_settings: request.settings,
+      });
+    },
+
+    // The SIDN is write-only: the answer is `{set, updatedAt}`, never the number.
+    async setSiteNumber(request) {
+      return await call("vitally_set_site_number", {
+        p_action_id: actionId(request),
+        p_sidn: request.sidn,
+      });
+    },
+
+    async setSiteCoordinator(request) {
+      return await call("vitally_set_site_coordinator", {
+        p_action_id: actionId(request),
+        p_volunteer_id: request.volunteerId,
+        p_expected_revision: request.expectedRevision,
+        p_granted: request.granted,
       });
     },
 
