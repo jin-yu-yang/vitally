@@ -1,5 +1,5 @@
 // Posted updates (change add-posted-updates): the Notifications panel every
-// staff member reads, and the ceiling admin's Post an update screen with its
+// staff member reads, and the workspace admin's Post an update screen with its
 // live preview, its table, the who-has-read list and the two confirmations.
 // Staff screens stay English. Every value from the database or the form is
 // escaped here (Review Focus 5); `button` and `confirmBody` take HTML.

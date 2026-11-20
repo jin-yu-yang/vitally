@@ -45,11 +45,11 @@ of the six RPCs and the demonstration people (Alex, Morgan, Sam) are gone. See
 - **Roles and certifications.** Spec §8.1 lists volunteer roles (Site Coordinator, VITA Volunteer,
   and others). Since 045 (volunteer clearance) the Roster's roles (044) map to the capabilities
   (`vitally_private.role_capabilities`), each role needs its confirmed certificates, and a staff
-  member acts only when cleared, with their roles' capabilities within `people.capabilities`
+  member acts only when cleared, with their roles' capabilities (since 052 `people.capabilities` mirrors the roles)
   ([Database: roster clearance](database.md#roster-clearance)). Volunteers > Workload (046) shows each
   volunteer's open cases and lets an admin assign or reassign; its Hours this week column comes with
-  the Schedule (#140). Still to do: the roster command sets
-  that ceiling once; changing it, or deactivating a staff member, is not built.
+  the Schedule (#140). Since 052 there is no ceiling: site coordinators change the Admin role and
+  edit Season settings ([Database](database.md#season-settings-and-site-coordinators)).
 - **One person, two workspaces** ([#104](https://github.com/jin-yu-yang/vitally/issues/104)).
   The screens are chosen by the acting person's capabilities (ruling R55): `admin` gets the office
   workspace, everyone else the preparation/review one. A staff account is one person and cannot

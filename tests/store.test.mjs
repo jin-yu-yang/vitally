@@ -1787,7 +1787,7 @@ test("listVolunteers reads the accounts and puts each on its volunteer", async (
   assert.deepEqual(list[0].account, { status: "invited", revision: 2, activatedAt: null, expiresAt: null });
   assert.equal(
     client.reads.find((read) => read.table === "accounts").columns,
-    "workspace_id,user_id,person_id,status,revision,activated_at,expires_at",
+    "workspace_id,user_id,person_id,status,revision,activated_at,expires_at,is_site_coordinator",
   );
 });
 
@@ -2114,4 +2114,52 @@ test("an update RPC error with VT004 becomes INVALID_TRANSITION", async () => {
     code: "INVALID_TRANSITION",
   });
   await assert.rejects(() => createStore(client).saveUpdate({ update: {} }), { code: "INVALID_TRANSITION" });
+});
+
+test("getSeasonSettings calls vitally_season_settings and returns its answer", async () => {
+  const answer = { season: 2027, certificateUploadUrl: "", clientDocumentsUrl: "", revision: 1, canEdit: true };
+  const client = fakeClient({ access: "staff", rpc: async () => ({ data: answer, error: null }) });
+  assert.deepEqual(await createStore(client).getSeasonSettings(), answer);
+  assert.equal(client.rpcCalls[0].name, "vitally_season_settings");
+});
+
+test("saveSeasonSettings sends the action id, the expected revision and the links", async () => {
+  const client = fakeClient({ access: "staff" });
+  const store = createStore(client);
+  const settings = { certificateUploadUrl: "https://example.org/sc", clientDocumentsUrl: "" };
+  await store.saveSeasonSettings({ actionId: "a-1", expectedRevision: 4, settings });
+  assert.deepEqual(client.rpcCalls[0], {
+    name: "vitally_save_season_settings",
+    args: { p_action_id: "a-1", p_expected_revision: 4, p_settings: settings },
+  });
+  const request = { expectedRevision: 4, settings };
+  await store.saveSeasonSettings(request);
+  assert.ok(request.actionId);
+  assert.equal(client.rpcCalls[1].args.p_action_id, request.actionId);
+});
+
+test("setSiteNumber sends the action id and the SIDN", async () => {
+  const client = fakeClient({ access: "staff" });
+  await createStore(client).setSiteNumber({ actionId: "a-1", sidn: "S00000000" });
+  assert.deepEqual(client.rpcCalls[0], {
+    name: "vitally_set_site_number",
+    args: { p_action_id: "a-1", p_sidn: "S00000000" },
+  });
+});
+
+test("setSiteCoordinator sends the volunteer, the account revision and granted", async () => {
+  const client = fakeClient({ access: "staff" });
+  const store = createStore(client);
+  await store.setSiteCoordinator({ actionId: "a-1", volunteerId: "person-ana", expectedRevision: 2, granted: true });
+  await store.setSiteCoordinator({ actionId: "a-2", volunteerId: "person-ana", expectedRevision: 3, granted: false });
+  assert.deepEqual(client.rpcCalls, [
+    {
+      name: "vitally_set_site_coordinator",
+      args: { p_action_id: "a-1", p_volunteer_id: "person-ana", p_expected_revision: 2, p_granted: true },
+    },
+    {
+      name: "vitally_set_site_coordinator",
+      args: { p_action_id: "a-2", p_volunteer_id: "person-ana", p_expected_revision: 3, p_granted: false },
+    },
+  ]);
 });

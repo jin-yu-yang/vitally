@@ -213,7 +213,7 @@ every email the stack would have sent.
    address. It is the invitation: it has the site's link and an expiry, and no code. Open the site
    in a second window, type the address on the sign-in screen and ask for a code. A second message
    arrives, "Your ViTally code is" followed by six digits. Type the code. Maya sees **Confirm your site**: enter a name and the
-   roster file's fictional `siteNumber` (`S00000000`). A wrong number says "That isn't this site's
+   fictional SIDN `S00000000` that `seed:local` sets when none is set (or the one set on Season settings). A wrong number says "That isn't this site's
    number."; the fifth cancels the invitation. The account turns **Active**, the Roster shows
    "Signed in as" the name, and because Maya has her Preparer role and certificates and is not
    new, she is now **Cleared** and lands on the staff screen.

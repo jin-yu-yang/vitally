@@ -75,13 +75,17 @@ const STAFF_SCREENS = Object.freeze([
   "office-cases",
   "office-add-case",
   "office-volunteers",
-  // Post an update (change add-posted-updates): a ceiling admin's only,
-  // cleared or not (`screenAllowed`).
+  // Post an update (change add-posted-updates) and Season settings (change
+  // add-season-settings): a workspace admin's only, cleared or not
+  // (`screenAllowed`).
   "office-updates",
+  "office-settings",
 ]);
-// The admin screens an uncleared ceiling admin keeps (design D10 of
-// add-volunteer-clearance, and add-posted-updates).
-const ADMIN_SETUP_SCREENS = Object.freeze(["office-volunteers", "office-updates"]);
+// The admin screens an uncleared workspace admin keeps (design D10 of
+// add-volunteer-clearance, add-posted-updates and add-season-settings).
+const ADMIN_SETUP_SCREENS = Object.freeze(["office-volunteers", "office-updates", "office-settings"]);
+// The screens only a workspace admin may be on.
+const CEILING_ONLY_SCREENS = Object.freeze(["office-updates", "office-settings"]);
 
 // An action whose answer never arrived may or may not have been applied. Those
 // are the only failures worth retrying with the same envelope; a refusal is
@@ -120,6 +124,21 @@ const STAFF_CONTACT_CONFLICT_MESSAGE =
 const STAFF_VOLUNTEER_CONFLICT_MESSAGE =
   "Someone else changed this volunteer. Close this and open it again to see their changes.";
 export const VOLUNTEER_CONFLICT_MESSAGE = STAFF_VOLUNTEER_CONFLICT_MESSAGE;
+// Site coordinators (change add-season-settings): a save that changes the
+// Admin role by someone who is not one, deactivating a site coordinator by
+// someone who is not one, and deactivating the last one.
+const STAFF_ADMIN_ROLE_MESSAGE = "Only site coordinators change the Admin role.";
+const STAFF_DEACTIVATE_SITE_COORDINATOR_MESSAGE = "Only site coordinators deactivate a site coordinator's account.";
+const STAFF_LAST_SITE_COORDINATOR_MESSAGE =
+  "At least one site coordinator must remain. Make someone else a site coordinator first.";
+// Season settings (change add-season-settings): what its writes say.
+const STAFF_SETTINGS_SAVED = "Season settings saved";
+const STAFF_SETTINGS_LINK_MESSAGE = "Enter a link that starts with https://.";
+const STAFF_SETTINGS_CONFLICT_MESSAGE = "Someone else changed these settings. Check them and save again.";
+const STAFF_SIDN_FORMAT_MESSAGE = "Enter the site's SIDN: S followed by eight digits.";
+const STAFF_SIDN_UPDATED = "SIDN updated";
+const SETTINGS_LINK_FIELDS = Object.freeze(["certificateUploadUrl", "clientDocumentsUrl"]);
+const freshSettingsUi = () => ({ notice: null, fieldErrors: null, sidnError: null });
 // Post an update (change add-posted-updates): the table is read again and
 // the form keeps what was typed. Staff-only, so named STAFF_.
 const STAFF_UPDATE_CONFLICT_MESSAGE = "Someone changed this update. Check the table and try again.";
@@ -333,6 +352,7 @@ export function createController({
       volunteers: "loading",
       updates: "loading",
       postedUpdates: "loading",
+      seasonSettings: "loading",
     },
     people: [],
     // The Roster (admin only): read when its screen opens and after each
@@ -369,13 +389,19 @@ export function createController({
     updatesUnread: 0,
     notificationsOpen: false,
     notificationsFresh: [],
-    // The Post an update screen (a ceiling admin's): the table, the form as
+    // The Post an update screen (a workspace admin's): the table, the form as
     // typed, the update being edited (`{id, revision, status}` or null) and
     // the form's own errors (`{field: message}` or null). None persisted.
     postedUpdates: [],
     updateForm: emptyUpdateForm(),
     updateEditing: null,
     updateFormError: null,
+    // Season settings (a workspace admin's): the `vitally_season_settings`
+    // answer as last read (null until then), and the page's own sentences:
+    // `notice` ({place: "links" | "coordinators", text}), `fieldErrors`
+    // ({field: message}) and the SIDN dialog's `sidnError`. None persisted.
+    seasonSettings: null,
+    seasonSettingsUi: freshSettingsUi(),
     // The caller's own workspace row, read only for a staff window: the
     // office's defaults.
     workspace: null,
@@ -469,6 +495,9 @@ export function createController({
   // Post an update's save and table action whose outcome is unknown, kept
   // the same way: `{ key, request }`, where the key says what was pressed.
   let pendingUpdateSave = null;
+  // A Season settings write whose answer never came: the same press sends
+  // that very request again, so the database replays its receipt.
+  let pendingSettingsWrite = null;
   let pendingUpdateAction = null;
   // The screening start for the open case, if one is due or held:
   // `{ action, inFlight, gaveUp }` (`startScreeningIfDue`).
@@ -551,9 +580,9 @@ export function createController({
   const screens = () => (staffWindow() ? STAFF_SCREENS : CLIENT_SCREENS);
 
   // Whether this principal may be on a screen: in its list, and Post an
-  // update only for a ceiling admin.
+  // update only for a workspace admin.
   const screenAllowed = (screen) =>
-    screens().includes(screen) && (screen !== "office-updates" || ceilingAdmin(state.principal));
+    screens().includes(screen) && (!CEILING_ONLY_SCREENS.includes(screen) || ceilingAdmin(state.principal));
 
   // Where "back to the list" goes for whoever is signed in.
   const homeScreen = () => screens()[0];
@@ -919,6 +948,7 @@ export function createController({
       // Post an update's table re-reads on focus too (an uncleared admin's
       // window has no realtime channel).
       if (awaitingClearance(state) && state.screen === "office-updates") await loadPostedUpdates();
+      if (awaitingClearance(state) && state.screen === "office-settings") await loadSeasonSettings();
       return;
     }
     // A wake event re-reads the clearance first: role changes never come
@@ -962,6 +992,12 @@ export function createController({
       if (state.screen === "office-updates")
         try {
           await readPostedUpdates();
+        } catch (error) {
+          failure = failure ?? error;
+        }
+      if (state.screen === "office-settings")
+        try {
+          await readSeasonSettings();
         } catch (error) {
           failure = failure ?? error;
         }
@@ -1130,6 +1166,7 @@ export function createController({
       if (state.screen === "office-volunteers") await readVolunteers();
       await readInvitations();
       if (state.screen === "office-updates") await readPostedUpdates();
+      if (state.screen === "office-settings") await readSeasonSettings();
     } else {
       state.lists.assistance = "ready";
     }
@@ -1138,7 +1175,7 @@ export function createController({
 
   // The Roster's list (design D9). Only an admin's window asks: the policies
   // would answer anyone else with no rows, and asking is already a mistake.
-  // It is the ceiling admin's (design D10), cleared or not. A
+  // It is the workspace admin's (design D10), cleared or not. A
   // first read that fails marks the list failed, so it never looks empty; one
   // that loaded once keeps what it shows. It throws, for loadData.
   async function readVolunteers() {
@@ -1422,7 +1459,7 @@ export function createController({
     return true;
   }
 
-  // Post an update's table: a ceiling admin's, cleared or not. Like the
+  // Post an update's table: a workspace admin's, cleared or not. Like the
   // Roster's list, a first read that fails marks it failed, and one that
   // loaded once keeps what it shows. It throws, for loadData and refresh.
   async function readPostedUpdates() {
@@ -1449,6 +1486,167 @@ export function createController({
     }
     show();
   }
+
+  // ---- Season settings (change add-season-settings, design D10) ----------
+  //
+  // A workspace admin's page, cleared or not. It is read on open, on focus and
+  // after each of its writes; there is no realtime for it. Like the Roster's
+  // list, a first read that fails marks it failed, and one that loaded once
+  // keeps what it shows. It throws, for loadData and refresh.
+  async function readSeasonSettings() {
+    if (!staffWindow() || !ceilingAdmin(state.principal)) return;
+    try {
+      state.seasonSettings = await store.getSeasonSettings();
+      state.lists = { ...state.lists, seasonSettings: "ready" };
+      noteConnected();
+    } catch (error) {
+      if (state.lists.seasonSettings !== "ready") state.lists = { ...state.lists, seasonSettings: "failed" };
+      throw error;
+    }
+  }
+
+  // Opening the page: read it, and say a failure with its own Try again.
+  // Never rejects.
+  async function loadSeasonSettings() {
+    try {
+      await readSeasonSettings();
+    } catch (error) {
+      noteLocalFailure(error, loadSeasonSettings);
+      return;
+    }
+    show();
+  }
+
+  // One write: the request kept for a lost answer (matched on `key`), busy
+  // while it is out, and `refused(error)` saying a refusal on the page (true
+  // when it did; anything else is the window's own error). The page is read
+  // again after any answer. Resolves to the store's answer, or null.
+  async function settingsWrite(key, makeRequest, send, refused) {
+    if (state.busy || !staffWindow() || !state.seasonSettings) return null;
+    let request = pendingSettingsWrite?.key === key ? pendingSettingsWrite.request : null;
+    pendingSettingsWrite = null;
+    if (!request) request = makeRequest();
+    state.seasonSettingsUi = freshSettingsUi();
+    state.busy = true;
+    state.error = null;
+    show();
+    let answer;
+    try {
+      answer = await send(request);
+    } catch (error) {
+      state.busy = false;
+      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingSettingsWrite = { key, request };
+      if (!refused(error)) noteFailure(error);
+      // What the write did, or what changed under it: the page as it is now.
+      await readSeasonSettings().catch(() => {});
+      show();
+      return null;
+    }
+    state.busy = false;
+    noteConnected();
+    try {
+      await readSeasonSettings();
+    } catch (error) {
+      noteFailure(error);
+    }
+    show();
+    return answer ?? {};
+  }
+
+  // Save: both links, trimmed, at the revision the page read. Resolves to
+  // the toast's text, or null (the page says why).
+  async function saveSeasonSettings(values) {
+    const settings = Object.fromEntries(
+      SETTINGS_LINK_FIELDS.map((field) => [field, String(values?.[field] ?? "").trim()]),
+    );
+    const expectedRevision = Number(state.seasonSettings?.revision ?? 0);
+    const answer = await settingsWrite(
+      JSON.stringify({ type: "links", settings, expectedRevision }),
+      () => ({ actionId: newActionId(), expectedRevision, settings }),
+      (request) => store.saveSeasonSettings(request),
+      (error) => {
+        const field = error?.cause?.details;
+        if (error?.code === "VALIDATION" && SETTINGS_LINK_FIELDS.includes(field)) {
+          state.seasonSettingsUi = { ...state.seasonSettingsUi, fieldErrors: { [field]: STAFF_SETTINGS_LINK_MESSAGE } };
+          return true;
+        }
+        if (error?.code === "CONFLICT") {
+          state.seasonSettingsUi = {
+            ...state.seasonSettingsUi,
+            notice: { place: "links", text: STAFF_SETTINGS_CONFLICT_MESSAGE },
+          };
+          return true;
+        }
+        return false;
+      },
+    );
+    return answer ? STAFF_SETTINGS_SAVED : null;
+  }
+
+  // Change the SIDN. Spaces, hyphens and case are ignored here as they are
+  // by the database, so a malformed number is said without sending it; the
+  // number goes as typed and is never kept in state.
+  async function saveSidn(sidn) {
+    if (state.busy || !staffWindow() || !state.seasonSettings) return null;
+    const typed = String(sidn ?? "");
+    if (!/^S[0-9]{8}$/.test(typed.replace(/[\s-]/g, "").toUpperCase())) {
+      state.seasonSettingsUi = { ...state.seasonSettingsUi, sidnError: STAFF_SIDN_FORMAT_MESSAGE };
+      show();
+      return null;
+    }
+    const answer = await settingsWrite(
+      // A lost answer is sent again only for the same number typed again.
+      JSON.stringify({ type: "sidn", typed }),
+      () => ({ actionId: newActionId(), sidn: typed }),
+      (request) => store.setSiteNumber(request),
+      (error) => {
+        if (error?.code !== "VALIDATION") return false;
+        state.seasonSettingsUi = { ...state.seasonSettingsUi, sidnError: STAFF_SIDN_FORMAT_MESSAGE };
+        return true;
+      },
+    );
+    return answer ? STAFF_SIDN_UPDATED : null;
+  }
+
+  // Add (the picker's volunteer) or Remove (a row's), at the account
+  // revision the page read. Resolves to the toast's text, or null.
+  async function changeSiteCoordinator(volunteerId, granted) {
+    const view = state.seasonSettings;
+    if (!volunteerId || !view) return null;
+    const list = granted ? view.candidates : view.siteCoordinators;
+    const person = (Array.isArray(list) ? list : []).find((entry) => entry?.volunteerId === volunteerId);
+    if (!person) return null;
+    const name = person.name ?? "";
+    const expectedRevision = Number(person.accountRevision);
+    const answer = await settingsWrite(
+      JSON.stringify({ type: "coordinator", volunteerId, granted, expectedRevision }),
+      () => ({ actionId: newActionId(), volunteerId, expectedRevision, granted }),
+      (request) => store.setSiteCoordinator(request),
+      (error) => {
+        const reason = error?.cause?.message;
+        const text =
+          error?.code === "INVALID_TRANSITION" && reason === "LAST_SITE_COORDINATOR"
+            ? STAFF_LAST_SITE_COORDINATOR_MESSAGE
+            : error?.code === "INVALID_TRANSITION" && reason === "DEFAULT_FOLLOWUP"
+              ? `${name} is the default follow-up person, so they stay a site coordinator.`
+              : // Somebody else changed them first: the page read again shows how.
+                error?.code === "CONFLICT" || error?.code === "INVALID_TRANSITION"
+                ? STAFF_SETTINGS_CONFLICT_MESSAGE
+                : null;
+        if (!text) return false;
+        state.seasonSettingsUi = { ...state.seasonSettingsUi, notice: { place: "coordinators", text } };
+        return true;
+      },
+    );
+    if (!answer) return null;
+    // Their own mark changed what they may do here and on the Roster: ask
+    // again, as a save of their own Roster row does. Not awaited.
+    if (volunteerId === state.principal?.personId) void recheckAfterOwnSave();
+    return granted ? `${name} is now a site coordinator` : `${name} is no longer a site coordinator`;
+  }
+
+  const addSiteCoordinator = (volunteerId) => changeSiteCoordinator(volunteerId, true);
+  const removeSiteCoordinator = (volunteerId) => changeSiteCoordinator(volunteerId, false);
 
   function copyUpdateForm(form) {
     const source = form && typeof form === "object" ? form : {};
@@ -1800,7 +1998,7 @@ export function createController({
   //
   // An uncleared staff window shows the setup screen and holds no work: no
   // case, no help request, no workspace row and no realtime channel. A
-  // ceiling admin's window keeps the Roster, which needs none of them.
+  // workspace admin's window keeps the Roster, which needs none of them.
   function dropWork() {
     unsubscribe();
     clearSelection();
@@ -1826,6 +2024,7 @@ export function createController({
     show();
     if (state.screen === "office-volunteers") await loadVolunteers();
     if (state.screen === "office-updates") await loadPostedUpdates();
+    if (state.screen === "office-settings") await loadSeasonSettings();
   }
 
   // An action refused NOT_CLEARED: the window is not cleared any more. It
@@ -2081,6 +2280,7 @@ export function createController({
       volunteers: "loading",
       updates: "loading",
       postedUpdates: "loading",
+      seasonSettings: "loading",
     };
     dataLoaded = false;
     state.people = [];
@@ -2107,6 +2307,9 @@ export function createController({
     state.updateFormError = null;
     pendingUpdateSave = null;
     pendingUpdateAction = null;
+    state.seasonSettings = null;
+    state.seasonSettingsUi = freshSettingsUi();
+    pendingSettingsWrite = null;
     state.assistance = [];
     state.workspace = null;
     state.openPanels = [];
@@ -2148,8 +2351,11 @@ export function createController({
     // The no-access window has nowhere to go: the logo and every other
     // navigation do nothing, so the screen and its Sign out stay.
     if (state.screen === "no-access" && !state.principal) return;
-    // Post an update is a ceiling admin's: anyone else lands on their home.
-    if (screen === "office-updates" && !screenAllowed(screen)) screen = homeScreen();
+    // Post an update and Season settings are a workspace admin's: anyone else
+    // lands on their home.
+    if (CEILING_ONLY_SCREENS.includes(screen) && !screenAllowed(screen)) screen = homeScreen();
+    // Season settings starts without an earlier visit's sentences.
+    if (screen === "office-settings") state.seasonSettingsUi = freshSettingsUi();
     // A new office draft belongs to the Add a case page: leaving drops it.
     if (screen !== "office-add-case") {
       state.officeDraft = false;
@@ -2184,6 +2390,8 @@ export function createController({
 
   function openDialog(name, context = null) {
     if (name !== "notifications") endNotifications();
+    // Change the SIDN opens without an earlier refusal.
+    if (name === "change-sidn") state.seasonSettingsUi = { ...state.seasonSettingsUi, sidnError: null };
     state.dialog = name;
     state.dialogContext = context ? { ...context } : null;
     show();
@@ -3834,7 +4042,9 @@ export function createController({
           ? roleNeedsMessage(cause.details)
           : error?.code === "INVALID_TRANSITION" && cause?.message === "OPEN_WORK"
             ? openWorkMessage(request.volunteer.name || "This volunteer", cause.details)
-            : null;
+            : error?.code === "FORBIDDEN" && cause?.message === "ADMIN_ROLE"
+              ? STAFF_ADMIN_ROLE_MESSAGE
+              : null;
       if (sentence) {
         state.volunteerFormError = sentence;
         await readVolunteers().catch(() => {});
@@ -3961,11 +4171,15 @@ export function createController({
       const sentence =
         cause?.message === "OPEN_WORK"
           ? openWorkMessage(current.name || "This volunteer", cause.details)
-          : error?.code === "CONFLICT"
-            ? null
-            : kind === "cancel" && error?.code === "INVALID_TRANSITION"
-              ? cancelRefusal(error)
-              : accountMessage(cause?.details);
+          : error?.code === "INVALID_TRANSITION" && cause?.message === "LAST_SITE_COORDINATOR"
+            ? STAFF_LAST_SITE_COORDINATOR_MESSAGE
+            : kind === "deactivate" && error?.code === "FORBIDDEN" && current.isSiteCoordinator === true
+              ? STAFF_DEACTIVATE_SITE_COORDINATOR_MESSAGE
+              : error?.code === "CONFLICT"
+                ? null
+                : kind === "cancel" && error?.code === "INVALID_TRANSITION"
+                  ? cancelRefusal(error)
+                  : accountMessage(cause?.details);
       if (sentence) {
         state.volunteerAccountNotice = { kind: "error", text: sentence };
         await readVolunteers().catch(() => {});
@@ -4432,6 +4646,11 @@ export function createController({
     closeNotifications,
     confirmUpdate,
     loadPostedUpdates,
+    loadSeasonSettings,
+    saveSeasonSettings,
+    saveSidn,
+    addSiteCoordinator,
+    removeSiteCoordinator,
     saveUpdate,
     updateAction,
     editUpdate,

@@ -34,14 +34,13 @@ const setStatus = (f, userId, status) =>
     userId,
     status,
   ]);
-const addStaffMember = (f, userId, key, name, capabilities) =>
+const addStaffMember = (f, userId, key, name) =>
   f.withSetupLock(() =>
-    f.sql("select vitally_private.add_staff_member($1,$2,$3,$4,$5::text[]) as person_id", [
+    f.sql("select vitally_private.add_staff_member($1,$2,$3,$4) as person_id", [
       f.workspaceId,
       userId,
       key,
       name,
-      capabilities,
     ]),
   );
 const readable = async (client, table) => {
@@ -90,7 +89,7 @@ test("sign-in accounts against real Supabase", async (t) => {
         assert.equal(roleAccount.person_id, personId, role);
       }
       // The identical re-run of the roster command adds no second account.
-      await addStaffMember(f, member.userId, "ada_account", "Ada Quill", ["prepare"]);
+      await addStaffMember(f, member.userId, "ada_account", "Ada Quill");
       assert.equal(await accountCount(f, member.userId), 1);
       assert.equal((await accountOf(f, member.userId)).revision, 1);
     });
@@ -184,7 +183,9 @@ test("sign-in accounts against real Supabase", async (t) => {
             'vitally_private.cancel_invitation(uuid,uuid)',
             'vitally_private.expire_invitations(uuid)',
             'vitally_private.account_check(uuid,text,jsonb)',
-            'vitally_private.insert_active_account(uuid,uuid,uuid)'
+            'vitally_private.insert_active_account(uuid,uuid,uuid)',
+            'public.vitally_set_site_coordinator(uuid,uuid,bigint,boolean)',
+            'vitally_private.deactivate_account(uuid,uuid,uuid)'
           ]::regprocedure[])
             and has_function_privilege('service_role', p.oid, 'EXECUTE')`,
       );
@@ -381,7 +382,6 @@ test("sign-in accounts against real Supabase", async (t) => {
     const CONFLICT = "VT003";
     const INVALID_TRANSITION = "VT004";
     const VALIDATION = "VT007";
-    const CEILING = ["assist", "prepare", "receive_documents", "review"];
     const rpc = async (client, fn, args) => {
       const { data, error } = await client.rpc(fn, args);
       assert.equal(error, null, `${fn}: ${error?.code} ${error?.message} ${error?.details}`);
@@ -503,9 +503,11 @@ test("sign-in accounts against real Supabase", async (t) => {
       assert.equal(invite.reusableUserId, null, "no auth user for a new address");
     });
 
+    // 052: create chooses no capabilities; linking the person gives them their
+    // roles' capabilities (spec sign-in-accounts, "Creating an account").
     await t.test("record create links the volunteer", async () => {
       const user = await f.provision();
-      const personId = await addVolunteer(user.email, { roles: ["greeter"], certificates: ["vsc"] });
+      const personId = await addVolunteer(user.email, { roles: ["preparer"], certificates: ["vsc", "itqr", "basic"] });
       const revision = await profileRevision(personId);
       const actionId = randomUUID();
       const result = await rpc(
@@ -517,7 +519,7 @@ test("sign-in accounts against real Supabase", async (t) => {
       assert.deepEqual(await membershipOf(user.userId), { access: "staff", active: true });
       const person = await one(f, "select user_id,capabilities from public.people where id=$1", [personId]);
       assert.equal(person.user_id, user.userId);
-      assert.deepEqual([...person.capabilities].sort(), CEILING);
+      assert.deepEqual(person.capabilities, ["prepare"]);
       const account = await accountOfPerson(personId);
       assert.equal(account.user_id, user.userId);
       assert.equal(account.status, "invited");
@@ -838,6 +840,141 @@ test("sign-in accounts against real Supabase", async (t) => {
         "SELF",
       );
       assert.equal((await accountOfPerson(f.siteCoordinatorId)).status, "active");
+    });
+
+    // ---- Change add-season-settings (design D4), migration 052 -------------
+    // Deactivating a site coordinator. Specs sign-in-accounts and
+    // site-coordinators. The fixture's site coordinator (Avery Lin) is the
+    // default follow-up person.
+    const siteCoordinatorOf = async (personId, workspaceId = f.workspaceId) =>
+      (
+        await one(f, "select is_site_coordinator from public.accounts where workspace_id=$1 and person_id=$2", [
+          workspaceId,
+          personId,
+        ])
+      ).is_site_coordinator;
+    const scHistory = async (personId) =>
+      (
+        await f.sql(
+          `select granted,changed_by_person_id from public.site_coordinator_changes
+            where workspace_id=$1 and person_id=$2 order by changed_at,id`,
+          [f.workspaceId, personId],
+        )
+      ).rows;
+
+    await t.test("deactivating the default follow-up person is open work", async () => {
+      const bea = await f.staff({
+        key: "bea_sc",
+        name: "Bea Okafor",
+        capabilities: ["admin", "followup"],
+        siteCoordinator: true,
+      });
+      const before = await accountOfPerson(f.siteCoordinatorId);
+      const error = await refusedWith(
+        bea.client,
+        "vitally_deactivate_account",
+        changeArgs(f.siteCoordinatorId, before.revision),
+        INVALID_TRANSITION,
+      );
+      assert.equal(error.message, "OPEN_WORK");
+      assert.ok(JSON.parse(error.details).includes("default follow-up person"), error.details);
+      assert.deepEqual(await accountOfPerson(f.siteCoordinatorId), before);
+      assert.equal(await siteCoordinatorOf(f.siteCoordinatorId), true);
+
+      // Spec site-coordinators, "An admin who isn't a site coordinator": Cal
+      // has the Admin role but is not a site coordinator, so deactivating Bea
+      // is refused and changes nothing.
+      const cal = await f.staff({
+        key: "cal_admin",
+        name: "Cal Moreno",
+        capabilities: ["admin", "assist", "followup", "receive_documents"],
+      });
+      assert.equal((await rpc(cal.client, "vitally_my_clearance")).isAdmin, true, "Cal is an admin by role");
+      const beaBefore = await accountOfPerson(bea.personId);
+      await refusedWith(
+        cal.client,
+        "vitally_deactivate_account",
+        changeArgs(bea.personId, beaBefore.revision),
+        FORBIDDEN,
+        undefined,
+        "Cal deactivates Bea",
+      );
+      assert.deepEqual(await accountOfPerson(bea.personId), beaBefore);
+      assert.equal(await siteCoordinatorOf(bea.personId), true);
+      assert.deepEqual(await scHistory(bea.personId), [{ granted: true, changed_by_person_id: null }]);
+      // Cal may still deactivate someone who isn't a site coordinator.
+      const plain = await f.staff({ key: "pim_plain", name: "Pim Achterberg", capabilities: ["prepare"], cleared: false });
+      await rpc(cal.client, "vitally_deactivate_account", changeArgs(plain.personId, (await accountOfPerson(plain.personId)).revision));
+      assert.equal((await accountOfPerson(plain.personId)).status, "deactivated");
+
+      // Spec site-coordinators, "Another site coordinator": Bea is neither the
+      // last nor the default, so a site coordinator (Avery) deactivating her
+      // also removes her mark.
+      const read = (await accountOfPerson(bea.personId)).revision;
+      const result = await rpc(admin, "vitally_deactivate_account", changeArgs(bea.personId, read));
+      assert.equal(result.accountRevision, read + 1, "one revision for both");
+      assert.equal((await accountOfPerson(bea.personId)).revision, read + 1);
+      assert.equal((await accountOfPerson(bea.personId)).status, "deactivated");
+      assert.equal(await siteCoordinatorOf(bea.personId), false);
+      assert.deepEqual(await scHistory(bea.personId), [
+        { granted: true, changed_by_person_id: null },
+        { granted: false, changed_by_person_id: f.siteCoordinatorId },
+      ]);
+      // Reactivating restores the account only.
+      await rpc(admin, "vitally_reactivate_account", changeArgs(bea.personId, read + 1));
+      assert.equal((await accountOfPerson(bea.personId)).status, "active");
+      assert.equal(await siteCoordinatorOf(bea.personId), false);
+      assert.equal((await rpc(bea.client, "vitally_my_clearance")).isSiteCoordinator, false);
+      assert.equal((await scHistory(bea.personId)).length, 2, "reactivating records nothing");
+      await deactivate(bea.personId);
+    });
+
+    await t.test("deactivating the last site coordinator is refused", async () => {
+      // A workspace of this test's own: Lou is the only site coordinator and
+      // not the default follow-up person; Mae is an admin by role and the default.
+      const lou = await f.provision();
+      const mae = await f.provision();
+      const workspaceId = randomUUID();
+      await f.initializeOwned({
+        workspaceId,
+        staff: [
+          { userId: lou.userId, personKey: "lou_last", name: "Lou Ferreira", capabilities: ["prepare"], siteCoordinator: true },
+          { userId: mae.userId, personKey: "mae_default", name: "Mae Turnbull", capabilities: ["admin", "followup"] },
+        ],
+        defaultFollowup: "mae_default",
+      });
+      const { id: louId } = await one(
+        f,
+        "select id from public.people where workspace_id=$1 and person_key='lou_last'",
+        [workspaceId],
+      );
+      const accountIn = () =>
+        one(
+          f,
+          "select status,is_site_coordinator,revision::int as revision from public.accounts where workspace_id=$1 and person_id=$2",
+          [workspaceId, louId],
+        );
+      const before = await accountIn();
+      assert.equal(before.is_site_coordinator, true);
+      // In the app nobody can: Mae isn't a site coordinator (FORBIDDEN), and
+      // Lou can't deactivate their own account (SELF).
+      await refusedWith(mae.client, "vitally_deactivate_account", changeArgs(louId, before.revision), FORBIDDEN);
+      assert.deepEqual(await accountIn(), before);
+      // Below the app, deactivate_account still keeps the last one.
+      const { id: maeId } = await one(
+        f,
+        "select id from public.people where workspace_id=$1 and person_key='mae_default'",
+        [workspaceId],
+      );
+      await assert.rejects(
+        () => f.sql("select vitally_private.deactivate_account($1,$2,$3)", [workspaceId, lou.userId, maeId]),
+        (error) =>
+          rejected("INVALID_TRANSITION")(error) &&
+          error.cause?.code === INVALID_TRANSITION &&
+          error.cause?.message === "LAST_SITE_COORDINATOR",
+      );
+      assert.deepEqual(await accountIn(), before);
+      assert.deepEqual(await membershipOf(lou.userId, workspaceId), { access: "staff", active: true });
     });
 
     // Review Focus 3.

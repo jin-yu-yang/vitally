@@ -89,9 +89,14 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
       activatedAt: row?.activated_at ?? null,
       expiresAt: row?.expires_at ?? null
     };
-    const cleared = roles.length > 0 && (!isNew || photoIdChecked) && account.status === "active";
-    // What the row waits for, in order: the Form 13615 (no roles) or the photo ID, then the account.
+    // A site coordinator also needs SC confirmed this season (change add-season-settings, D6).
+    const isSiteCoordinator = row?.is_site_coordinator === true;
+    const scMissing = isSiteCoordinator && !(certsById.get(person.id) ?? []).includes("sc");
+    const cleared = roles.length > 0 && (!isNew || photoIdChecked) && !scMissing && account.status === "active";
+    // What the row waits for, in order: the Form 13615 (no roles) or the photo
+    // ID, a site coordinator's SC certificate, then the account.
     const missing = roles.length === 0 ? ["form13615"] : !isNew || photoIdChecked ? [] : ["photoId"];
+    if (scMissing) missing.push("scCertificate");
     if (account.status !== "active") missing.push(ACCOUNT_MISSING[account.status]);
     list.push({
       id: person.id,
@@ -110,6 +115,7 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
       isNew,
       photoIdChecked,
       account,
+      isSiteCoordinator,
       cleared,
       missing
     });
@@ -263,6 +269,16 @@ export function openWorkMessage(name, details) {
   }
   if (!Array.isArray(list) || !list.length || !list.every((label) => typeof label === "string")) return null;
   return `${name} still has open work: ${list.join(", ")}. Finish it or hand it over first.`;
+}
+
+// The role boxes to untick after one certificate box changed, from the
+// form's role boxes (`{value, checked, disabled}`). A disabled box (the Admin
+// tick for someone who is not a site coordinator) keeps its saved state: it
+// is never unticked, and so never announced; the save decides about it.
+export function roleBoxesToUntick(roleBoxes, checkedCertificates, changedCertificate) {
+  const free = [...(roleBoxes ?? [])].filter((box) => box.checked && !box.disabled);
+  const drop = rolesToUntick(free.map((box) => box.value), checkedCertificates, changedCertificate);
+  return free.filter((box) => drop.includes(box.value));
 }
 
 // The ticked roles to untick after one certificate box changed. Only an

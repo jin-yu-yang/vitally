@@ -61,3 +61,10 @@ test("every staff dialog is classified", () => {
   const all = [...capability, ...CEILING_DIALOGS, ...NO_CAPABILITY_DIALOGS];
   assert.equal(new Set(all).size, all.length, "the categories overlap");
 });
+
+test("Change the SIDN is a ceiling dialog: never replaced when capabilities change", () => {
+  assert.ok(CEILING_DIALOGS.includes("change-sidn"));
+  assert.equal(Object.hasOwn(DIALOG_CAPABILITY, "change-sidn"), false);
+  assert.equal(dialogLocked(stateWith([], { dialog: "change-sidn" })), false);
+  assert.equal(dialogLocked(stateWith(["prepare"], { dialog: "change-sidn" })), false);
+});

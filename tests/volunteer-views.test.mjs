@@ -90,7 +90,11 @@ test("the Roster page says volunteers work on cases once cleared, and shows no s
   assert.match(html, /Volunteers work on cases only once they are cleared\./);
   assert.doesNotMatch(html, /recorded here|change what anyone can do/);
   assert.match(html, /class="btn primary" data-action="open-add-volunteer"[^>]*>(?:<svg[\s\S]*?<\/svg>)? Add a volunteer<\/button>/);
-  assert.doesNotMatch(html, /season|2025|2026/i);
+  // The page itself; the sidebar's Season settings link (change
+  // add-season-settings) is not the Roster's.
+  const main = html.slice(html.indexOf('<main id="main"'));
+  assert.ok(main.length < html.length, "the page is drawn");
+  assert.doesNotMatch(main, /season|2025|2026/i);
 });
 
 test("the table has the spec's columns and a count", () => {
@@ -378,6 +382,27 @@ test("drawer account section offers Deactivate when active", () => {
   assert.doesNotMatch(section, /account-create|account-resend|account-reactivate/);
 });
 
+// Change add-season-settings, review fix: deactivating a site coordinator's
+// account needs a site coordinator.
+test("Deactivate on a site coordinator is offered only to site coordinators", () => {
+  const coordinator = withStatus("active", { isSiteCoordinator: true });
+  const byAdmin = accountPart(volunteerDrawerBody({ volunteer: coordinator, isNew: false, ui: {}, canChangeAdmin: false }));
+  assert.doesNotMatch(byAdmin, /account-deactivate/);
+  assert.match(
+    byAdmin,
+    /<p class="field-note" id="volunteer-deactivate-note">Only site coordinators deactivate a site coordinator&#39;s account\.<\/p>/,
+  );
+  const bySiteCoordinator = accountPart(
+    volunteerDrawerBody({ volunteer: coordinator, isNew: false, ui: {}, canChangeAdmin: true }),
+  );
+  assert.match(bySiteCoordinator, /data-action="account-deactivate"/);
+  assert.doesNotMatch(bySiteCoordinator, /volunteer-deactivate-note/);
+  // Someone who isn't a site coordinator keeps Deactivate for any admin.
+  const plain = accountPart(volunteerDrawerBody({ volunteer: withStatus("active"), isNew: false, ui: {}, canChangeAdmin: false }));
+  assert.match(plain, /data-action="account-deactivate"/);
+  assert.doesNotMatch(plain, /volunteer-deactivate-note/);
+});
+
 test("the cancel-invitation dialog says access ends, not the sign-in code", () => {
   const html = cancelInvitationDialogBody({ volunteer: volunteer(), });
   assert.match(html, /will be cancelled and it will no longer give them access./);
@@ -623,4 +648,51 @@ test("the drawer has an empty polite status line for unticked roles (#192)", () 
     );
     assert.equal(html.match(/id="volunteer-role-notice"/g).length, 1);
   }
+});
+
+test("a site coordinator's row without SC says SC certificate missing", () => {
+  const [row] = rowsOf(
+    renderRoster([volunteer({ roles: ["admin"], cleared: false, missing: ["scCertificate"] })], { list: "ready", filters: {} }),
+  );
+  assert.match(row, /Not cleared/);
+  assert.match(row, /SC certificate missing/);
+});
+
+const adminTick = (html) => html.match(/<input type="checkbox" name="role" value="admin"[^>]*>/)[0];
+
+test("for someone who is not a site coordinator the Admin tick is disabled, keeps its state and says why", () => {
+  const held = volunteerDrawerBody({ volunteer: volunteer({ roles: ["admin"] }), isNew: false, ui: {}, canChangeAdmin: false });
+  assert.match(adminTick(held), / disabled/);
+  assert.match(adminTick(held), / checked/);
+  assert.match(adminTick(held), /aria-describedby="volunteer-admin-note"/);
+  assert.match(held, /<p class="field-note" id="volunteer-admin-note">Only site coordinators change the Admin role\.<\/p>/);
+  // A disabled box is not sent, so the saved Admin role goes with the form as it was.
+  assert.match(held, /<input type="hidden" name="role" value="admin">/);
+  const without = volunteerDrawerBody({ volunteer: volunteer({ roles: ["preparer"] }), isNew: false, ui: {}, canChangeAdmin: false });
+  assert.match(adminTick(without), / disabled/);
+  assert.doesNotMatch(adminTick(without), / checked/);
+  assert.doesNotMatch(without, /type="hidden" name="role"/);
+  // The other roles stay free.
+  assert.doesNotMatch(without.match(/<input type="checkbox" name="role" value="preparer"[^>]*>/)[0], /disabled/);
+});
+
+test("for a site coordinator the Admin tick is a normal tick", () => {
+  const html = volunteerDrawerBody({ volunteer: volunteer({ roles: ["admin"] }), isNew: false, ui: {}, canChangeAdmin: true });
+  assert.doesNotMatch(adminTick(html), /disabled/);
+  assert.doesNotMatch(html, /Only site coordinators change the Admin role|type="hidden" name="role"/);
+});
+
+test("the drawer's Admin tick follows whether the signed-in person is a site coordinator", () => {
+  const open = (isSiteCoordinator) =>
+    dialog(
+      baseState({
+        principal: { userId: "u1", workspaceId: "w1", access: "staff", personId: "p-sam", clearance: cleared({ isAdmin: true, isSiteCoordinator }) },
+        volunteers: [volunteer({ roles: ["admin"] })],
+        dialog: "volunteer",
+        dialogContext: { volunteerId: "v-1" },
+      }),
+    );
+  assert.match(adminTick(open(false)), / disabled/);
+  assert.match(open(false), /Only site coordinators change the Admin role\./);
+  assert.doesNotMatch(adminTick(open(true)), /disabled/);
 });

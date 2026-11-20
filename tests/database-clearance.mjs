@@ -770,30 +770,45 @@ test("the action gate against real Supabase", async (t) => {
     });
 
     await t.test("effective capabilities", async (t) => {
-      // Each member's ceiling is wider than the roles f.clearStaff gives them.
-      const member = async (key, name, ceiling, roleCapabilities) => {
-        const made = await f.staff({ key, name, capabilities: ceiling, cleared: false });
-        await f.clearStaff(made.personId, roleCapabilities);
+      // There is no ceiling since 052: each member gets the roles for
+      // `roleCapabilities`, and then `written` is written straight into
+      // people.capabilities, which the mirror replaces with their roles'
+      // capabilities. Spec volunteer-clearance, "The caller's capabilities
+      // come from their roles".
+      const capabilitiesOf = async (personId) =>
+        (await one(f, "select capabilities from public.people where id=$1", [personId])).capabilities;
+      const member = async (key, name, written, roleCapabilities, { siteCoordinator = false } = {}) => {
+        const made = await f.staff({ key, name, capabilities: roleCapabilities, cleared: false, siteCoordinator });
+        await f.clearStaff(made.personId, roleCapabilities, f.workspaceId, { siteCoordinator });
+        await f.sql("update public.people set capabilities=$2 where id=$1", [made.personId, written]);
         return made;
       };
 
-      await t.test("a Preparer with review in the ceiling cannot claim a review", async () => {
+      await t.test("a Preparer with review written in cannot claim a review", async () => {
         const prep = await member("pax_preparer", "Pax Moreau", ["prepare", "review"], ["prepare"]);
+        assert.deepEqual(await capabilitiesOf(prep.personId), ["prepare"]);
         const caseId = await f.preparedCase();
         await assert.rejects(() => f.act(prep.client, caseId, "CLAIM_REVIEW", {}), rejected("INELIGIBLE"));
       });
 
-      await t.test("a Reviewer with only review in the ceiling cannot claim preparation", async () => {
+      // Review Focus 4: the Reviewer role gives `prepare`, so a Reviewer whose
+      // stored capabilities were written as `review` alone still claims
+      // preparation (spec scenario "A role wider than the ceiling").
+      await t.test("a Reviewer with only review written in claims preparation", async () => {
         const reviewer = await member("rhea_reviewer", "Rhea Duval", ["review"], ["review"]);
+        assert.deepEqual(await capabilitiesOf(reviewer.personId), ["prepare", "review"]);
         const caseId = await f.readyCase();
-        await assert.rejects(
-          () => f.act(reviewer.client, caseId, "CLAIM_PREPARATION", {}),
-          rejected("INELIGIBLE"),
+        await f.act(reviewer.client, caseId, "CLAIM_PREPARATION", {});
+        assert.equal(
+          (await one(f, "select preparer_id from public.cases where id=$1", [caseId])).preparer_id,
+          reviewer.personId,
         );
       });
 
-      await t.test("an Intaker with admin in the ceiling cannot create an assisted case", async () => {
-        const intaker = await member("ida_intaker", "Ida Brandt", ["admin"], ["assist"]);
+      // A site coordinator is a workspace admin, but creating an assisted case
+      // needs `admin` from the Admin role.
+      await t.test("a site coordinator whose only role is Intaker cannot create an assisted case", async () => {
+        const intaker = await member("ida_intaker", "Ida Brandt", ["admin"], ["assist"], { siteCoordinator: true });
         const actionId = randomUUID();
         await assert.rejects(
           () => f.createCase(intaker.client, actionId, { mode: "assisted" }),
@@ -817,14 +832,15 @@ test("the action gate against real Supabase", async (t) => {
         assert.equal(n, 0);
       });
 
-      // design.md, Risks: one test per RPC family where the ceiling holds the
-      // capability and the role does not. Each also shows the role that grants
-      // it succeeding, so the refusal is the role's and not something else.
+      // design.md, Risks (045): one test per RPC family where the capability
+      // is written in and the role does not give it. Each also shows the role
+      // that grants it succeeding, so the refusal is the role's and not
+      // something else.
       const forbidden = (fn, error) =>
         assert.ok(error?.code === "VT001" && error?.message === "FORBIDDEN", `${fn}: ${error?.code} ${error?.message}`);
       const OFFICE_CEILING = ["admin", "assist", "receive_documents"];
 
-      await t.test("a Preparer with assist in the ceiling cannot claim an assistance request", async () => {
+      await t.test("a Preparer with assist written in cannot claim an assistance request", async () => {
         const prep = await member("abe_assist_preparer", "Abe Lindqvist", ["prepare", "assist"], ["prepare"]);
         const intaker = await member("ama_assist_intaker", "Ama Quarshie", ["prepare", "assist"], ["assist"]);
         const { itemId } = await f.seedAssistance();
@@ -844,7 +860,7 @@ test("the action gate against real Supabase", async (t) => {
         assert.equal((await itemRow()).assignee_person_id, intaker.personId);
       });
 
-      await t.test("an Intaker with admin in the ceiling cannot close unsigned cases", async () => {
+      await t.test("an Intaker with admin written in cannot close unsigned cases", async () => {
         const intaker = await member("ike_close_intaker", "Ike Barrowman", OFFICE_CEILING, ["assist"]);
         const lead = await member("liv_close_admin", "Liv Castellano", OFFICE_CEILING, ["admin"]);
         const caseId = await f.approvedCase();
@@ -864,7 +880,7 @@ test("the action gate against real Supabase", async (t) => {
         assert.equal((await caseRow()).stage, "closed");
       });
 
-      await t.test("a Preparer with followup in the ceiling cannot log a contact on a follow-up", async () => {
+      await t.test("a Preparer with followup written in cannot log a contact on a follow-up", async () => {
         const ceiling = ["prepare", "admin", "followup"];
         const prep = await member("pim_followup_preparer", "Pim Okafor", ceiling, ["prepare"]);
         const lead = await member("fay_followup_admin", "Fay Lindell", ceiling, ["admin", "followup"]);
@@ -891,7 +907,7 @@ test("the action gate against real Supabase", async (t) => {
         assert.equal(await entries(), before + 1);
       });
 
-      await t.test("an Intaker with admin in the ceiling cannot edit someone else's contact", async () => {
+      await t.test("an Intaker with admin written in cannot edit someone else's contact", async () => {
         const intaker = await member("ivy_edit_intaker", "Ivy Marchetti", OFFICE_CEILING, ["assist"]);
         const lead = await member("lex_edit_admin", "Lex Halvorsen", OFFICE_CEILING, ["admin"]);
         const caseId = await f.preparedCase();
@@ -927,13 +943,15 @@ test("the action gate against real Supabase", async (t) => {
       await assert.rejects(() => f.act(reviewer.client, caseId, "CLAIM_REVIEW", {}), rejected("SELF_REVIEW"));
     });
 
-    // The Roster stays on the ceiling: an uncleared admin still saves.
-    await t.test("an uncleared admin can save a volunteer", async () => {
+    // The Roster's admin check is the workspace admin check (052): a site
+    // coordinator with no roles is an admin, cleared or not.
+    await t.test("an uncleared site coordinator can save a volunteer", async () => {
       const lead = await f.staff({
         key: "ada_uncleared_admin",
         name: "Ada Whitcombe",
-        capabilities: ["admin", "followup"],
+        capabilities: [],
         cleared: false,
+        siteCoordinator: true,
       });
       const { data, error } = await lead.client.rpc("vitally_save_volunteer", {
         p_action_id: randomUUID(),
@@ -981,6 +999,7 @@ test("vitally_my_clearance against real Supabase", async (t) => {
         missing: [{ kind: "form13615" }],
         capabilities: [],
         isAdmin: false,
+        isSiteCoordinator: false,
         siteCheck: false,
         siteCoordinatorName: "Avery Lin",
       });
@@ -992,18 +1011,21 @@ test("vitally_my_clearance against real Supabase", async (t) => {
         missing: [],
         capabilities: ["prepare"],
         isAdmin: false,
+        isSiteCoordinator: false,
         siteCheck: false,
         siteCoordinatorName: "Avery Lin",
       });
     });
 
-    // 047 (add-account-invitations, design D12) adds siteCheck.
-    await t.test("the answer has exactly six keys", async () => {
+    // 047 (add-account-invitations, design D12) adds siteCheck; 052 (design
+    // D4) adds isSiteCoordinator.
+    await t.test("the answer has exactly seven keys", async () => {
       const result = await myClearance(f.preparer);
       assert.deepEqual(Object.keys(result).sort(), [
         "capabilities",
         "cleared",
         "isAdmin",
+        "isSiteCoordinator",
         "missing",
         "siteCheck",
         "siteCoordinatorName",
@@ -1033,12 +1055,15 @@ test("vitally_my_clearance against real Supabase", async (t) => {
       assert.deepEqual(checked.capabilities, ["prepare"]);
     });
 
-    await t.test("an uncleared admin still reports the admin ceiling", async () => {
+    // 052: the admin an uncleared staff member reports is the workspace admin
+    // check, so a site coordinator with no roles.
+    await t.test("an uncleared site coordinator still reports being an admin", async () => {
       const lead = await f.staff({
         key: "ada_my_clearance",
         name: "Ada Brandt",
-        capabilities: ["admin", "followup"],
+        capabilities: [],
         cleared: false,
+        siteCoordinator: true,
       });
       const result = await myClearance(lead.client);
       assert.equal(result.cleared, false);
@@ -1153,7 +1178,18 @@ test("assignees must be cleared against real Supabase", async (t) => {
       const { id: requestId } = await one(f, "select id from public.document_requests where case_id=$1", [requested]);
       const withdrawn = await f.readyCase();
       await f.act(f.preparer, withdrawn, "CLAIM_PREPARATION", {});
-      await setCurrentRoles(f, coordinatorId, []);
+      // Uncleared while keeping the Admin role, and so `followup` (052: the
+      // capabilities are the mirror of the roles): the coordinator is a site
+      // coordinator, whose clearance also needs SC (design D6).
+      await f.sql(
+        `delete from public.certificates c using public.workspaces w
+          where w.id=c.workspace_id and c.season=w.current_season and c.workspace_id=$1 and c.person_id=$2 and c.certificate='sc'`,
+        [f.workspaceId, coordinatorId],
+      );
+      assert.equal(
+        (await one(f, "select vitally_private.cleared($1,$2) as cleared", [f.workspaceId, coordinatorId])).cleared,
+        false,
+      );
       try {
         await f.act(f.preparer, requested, "ESCALATE_CONTACT", {
           requestId,
@@ -1173,7 +1209,9 @@ test("assignees must be cleared against real Supabase", async (t) => {
         ).rows;
         assert.deepEqual(notice, [{ assignee_person_id: coordinatorId }]);
       } finally {
-        await f.clearStaff(coordinatorId, ["admin", "followup", "assist", "receive_documents"]);
+        await f.clearStaff(coordinatorId, ["admin", "followup", "assist", "receive_documents"], f.workspaceId, {
+          siteCoordinator: true,
+        });
       }
     });
   } finally {

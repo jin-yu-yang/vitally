@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ceilingAdmin, missingLines, withOwnCapabilities } from "../src/clearance.mjs";
+import { ceilingAdmin, missingLines, siteCoordinator, withOwnCapabilities } from "../src/clearance.mjs";
 
 const clearance = (extra = {}) => ({
   cleared: false,
@@ -60,4 +60,24 @@ test("missingLines gives the copy in order: Form 13615, photo ID, then roles", (
     "Greeter needs IT&QR.",
   ]);
   assert.deepEqual(missingLines(clearance()), []);
+});
+
+test("siteCoordinator reads isSiteCoordinator and is false without a clearance", () => {
+  assert.equal(siteCoordinator({ clearance: clearance({ isAdmin: true, isSiteCoordinator: true }) }), true);
+  assert.equal(siteCoordinator({ clearance: clearance({ isAdmin: true }) }), false);
+  assert.equal(siteCoordinator({ clearance: clearance({ isSiteCoordinator: "yes" }) }), false);
+  assert.equal(siteCoordinator({ access: "applicant" }), false);
+  assert.equal(siteCoordinator(null), false);
+});
+
+test("missingLines says a site coordinator needs the SC certificate, after the roles", () => {
+  const lines = missingLines(
+    clearance({
+      missing: [
+        { kind: "role", role: "admin", certificates: ["IT&QR"] },
+        { kind: "siteCoordinator", certificates: ["SC"] },
+      ],
+    }),
+  );
+  assert.deepEqual(lines, ["Admin needs IT&QR.", "Site coordinators need the SC certificate."]);
 });

@@ -12,16 +12,23 @@ export const withOwnCapabilities = (people, principal) => {
   );
 };
 
-// The ceiling admin flag (not the effective capabilities).
+// The workspace admin flag (a site coordinator, or the Admin role this season),
+// not the effective capabilities.
 export const ceilingAdmin = (principal) => principal?.clearance?.isAdmin === true;
+
+// Whether the signed-in person is a site coordinator (change add-season-settings):
+// only they change Season settings, who is a site coordinator, and the Admin role.
+export const siteCoordinator = (principal) => principal?.clearance?.isSiteCoordinator === true;
 
 const capitalise = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 
-// One line per thing still missing: the 13615, the photo ID, then each role.
+// One line per thing still missing: the 13615, the photo ID, each role, then
+// a site coordinator's SC certificate.
 export const missingLines = (clearance) =>
   (clearance?.missing ?? []).map((item) => {
     if (item.kind === "form13615") return "Upload your signed Form 13615.";
     if (item.kind === "photoId") return "Have your photo ID checked.";
+    if (item.kind === "siteCoordinator") return "Site coordinators need the SC certificate.";
     return `${capitalise(item.role)} needs ${item.certificates.join(" and ")}.`;
   });
 

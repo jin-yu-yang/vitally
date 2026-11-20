@@ -308,11 +308,10 @@ test("case actions apply the shared check order against real Supabase", async (t
           ).rows;
         const stored = await receipt();
         const revision = await revisionOf(f, caseId);
-        // The capability the action needed is re-checked on every replay.
-        await f.sql(
-          "update public.people set capabilities=$1 where id=$2",
-          [["assist", "receive_documents"], f.siteCoordinatorId],
-        );
+        // The capability the action needed is re-checked on every replay. The
+        // capabilities are the mirror of the roles (052), so the coordinator
+        // loses `admin` by becoming an Intaker.
+        await f.clearStaff(f.siteCoordinatorId, ["assist", "receive_documents"]);
         try {
           const stripped = await f.siteCoordinator.rpc(
             "vitally_apply_action",
@@ -320,10 +319,7 @@ test("case actions apply the shared check order against real Supabase", async (t
           );
           assert.equal(stripped.error.code, "VT001");
         } finally {
-          await f.sql("update public.people set capabilities=$1 where id=$2", [
-            ["admin", "followup", "assist", "receive_documents"],
-            f.siteCoordinatorId,
-          ]);
+          await f.clearStaff(f.siteCoordinatorId, ["admin", "followup", "assist", "receive_documents"]);
         }
         // So is the membership the caller acts under.
         await f.sql(
@@ -513,7 +509,9 @@ test("case actions apply the shared check order against real Supabase", async (t
           checks: f.intakeChecks,
         });
         // Step 4 lets any same-workspace person attempt a claim; step 7 does not.
-        for (const client of [f.siteCoordinator, f.reviewer])
+        // Review Focus 4: the Reviewer role gives `prepare` (052), so the
+        // unqualified callers are the Admin and the Intaker.
+        for (const client of [f.siteCoordinator, f.intaker])
           await assert.rejects(
             () => f.act(client, received, "CLAIM_PREPARATION", {}),
             rejected("INELIGIBLE"),

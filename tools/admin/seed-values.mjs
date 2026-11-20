@@ -102,9 +102,10 @@ export const CASE_LABEL_ASSIGNMENTS = Object.freeze([
 
 // The four role accounts' clearance, which `npm run seed:local` saves before
 // anything acts as one of them: the current-season role, its confirmed
-// certificates, and not new. The roles match each account's ceiling.
+// certificates, and not new. The Site Coordinator is a site coordinator
+// (add-season-settings), so it needs SC as well to be cleared (design D6).
 export const ROLE_ACCOUNT_CLEARANCE = Object.freeze({
-  site_coordinator: Object.freeze({ roles: ["admin"], certificates: ["vsc", "itqr"], isNew: false }),
+  site_coordinator: Object.freeze({ roles: ["admin"], certificates: ["vsc", "itqr", "sc"], isNew: false }),
   preparer: Object.freeze({ roles: ["preparer"], certificates: ["vsc", "itqr", "basic"], isNew: false }),
   reviewer: Object.freeze({ roles: ["reviewer"], certificates: ["vsc", "itqr", "advanced"], isNew: false }),
   intaker: Object.freeze({ roles: ["intaker"], certificates: ["vsc", "itqr"], isNew: false }),

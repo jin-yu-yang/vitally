@@ -187,7 +187,9 @@ records the cases in `.vitally-runs/seed-<workspaceId>.json`. A re-run replaces 
 the eight volunteers, and leaves every other case and volunteer alone. If it stops with
 `SEED_SETUP`, a role account or client A is missing from the workspace, or the default follow-up
 person is not the site coordinator account (this happens on a stack set up from the old example
-roster). In both cases, run the roster command again with the current example roster.
+roster, which gave capabilities instead of `siteCoordinator: true`; since 052 the seed refuses
+such a stack until the roster command is run again). In both cases, run the roster command again
+with the current example roster.
 
 The seed also labels some rehearsal cases with the three starter labels. It stops with `SEED_SETUP` if
 one of those labels was renamed in the workspace, so rename them back (or seed a fresh workspace) first.
@@ -214,12 +216,13 @@ its root. The stack must already be running ([Start and stop](#start-and-stop)).
 
 1. **The roster file.** `.vitally-roster.local.json` must have:
    - your `workspaceId` (keep the one you have; a new ID makes a new, empty workspace);
-   - in `staff`, the `site_coordinator` (with `admin`, `followup`, `assist`, `receive_documents`),
-     `preparer` (`prepare`) and `reviewer` (`review`) entries of
+   - in `staff`, the `site_coordinator` (with `"siteCoordinator": true`), `preparer` and
+     `reviewer` entries of
      [`tools/admin/roster.example.json`](../tools/admin/roster.example.json); `intaker` is optional;
    - `"defaultFollowup": "site_coordinator"`;
-   - `"siteNumber": "S00000000"` (fictional), so a volunteer you give an account can pass the
-     site check at their first sign-in;
+   - no `siteNumber` (and no `capabilities` on any entry): both are ignored with a note. The
+     SIDN is set on **Season settings**, and `seed:local` sets the fictional `S00000000` when none
+     is set, so a volunteer you give an account can pass the site check at their first sign-in;
    - `client-a@example.org` as the first entry of `applicants`;
    - no `presenters` and no `sampleCaseOwners` (both are ignored with a note, but they belong to
      the old roster).
@@ -583,7 +586,7 @@ and the commands are in [`docs/developer/database.md`](developer/database.md#mig
 
 ### Migration failed (VT008)
 
-Two migrations refuse with `VT008`: 043 and 045 ([045's guard](#045s-guard) below). The migrator
+Three migrations refuse with `VT008`: 043, 045 and 052 ([045's guard](#045s-guard) and [052's guard](#052s-guard) below). The migrator
 prints only the code; the full message starts with the migration's number.
 
 #### 043's guard
@@ -651,6 +654,51 @@ where p.user_id is not null
 For each person listed, either confirm the missing certificates or remove the unsupported roles on
 the Roster (decide which with the project owner), then run the migrator again. Do not edit the
 migration file.
+
+#### 052's guard
+
+From migration 052 (Season settings), `Migration failed (VT008).` means it refused to run, and
+**nothing was changed**. 052 would change someone's admin access, and the message gives a count
+for each direction:
+
+- `admin without the Admin role`: an active staff member holds `admin` in `people.capabilities`
+  but not the Admin role on their current-season Roster entry, so 052 would take their admin away.
+  Give each of them the Admin role on the Roster (which needs the certificates the role asks for).
+- `the Admin role without admin`: someone with a sign-in has the Admin role this season but no
+  `admin` today (an Admin tick under the old capabilities ceiling didn't make an admin), so 052
+  would make them one. List them with the query in step 2 below and untick Admin for each; tick
+  it again after 052 for anyone who should be an admin.
+
+Then run the migrator again. Do not edit the migration file.
+
+**Hosted deploy order for 052.** Do these in order, back to back:
+
+1. In the current Roster, give every admin VSC, IT&QR and the Admin role. Without this, 052's guard
+   refuses and lists the count.
+2. List who has the Admin role this season without admin today:
+
+   ```sql
+   select p.name from public.people p
+   join public.workspaces w on w.id=p.workspace_id
+   join public.roster_entries r on r.workspace_id=w.id and r.season=w.current_season and r.person_id=p.id
+   where p.user_id is not null and 'admin'=any(r.roles) and not ('admin'=any(p.capabilities));
+   ```
+
+   For each person listed, untick Admin before 052. To keep someone as an admin, tick it again
+   after 052, which makes them one on purpose. 052 refuses while anyone is listed.
+3. Run migration 052 (`tools/admin/migrate.mjs --target classroom`, with `NODE_EXTRA_CA_CERTS` set).
+   From here until step 4 there is no site coordinator: Season settings is read-only to everyone,
+   and escalations, approvals, withdrawals and closes reach the default follow-up person through
+   the `followup` capability that step 1 gave them.
+4. Re-run the roster command with `siteCoordinator: true` on the site coordinator's entry, and
+   `defaultFollowup` naming that entry's key. The file's old `capabilities` and `siteNumber` are
+   ignored and reported.
+5. The site coordinator ticks their own SC certificate on the Roster. They stay uncleared until
+   then, but can still reach the Roster and Season settings.
+
+A person with no sign-in loses their capabilities under the mirror and is hidden from non-admin
+staff. Before deploying, `select count(*) from public.people where user_id is null and
+cardinality(capabilities) > 0;` should return 0 (it did on the hosted database on 2026-11-19).
 
 ## 5. Tests
 
@@ -938,7 +986,7 @@ privileged test cleanup against the classroom project.**
      link.
    - Turn off new-user sign-ups and anonymous sign-ins; keep the Email provider on; set the Site
      URL to the hosting address once it exists.
-4. **Admit the roster** with the roster command (format below). Start with one staff member (the roster also needs a `defaultFollowup`) and the
+4. **Admit the roster** with the roster command (format below). Start with one staff member (the roster also needs a `defaultFollowup`, who must have `"siteCoordinator": true`) and the
    one approved test-client address, send that client one real code, and only then add the class:
 
    ```sh
@@ -1004,9 +1052,9 @@ matching `.vitally-roster*.json` and are never committed.
 | Field | Meaning |
 | --- | --- |
 | `workspaceId` | A lower-case UUID. Generate it once and keep it: re-running the same roster with more addresses adds them to the same workspace. |
-| `staff` | Required, at least one entry. Real staff members, each `{ "email", "name", "personKey", "capabilities" }`. Each gets a `staff` account linked to its own new person, which it always acts as, with the staff screens and no demo tools. `capabilities` is non-empty, from `prepare`, `review`, `admin`, `followup`, `receive_documents`, `assist`; an entry with `followup` must also have `admin`; `personKey` is unique. Re-running is harmless, but an existing member's values cannot be changed. For a rehearsal, use fictional names and addresses. |
-| `defaultFollowup` | Required: the `personKey` of a `staff` entry with `followup`, who then gets new follow-ups. See [Back end: the roster](developer/backend.md#the-roster). |
-| `siteNumber` | Optional: the site's SIDN, `S` and eight digits. A volunteer given an account in the app types it at their first sign-in; without it they see "This site isn't set up for sign-in yet." The real number goes only in your roster file, never in the repository. |
+| `staff` | Required, at least one entry. Real staff members, each `{ "email", "name", "personKey" }`, plus `"siteCoordinator": true` for a site coordinator (052; it grants and never removes). Each gets a `staff` account linked to its own new person, which it always acts as, with the staff screens and no demo tools. Roles come from the Roster, not the file: the old `capabilities` key is accepted, ignored and reported. `personKey` is unique. Re-running is harmless, but an existing member's values cannot be changed. For a rehearsal, use fictional names and addresses. |
+| `defaultFollowup` | Required: the `personKey` of a `staff` entry with `"siteCoordinator": true`, who then gets new follow-ups. See [Back end: the roster](developer/backend.md#the-roster). |
+| `siteNumber` | Accepted, ignored and reported since 052. A site coordinator sets the site's SIDN on **Season settings**; a volunteer given an account types it at their first sign-in, and without it they see "This site isn't set up for sign-in yet." The real number is typed into the app, never into the repository. |
 | `applicants` | Classmates who play clients. Each sees only their own applications. |
 | `sampleCaseOwners` | Removed in #135. A roster that still has it runs, and the command prints a note that it was ignored. |
 | `presenters` | Removed in #136. A roster that still has it runs, and the command prints "presenters is no longer used and was ignored; those addresses get no access." A former presenter address cannot sign in; an open window shows "This account has no access". |
