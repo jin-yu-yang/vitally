@@ -53,9 +53,9 @@
 
 ## 9. Browser story
 
-- [ ] 9.1 Add a short Season settings walk to the story: the Site Coordinator persona opens Season settings, saves the upload link, sets the SIDN, and a screenshot is taken. Record the leg times before and after.
+- [x] 9.1 Add a short Season settings walk to the story: the Site Coordinator persona opens Season settings, saves the upload link, sets the SIDN, and a screenshot is taken. Record the leg times before and after.
 
 ## 10. Docs and checks
 
 - [x] 10.1 Update `docs/developer/` (database notes on the mirror, site coordinators and season settings; roster file format) and `docs/setup.md` where the roster file is described.
-- [ ] 10.2 Run `npm test`, `npm run build:hant -- --check`, `npx openspec validate --all`, `npm run db:migrate:test` + `npm run test:database`, `npm run test:auth-browser` and `npm run test:browser` (or the PR's CI run). Also run a local `db:migrate:test` on a stack that already has main's migrations.
+- [x] 10.2 Run `npm test`, `npm run build:hant -- --check`, `npx openspec validate --all`, `npm run db:migrate:test` + `npm run test:database`, `npm run test:auth-browser` and `npm run test:browser` (or the PR's CI run). Also run a local `db:migrate:test` on a stack that already has main's migrations.
