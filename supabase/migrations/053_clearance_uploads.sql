@@ -106,6 +106,14 @@ begin
  if p_action_id is null or p_document is null or p_document not in ('form13615','photoId') then
   raise sqlstate 'VT007' using message='VALIDATION';
  end if;
+ -- The stored answer first, so a retry whose answer was lost still gets it; a
+ -- refusal below rolls the reservation back.
+ v_digest=encode(extensions.digest(jsonb_build_object('operation','MARK_UPLOAD_SENT','document',p_document,
+  'personId',v_person.id)::text,'sha256'),'hex');
+ v_receipt=vitally_private.reserve_receipt(v_member,p_action_id,'MARK_UPLOAD_SENT',v_digest,v_person.id);
+ if v_receipt.receipt is not null then
+  return v_receipt.receipt;
+ end if;
  select r.* into v_entry from public.roster_entries r
   join public.workspaces w on w.id=r.workspace_id and w.current_season=r.season
   where r.workspace_id=v_person.workspace_id and r.person_id=v_person.id for update of r;
@@ -114,12 +122,6 @@ begin
  end if;
  if p_document='photoId' and (not v_entry.is_new or v_entry.photo_id_checked_at is not null) then
   raise sqlstate 'VT007' using message='VALIDATION',detail='PHOTO_ID_NOT_NEEDED';
- end if;
- v_digest=encode(extensions.digest(jsonb_build_object('operation','MARK_UPLOAD_SENT','document',p_document,
-  'personId',v_person.id)::text,'sha256'),'hex');
- v_receipt=vitally_private.reserve_receipt(v_member,p_action_id,'MARK_UPLOAD_SENT',v_digest,v_person.id);
- if v_receipt.receipt is not null then
-  return v_receipt.receipt;
  end if;
  v_sent=now();
  if p_document='form13615' then
@@ -356,7 +358,7 @@ begin
   insert into public.roster_entries(workspace_id,person_id,season,roles,added_by_person_id,is_new,photo_id_checked_at)
    values(v_member.workspace_id,v_target_id,v_season,v_roles,v_person.id,v_is_new,v_photo_checked_at)
    on conflict(workspace_id,person_id,season) do update
-    set roles=excluded.roles,is_new=excluded.is_new,photo_id_checked_at=excluded.photo_id_checked_at,
+    set roles=excluded.roles,is_new=excluded.is_new,photo_id_checked_at=excluded.photo_id_checked_at, -- 053
      form_13615_sent_at=case when v_clear_13615 then null else public.roster_entries.form_13615_sent_at end, -- 053
      photo_id_sent_at=case when (v_entry.photo_id_checked_at is null and v_photo_checked_at is not null) -- 053
        or (coalesce(v_entry.is_new,false) and not v_is_new) then null else public.roster_entries.photo_id_sent_at end; -- 053

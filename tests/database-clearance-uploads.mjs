@@ -202,6 +202,17 @@ test("vitally_mark_upload_sent against real Supabase", async (t) => {
       assert.equal((await entryOf(m)).photo_id_sent_at, null);
     });
 
+    await t.test("a retry after the photo ID was checked returns the stored answer", async () => {
+      const m = await unclearedMember("snd_retry", "Edda Wolverton");
+      await setEntry(m, "is_new=true,photo_id_checked_at=null");
+      const id = randomUUID();
+      const one = await sent(m.client, "photoId", id);
+      await setEntry(m, "photo_id_checked_at=now()");
+      const two = await sent(m.client, "photoId", id);
+      assert.deepEqual(two, one);
+      assert.equal(await f.receiptsFor(id), 1);
+    });
+
     await t.test("photoId is refused when the entry is not new", async () => {
       const m = await unclearedMember("snd_notnew", "Emil Farraday");
       await setEntry(m, "is_new=false,photo_id_checked_at=null");
@@ -401,6 +412,20 @@ test("reviewing sent uploads against real Supabase", async (t) => {
       await save(m, { certificates: ["vsc"] });
       assert.equal((await entryOf(m)).form_13615_sent_at, null);
       assert.deepEqual(await certsOf(m), ["vsc"]);
+    });
+
+    await t.test("reordering the roles keeps the 13615 date", async () => {
+      const m = await uncleared("rev_order", "Ines Whitcombe");
+      await f.sql(
+        "insert into public.certificates(workspace_id,person_id,season,certificate,status,confirmed_at) values($1,$2,$3,'vsc','confirmed',now()),($1,$2,$3,'itqr','confirmed',now())",
+        [f.workspaceId, m.personId, season],
+      );
+      await setEntry(m, "roles='{greeter,intaker}'");
+      await send(m, "form13615");
+      const before = (await entryOf(m)).form_13615_sent_at;
+      assert.ok(before);
+      await save(m, { roles: ["intaker", "greeter"] });
+      assert.deepEqual((await entryOf(m)).form_13615_sent_at, before);
     });
 
     await t.test("a phone-only save keeps it", async () => {
