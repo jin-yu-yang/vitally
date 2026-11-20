@@ -10509,3 +10509,16 @@ test("markUploadSent: busy blocks a second press", async () => {
   assert.equal(store.sends.length, 1);
   controller.stop();
 });
+
+test("markUploadSent: a refusal drops an earlier action's Try again", async () => {
+  const store = uploadStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.nextClearance = domainError("OFFLINE");
+  await controller.checkClearance();
+  assert.equal(controller.getState().retryable, true);
+  store.failSend = Object.assign(domainError("VALIDATION"), { cause: { message: "PHOTO_ID_NOT_NEEDED" } });
+  await controller.markUploadSent("photoId");
+  assert.equal(controller.getState().retryable, false);
+  controller.stop();
+});

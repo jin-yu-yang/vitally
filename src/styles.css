@@ -2373,6 +2373,13 @@ textarea::placeholder {
 .setup-screen ul {
   padding-left: 20px;
 }
+.setup-upload {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 6px;
+}
 .review-panel {
   margin-bottom: 20px;
 }

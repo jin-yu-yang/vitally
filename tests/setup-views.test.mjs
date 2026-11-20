@@ -44,14 +44,14 @@ const staffState = (extra = {}, overrides = {}) => ({
 test("the setup screen for a missing Form 13615 names it and the site coordinator", () => {
   const html = setupScreen(staffState());
   assert.match(html, /<h1>Finish your setup for this season<\/h1>/);
-  assert.match(html, /<li>Upload your signed Form 13615\.<\/li>/);
+  assert.ok(html.includes('<span id="setup-item-form13615">Upload your signed Form 13615.</span>'));
   assert.match(html, /Ask Jordan Avery, your site coordinator\./);
   assert.match(html, /<button type="button" class="btn primary" data-action="check-clearance" >Check again<\/button>/);
 });
 
 test("the setup screen for an unchecked photo ID says so", () => {
   const html = setupScreen(staffState({ missing: [{ kind: "photoId" }] }));
-  assert.match(html, /<li>Have your photo ID checked\.<\/li>/);
+  assert.ok(html.includes('<span id="setup-item-photoId">Have your photo ID checked.</span>'));
   assert.doesNotMatch(html, /Form 13615/);
 });
 
@@ -174,7 +174,8 @@ test("setup uploads: offers Upload and I've uploaded it", () => {
   assert.match(html, /<a [^>]*target="_blank"/);
   assert.match(html, /<a [^>]*rel="noopener"/);
   assert.match(html, />Upload<\/a>/);
-  assert.match(html, /data-action="mark-upload-sent"\s+data-document="form13615"[^>]*>I've uploaded it</);
+  assert.match(html, /data-action="mark-upload-sent"\s+data-document="form13615" aria-describedby="setup-item-form13615"[^>]*>I've uploaded it</);
+  assert.ok(html.includes('<li><span id="setup-item-form13615">Upload your signed Form 13615.</span><div class="setup-upload">'));
 });
 
 test("setup uploads: shows the waiting state once sent", () => {
@@ -227,4 +228,26 @@ test("setup uploads: role and SC items are unchanged", () => {
   assert.match(html, /Preparer needs VSC and Basic\./);
   assert.match(html, /Site coordinators need the SC certificate\./);
   assert.doesNotMatch(html, /mark-upload-sent|Upload<\/a>/);
+});
+
+test("setup uploads: a sent time that does not parse still says waiting", () => {
+  const html = withItem("not a date");
+  assert.ok(html.includes("Waiting for review</span>"));
+  assert.doesNotMatch(html, /sent /);
+});
+
+test("setup uploads: keeps the order Form 13615, photo ID, roles, SC", () => {
+  const html = setupScreen(
+    staffState({
+      missing: [
+        { kind: "form13615", sentAt: null },
+        { kind: "photoId", sentAt: null },
+        { kind: "role", role: "preparer", certificates: ["VSC"] },
+        { kind: "siteCoordinator" },
+      ],
+    }),
+  );
+  const at = ["Form 13615", "photo ID", "Preparer needs", "SC certificate"].map((text) => html.indexOf(text));
+  assert.deepEqual([...at].sort((x, y) => x - y), at);
+  assert.ok(at[0] > -1);
 });

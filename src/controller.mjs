@@ -4016,6 +4016,8 @@ export function createController({
       await store.markUploadSent(request);
     } catch (error) {
       state.busy = false;
+      // An earlier action's Try again does not belong beside this refusal.
+      state.retryable = false;
       if (UNKNOWN_OUTCOME.includes(error?.code)) pendingUploadSend = { request };
       const known = error?.code === "VALIDATION" ? UPLOAD_REFUSALS[error?.cause?.message] : null;
       noteFailure(error, { message: known ?? (error?.code === "OFFLINE" ? undefined : "Something went wrong.") });
