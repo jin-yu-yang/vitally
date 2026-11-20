@@ -60,8 +60,8 @@ export const SCREENING_CHECK_LABELS = Object.freeze({
 });
 
 // The corrected Exit Form values are optional. A group whose only filled field
-// is its fixed method counts as empty, so the method is dropped before the
-// shared parser sees it. Sent only when some group is filled.
+// is its fixed method (`<prefix>.fixedMethod`) counts as empty. Sent only when
+// some group is filled.
 function returnToSigning(values) {
   const out = { confirmed: confirmation(values, "Confirm that the fix is done.") };
   const filled = { ...values };
@@ -71,8 +71,12 @@ function returnToSigning(values) {
     const others = GROUP_FIELDS.filter((key) => key !== "method").some(
       (key) => String(values?.[`${prefix}.${key}`] ?? "").trim() !== "",
     );
-    if (others) any = true;
-    else delete filled[`${prefix}.method`];
+    const fixed = String(values?.[`${prefix}.fixedMethod`] ?? "").trim();
+    delete filled[`${prefix}.fixedMethod`];
+    // The settled return's fixed method only travels with other values; a
+    // method the admin chose is always passed on, so a lone one is refused.
+    if (others && fixed && !filled[`${prefix}.method`]) filled[`${prefix}.method`] = fixed;
+    if (others || String(filled[`${prefix}.method`] ?? "").trim() !== "") any = true;
   }
   if (any) out.exitForm = exitFormFrom(filled);
   const remarks = String(values?.remarks ?? "").trim();

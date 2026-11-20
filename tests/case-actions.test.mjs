@@ -676,21 +676,24 @@ test("RETURN_TO_SIGNING: the corrected Exit Form values", async () => {
   const { exitFormFrom } = await import("../src/questionnaires.mjs");
   const sure = { confirmed: "on" };
   // A fixed method alone sends no group.
-  assert.deepEqual(payloadFor("RETURN_TO_SIGNING", {}, { ...sure, "state.method": "efile" }).payload, { confirmed: true });
+  assert.deepEqual(payloadFor("RETURN_TO_SIGNING", {}, { ...sure, "state.fixedMethod": "efile" }).payload, { confirmed: true });
+  // A method the admin chose, alone, is refused like on the reviewer form.
+  refused("RETURN_TO_SIGNING", { ...sure, "federal.method": "paper" }, "Federal: choose Refund, Owe or None.");
+  refused("RETURN_TO_SIGNING", { ...sure, "local.SIT.method": "efile" }, "Local SIT: choose Refund, Owe or None.");
   const values = {
     ...sure,
     "federal.method": "paper",
     "federal.result": "refund",
     "federal.amount": "1250.00",
     "federal.refundBy": "direct_deposit",
-    "state.method": "efile",
+    "state.fixedMethod": "efile",
     "state.result": "refund",
     "state.amount": "85.00",
     "state.refundBy": "check",
     remarks: "  Corrected dependent SSN ",
   };
   const { payload } = payloadFor("RETURN_TO_SIGNING", {}, values);
-  assert.deepEqual(payload.exitForm, exitFormFrom(values));
+  assert.deepEqual(payload.exitForm, exitFormFrom({ ...values, "state.method": "efile" }));
   assert.equal(payload.exitForm.federal.method, "paper");
   assert.equal(payload.exitForm.state.refundBy, "check");
   assert.equal(payload.remarks, "Corrected dependent SSN");

@@ -1766,7 +1766,7 @@ test("Return to signing dialog: groups for the case's returns, settled method fi
   assert.match(html, /data-exit-group="federal"/);
   assert.match(html, /name="federal\.method" value="paper"/);
   assert.match(html, /data-exit-group="state"/);
-  assert.match(html, /<input type="hidden" name="state\.method" value="efile">/);
+  assert.match(html, /<input type="hidden" name="state\.fixedMethod" value="efile">/);
   assert.doesNotMatch(html, /type="radio"[^>]*name="state\.method"/);
   assert.match(html, /How it was filed: E-file/);
   for (const type of ["NPT", "BIRT", "EET", "SIT", "PAIBWTR"]) assert.match(html, new RegExp(`data-exit-group="local\\.${type}"`));
