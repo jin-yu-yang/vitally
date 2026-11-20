@@ -875,6 +875,52 @@ test("volunteer roster records against real Supabase", async (t) => {
       }
     });
 
+    // 052: a site coordinator without SC is not cleared (design D6), so
+    // unticking SC while holding work is refused; being the default exempts
+    // only the default row, not their other work.
+    await t.test("open work: a site coordinator who prepares keeps SC, default or not", async () => {
+      const member = await f.staff({
+        key: "sol_coordinator_preparer",
+        name: "Sol Abernathy",
+        capabilities: ["prepare"],
+        siteCoordinator: true,
+      });
+      const caseId = await f.readyCase();
+      await f.act(member.client, caseId, "CLAIM_PREPARATION", {});
+      const preparing = `preparing client ${await clientOf(f, caseId)}`;
+      const certificates = ["vsc", "itqr", "basic"];
+      const before = await certificatesOf(f, member.personId);
+      const revision = await revisionOf(f, member.personId);
+      assert.deepEqual(
+        await refusedForOpenWork(f, admin, await editOf(f, member.personId, { name: "Sol Abernathy", roles: ["preparer"], certificates })),
+        [preparing],
+        "SC unticked",
+      );
+      assert.deepEqual(await certificatesOf(f, member.personId), before);
+      assert.equal(await revisionOf(f, member.personId), revision);
+      assert.equal(await clearedOf(f, member.personId), true);
+      // The positive control: the same save with SC ticked goes through.
+      await save(
+        admin,
+        await editOf(f, member.personId, { name: "Sol Abernathy", roles: ["preparer"], certificates: [...certificates, "sc"] }),
+      );
+      await setDefaultFollowup(member.personId);
+      try {
+        assert.deepEqual(
+          await refusedForOpenWork(
+            f,
+            admin,
+            await editOf(f, member.personId, { name: "Sol Abernathy", roles: [], certificates: [...certificates, "sc"] }),
+          ),
+          [preparing],
+          "default and preparing",
+        );
+        assert.deepEqual(await rolesOf(f, member.personId), ["preparer"]);
+      } finally {
+        await setDefaultFollowup(f.siteCoordinatorId);
+      }
+    });
+
     await t.test("open work: removing Greeter while preparing is allowed", async () => {
       const prep = await f.staff({ key: "gwen_open_greeter", name: "Gwen Ostrander", capabilities: ["prepare"] });
       const certificates = ["vsc", "itqr", "basic"];

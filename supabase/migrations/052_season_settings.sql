@@ -1035,8 +1035,11 @@ begin
   v_was_capable=vitally_private.role_capabilities(coalesce(v_entry.roles,'{}'::text[])); -- 052
   v_was_cleared=vitally_private.cleared(v_member.workspace_id,p_volunteer_id);
   v_capabilities=vitally_private.role_capabilities(v_roles); -- 052
-  v_cleared=cardinality(v_roles)>0 and (not v_is_new or v_photo_checked_at is not null);
+  -- A site coordinator also needs SC ticked to stay cleared (design D6); an -- 052
+  -- uploaded SC left unticked doesn't count. -- 052
   v_default_met=vitally_private.is_site_coordinator(v_member.workspace_id,p_volunteer_id); -- 052
+  v_cleared=cardinality(v_roles)>0 and (not v_is_new or v_photo_checked_at is not null)
+   and (not v_default_met or 'sc'=any(v_certificates)); -- 052
   select jsonb_agg(w.label) into v_open_work from vitally_private.open_work(v_member.workspace_id,p_volunteer_id) w
    where not (v_default_met and w.label='default follow-up person') and ( -- 052
     (v_was_cleared and not v_cleared) -- 052
