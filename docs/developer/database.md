@@ -167,7 +167,7 @@ grep -n -E "^create (or replace )?function" supabase/migrations/*.sql
 
 Two schemas:
 
-- **`public`**: the application tables and the twenty-six browser-callable functions.
+- **`public`**: the application tables and the thirty browser-callable functions.
 - **`vitally_private`**: helper functions, the migration ledger, and tables browsers must never
   reach. Every function here is `SECURITY DEFINER` with `search_path=''`, and `EXECUTE` is revoked
   from every role, including `service_role`.
@@ -298,8 +298,12 @@ policy and `vitally_private.lock_case` (which applies the same rule to writes) i
 
 ## The action API
 
-Browsers can call exactly twenty-six functions. Each runs as its owner (`SECURITY DEFINER`), checks the
-caller itself, and returns a JSON receipt.
+Browsers can call exactly thirty functions. Each runs as its owner (`SECURITY DEFINER`), checks the
+caller itself, and returns a JSON receipt. The table below lists the case, Roster, update and label
+functions. The account functions (047, [sign-in accounts](backend.md)) and Season settings' four
+(`vitally_season_settings`, `vitally_save_season_settings`, `vitally_set_site_coordinator`,
+`vitally_set_site_number`; 052, [below](#season-settings-and-site-coordinators)) are described where
+they belong.
 
 | Function | Purpose | Returns |
 | --- | --- | --- |
@@ -326,7 +330,7 @@ None of them takes a person parameter (043 removed `p_person_id`). The database 
 the caller acts as ([below](#who-is-acting)).
 
 The exact signatures are pinned by a test ([`tests/support/rpc-signatures.mjs`](../../tests/support/rpc-signatures.mjs)),
-so adding a twenty-seventh function or changing an argument fails the database suite until the list is
+so adding a thirty-first function or changing an argument fails the database suite until the list is
 updated.
 
 ### Who is acting

@@ -904,7 +904,7 @@ The database side is in [Database: clearance uploads](database.md#clearance-uplo
   `photoId` items show **Upload** (a link to the clearance's `uploadUrl`, `target="_blank"
   rel="noopener"`) or, with no link, "Ask your site coordinator how to send it.", and an **I've
   uploaded it** button carrying the document. Once the item has a `sentAt`, the button is replaced by
-  "Waiting for review · sent Nov 20" (New York, as `DAY` in `update-views.mjs`); Upload stays so a
+  "Waiting for review · sent Nov 20" (New York, as `SENT_DAY` in `ui.mjs`, which the drawer's sent line also uses); Upload stays so a
   corrected file can be sent. Role and SC items are unchanged.
 - **`controller.markUploadSent(document)`** calls the store's `markUploadSent` with a fresh action
   id, or the same one when the last send's outcome was unknown, then re-reads the clearance as Check
