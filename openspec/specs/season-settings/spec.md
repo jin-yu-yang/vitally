@@ -33,7 +33,7 @@ The season card SHALL be headed with the current season's label, "<season> for T
 
 Each link SHALL be empty or an `https://` address with no spaces, at most 500 characters, after trimming. A site coordinator's Save SHALL store both links for the workspace and say "Season settings saved". An invalid link SHALL be refused, naming the field, with "Enter a link that starts with https://." and nothing SHALL be stored. A save from a page that read an older version SHALL be refused with `CONFLICT`, and the page SHALL read the settings again and say "Someone else changed these settings. Check them and save again."
 
-The links SHALL be stored once per workspace and SHALL be kept when the season changes; the season label SHALL be derived from the workspace's current season, not stored. The SIDN SHALL likewise stay one per workspace. The links SHALL NOT be shown anywhere else in this change; the uploads change and #157 will use them.
+The links SHALL be stored once per workspace and SHALL be kept when the season changes; the season label SHALL be derived from the workspace's current season, not stored. The SIDN SHALL likewise stay one per workspace. The certificate and photo ID upload link SHALL also be returned to a staff member with a current-season roster entry in their own clearance answer, for the setup screen's Upload (capability `volunteer-clearance`). The Season settings read itself SHALL stay for workspace admins only. The client documents link SHALL NOT be shown anywhere else; #157 will use it.
 
 #### Scenario: Saving the links
 - **WHEN** a site coordinator enters `https://example.org/certificates` and `https://example.org/client-documents` and presses Save
@@ -50,6 +50,10 @@ The links SHALL be stored once per workspace and SHALL be kept when the season c
 #### Scenario: Two site coordinators save
 - **WHEN** two site coordinators open the page, one saves, and the other then saves
 - **THEN** the second is refused with `CONFLICT`, and their page reads the settings again
+
+#### Scenario: A volunteer gets the certificate link
+- **WHEN** a site coordinator saves `https://example.org/certificates`, and a staff member with a current-season roster entry and no roles reads their clearance
+- **THEN** their clearance answer carries `https://example.org/certificates`, and not the client documents link
 
 ### Requirement: The SIDN is set on Season settings and never read back
 The SIDN row SHALL show "Set · updated <date>" when the workspace has a site number, or "Not set" when it has none, with the help text "Volunteers type it at their first sign-in." For a site coordinator it SHALL offer "Change…", which opens a dialog titled "Change the SIDN" with one field, "SIDN", and Save and Cancel. Spaces, hyphens and letter case SHALL be ignored. A value that is not `S` followed by eight digits SHALL be refused with "Enter the site's SIDN: S followed by eight digits." Saving SHALL replace the site number, record when it was updated, close the dialog and say "SIDN updated".
