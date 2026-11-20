@@ -299,8 +299,8 @@ policy and `vitally_private.lock_case` (which applies the same rule to writes) i
 ## The action API
 
 Browsers can call exactly thirty functions. Each runs as its owner (`SECURITY DEFINER`), checks the
-caller itself, and returns a JSON receipt. The table below lists the case, Roster, update and label
-functions. The account functions (047, [sign-in accounts](backend.md)) and Season settings' four
+caller itself, and returns a JSON receipt. The table below lists the case, Roster, clearance, update and label
+functions. The account functions (047, [migrations](#migrations)) and Season settings' four
 (`vitally_season_settings`, `vitally_save_season_settings`, `vitally_set_site_coordinator`,
 `vitally_set_site_number`; 052, [below](#season-settings-and-site-coordinators)) are described where
 they belong.
@@ -456,7 +456,7 @@ no file, only a date.
   column and raises the revision; with nothing waiting it writes nothing and returns the current
   revision. The receipt is `MARK_UPLOAD_REVIEWED`.
 - **`vitally_save_volunteer`** clears `form_13615_sent_at` when the roles change (as sets) or the
-  confirmed certificates change, and `photo_id_sent_at` when the Photo ID check is newly set or New
+  confirmed certificates change (including an uploaded certificate being confirmed), and `photo_id_sent_at` when the Photo ID check is newly set or New
   is unticked. A save that changes neither leaves both dates. Its payload and other refusals are
   unchanged.
 - **`vitally_my_clearance`** returns the workspace's `season_settings.certificate_upload_url` as
