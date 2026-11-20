@@ -101,6 +101,14 @@ function fakeStore({
       if (answer instanceof Error) throw answer;
       return answer;
     },
+    // The sidebar's uploads count (change add-clearance-uploads, D8).
+    uploadsCount: 0,
+    failCount: false,
+    async countUploadsToReview() {
+      store.calls.push("countUploadsToReview");
+      if (store.failCount) throw Object.assign(new Error("offline"), { code: "OFFLINE" });
+      return store.uploadsCount;
+    },
     async listPeople() {
       store.calls.push("listPeople");
       return people;
@@ -10653,5 +10661,136 @@ test("Mark reviewed does nothing outside the volunteer dialog", async () => {
   controller.closeDialog();
   assert.equal(await controller.markUploadReviewed("form13615"), null);
   assert.equal(store.calls.includes("markUploadReviewed"), false);
+  controller.stop();
+});
+
+// ---- The sidebar count (change add-clearance-uploads, design D8) ----
+
+const countReads = (store) => store.calls.filter((entry) => entry === "countUploadsToReview").length;
+
+test("an admin window reads the count with its data", async () => {
+  const store = adminStaffStore();
+  store.uploadsCount = 3;
+  const { controller } = build({ store });
+  assert.equal(controller.getState().uploadsToReview, 0, "the count starts at zero");
+  await controller.start();
+  assert.equal(controller.getState().uploadsToReview, 3);
+  controller.stop();
+});
+
+test("a non-admin window never reads the count", async () => {
+  const store = fakeStore({
+    principal: { userId: "p2", workspaceId: "w1", access: "staff", personId: "person-alex" },
+    people: [{ id: "person-alex", name: "Alex", capabilities: ["prepare"] }],
+    clearance: { cleared: true, missing: [], capabilities: ["prepare"], isAdmin: false },
+  });
+  store.uploadsCount = 5;
+  const { controller, events } = build({ store });
+  await controller.start();
+  await events.emit("focus");
+  assert.equal(countReads(store), 0);
+  assert.equal(controller.getState().uploadsToReview, 0);
+  controller.stop();
+});
+
+test("the clearance check re-reads the count for a cleared admin", async () => {
+  const store = adminStaffStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.uploadsCount = 2;
+  const reads = countReads(store);
+  await controller.checkClearance();
+  assert.equal(countReads(store), reads + 1);
+  assert.equal(controller.getState().uploadsToReview, 2);
+  controller.stop();
+});
+
+test("a cleared check with the same standing still redraws when the count changed", async () => {
+  const store = adminStaffStore();
+  const { controller, renders } = build({ store });
+  await controller.start();
+  const quiet = renders.count;
+  await controller.checkClearance();
+  assert.equal(renders.count, quiet, "same standing, same count: no redraw");
+  store.uploadsCount = 3;
+  await controller.checkClearance();
+  assert.equal(renders.count, quiet + 1, "the new count is drawn");
+  controller.stop();
+});
+
+test("an uncleared admin's clearance check re-reads the count", async () => {
+  const store = adminStaffStore({ clearance: { ...UNCLEARED_ADMIN } });
+  store.uploadsCount = 1;
+  const { controller, events, renders } = build({ store });
+  await controller.start();
+  assert.equal(controller.getState().principal.clearance.cleared, false);
+  assert.equal(controller.getState().uploadsToReview, 0, "no data load while uncleared: the first check reads it");
+  store.uploadsCount = 4;
+  const drawn = renders.count;
+  await events.emit("focus");
+  assert.equal(controller.getState().uploadsToReview, 4);
+  assert.ok(renders.count > drawn);
+  controller.stop();
+});
+
+test("a cleared window's wake refresh re-reads the count", async () => {
+  const store = adminStaffStore();
+  const { controller, events } = build({ store });
+  await controller.start();
+  store.uploadsCount = 6;
+  await events.emit("focus");
+  assert.equal(controller.getState().uploadsToReview, 6);
+  controller.stop();
+});
+
+test("a failed count read keeps the last count and fails nothing else", async () => {
+  const store = adminStaffStore({ cases: [sampleCase()] });
+  store.uploadsCount = 2;
+  const { controller, events } = build({ store });
+  await controller.start();
+  assert.equal(controller.getState().uploadsToReview, 2);
+  store.failCount = true;
+  await events.emit("focus");
+  const state = controller.getState();
+  assert.equal(state.uploadsToReview, 2);
+  assert.equal(state.error, null);
+  assert.equal(state.cases.length, 1);
+  controller.stop();
+});
+
+test("a hanging count read never holds back the clearance outcome", async () => {
+  const store = adminStaffStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.countUploadsToReview = () => new Promise(() => {});
+  store.nextClearance = { ...UNCLEARED_ADMIN };
+  void controller.checkClearance();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(controller.getState().principal.clearance.cleared, false, "the check's outcome is applied");
+  controller.stop();
+});
+
+test("Save and Mark reviewed re-read the count", async () => {
+  const store = uploadReviewStore();
+  store.uploadsCount = 2;
+  const { controller } = await openReviewDrawer(store);
+  assert.equal(controller.getState().uploadsToReview, 2);
+  store.uploadsCount = 1;
+  await controller.markUploadReviewed("form13615");
+  assert.equal(controller.getState().uploadsToReview, 1);
+  store.uploadsCount = 0;
+  assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
+  assert.equal(controller.getState().uploadsToReview, 0);
+  controller.stop();
+});
+
+test("reading the Roster's list re-reads the count", async () => {
+  const store = rosterStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.uploadsCount = 7;
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  assert.equal(controller.getState().uploadsToReview, 7);
   controller.stop();
 });

@@ -6282,6 +6282,10 @@ html:lang(zh-Hant) {
   flex: 1 1 auto;
   text-align: left;
 }
+.nav-count {
+  font-weight: 700;
+}
+
 .nav-badge {
   min-width: 20px;
   height: 20px;

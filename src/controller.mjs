@@ -387,6 +387,8 @@ export function createController({
     // highlights them until it closes, though they are marked read at once.
     updates: [],
     updatesUnread: 0,
+    // Volunteers with an upload to review (a workspace admin's sidebar; D8).
+    uploadsToReview: 0,
     notificationsOpen: false,
     notificationsFresh: [],
     // The Post an update screen (a workspace admin's): the table, the form as
@@ -991,6 +993,8 @@ export function createController({
       }
       // A client who signed in since shows as Active (never throws).
       await readInvitations();
+      // The sidebar's uploads count (never throws).
+      await readUploadsCount();
       if (state.screen === "office-updates")
         try {
           await readPostedUpdates();
@@ -1166,6 +1170,7 @@ export function createController({
       await loadWorkspace();
       // The Roster is read only where it is shown (a restored window on it).
       if (state.screen === "office-volunteers") await readVolunteers();
+      else await readUploadsCount();
       await readInvitations();
       if (state.screen === "office-updates") await readPostedUpdates();
       if (state.screen === "office-settings") await readSeasonSettings();
@@ -1189,6 +1194,28 @@ export function createController({
     } catch (error) {
       if (state.lists.volunteers !== "ready") state.lists.volunteers = "failed";
       throw error;
+    } finally {
+      // After the list, and whatever the list did: the count is its own read.
+      await readUploadsCount();
+    }
+  }
+
+  // The sidebar's uploads-to-review count (design D8): only a workspace
+  // admin's staff window asks, cleared or not. Returns whether the number
+  // changed. A failed read keeps the last count; it never throws and never
+  // changes what its caller does.
+  async function readUploadsCount() {
+    try {
+      if (!staffWindow() || !ceilingAdmin(state.principal)) return false;
+      const asked = state.principal.userId;
+      const count = Number(await store.countUploadsToReview());
+      if (!Number.isFinite(count) || count < 0) return false;
+      if (!staffWindow() || state.principal.userId !== asked) return false;
+      if (state.uploadsToReview === count) return false;
+      state.uploadsToReview = count;
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -2112,7 +2139,8 @@ export function createController({
     if (now && was) {
       // Cleared before and after: nothing to reload, and nothing to draw unless
       // what the person may do changed. Their entry is already narrowed above.
-      if (sameStanding(oldClearance, answer)) return;
+      // The uploads count is the one thing that can still have moved.
+      if (sameStanding(oldClearance, answer)) return redrawIfUploadsChanged(same);
       // All cases is Admin's; the other screens stay, and Admin coming back
       // moves nobody.
       let focus = false;
@@ -2122,13 +2150,21 @@ export function createController({
       }
       persistSession();
       show(focus);
-      return;
+      return redrawIfUploadsChanged(same);
     }
     if (!now && was) dropWork();
     // Still not cleared: the feed re-reads with the check.
     await readFeed();
     persistSession();
     show();
+    await redrawIfUploadsChanged(same);
+  }
+
+  // The uploads count, read after the clearance's own outcome is drawn, so a
+  // slow or failed count never delays or changes it. Redraws only when the
+  // number moved and the window is still the one that asked.
+  async function redrawIfUploadsChanged(same) {
+    if ((await readUploadsCount()) && same()) show();
   }
 
   async function start() {
