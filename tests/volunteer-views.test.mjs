@@ -90,7 +90,11 @@ test("the Roster page says volunteers work on cases once cleared, and shows no s
   assert.match(html, /Volunteers work on cases only once they are cleared\./);
   assert.doesNotMatch(html, /recorded here|change what anyone can do/);
   assert.match(html, /class="btn primary" data-action="open-add-volunteer"[^>]*>(?:<svg[\s\S]*?<\/svg>)? Add a volunteer<\/button>/);
-  assert.doesNotMatch(html, /season|2025|2026/i);
+  // The page itself; the sidebar's Season settings link (change
+  // add-season-settings) is not the Roster's.
+  const main = html.slice(html.indexOf('<main id="main"'));
+  assert.ok(main.length < html.length, "the page is drawn");
+  assert.doesNotMatch(main, /season|2025|2026/i);
 });
 
 test("the table has the spec's columns and a count", () => {

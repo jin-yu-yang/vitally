@@ -33,6 +33,7 @@ export const CEILING_DIALOGS = Object.freeze([
   "update-people",
   "unpublish-update",
   "delete-update",
+  "change-sidn",
   "notifications",
 ]);
 

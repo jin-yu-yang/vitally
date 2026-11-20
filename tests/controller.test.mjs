@@ -5250,13 +5250,14 @@ test("an applicant's help-request list counts as loaded, and sign-out starts ove
   await controller.start();
   // The Roster's list is a staff admin's, read only on its screen: an
   // applicant never reads it. Nor the posted-update feed and table, which
-  // are staff's.
+  // are staff's, nor Season settings, a workspace admin's.
   assert.deepEqual(controller.getState().lists, {
     cases: "ready",
     assistance: "ready",
     volunteers: "loading",
     updates: "loading",
     postedUpdates: "loading",
+    seasonSettings: "loading",
   });
   await controller.signOut();
   assert.deepEqual(controller.getState().lists, {
@@ -5265,6 +5266,7 @@ test("an applicant's help-request list counts as loaded, and sign-out starts ove
     volunteers: "loading",
     updates: "loading",
     postedUpdates: "loading",
+    seasonSettings: "loading",
   });
   controller.stop();
 });
@@ -10057,5 +10059,343 @@ test("LAST_SITE_COORDINATOR on deactivate says one must remain, in the drawer", 
   });
   assert.equal(state.dialog, "volunteer", "back in the drawer, which says it");
   assert.equal(state.error, null);
+  controller.stop();
+});
+
+// ---------------------------------------------------------------------------
+// Season settings (change add-season-settings, Task 10)
+// ---------------------------------------------------------------------------
+
+const SC_CLEARED = Object.freeze({
+  cleared: true,
+  missing: [],
+  capabilities: ["admin"],
+  isAdmin: true,
+  isSiteCoordinator: true,
+  siteCoordinatorName: null,
+});
+const SC_UNCLEARED = Object.freeze({
+  cleared: false,
+  missing: [{ kind: "form13615" }],
+  capabilities: [],
+  isAdmin: true,
+  isSiteCoordinator: true,
+  siteCoordinatorName: "Sam",
+});
+const PREPARER_CLEARED = Object.freeze({
+  cleared: true,
+  missing: [],
+  capabilities: ["prepare"],
+  isAdmin: false,
+  isSiteCoordinator: false,
+  siteCoordinatorName: null,
+});
+const settingsAnswer = () => ({
+  season: 2027,
+  certificateUploadUrl: "https://example.org/certificates",
+  clientDocumentsUrl: null,
+  revision: 3,
+  siteNumber: { set: false, updatedAt: null },
+  canEdit: true,
+  siteCoordinators: [
+    { volunteerId: "person-sam", name: "Sam", email: "sam@example.org", since: "2026-11-02T15:00:00Z", onRoster: true, accountRevision: 4 },
+    { volunteerId: "person-dana", name: "Dana Wu", email: "dana@example.org", since: "2026-11-03T15:00:00Z", onRoster: false, accountRevision: 2 },
+  ],
+  candidates: [{ volunteerId: "person-ana", name: "Ana Ortiz", accountRevision: 1 }],
+  history: [],
+});
+// An admin staff store with the four Season settings calls. `failNextSettings`
+// makes the next write reject.
+const settingsStore = (overrides = {}) => {
+  const store = adminStaffStore({ clearance: { ...SC_CLEARED }, ...overrides });
+  store.settings = settingsAnswer();
+  store.failNextSettings = null;
+  const fail = () => {
+    const error = store.failNextSettings;
+    store.failNextSettings = null;
+    if (error) throw error;
+  };
+  store.getSeasonSettings = async () => {
+    store.calls.push("getSeasonSettings");
+    return structuredClone(store.settings);
+  };
+  store.saveSeasonSettings = async (request) => {
+    store.calls.push("saveSeasonSettings");
+    store.writes.push({ type: "saveSeasonSettings", ...request });
+    fail();
+    store.settings = { ...store.settings, ...request.settings, revision: store.settings.revision + 1 };
+    return { ...store.settings };
+  };
+  store.setSiteNumber = async (request) => {
+    store.calls.push("setSiteNumber");
+    store.writes.push({ type: "setSiteNumber", ...request });
+    fail();
+    store.settings.siteNumber = { set: true, updatedAt: "2026-11-19T15:00:00Z" };
+    return { set: true, updatedAt: "2026-11-19T15:00:00Z" };
+  };
+  store.setSiteCoordinator = async (request) => {
+    store.calls.push("setSiteCoordinator");
+    store.writes.push({ type: "setSiteCoordinator", ...request });
+    fail();
+    return { actionId: request.actionId, volunteerId: request.volunteerId, isSiteCoordinator: request.granted, accountRevision: request.expectedRevision + 1 };
+  };
+  return store;
+};
+const settingsReads = (store) => store.calls.filter((entry) => entry === "getSeasonSettings").length;
+const settingsRefusal = (code, message, details) =>
+  Object.assign(new Error(code), { code, cause: { message: message ?? code, details: details ?? null } });
+
+async function onSettingsScreen(overrides = {}) {
+  const store = settingsStore(overrides);
+  const built = build({ store });
+  await built.controller.start();
+  built.controller.navigate("office-settings");
+  await built.controller.loadSeasonSettings();
+  return { store, ...built };
+}
+
+test("season settings: the link is offered to a workspace admin, cleared or not, and not to a preparer", async () => {
+  for (const clearance of [SC_CLEARED, SC_UNCLEARED, { ...SC_CLEARED, isSiteCoordinator: false }]) {
+    const { controller } = build({ store: settingsStore({ clearance: { ...clearance } }) });
+    await controller.start();
+    assert.match(staffScreen(controller.getState()), /data-action="open-season-settings"/, JSON.stringify(clearance));
+    controller.stop();
+  }
+  const { controller } = build({ store: settingsStore({ clearance: { ...PREPARER_CLEARED } }) });
+  await controller.start();
+  assert.doesNotMatch(staffScreen(controller.getState()), /open-season-settings/);
+  controller.stop();
+});
+
+test("season settings: opening reads the page and shows it", async () => {
+  const { store, controller } = await onSettingsScreen();
+  const state = controller.getState();
+  assert.equal(state.screen, "office-settings");
+  assert.equal(state.lists.seasonSettings, "ready");
+  assert.equal(state.seasonSettings.revision, 3);
+  assert.equal(settingsReads(store), 1);
+  assert.match(staffScreen(state), /<h1>Season settings<\/h1>[\s\S]*2027 for TY 2026/);
+  controller.stop();
+});
+
+test("season settings: a restored window for a preparer goes home and reads nothing", async () => {
+  const sessionStorage = fakeSession();
+  const seed = build({ store: settingsStore(), sessionStorage });
+  await seed.controller.start();
+  seed.controller.navigate("office-settings");
+  seed.controller.stop();
+  const store = settingsStore({ clearance: { ...PREPARER_CLEARED } });
+  const { controller } = build({ store, sessionStorage });
+  await controller.start();
+  assert.equal(controller.getState().screen, "staff");
+  controller.navigate("office-settings");
+  await controller.loadSeasonSettings();
+  assert.equal(controller.getState().screen, "staff");
+  assert.equal(settingsReads(store), 0);
+  controller.stop();
+});
+
+test("season settings: an admin window restored on the page reads it", async () => {
+  const sessionStorage = fakeSession();
+  const seed = build({ store: settingsStore(), sessionStorage });
+  await seed.controller.start();
+  seed.controller.navigate("office-settings");
+  seed.controller.stop();
+  const store = settingsStore();
+  const { controller } = build({ store, sessionStorage });
+  await controller.start();
+  assert.equal(controller.getState().screen, "office-settings");
+  assert.equal(controller.getState().lists.seasonSettings, "ready");
+  assert.equal(settingsReads(store), 1);
+  controller.stop();
+});
+
+test("season settings: an uncleared site coordinator keeps the page, restored and re-read on focus", async () => {
+  const sessionStorage = fakeSession();
+  const seed = build({ store: settingsStore({ clearance: { ...SC_UNCLEARED } }), sessionStorage });
+  await seed.controller.start();
+  seed.controller.navigate("office-settings");
+  seed.controller.stop();
+  const store = settingsStore({ clearance: { ...SC_UNCLEARED } });
+  const { controller, events } = build({ store, sessionStorage });
+  await controller.start();
+  const state = controller.getState();
+  assert.equal(state.screen, "office-settings");
+  assert.equal(state.lists.seasonSettings, "ready");
+  assert.equal(store.calls.includes("listCases"), false);
+  assert.match(staffScreen(state), /<h1>Season settings<\/h1>/);
+  const reads = settingsReads(store);
+  await events.emit("focus");
+  assert.equal(settingsReads(store), reads + 1);
+  controller.stop();
+});
+
+test("season settings: a failed first read says so, and Try again reads again", async () => {
+  const store = settingsStore();
+  const { controller } = build({ store });
+  await controller.start();
+  const read = store.getSeasonSettings;
+  store.getSeasonSettings = async () => {
+    store.calls.push("getSeasonSettings");
+    throw Object.assign(new Error("Network error."), { code: "OFFLINE" });
+  };
+  controller.navigate("office-settings");
+  await controller.loadSeasonSettings();
+  let state = controller.getState();
+  assert.equal(state.lists.seasonSettings, "failed");
+  assert.equal(state.retryable, true);
+  assert.match(staffScreen(state), /Season settings couldn&#39;t load\./);
+  store.getSeasonSettings = read;
+  await controller.retryLast();
+  state = controller.getState();
+  assert.equal(state.lists.seasonSettings, "ready");
+  controller.stop();
+});
+
+test("season settings: Save sends both links at the revision read, and re-reads", async () => {
+  const { store, controller } = await onSettingsScreen();
+  const text = await controller.saveSeasonSettings({
+    certificateUploadUrl: " https://example.org/certificates ",
+    clientDocumentsUrl: "https://example.org/client-documents",
+  });
+  assert.equal(text, "Season settings saved");
+  const write = store.writes.find((entry) => entry.type === "saveSeasonSettings");
+  assert.equal(write.expectedRevision, 3);
+  assert.ok(write.actionId);
+  assert.deepEqual(write.settings, {
+    certificateUploadUrl: "https://example.org/certificates",
+    clientDocumentsUrl: "https://example.org/client-documents",
+  });
+  assert.equal(settingsReads(store), 2);
+  assert.equal(controller.getState().seasonSettings.revision, 4);
+  assert.equal(controller.getState().busy, false);
+  controller.stop();
+});
+
+test("season settings: a refused link is said beside its field", async () => {
+  const { store, controller } = await onSettingsScreen();
+  store.failNextSettings = settingsRefusal("VALIDATION", "VALIDATION", "certificateUploadUrl");
+  assert.equal(await controller.saveSeasonSettings({ certificateUploadUrl: "http://example.org", clientDocumentsUrl: "" }), null);
+  const state = controller.getState();
+  assert.deepEqual(state.seasonSettingsUi.fieldErrors, { certificateUploadUrl: "Enter a link that starts with https://." });
+  assert.equal(state.error, null);
+  assert.equal(state.busy, false);
+  controller.stop();
+});
+
+test("season settings: CONFLICT re-reads and asks to check and save again", async () => {
+  const { store, controller } = await onSettingsScreen();
+  store.failNextSettings = settingsRefusal("CONFLICT");
+  store.settings.revision = 5;
+  assert.equal(await controller.saveSeasonSettings({ certificateUploadUrl: "", clientDocumentsUrl: "" }), null);
+  const state = controller.getState();
+  assert.deepEqual(state.seasonSettingsUi.notice, {
+    place: "links",
+    text: "Someone else changed these settings. Check them and save again.",
+  });
+  assert.equal(state.seasonSettings.revision, 5);
+  assert.equal(settingsReads(store), 2);
+  assert.match(staffScreen(state), /Someone else changed these settings\. Check them and save again\./);
+  controller.stop();
+});
+
+test("season settings: Change the SIDN sends the number, re-reads and says SIDN updated", async () => {
+  const { store, controller } = await onSettingsScreen();
+  controller.openDialog("change-sidn");
+  assert.match(dialog(controller.getState()), /Change the SIDN/);
+  assert.equal(await controller.saveSidn("s1234-5678"), "SIDN updated");
+  const write = store.writes.find((entry) => entry.type === "setSiteNumber");
+  assert.equal(write.sidn, "s1234-5678");
+  assert.ok(write.actionId);
+  assert.equal(settingsReads(store), 2);
+  assert.equal(controller.getState().seasonSettings.siteNumber.set, true);
+  controller.stop();
+});
+
+test("season settings: a malformed SIDN is said in the dialog, before or after sending", async () => {
+  const { store, controller } = await onSettingsScreen();
+  controller.openDialog("change-sidn");
+  const sentence = "Enter the site's SIDN: S followed by eight digits.";
+  assert.equal(await controller.saveSidn("S1234"), null);
+  assert.equal(controller.getState().seasonSettingsUi.sidnError, sentence);
+  assert.equal(store.writes.some((entry) => entry.type === "setSiteNumber"), false, "nothing sent");
+  store.failNextSettings = settingsRefusal("VALIDATION", "VALIDATION", "SIDN_FORMAT");
+  assert.equal(await controller.saveSidn("S12345678"), null);
+  const state = controller.getState();
+  assert.equal(state.seasonSettingsUi.sidnError, sentence);
+  assert.equal(state.dialog, "change-sidn");
+  assert.match(dialog(state), /Enter the site&#39;s SIDN: S followed by eight digits\./);
+  // Closing and opening again starts clean.
+  controller.closeDialog();
+  controller.openDialog("change-sidn");
+  assert.equal(controller.getState().seasonSettingsUi.sidnError, null);
+  controller.stop();
+});
+
+test("season settings: Add grants the picked person at their account revision and re-reads", async () => {
+  const { store, controller } = await onSettingsScreen();
+  assert.equal(await controller.addSiteCoordinator("person-ana"), "Ana Ortiz is now a site coordinator");
+  const write = store.writes.find((entry) => entry.type === "setSiteCoordinator");
+  assert.equal(write.volunteerId, "person-ana");
+  assert.equal(write.granted, true);
+  assert.equal(write.expectedRevision, 1);
+  assert.ok(write.actionId);
+  assert.equal(settingsReads(store), 2);
+  // No pick sends nothing.
+  assert.equal(await controller.addSiteCoordinator(""), null);
+  assert.equal(store.writes.filter((entry) => entry.type === "setSiteCoordinator").length, 1);
+  controller.stop();
+});
+
+test("season settings: Remove takes it away at the account revision and re-reads", async () => {
+  const { store, controller } = await onSettingsScreen();
+  assert.equal(await controller.removeSiteCoordinator("person-dana"), "Dana Wu is no longer a site coordinator");
+  const write = store.writes.find((entry) => entry.type === "setSiteCoordinator");
+  assert.deepEqual(
+    { volunteerId: write.volunteerId, granted: write.granted, expectedRevision: write.expectedRevision },
+    { volunteerId: "person-dana", granted: false, expectedRevision: 2 },
+  );
+  assert.equal(settingsReads(store), 2);
+  controller.stop();
+});
+
+test("season settings: removing yourself asks the clearance again", async () => {
+  const { store, controller } = await onSettingsScreen();
+  const checks = clearanceCalls(store);
+  assert.equal(await controller.removeSiteCoordinator("person-sam"), "Sam is no longer a site coordinator");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(clearanceCalls(store) > checks);
+  controller.stop();
+});
+
+test("season settings: LAST_SITE_COORDINATOR and DEFAULT_FOLLOWUP are said in the card", async () => {
+  const { store, controller } = await onSettingsScreen();
+  store.failNextSettings = settingsRefusal("INVALID_TRANSITION", "LAST_SITE_COORDINATOR");
+  assert.equal(await controller.removeSiteCoordinator("person-sam"), null);
+  assert.deepEqual(controller.getState().seasonSettingsUi.notice, {
+    place: "coordinators",
+    text: "At least one site coordinator must remain. Make someone else a site coordinator first.",
+  });
+  assert.equal(controller.getState().error, null);
+  store.failNextSettings = settingsRefusal("INVALID_TRANSITION", "DEFAULT_FOLLOWUP");
+  assert.equal(await controller.removeSiteCoordinator("person-dana"), null);
+  const state = controller.getState();
+  assert.deepEqual(state.seasonSettingsUi.notice, {
+    place: "coordinators",
+    text: "Dana Wu is the default follow-up person, so they stay a site coordinator.",
+  });
+  assert.equal(settingsReads(store), 3, "each refusal re-reads");
+  assert.match(staffScreen(state), /Dana Wu is the default follow-up person, so they stay a site coordinator\./);
+  controller.stop();
+});
+
+test("season settings: another refusal is the window's own error, and the page re-reads", async () => {
+  const { store, controller } = await onSettingsScreen();
+  store.failNextSettings = Object.assign(new Error("Network error."), { code: "OFFLINE" });
+  assert.equal(await controller.addSiteCoordinator("person-ana"), null);
+  const state = controller.getState();
+  assert.equal(state.error.code, "OFFLINE");
+  assert.equal(state.busy, false);
+  assert.equal(settingsReads(store), 2);
   controller.stop();
 });

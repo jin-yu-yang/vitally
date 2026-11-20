@@ -1433,6 +1433,41 @@ if (!config) {
     }
   }
 
+  // Season settings' Save. A landed save draws what was stored; a conflict
+  // draws the settings as they are now, so what was typed goes; a refused
+  // link keeps what was typed and the field it names takes the keyboard.
+  async function submitSeasonSettings(form, by) {
+    const values = new FormData(form);
+    const text = await controller.saveSeasonSettings({
+      certificateUploadUrl: String(values.get("certificateUploadUrl") ?? ""),
+      clientDocumentsUrl: String(values.get("clientDocumentsUrl") ?? ""),
+    });
+    if (text) {
+      clearFormDrafts(form);
+      notify("success", text, by);
+      return;
+    }
+    const ui = controller.getState().seasonSettingsUi ?? {};
+    if (ui.notice) {
+      clearFormDrafts(form);
+      render();
+    }
+    root.querySelector('#season-settings-form [aria-invalid="true"]')?.focus();
+  }
+
+  // Change the SIDN. A landed save closes the dialog; a refusal keeps it,
+  // with its sentence beside the field.
+  async function submitSidn(form, by) {
+    const text = await controller.saveSidn(String(new FormData(form).get("sidn") ?? ""));
+    if (text) {
+      clearFormDrafts(form);
+      closeDialog("#sidn-status");
+      notify("success", text, by);
+      return;
+    }
+    root.querySelector("#sidn-input")?.focus();
+  }
+
   // Post an update (change add-posted-updates). The form as typed is held
   // by the controller, which does not redraw for it: only the preview is
   // drawn again, and the link field and the role boxes shown or hidden, so
@@ -1941,6 +1976,12 @@ if (!config) {
       controller.navigate("office-updates");
       void controller.loadPostedUpdates();
     },
+    // And Season settings (change add-season-settings).
+    "open-season-settings": () => {
+      formDrafts.clear();
+      controller.navigate("office-settings");
+      void controller.loadSeasonSettings();
+    },
     // Pressed again while on the page: a fresh draft, which is what it asks for.
     "open-add-case": async () => {
       formDrafts.clear();
@@ -2005,6 +2046,30 @@ if (!config) {
         if (leaveAddCaseFirst("open-post-update", target)) break;
         EXITS["open-post-update"]();
         break;
+      case "open-season-settings":
+        if (leaveAddCaseFirst("open-season-settings", target)) break;
+        EXITS["open-season-settings"]();
+        break;
+      // ---- Season settings (change add-season-settings) ----
+      case "open-change-sidn":
+        // A fresh dialog: no earlier refusal, and no number typed before.
+        controller.dismissError();
+        formDrafts.delete("sidn-input");
+        openDialog("change-sidn", null, describeFocus(target));
+        break;
+      case "add-site-coordinator": {
+        const text = await controller.addSiteCoordinator(root.querySelector("#sc-pick")?.value ?? "");
+        if (text) {
+          formDrafts.delete("sc-pick");
+          notify("success", text, by);
+        }
+        break;
+      }
+      case "remove-site-coordinator": {
+        const text = await controller.removeSiteCoordinator(target.dataset.volunteerId ?? "");
+        if (text) notify("success", text, by);
+        break;
+      }
       // ---- posted updates (change add-posted-updates) ----
       case "open-notifications":
         // The panel opens at once; marking what it shows read follows.
@@ -2829,6 +2894,10 @@ if (!config) {
         await submitVolunteer(form, by);
       } else if (form.id === "update-form") {
         await submitUpdate(form, event.submitter, by);
+      } else if (form.id === "season-settings-form") {
+        await submitSeasonSettings(form, by);
+      } else if (form.id === "sidn-form") {
+        await submitSidn(form, by);
       } else if (caseControl) {
         await runCaseAction(caseControl, form, by);
       } else if (assistControl) {
