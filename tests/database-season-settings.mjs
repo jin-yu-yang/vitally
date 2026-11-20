@@ -488,8 +488,16 @@ test("Season settings against real Supabase", async (t) => {
           assert.ok(!byId[nadia.personId], "an admin by role is not listed");
 
           // Candidates: active staff accounts who are not site coordinators.
+          // Each carries its account revision, which the grant needs.
           for (const entry of answer.candidates)
-            assert.deepEqual(Object.keys(entry).sort(), ["name", "volunteerId"]);
+            assert.deepEqual(Object.keys(entry).sort(), ["accountRevision", "name", "volunteerId"]);
+          const patCandidate = answer.candidates.find((entry) => entry.volunteerId === pat.personId);
+          const { revision: patRevision } = await one(
+            f,
+            "select revision::int as revision from public.accounts where workspace_id=$1 and person_id=$2",
+            [f.workspaceId, pat.personId],
+          );
+          assert.equal(patCandidate.accountRevision, patRevision);
           const candidates = answer.candidates.map((entry) => entry.volunteerId);
           assert.ok(candidates.includes(pat.personId), "an active account");
           assert.ok(candidates.includes(nadia.personId), "an admin by role");
@@ -530,18 +538,18 @@ test("Season settings against real Supabase", async (t) => {
           assert.ok(!picker.includes(gone.personId), "a deactivated volunteer");
           assert.ok(picker.includes(pat.personId));
 
-          // Adding from the picker: History's first line says so.
-          await rpc(sc, "vitally_set_site_coordinator", {
+          // Adding from the picker, end to end: the candidate as the read gave
+          // it, at its own account revision. History's first line says so.
+          // (The finally below removes Pat again.)
+          const pick = (await read()).candidates.find((entry) => entry.volunteerId === pat.personId);
+          const granted = await rpc(sc, "vitally_set_site_coordinator", {
             p_action_id: randomUUID(),
-            p_volunteer_id: pat.personId,
-            p_expected_revision: (
-              await one(f, "select revision::int as revision from public.accounts where workspace_id=$1 and person_id=$2", [
-                f.workspaceId,
-                pat.personId,
-              ])
-            ).revision,
+            p_volunteer_id: pick.volunteerId,
+            p_expected_revision: pick.accountRevision,
             p_granted: true,
           });
+          assert.equal(granted.isSiteCoordinator, true);
+          assert.equal(granted.accountRevision, pick.accountRevision + 1);
           const after = await read();
           assert.ok(after.siteCoordinators.some((entry) => entry.volunteerId === pat.personId));
           assert.ok(!after.candidates.some((entry) => entry.volunteerId === pat.personId));

@@ -1156,7 +1156,8 @@ revoke all on function vitally_private.season_settings_answer(uuid) from public,
 -- (an active, marked account) by name, each with their email, since (their
 -- latest grant), onRoster (a current-season roster entry) and account
 -- revision; the candidates for the picker (an active staff account that is not
--- a site coordinator); and the history, newest first, at most 50 lines.
+-- a site coordinator), each with its account revision for the grant; and the
+-- history, newest first, at most 50 lines.
 create function public.vitally_season_settings()
 returns jsonb language plpgsql security definer set search_path='' as $$
 declare v_member public.memberships;
@@ -1186,7 +1187,8 @@ begin
     join public.people p on p.workspace_id=a.workspace_id and p.id=a.person_id
     left join public.volunteer_profiles v on v.workspace_id=p.workspace_id and v.person_id=p.id
     where a.workspace_id=v_workspace and a.status='active' and a.is_site_coordinator),'[]'::jsonb),
-   'candidates',coalesce((select jsonb_agg(jsonb_build_object('volunteerId',p.id,'name',p.name) order by p.name,p.id)
+   'candidates',coalesce((select jsonb_agg(jsonb_build_object('volunteerId',p.id,'name',p.name,
+     'accountRevision',a.revision) order by p.name,p.id)
     from public.accounts a
     join public.memberships m on m.workspace_id=a.workspace_id and m.user_id=a.user_id
     join public.people p on p.workspace_id=a.workspace_id and p.id=a.person_id
