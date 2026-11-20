@@ -10,22 +10,22 @@
 
 ## 2. Store and contracts
 
-- [ ] 2.1 Add `return_to_signing_exit_forms` to `STAFF_TABLES` and to the staff record loader in `src/supabase-store.mjs` as `returnToSigningExitForms`, with a unit test
-- [ ] 2.2 Document the `RETURN_TO_SIGNING` payload and the new record field in `src/contracts.mjs`
+- [x] 2.1 Add `return_to_signing_exit_forms` to `STAFF_TABLES` and to the staff record loader in `src/supabase-store.mjs` as `returnToSigningExitForms`, with a unit test
+- [x] 2.2 Document the `RETURN_TO_SIGNING` payload and the new record field in `src/contracts.mjs`
 
 ## 3. The Exit Form rule
 
-- [ ] 3.1 Extend `tests/exit-form-source.test.mjs` with the spec scenarios: stored values printed, the planned method until the refile, the case's method once refiled, the latest Return to signing decides, only gaps listed, nothing missing, and #173's cases unchanged
-- [ ] 3.2 Update `exitFormSource` and `exitFormNote` in `src/exit-form-source.mjs` (D5), adding `recordedAt`
-- [ ] 3.3 Check that `exitFormPanel`, `exitFormTool` and `viewExitForm` show the new note and PDF content, with unit tests in `tests/admin-views.test.mjs` and the staff views tests
+- [x] 3.1 Extend `tests/exit-form-source.test.mjs` with the spec scenarios: stored values printed, the planned method until the refile, the case's method once refiled, the latest Return to signing decides, only gaps listed, nothing missing, and #173's cases unchanged
+- [x] 3.2 Update `exitFormSource` and `exitFormNote` in `src/exit-form-source.mjs` (D5), adding `recordedAt`
+- [x] 3.3 Check that `exitFormPanel`, `exitFormTool` and `viewExitForm` show the new note and PDF content, with unit tests in `tests/admin-views.test.mjs` and the staff views tests
 
 ## 4. The Return to signing dialog and payload
 
-- [ ] 4.1 Write unit tests for the payload builder (`tests/case-actions.test.mjs`): no values gives `{confirmed: true}`; filled groups give `exitForm`; a group with only its fixed method is not filled; remarks trimmed and omitted when blank
-- [ ] 4.2 Make `exitGroup` shareable from `src/staff-views.mjs`, with a scope parameter and a fixed-method variant, keeping the reviewer form's output unchanged (existing tests pass)
-- [ ] 4.3 Extend `returnToSigningDialogBody` in `src/admin-views.mjs` (D4): the lead, Federal and State groups only for returns with a method, the fixed method for a settled return, the Local groups and Remarks, with tests in `tests/admin-views.test.mjs` and `tests/confirm-dialogs.test.mjs`
-- [ ] 4.4 Update the `RETURN_TO_SIGNING` builder in `src/case-actions.mjs` to use `exitFormFrom`
-- [ ] 4.5 Wire the dialog in `src/app.mjs`: reopen typed-in groups after a refusal, and "Clear this section"; the demo-fill button fills one sensible group
+- [x] 4.1 Write unit tests for the payload builder (`tests/case-actions.test.mjs`): no values gives `{confirmed: true}`; filled groups give `exitForm`; a group with only its fixed method is not filled; remarks trimmed and omitted when blank
+- [x] 4.2 Make `exitGroup` shareable from `src/staff-views.mjs`, with a scope parameter and a fixed-method variant, keeping the reviewer form's output unchanged (existing tests pass)
+- [x] 4.3 Extend `returnToSigningDialogBody` in `src/admin-views.mjs` (D4): the lead, Federal and State groups only for returns with a method, the fixed method for a settled return, the Local groups and Remarks, with tests in `tests/admin-views.test.mjs` and `tests/confirm-dialogs.test.mjs`
+- [x] 4.4 Update the `RETURN_TO_SIGNING` builder in `src/case-actions.mjs` to use `exitFormFrom`
+- [x] 4.5 Wire the dialog in `src/app.mjs`: reopen typed-in groups after a refusal, and "Clear this section"; the demo-fill button fills one sensible group
 
 ## 5. Mark e-filed preselection
 
