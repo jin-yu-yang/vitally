@@ -9405,8 +9405,9 @@ test(
           name: SELF_NAME,
           capabilities: ["admin", "followup"],
           cleared: false,
-          // Only a site coordinator reaches the Roster and changes the Admin
-          // role (change add-season-settings); a ceiling-only admin does not.
+          // A workspace admin (a site coordinator or the Admin role) reaches the
+          // Roster, but only a site coordinator changes the Admin role
+          // (change add-season-settings).
           siteCoordinator: true,
         });
         // Where the keyboard is, by what the element is (never its text).

@@ -350,18 +350,22 @@ member can never be saved (`VT007`).
 **Creating staff.** Two private functions, run only by the roster command's connection inside its
 transaction (no browser role may execute them):
 
-- `vitally_private.add_staff_member(workspace, user, person_key, name, capabilities)` inserts the
-  `staff` membership and the linked person. Repeating identical values changes nothing and returns
-  the existing person, so a roster re-run succeeds. It refuses (`VT007`) a capability outside the known set, capabilities with `followup` but not `admin` (042), different values for an existing key or
-  account, and an account with a membership in another workspace.
+- `vitally_private.add_staff_member(p_workspace_id, p_user_id, p_person_key, p_name)` inserts the
+  `staff` membership and the linked person. Since 052 it takes no capabilities: they come from the
+  person's roles this season (`people.capabilities` mirrors them). Repeating identical values changes
+  nothing and returns the existing person, so a roster re-run succeeds. It refuses (`VT007`) a
+  different name for an existing key or account, and an account with a membership in another
+  workspace.
 - `vitally_private.set_default_followup(workspace, person_key)` moves
-  `workspaces.default_followup_person_id`, and refuses a person who is not a staff member's or lacks
-  `followup`. Open follow-ups keep their assignee; new ones go to the new default.
+  `workspaces.default_followup_person_id`, and refuses a person who is not a staff member's. Who may be
+  the default is decided by `vitally_private.can_be_default_followup` (052): a person with a sign-in
+  who is a site coordinator, or whose capabilities include `followup`. Open follow-ups keep their
+  assignee; new ones go to the new default.
 
 `initialize_workspace(workspace, applicants)` (043) creates the workspace and the applicant
 memberships only. A new workspace has no people and no default follow-up person until the roster
 adds staff and calls `set_default_followup`; on a re-run, an existing workspace's default must still
-hold `followup`.
+pass `can_be_default_followup`.
 
 ### Roster clearance
 

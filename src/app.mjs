@@ -2808,6 +2808,12 @@ if (!config) {
       void uploadShadedCopy(field, signedInUserId());
       return;
     }
+    if (field.id === "sc-pick") {
+      // Add stays disabled until a person is picked.
+      const add = field.form?.querySelector('[data-action="add-site-coordinator"]');
+      if (add) add.disabled = field.value === "";
+      return;
+    }
     if (field.matches?.("select[data-board-filter]")) {
       controller.setBoardFilter(field.dataset.boardFilter, field.value);
       root.querySelector(`#${field.id}`)?.focus();

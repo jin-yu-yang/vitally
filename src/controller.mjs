@@ -76,15 +76,15 @@ const STAFF_SCREENS = Object.freeze([
   "office-add-case",
   "office-volunteers",
   // Post an update (change add-posted-updates) and Season settings (change
-  // add-season-settings): a ceiling admin's only, cleared or not
+  // add-season-settings): a workspace admin's only, cleared or not
   // (`screenAllowed`).
   "office-updates",
   "office-settings",
 ]);
-// The admin screens an uncleared ceiling admin keeps (design D10 of
+// The admin screens an uncleared workspace admin keeps (design D10 of
 // add-volunteer-clearance, add-posted-updates and add-season-settings).
 const ADMIN_SETUP_SCREENS = Object.freeze(["office-volunteers", "office-updates", "office-settings"]);
-// The screens only a ceiling admin may be on.
+// The screens only a workspace admin may be on.
 const CEILING_ONLY_SCREENS = Object.freeze(["office-updates", "office-settings"]);
 
 // An action whose answer never arrived may or may not have been applied. Those
@@ -387,14 +387,14 @@ export function createController({
     updatesUnread: 0,
     notificationsOpen: false,
     notificationsFresh: [],
-    // The Post an update screen (a ceiling admin's): the table, the form as
+    // The Post an update screen (a workspace admin's): the table, the form as
     // typed, the update being edited (`{id, revision, status}` or null) and
     // the form's own errors (`{field: message}` or null). None persisted.
     postedUpdates: [],
     updateForm: emptyUpdateForm(),
     updateEditing: null,
     updateFormError: null,
-    // Season settings (a ceiling admin's): the `vitally_season_settings`
+    // Season settings (a workspace admin's): the `vitally_season_settings`
     // answer as last read (null until then), and the page's own sentences:
     // `notice` ({place: "links" | "coordinators", text}), `fieldErrors`
     // ({field: message}) and the SIDN dialog's `sidnError`. None persisted.
@@ -578,7 +578,7 @@ export function createController({
   const screens = () => (staffWindow() ? STAFF_SCREENS : CLIENT_SCREENS);
 
   // Whether this principal may be on a screen: in its list, and Post an
-  // update only for a ceiling admin.
+  // update only for a workspace admin.
   const screenAllowed = (screen) =>
     screens().includes(screen) && (!CEILING_ONLY_SCREENS.includes(screen) || ceilingAdmin(state.principal));
 
@@ -1173,7 +1173,7 @@ export function createController({
 
   // The Roster's list (design D9). Only an admin's window asks: the policies
   // would answer anyone else with no rows, and asking is already a mistake.
-  // It is the ceiling admin's (design D10), cleared or not. A
+  // It is the workspace admin's (design D10), cleared or not. A
   // first read that fails marks the list failed, so it never looks empty; one
   // that loaded once keeps what it shows. It throws, for loadData.
   async function readVolunteers() {
@@ -1457,7 +1457,7 @@ export function createController({
     return true;
   }
 
-  // Post an update's table: a ceiling admin's, cleared or not. Like the
+  // Post an update's table: a workspace admin's, cleared or not. Like the
   // Roster's list, a first read that fails marks it failed, and one that
   // loaded once keeps what it shows. It throws, for loadData and refresh.
   async function readPostedUpdates() {
@@ -1487,7 +1487,7 @@ export function createController({
 
   // ---- Season settings (change add-season-settings, design D10) ----------
   //
-  // A ceiling admin's page, cleared or not. It is read on open, on focus and
+  // A workspace admin's page, cleared or not. It is read on open, on focus and
   // after each of its writes; there is no realtime for it. Like the Roster's
   // list, a first read that fails marks it failed, and one that loaded once
   // keeps what it shows. It throws, for loadData and refresh.
@@ -1996,7 +1996,7 @@ export function createController({
   //
   // An uncleared staff window shows the setup screen and holds no work: no
   // case, no help request, no workspace row and no realtime channel. A
-  // ceiling admin's window keeps the Roster, which needs none of them.
+  // workspace admin's window keeps the Roster, which needs none of them.
   function dropWork() {
     unsubscribe();
     clearSelection();
@@ -2349,7 +2349,7 @@ export function createController({
     // The no-access window has nowhere to go: the logo and every other
     // navigation do nothing, so the screen and its Sign out stay.
     if (state.screen === "no-access" && !state.principal) return;
-    // Post an update and Season settings are a ceiling admin's: anyone else
+    // Post an update and Season settings are a workspace admin's: anyone else
     // lands on their home.
     if (CEILING_ONLY_SCREENS.includes(screen) && !screenAllowed(screen)) screen = homeScreen();
     // Season settings starts without an earlier visit's sentences.

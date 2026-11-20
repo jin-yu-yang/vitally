@@ -79,6 +79,8 @@ test("the editable page", () => {
   assert.match(picker, /<option value="p-ana">Ana Ortiz<\/option>/);
   assert.equal((picker.match(/<option/g) ?? []).length, 2);
   assert.match(html, /data-action="add-site-coordinator"[^>]*>Add<\/button>/);
+  // Nothing is picked, so Add is disabled.
+  assert.match(html, /data-action="add-site-coordinator"\s+disabled>Add<\/button>/);
   // History, closed, newest first, in its three forms.
   assert.match(html, /<details class="sc-log"><summary>History<\/summary>/);
   assert.doesNotMatch(html, /<details class="sc-log" open/);
@@ -137,9 +139,10 @@ test("a notice is said in its own card", () => {
 
 test("busy disables the page's buttons", () => {
   const html = renderSeasonSettings(view(), { canEdit: true, ui: { busy: true } });
-  // Save, Change…, Add, and Remove on each of the two rows.
+  // Save, Change…, Add, and Remove on each of the two rows; idle, only Add (nothing picked).
   assert.equal((html.match(/<button[^>]* disabled/g) ?? []).length, 5);
-  assert.equal((renderSeasonSettings(view(), { canEdit: true, ui: {} }).match(/<button[^>]* disabled/g) ?? []).length, 0);
+  assert.equal((renderSeasonSettings(view(), { canEdit: true, ui: {} }).match(/<button[^>]* disabled/g) ?? []).length, 1);
+
 });
 
 test("escaping: names, emails and links render as text", () => {

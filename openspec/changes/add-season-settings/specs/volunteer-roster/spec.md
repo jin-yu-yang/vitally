@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Only a site coordinator changes the Admin role
-`vitally_save_volunteer` SHALL refuse with `FORBIDDEN` (detail `ADMIN_ROLE`), writing nothing and storing no receipt, a save by a caller who is not a site coordinator (capability `site-coordinators`) that adds the Admin role to a volunteer, removes it, or adds a new volunteer with it. Any workspace admin SHALL keep changing every other role. In the volunteer form, a caller who is not a site coordinator SHALL see the Admin tick disabled, showing its saved state, with "Only site coordinators change the Admin role."
+`vitally_save_volunteer` SHALL refuse with `FORBIDDEN` (`ADMIN_ROLE`), writing nothing and storing no receipt, a save by a caller who is not a site coordinator (capability `site-coordinators`) that adds the Admin role to a volunteer, removes it, or adds a new volunteer with it. Any workspace admin SHALL keep changing every other role. In the volunteer form, a caller who is not a site coordinator SHALL see the Admin tick disabled, showing its saved state, with "Only site coordinators change the Admin role."
 
 #### Scenario: A site coordinator gives the Admin role
 - **WHEN** a site coordinator ticks VSC, IT&QR and Admin for a volunteer and saves

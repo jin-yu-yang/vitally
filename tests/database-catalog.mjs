@@ -97,7 +97,7 @@ const READ_ONLY_RPCS = Object.freeze([
   "vitally_prepare_account",
   "vitally_season_settings",
 ]);
-// The signatures 043 drops by name.
+// The signatures 043 and 052 drop by name.
 const OLD_SIGNATURES = Object.freeze([
   "public.vitally_apply_action(uuid,uuid,bigint,uuid,text,jsonb)",
   "public.vitally_assistance_action(uuid,uuid,bigint,uuid,text,text)",

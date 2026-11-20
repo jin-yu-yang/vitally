@@ -124,7 +124,7 @@ function coordinatorsCard(view, { canEdit, selfId, ui }) {
         busy,
       )}><option value="">Make someone a site coordinator…</option>${candidates
         .map((person) => `<option value="${esc(person.volunteerId)}">${esc(person.name)}</option>`)
-        .join("")}</select>${button("Add", "add-site-coordinator", "secondary", disabled(busy).trim())}</form>`
+        .join("")}</select>${button("Add", "add-site-coordinator", "secondary", "disabled")}</form>`
     : "";
   const log = history.length
     ? `<details class="sc-log"><summary>History</summary><ul>${history.map(historyLine).join("")}</ul></details>`

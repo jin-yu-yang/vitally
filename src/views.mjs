@@ -212,7 +212,7 @@ const isAdmin = (person) =>
 // What the staff sidebar holds: the brand, the screens this account can go to,
 // and who is signed in. Screens that do not exist yet (Dashboard, Schedule,
 // Documents, Messages) are not shown. `office` is the effective admin (All
-// cases, Follow-ups); `volunteers` is the ceiling admin (the Roster), and
+// cases, Follow-ups); `volunteers` is the workspace admin (the Roster), and
 // `board` is false on the setup screen, which has no work board.
 export function staffSidebar(state, person, office, { volunteers = office, board = true } = {}) {
   // A staff account is its own person: "Signed in as".
@@ -240,7 +240,7 @@ export function staffSidebar(state, person, office, { volunteers = office, board
         onRoster ? 'aria-current="page"' : "",
       )
     : "";
-  // Post an update follows the Roster: the ceiling admin's, cleared or not.
+  // Post an update follows the Roster: the workspace admin's, cleared or not.
   const postUpdate = volunteers
     ? button(
         `${icon("megaphone")} Post an update`,
@@ -270,7 +270,7 @@ export function staffSidebar(state, person, office, { volunteers = office, board
     "nav-link nav-notifications",
     `aria-haspopup="dialog"${unread > 0 ? ` aria-label="Notifications, ${unread} unread"` : ""}`,
   );
-  // On the setup screen there is no board: a ceiling admin's way back from
+  // On the setup screen there is no board: a workspace admin's way back from
   // the Roster is the setup screen itself.
   const home = board || volunteers
     ? button(
@@ -291,7 +291,7 @@ export function staffSidebar(state, person, office, { volunteers = office, board
 // The records are decorated here — once, with the roster this screen already
 // holds — so the renderers never see a bare id.
 const OFFICE_SCREENS = ["office-cases", "office-add-case", "office-volunteers", "office-updates", "office-settings"];
-// The ceiling admin's screens, cleared or not: the Roster, Post an update and
+// The workspace admin's screens, cleared or not: the Roster, Post an update and
 // Season settings.
 const CEILING_SCREENS = ["office-volunteers", "office-updates", "office-settings"];
 
@@ -327,7 +327,7 @@ const workloadPanel = (state) => {
 };
 
 // The Volunteers page (change add-volunteer-roster-records): the Roster, for a
-// ceiling admin, cleared or not; and the Workload tab beside it, only when
+// workspace admin, cleared or not; and the Workload tab beside it, only when
 // `workload` — a cleared, effective admin (change add-volunteer-workload, D1).
 const rosterPage = (state, { workload = false } = {}) => {
   const tab = workload && state.volunteerTab === "workload" ? "workload" : "roster";
@@ -348,7 +348,7 @@ const rosterPage = (state, { workload = false } = {}) => {
   );
 };
 
-// Post an update (change add-posted-updates): for a ceiling admin, cleared or not.
+// Post an update (change add-posted-updates): for a workspace admin, cleared or not.
 const postUpdatePage = (state) =>
   frame(
     "OFFICE · ADMIN",
@@ -357,7 +357,7 @@ const postUpdatePage = (state) =>
     "",
     renderPostUpdatePage(state),
   );
-// Season settings (change add-season-settings): for a ceiling admin, cleared
+// Season settings (change add-season-settings): for a workspace admin, cleared
 // or not; only a site coordinator (the read's own `canEdit`) gets controls.
 const seasonSettingsPage = (state) =>
   frame(
@@ -388,7 +388,7 @@ export function staffScreen(state) {
   const office = isAdmin(person);
   const volunteers = ceilingAdmin(state.principal);
   const open = state.sidebarOpen !== false;
-  // Not cleared: the setup screen, and for a ceiling admin the Roster and
+  // Not cleared: the setup screen, and for a workspace admin the Roster and
   // Post an update. No work.
   if (awaitingClearance(state)) {
     const onCeiling = volunteers && CEILING_SCREENS.includes(state.screen);
