@@ -1,6 +1,6 @@
 # ViTally roadmap
 
-Where ViTally stands and what comes next, as of **Nov 17, 2026**. Dates are targets, not promises.
+Where ViTally stands and what comes next, as of **Nov 20, 2026**. Dates are targets, not promises.
 Update this page when a row's state changes; the [README](../README.md) only links here.
 
 ## Where ViTally stands
@@ -41,9 +41,9 @@ Slack). Screening stays in Airtable. Dates are targets.
 | | Work | Issue | Target | State |
 | --- | --- | --- | --- | --- |
 | Adoption | Roster: Form 13615 and photo ID uploads to PCDC's OneDrive link with "I've uploaded it" | [#138](https://github.com/jin-yu-yang/vitally/issues/138) | Nov 29 | Not started |
-| Adoption | Season settings, site coordinator role, Start next season | [#138](https://github.com/jin-yu-yang/vitally/issues/138) | Nov 29 | Not started |
+| Adoption | Season settings, site coordinator role, Start next season | [#138](https://github.com/jin-yu-yang/vitally/issues/138) | Nov 29 | Season settings and site coordinators **done** (#237, Nov 20); Start next season not started |
 | Adoption | Returning-volunteer picker; Roster CSV export | [#138](https://github.com/jin-yu-yang/vitally/issues/138) | Nov 29 | Not started; picker can be cut |
-| Adoption | Clearance fixes: role changes without a reload, a self-cleared admin, screen-reader announcement | [#190](https://github.com/jin-yu-yang/vitally/issues/190) #191 #192 | Nov 22 | #191 and #192 **done** (Nov 18); #190 not started |
+| Adoption | Clearance fixes: role changes without a reload, a self-cleared admin, screen-reader announcement | [#190](https://github.com/jin-yu-yang/vitally/issues/190) #191 #192 | Nov 22 | **Done**: #191 and #192 (Nov 18), #190 (#234, Nov 19) |
 | Adoption | Workload and Reassign | #139 | — | **Done** |
 | Adoption | Hourly volunteer schedule with a role per shift | [#140](https://github.com/jin-yu-yang/vitally/issues/140) | Dec 6 | Not started |
 | Adoption | Posted updates and notifications | #150 | — | **Done** |
