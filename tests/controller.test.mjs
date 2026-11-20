@@ -10512,10 +10512,13 @@ test("markUploadSent: busy blocks a second press", async () => {
 
 test("markUploadSent: a refusal drops an earlier action's Try again", async () => {
   const store = uploadStore();
+  store.records.set("case-a", { id: "case-a", reference: "VT-AAAA-BBBB", stage: "preparation_ready", revision: 2, answers: {} });
   const { controller } = build({ store });
   await controller.start();
-  store.nextClearance = domainError("OFFLINE");
-  await controller.checkClearance();
+  await controller.selectCase("case-a");
+  // A store action lost to an unknown outcome keeps its own Try again.
+  store.failNext = domainError("OFFLINE");
+  await assert.rejects(controller.runAction("CLAIM_PREPARATION", {}));
   assert.equal(controller.getState().retryable, true);
   store.failSend = Object.assign(domainError("VALIDATION"), { cause: { message: "PHOTO_ID_NOT_NEEDED" } });
   await controller.markUploadSent("photoId");
