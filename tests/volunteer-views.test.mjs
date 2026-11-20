@@ -382,6 +382,27 @@ test("drawer account section offers Deactivate when active", () => {
   assert.doesNotMatch(section, /account-create|account-resend|account-reactivate/);
 });
 
+// Change add-season-settings, review fix: deactivating a site coordinator's
+// account needs a site coordinator.
+test("Deactivate on a site coordinator is offered only to site coordinators", () => {
+  const coordinator = withStatus("active", { isSiteCoordinator: true });
+  const byAdmin = accountPart(volunteerDrawerBody({ volunteer: coordinator, isNew: false, ui: {}, canChangeAdmin: false }));
+  assert.doesNotMatch(byAdmin, /account-deactivate/);
+  assert.match(
+    byAdmin,
+    /<p class="field-note" id="volunteer-deactivate-note">Only site coordinators deactivate a site coordinator&#39;s account\.<\/p>/,
+  );
+  const bySiteCoordinator = accountPart(
+    volunteerDrawerBody({ volunteer: coordinator, isNew: false, ui: {}, canChangeAdmin: true }),
+  );
+  assert.match(bySiteCoordinator, /data-action="account-deactivate"/);
+  assert.doesNotMatch(bySiteCoordinator, /volunteer-deactivate-note/);
+  // Someone who isn't a site coordinator keeps Deactivate for any admin.
+  const plain = accountPart(volunteerDrawerBody({ volunteer: withStatus("active"), isNew: false, ui: {}, canChangeAdmin: false }));
+  assert.match(plain, /data-action="account-deactivate"/);
+  assert.doesNotMatch(plain, /volunteer-deactivate-note/);
+});
+
 test("the cancel-invitation dialog says access ends, not the sign-in code", () => {
   const html = cancelInvitationDialogBody({ volunteer: volunteer(), });
   assert.match(html, /will be cancelled and it will no longer give them access./);

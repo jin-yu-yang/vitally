@@ -881,8 +881,35 @@ test("sign-in accounts against real Supabase", async (t) => {
       assert.deepEqual(await accountOfPerson(f.siteCoordinatorId), before);
       assert.equal(await siteCoordinatorOf(f.siteCoordinatorId), true);
 
+      // Spec site-coordinators, "An admin who isn't a site coordinator": Cal
+      // has the Admin role but is not a site coordinator, so deactivating Bea
+      // is refused and changes nothing.
+      const cal = await f.staff({
+        key: "cal_admin",
+        name: "Cal Moreno",
+        capabilities: ["admin", "assist", "followup", "receive_documents"],
+      });
+      assert.equal((await rpc(cal.client, "vitally_my_clearance")).isAdmin, true, "Cal is an admin by role");
+      const beaBefore = await accountOfPerson(bea.personId);
+      await refusedWith(
+        cal.client,
+        "vitally_deactivate_account",
+        changeArgs(bea.personId, beaBefore.revision),
+        FORBIDDEN,
+        undefined,
+        "Cal deactivates Bea",
+      );
+      assert.deepEqual(await accountOfPerson(bea.personId), beaBefore);
+      assert.equal(await siteCoordinatorOf(bea.personId), true);
+      assert.deepEqual(await scHistory(bea.personId), [{ granted: true, changed_by_person_id: null }]);
+      // Cal may still deactivate someone who isn't a site coordinator.
+      const plain = await f.staff({ key: "pim_plain", name: "Pim Achterberg", capabilities: ["prepare"], cleared: false });
+      await rpc(cal.client, "vitally_deactivate_account", changeArgs(plain.personId, (await accountOfPerson(plain.personId)).revision));
+      assert.equal((await accountOfPerson(plain.personId)).status, "deactivated");
+
       // Spec site-coordinators, "Another site coordinator": Bea is neither the
-      // last nor the default, so deactivating her also removes her mark.
+      // last nor the default, so a site coordinator (Avery) deactivating her
+      // also removes her mark.
       const read = (await accountOfPerson(bea.personId)).revision;
       const result = await rpc(admin, "vitally_deactivate_account", changeArgs(bea.personId, read));
       assert.equal(result.accountRevision, read + 1, "one revision for both");
@@ -929,13 +956,23 @@ test("sign-in accounts against real Supabase", async (t) => {
         );
       const before = await accountIn();
       assert.equal(before.is_site_coordinator, true);
-      const error = await refusedWith(
-        mae.client,
-        "vitally_deactivate_account",
-        changeArgs(louId, before.revision),
-        INVALID_TRANSITION,
+      // In the app nobody can: Mae isn't a site coordinator (FORBIDDEN), and
+      // Lou can't deactivate their own account (SELF).
+      await refusedWith(mae.client, "vitally_deactivate_account", changeArgs(louId, before.revision), FORBIDDEN);
+      assert.deepEqual(await accountIn(), before);
+      // Below the app, deactivate_account still keeps the last one.
+      const { id: maeId } = await one(
+        f,
+        "select id from public.people where workspace_id=$1 and person_key='mae_default'",
+        [workspaceId],
       );
-      assert.equal(error.message, "LAST_SITE_COORDINATOR");
+      await assert.rejects(
+        () => f.sql("select vitally_private.deactivate_account($1,$2,$3)", [workspaceId, lou.userId, maeId]),
+        (error) =>
+          rejected("INVALID_TRANSITION")(error) &&
+          error.cause?.code === INVALID_TRANSITION &&
+          error.cause?.message === "LAST_SITE_COORDINATOR",
+      );
       assert.deepEqual(await accountIn(), before);
       assert.deepEqual(await membershipOf(lou.userId, workspaceId), { access: "staff", active: true });
     });

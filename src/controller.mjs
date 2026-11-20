@@ -125,8 +125,10 @@ const STAFF_VOLUNTEER_CONFLICT_MESSAGE =
   "Someone else changed this volunteer. Close this and open it again to see their changes.";
 export const VOLUNTEER_CONFLICT_MESSAGE = STAFF_VOLUNTEER_CONFLICT_MESSAGE;
 // Site coordinators (change add-season-settings): a save that changes the
-// Admin role by someone who is not one, and deactivating the last one.
+// Admin role by someone who is not one, deactivating a site coordinator by
+// someone who is not one, and deactivating the last one.
 const STAFF_ADMIN_ROLE_MESSAGE = "Only site coordinators change the Admin role.";
+const STAFF_DEACTIVATE_SITE_COORDINATOR_MESSAGE = "Only site coordinators deactivate a site coordinator's account.";
 const STAFF_LAST_SITE_COORDINATOR_MESSAGE =
   "At least one site coordinator must remain. Make someone else a site coordinator first.";
 // Season settings (change add-season-settings): what its writes say.
@@ -4171,11 +4173,13 @@ export function createController({
           ? openWorkMessage(current.name || "This volunteer", cause.details)
           : error?.code === "INVALID_TRANSITION" && cause?.message === "LAST_SITE_COORDINATOR"
             ? STAFF_LAST_SITE_COORDINATOR_MESSAGE
-            : error?.code === "CONFLICT"
-              ? null
-              : kind === "cancel" && error?.code === "INVALID_TRANSITION"
-                ? cancelRefusal(error)
-                : accountMessage(cause?.details);
+            : kind === "deactivate" && error?.code === "FORBIDDEN" && current.isSiteCoordinator === true
+              ? STAFF_DEACTIVATE_SITE_COORDINATOR_MESSAGE
+              : error?.code === "CONFLICT"
+                ? null
+                : kind === "cancel" && error?.code === "INVALID_TRANSITION"
+                  ? cancelRefusal(error)
+                  : accountMessage(cause?.details);
       if (sentence) {
         state.volunteerAccountNotice = { kind: "error", text: sentence };
         await readVolunteers().catch(() => {});

@@ -10062,6 +10062,26 @@ test("LAST_SITE_COORDINATOR on deactivate says one must remain, in the drawer", 
   controller.stop();
 });
 
+// Review fix: deactivating a site coordinator needs a site coordinator. The
+// drawer offers no Deactivate to anyone else; a refusal that still arrives
+// (for example from a window drawn before a change) says why, in the drawer.
+test("FORBIDDEN on deactivating a site coordinator says only site coordinators can", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "active", revision: 3 }, isSiteCoordinator: true }];
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("deactivate-account", { volunteerId: "v-1" });
+  store.failAccount = accountRefusal("FORBIDDEN", "FORBIDDEN", null);
+  assert.equal(await controller.deactivateAccount(), false);
+  const state = controller.getState();
+  assert.deepEqual(state.volunteerAccountNotice, {
+    kind: "error",
+    text: "Only site coordinators deactivate a site coordinator's account.",
+  });
+  assert.equal(state.dialog, "volunteer", "back in the drawer, which says it");
+  assert.equal(state.error, null);
+  controller.stop();
+});
+
 // ---------------------------------------------------------------------------
 // Season settings (change add-season-settings, Task 10)
 // ---------------------------------------------------------------------------

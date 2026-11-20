@@ -3,9 +3,11 @@
 -- people.capabilities becomes a mirror of the person's current-season role
 -- capabilities while they have a sign-in, and empty otherwise (design D1).
 -- In order (design D8):
---   §1 the guard: refuse with VT008, changing nothing, if any person with an
---      active staff membership holds `admin` in people.capabilities without
---      the Admin role on their current-season roster entry;
+--   §1 the guard: refuse with VT008, changing nothing, if the recompute
+--      would change anyone's admin either way: a person with an active staff
+--      membership holds `admin` in people.capabilities without the Admin role
+--      on their current-season roster entry (they would lose it), or a person
+--      with a sign-in has that Admin role without `admin` (they would gain it);
 --   §2 the snapshot of every person's capabilities, for a rollback migration;
 --   §3 the schema: effective_capabilities (role capabilities only), the
 --      mirror helper and its two triggers; the site coordinator flag on
@@ -19,24 +21,35 @@
 -- The migration runs in one transaction.
 
 -- ---------------------------------------------------------------------------
--- §1. The guard. Only active staff memberships are counted: a person with no
--- sign-in, or an inactive one, already has no admin to lose.
-
+-- §1. The guard, both directions, with a count for each that offends.
+-- Losing admin: only active staff memberships are counted, since a person
+-- with no sign-in, or an inactive one, already has no admin to lose.
+-- Gaining admin: every person with a sign-in, as the mirror counts them; an
+-- Admin role ticked on the Roster under the old ceiling did not make an
+-- admin, and 052 must not make one silently. Untick the role before 052, or
+-- keep it and re-confirm the person afterwards.
 -- 052 §1 begin
 do $$
-declare v_count bigint;
+declare v_counts text;
 begin
- select count(*) into v_count
-  from public.memberships m
-  join public.people p on p.workspace_id=m.workspace_id and p.user_id=m.user_id
-  where m.active and m.access='staff' and 'admin'=any(p.capabilities)
-   and not exists(select 1 from public.workspaces w
-    join public.roster_entries r on r.workspace_id=w.id and r.season=w.current_season
-    where w.id=p.workspace_id and r.person_id=p.id and 'admin'=any(r.roles));
- if v_count>0 then
+ select string_agg(x.kind||'='||x.n,', ' order by x.ord) into v_counts from (
+  select 1 as ord,'admin without the Admin role' as kind,(select count(*)
+   from public.memberships m
+   join public.people p on p.workspace_id=m.workspace_id and p.user_id=m.user_id
+   where m.active and m.access='staff' and 'admin'=any(p.capabilities)
+    and not exists(select 1 from public.workspaces w
+     join public.roster_entries r on r.workspace_id=w.id and r.season=w.current_season
+     where w.id=p.workspace_id and r.person_id=p.id and 'admin'=any(r.roles))) as n
+  union all select 2,'the Admin role without admin',(select count(*)
+   from public.people p
+   join public.workspaces w on w.id=p.workspace_id
+   join public.roster_entries r on r.workspace_id=w.id and r.season=w.current_season and r.person_id=p.id
+   where p.user_id is not null and 'admin'=any(r.roles) and not ('admin'=any(p.capabilities)))
+ ) x where x.n>0;
+ if v_counts is not null then
   raise exception using errcode='VT008',
-   message='052 refused: people with a sign-in hold admin without the Admin role ('||v_count||')',
-   detail=v_count::text;
+   message='052 refused: people with a sign-in whose admin would change ('||v_counts||')',
+   detail=v_counts;
  end if;
 end;
 $$;
@@ -580,7 +593,9 @@ end;
 $$;
 revoke all on function vitally_private.deactivate_account(uuid,uuid,uuid) from public,anon,authenticated,service_role; -- 052
 
--- From 047, with one change: the acting person is passed to
+-- From 047, with two changes: deactivating a site coordinator's account needs
+-- a site coordinator (FORBIDDEN otherwise, since it removes the mark only a
+-- site coordinator may remove), and the acting person is passed to
 -- deactivate_account, which records them as the remover of a site coordinator.
 create or replace function public.vitally_deactivate_account(p_action_id uuid,p_volunteer_id uuid,p_expected_revision bigint) -- 052
 returns jsonb language plpgsql security definer set search_path='' as $$
@@ -618,6 +633,10 @@ begin
  if not found then
   raise sqlstate 'VT004' using message='INVALID_TRANSITION';
  end if;
+ if v_account.is_site_coordinator -- 052
+  and not vitally_private.is_site_coordinator(v_member.workspace_id,v_person.id) then -- 052
+  raise sqlstate 'VT001' using message='FORBIDDEN'; -- 052
+ end if; -- 052
  if v_account.revision<>p_expected_revision then
   raise sqlstate 'VT003' using message='CONFLICT';
  end if;

@@ -7,7 +7,7 @@ import { createDatabaseFixture, rejected } from "./support/database-fixture.mjs"
 // OpenSpec change add-season-settings (design D1, D8), migration 052:
 // people.capabilities mirror the person's current-season role capabilities
 // while they have a sign-in, and are empty otherwise; the migration's guard
-// refuses when someone with a sign-in would lose admin. Spec:
+// refuses when someone with a sign-in would lose or gain admin. Spec:
 // volunteer-clearance. The file shares one fixture; every staff member below
 // has a person key of their own.
 
@@ -16,27 +16,44 @@ const MIGRATION = readFileSync(
   "utf8",
 );
 const SECTION_1 = MIGRATION.split("-- 052 §1 begin")[1].split("-- 052 §1 end")[0];
-// §1's count, copied from the section: the guard reads every workspace, so the
-// guard tests compare against this baseline, taken in the same snapshot,
-// rather than assume no other workspace has an offender.
-const OFFENDERS = `select count(*)::int as n
-  from public.memberships m
-  join public.people p on p.workspace_id=m.workspace_id and p.user_id=m.user_id
-  where m.active and m.access='staff' and 'admin'=any(p.capabilities)
-   and not exists(select 1 from public.workspaces w
-    join public.roster_entries r on r.workspace_id=w.id and r.season=w.current_season
-    where w.id=p.workspace_id and r.person_id=p.id and 'admin'=any(r.roles))`;
+// §1's two counts, copied from the section: the guard reads every workspace,
+// so the guard tests compare against these baselines, taken in the same
+// snapshot, rather than assume no other workspace has an offender.
+const LOSING = `count(*)
+   from public.memberships m
+   join public.people p on p.workspace_id=m.workspace_id and p.user_id=m.user_id
+   where m.active and m.access='staff' and 'admin'=any(p.capabilities)
+    and not exists(select 1 from public.workspaces w
+     join public.roster_entries r on r.workspace_id=w.id and r.season=w.current_season
+     where w.id=p.workspace_id and r.person_id=p.id and 'admin'=any(r.roles))`;
+const GAINING = `count(*)
+   from public.people p
+   join public.workspaces w on w.id=p.workspace_id
+   join public.roster_entries r on r.workspace_id=w.id and r.season=w.current_season and r.person_id=p.id
+   where p.user_id is not null and 'admin'=any(r.roles) and not ('admin'=any(p.capabilities))`;
+const OFFENDERS = `select (select ${LOSING})::int as lose, (select ${GAINING})::int as gain`;
+// The counts §1's message names, or null when §1 passes.
+const offenderText = ({ lose, gain }) =>
+  [lose > 0 && `admin without the Admin role=${lose}`, gain > 0 && `the Admin role without admin=${gain}`]
+    .filter(Boolean)
+    .join(", ") || null;
+const squash = (text) => text.replace(/\s+/g, " ");
 
 const REPEATABLE_READ = "begin isolation level repeatable read";
 const REALTIME_DEADLINE_MS = 15_000;
 const CONTROL_ATTEMPT_MS = 2_500;
 
 const one = async (f, text, values) => (await f.sql(text, values)).rows[0];
-// 052's own refusal: VT008, which no application code maps, naming the count.
-const refused052 = (count) => (error) =>
+// 052's own refusal: VT008, which no application code maps, naming the counts.
+const refused052 = (counts) => (error) =>
   rejected("VT008")(error) &&
-  /^052 refused: .*\(\d+\)$/.test(error.cause?.message ?? "") &&
-  error.cause.message.endsWith(`(${count})`);
+  error.cause?.message === `052 refused: people with a sign-in whose admin would change (${offenderText(counts)})`;
+// §1 against the baseline: passes when nobody offends, otherwise refuses with
+// exactly these counts.
+const expectSection1 = async (f, counts) => {
+  if (offenderText(counts) === null) await f.sql(SECTION_1);
+  else await assert.rejects(() => f.sql(SECTION_1), refused052(counts));
+};
 
 async function inTransaction(f, body, begin = "begin") {
   await f.sql(begin);
@@ -86,16 +103,37 @@ test("people.capabilities mirror this season's roles against real Supabase", asy
       await inTransaction(
         f,
         async () => {
-          // The copy above still counts what §1 counts.
-          const squash = (text) => text.replace(/\s+/g, " ");
-          assert.ok(squash(SECTION_1).includes(squash(OFFENDERS.split("as n")[1])));
-          const { n: baseline } = await one(f, OFFENDERS);
+          // The copies above still count what §1 counts.
+          for (const count of [LOSING, GAINING]) assert.ok(squash(SECTION_1).includes(squash(count)));
+          const baseline = await one(f, OFFENDERS);
           await setRoles(f.siteCoordinatorId, []);
           await writeAround(
             "update public.people set capabilities='{admin,assist,followup,receive_documents}' where workspace_id=$1 and id=$2",
             [f.workspaceId, f.siteCoordinatorId],
           );
-          await assert.rejects(() => f.sql(SECTION_1), refused052(baseline + 1));
+          await expectSection1(f, { ...baseline, lose: baseline.lose + 1 });
+        },
+        REPEATABLE_READ,
+      );
+    });
+
+    // The reviewer's case: before 052, an admin ticked Admin on the Roster for
+    // an ordinary volunteer, and the old ceiling kept them from being an
+    // admin. 052's mirror would make them one, so the guard refuses.
+    await t.test("the 052 guard refuses an Admin role without admin", async () => {
+      const member = await f.staff({ key: "vera_volunteer", name: "Vera Lindqvist", capabilities: ["prepare"] });
+      await inTransaction(
+        f,
+        async () => {
+          const baseline = await one(f, OFFENDERS);
+          await confirm(member.personId, ["vsc", "itqr", "basic"]);
+          await setRoles(member.personId, ["preparer", "admin"]);
+          // Their capabilities as the ceiling left them: prepare only.
+          await writeAround("update public.people set capabilities='{prepare}' where workspace_id=$1 and id=$2", [
+            f.workspaceId,
+            member.personId,
+          ]);
+          await expectSection1(f, { ...baseline, gain: baseline.gain + 1 });
         },
         REPEATABLE_READ,
       );
@@ -105,15 +143,25 @@ test("people.capabilities mirror this season's roles against real Supabase", asy
       await inTransaction(
         f,
         async () => {
-          const { n: baseline } = await one(f, OFFENDERS);
+          const baseline = await one(f, OFFENDERS);
           await writeAround(
             "insert into public.people(workspace_id,person_key,name,capabilities) values($1,'gus_guard','Gus Mendel','{admin,assist,followup,receive_documents}')",
             [f.workspaceId],
           );
-          // Unchanged by the admin with no sign-in: passes when nobody else
-          // offends, and otherwise refuses with the same count.
-          if (baseline === 0) await f.sql(SECTION_1);
-          else await assert.rejects(() => f.sql(SECTION_1), refused052(baseline));
+          // And a volunteer with no sign-in who has the Admin role but no admin.
+          await writeAround(
+            "insert into public.people(workspace_id,person_key,name,capabilities) values($1,'ada_guard','Ada Moreau','{}')",
+            [f.workspaceId],
+          );
+          await writeAround(
+            `insert into public.roster_entries(workspace_id,person_id,season,roles)
+              select $1,p.id,w.current_season,'{admin}' from public.people p join public.workspaces w on w.id=p.workspace_id
+              where p.workspace_id=$1 and p.person_key='ada_guard'`,
+            [f.workspaceId],
+          );
+          // Unchanged by either: passes when nobody else offends, and
+          // otherwise refuses with the same counts.
+          await expectSection1(f, baseline);
         },
         REPEATABLE_READ,
       );

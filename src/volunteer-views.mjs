@@ -136,9 +136,17 @@ const tickRow = (name, text, on) =>
 // Create account sends the saved profile, so it waits while the form has
 // unsaved changes: the page turns it off and shows the hint as the form is
 // edited (`volunteerFormChanged`).
-function accountSection(volunteer, notice) {
+// Deactivating a site coordinator's account needs a site coordinator (change
+// add-season-settings): for anyone else the drawer says so instead.
+function accountSection(volunteer, notice, { viewerIsSiteCoordinator = true } = {}) {
   const status = volunteer?.account?.status ?? "none";
   const id = `data-volunteer-id="${esc(volunteer.id)}"`;
+  const deactivate =
+    volunteer?.isSiteCoordinator === true && !viewerIsSiteCoordinator
+      ? `<p class="field-note" id="volunteer-deactivate-note">${esc(
+          "Only site coordinators deactivate a site coordinator's account.",
+        )}</p>`
+      : button("Deactivate", "account-deactivate", "secondary", id);
   // An invitation nobody has used yet can be taken back; one that was ever
   // active cannot.
   const cancellable = volunteer?.account?.activatedAt == null;
@@ -152,8 +160,8 @@ function accountSection(volunteer, notice) {
     invited: `${button("Resend", "account-resend", "secondary", id)}${when(
       cancellable,
       button("Cancel invitation", "account-cancel-invitation", "secondary", id),
-    )}${button("Deactivate", "account-deactivate", "secondary", id)}`,
-    active: button("Deactivate", "account-deactivate", "secondary", id),
+    )}${deactivate}`,
+    active: deactivate,
     deactivated: button("Reactivate", "account-reactivate", "secondary", id),
   }[status];
   const said = notice?.text
@@ -219,7 +227,8 @@ export function cancelInvitationDialogBody({ volunteer = null, email = "" } = {}
  * @param {object} args `{volunteer, isNew, ui, canChangeAdmin}` — `ui` is
  *   `{busy, error, retryable, formError}`. `canChangeAdmin` is false for a
  *   caller who is not a site coordinator: the Admin tick is then disabled,
- *   showing its saved state (change add-season-settings).
+ *   showing its saved state, and a site coordinator's account offers no
+ *   Deactivate (change add-season-settings).
  */
 export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {}, canChangeAdmin = true } = {}) {
   if (!isNew && !volunteer)
@@ -273,7 +282,7 @@ export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {}, 
     "isNew",
     "New volunteer",
     isNew ? true : v.isNew === true,
-  )}${tickRow("photoIdChecked", "Photo ID checked", v.photoIdChecked === true)}</fieldset>${when(!isNew && volunteer, accountSection(v, ui?.accountNotice))}`;
+  )}${tickRow("photoIdChecked", "Photo ID checked", v.photoIdChecked === true)}</fieldset>${when(!isNew && volunteer, accountSection(v, ui?.accountNotice, { viewerIsSiteCoordinator: canChangeAdmin }))}`;
   const formError = ui?.formError
     ? `<p class="notice error" role="alert" id="volunteer-form-error">${icon("help")}<span>${esc(ui.formError)}</span></p>`
     : "";
