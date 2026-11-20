@@ -1433,6 +1433,7 @@ test("a subscription watches only the tables its principal may read", async () =
     "preparer_questionnaires",
     "reviewer_questionnaires",
     "preparer_shaded_fields",
+    "return_to_signing_exit_forms",
     "case_labels",
     "case_label_links",
     "posted_updates",

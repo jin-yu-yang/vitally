@@ -428,7 +428,7 @@ test("volunteer clearance against real Supabase", async (t) => {
 });
 
 // ---------------------------------------------------------------------------
-// The read gate (design D3): the 23 case-data policies read only for a cleared
+// The read gate (design D3): the 24 case-data policies read only for a cleared
 // staff member, through the no-argument InitPlan helper
 // `vitally_policy.cleared_workspace_id()`. `people` is not gated, and neither
 // is `posted_updates` (049): it holds no case data, and its audience policy
@@ -456,6 +456,7 @@ const CASE_TABLES = Object.freeze([
   "preparation_participants",
   "preparer_questionnaires",
   "preparer_shaded_fields",
+  "return_to_signing_exit_forms",
   "reviewer_questionnaires",
   "reviews",
 ]);
@@ -602,7 +603,7 @@ test("the read gate against real Supabase", async (t) => {
           where schemaname='public' and qual like '%access = ''staff''%' and tablename not in ('people','posted_updates')
           order by tablename`,
       );
-      assert.equal(rows.length, 23);
+      assert.equal(rows.length, 24);
       assert.deepEqual(rows.map((row) => row.tablename), [...CASE_TABLES]);
       for (const row of rows)
         assert.ok(row.qual.includes("cleared_workspace_id"), `${row.tablename}.${row.policyname}`);
