@@ -763,3 +763,11 @@ test("no sent line in Add a volunteer", () => {
   const withData = volunteerDrawerBody({ volunteer: volunteer({ form13615SentAt: "2026-11-20T15:00:00Z" }), isNew: true, ui: {} });
   assert.doesNotMatch(withData, /mark-upload-reviewed/);
 });
+
+test("Mark reviewed is off while the drawer is busy", () => {
+  const v = volunteer({ form13615SentAt: "2026-11-20T15:00:00Z", photoIdSentAt: "2026-11-20T15:00:00Z" });
+  const busy = volunteerDrawerBody({ volunteer: v, isNew: false, ui: { busy: true } });
+  assert.equal([...busy.matchAll(/data-action="mark-upload-reviewed" data-document="[A-Za-z0-9]+" disabled/g)].length, 2);
+  const idle = volunteerDrawerBody({ volunteer: v, isNew: false, ui: {} });
+  assert.doesNotMatch(idle, /mark-upload-reviewed"[^>]*disabled/);
+});

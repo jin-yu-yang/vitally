@@ -147,14 +147,14 @@ const tickRow = (name, text, on) =>
 
 // A "sent" line in the drawer with its Mark reviewed (design D7). The date is
 // the New York day; an unreadable one leaves the line without it.
-function sentLine(sentAt, name, document) {
+function sentLine(sentAt, name, document, busy = false) {
   const day = new Date(sentAt);
   const date = Number.isNaN(day.getTime()) ? "" : ` ${SENT_DAY.format(day)}`;
   return `<p class="volunteer-sent" data-document="${document}"><span>${name} sent${esc(date)}</span> ${button(
     "Mark reviewed",
     "mark-upload-reviewed",
     "secondary",
-    `data-document="${document}"`,
+    `data-document="${document}"${busy ? " disabled" : ""}`,
   )}</p>`;
 }
 
@@ -301,7 +301,7 @@ export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {}, 
   )}${when(
     !canChangeAdmin,
     `<p class="field-note" id="volunteer-admin-note">Only site coordinators change the Admin role.</p>`,
-  )}</fieldset>${when(!isNew && v.form13615SentAt != null, sentLine(v.form13615SentAt, "Form 13615", "form13615"))}<fieldset class="check-group"><legend>Certificates</legend>${ticks(
+  )}</fieldset>${when(!isNew && v.form13615SentAt != null, sentLine(v.form13615SentAt, "Form 13615", "form13615", ui?.busy === true))}<fieldset class="check-group"><legend>Certificates</legend>${ticks(
     "certificate",
     CERTIFICATES,
     v.certificates ?? [],
@@ -310,7 +310,7 @@ export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {}, 
     "isNew",
     "New volunteer",
     isNew ? true : v.isNew === true,
-  )}${tickRow("photoIdChecked", "Photo ID checked", v.photoIdChecked === true)}${when(!isNew && v.photoIdSentAt != null, sentLine(v.photoIdSentAt, "Photo ID", "photoId"))}</fieldset>${when(!isNew && volunteer, accountSection(v, ui?.accountNotice, { viewerIsSiteCoordinator: canChangeAdmin }))}`;
+  )}${tickRow("photoIdChecked", "Photo ID checked", v.photoIdChecked === true)}${when(!isNew && v.photoIdSentAt != null, sentLine(v.photoIdSentAt, "Photo ID", "photoId", ui?.busy === true))}</fieldset>${when(!isNew && volunteer, accountSection(v, ui?.accountNotice, { viewerIsSiteCoordinator: canChangeAdmin }))}`;
   const formError = ui?.formError
     ? `<p class="notice error" role="alert" id="volunteer-form-error">${icon("help")}<span>${esc(ui.formError)}</span></p>`
     : "";

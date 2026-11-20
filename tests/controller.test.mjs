@@ -10586,7 +10586,7 @@ test("Mark reviewed re-reads the Roster", async () => {
 test("Mark reviewed keeps the drawer open and the next Save sends the new revision", async () => {
   const store = uploadReviewStore();
   const { controller } = await openReviewDrawer(store);
-  controller.getState(); // the drawer's typed values live in the page (app.mjs drafts); the controller must not touch them
+  // The typed values live in the page (app.mjs drafts). Their survival is checked by the browser test (Task 8): it types into the drawer, presses Mark reviewed and saves.
   const before = controller.getState();
   const { dialog, dialogContext } = before;
   await controller.markUploadReviewed("form13615");
@@ -10615,5 +10615,43 @@ test("a CONFLICT on Mark reviewed says VOLUNTEER_CONFLICT_MESSAGE and re-reads",
   assert.equal(state.dialog, "volunteer");
   assert.equal(volunteerReads(store), reads + 1);
   assert.equal(state.volunteers[0].revision, 9);
+  controller.stop();
+});
+
+test("Mark reviewed does nothing while another action is busy", async () => {
+  const store = uploadReviewStore();
+  const { controller } = await openReviewDrawer(store);
+  let release;
+  const held = new Promise((resolve) => (release = resolve));
+  const send = store.markUploadReviewed;
+  store.markUploadReviewed = async (request) => {
+    await held;
+    return send(request);
+  };
+  const first = controller.markUploadReviewed("form13615");
+  assert.equal(controller.getState().busy, true);
+  assert.equal(await controller.markUploadReviewed("photoId"), null);
+  release();
+  assert.equal(await first, "Marked reviewed");
+  assert.equal(store.writes.filter((w) => w.type === "markUploadReviewed").length, 1);
+  controller.stop();
+});
+
+test("Mark reviewed says NOT_FOUND when the drawer's volunteer is gone", async () => {
+  const store = uploadReviewStore();
+  const { controller } = await openReviewDrawer(store);
+  store.volunteers = [];
+  await controller.loadVolunteers();
+  await assert.rejects(() => controller.markUploadReviewed("form13615"), (error) => error.code === "NOT_FOUND");
+  assert.equal(store.calls.includes("markUploadReviewed"), false);
+  controller.stop();
+});
+
+test("Mark reviewed does nothing outside the volunteer dialog", async () => {
+  const store = uploadReviewStore();
+  const { controller } = await openReviewDrawer(store);
+  controller.closeDialog();
+  assert.equal(await controller.markUploadReviewed("form13615"), null);
+  assert.equal(store.calls.includes("markUploadReviewed"), false);
   controller.stop();
 });
