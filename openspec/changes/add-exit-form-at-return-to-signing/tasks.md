@@ -1,12 +1,12 @@
 ## 1. Database: migration 054
 
-- [ ] 1.1 Write database tests first (`tests/database-filing.mjs` or a new `tests/database-return-to-signing-exit-form.mjs` wired into `npm run test:database`): optional values, stored values, empty values store nothing, settled-method mismatch, group for a missing return, banking detail refused, remarks over 2000 refused, unknown key refused, refused action changes nothing
-- [ ] 1.2 Write database tests for access: an applicant reads no rows, a cleared staff member reads them, an uncleared one doesn't, a direct insert by staff is refused, and the realtime publication carries the table to staff only (`tests/database-realtime.mjs`)
-- [ ] 1.3 Create `supabase/migrations/054_return_to_signing_exit_forms.sql`: the `return_to_signing_exit_forms` table (D1), its `check_exit_form` and remarks constraints, row-level security copied from `staff_reviewer_questionnaires`, grants, and the realtime publication
-- [ ] 1.4 In 054, redefine `check_payload` from its latest copy, splitting `RETURN_TO_SIGNING` from `MARK_READY_TO_EFILE` and accepting optional `exitForm` and `remarks` (D3)
-- [ ] 1.5 In 054, redefine `act_return_to_signing`: the case-dependent method rules, the insert when any value is given, and `detail: {exitFormId}` (D2, D3)
-- [ ] 1.6 In 054, redefine `apply_fixture_scenario` from migration 039, clearing the new table (D7)
-- [ ] 1.7 Run `npm run db:migrate:test` and `npm run test:database`, all passing
+- [x] 1.1 Write database tests first (`tests/database-filing.mjs` or a new `tests/database-return-to-signing-exit-form.mjs` wired into `npm run test:database`): optional values, stored values, empty values store nothing, settled-method mismatch, group for a missing return, banking detail refused, remarks over 2000 refused, unknown key refused, refused action changes nothing
+- [x] 1.2 Write database tests for access: an applicant reads no rows, a cleared staff member reads them, an uncleared one doesn't, a direct insert by staff is refused, and the realtime publication carries the table to staff only (`tests/database-realtime.mjs`)
+- [x] 1.3 Create `supabase/migrations/054_return_to_signing_exit_forms.sql`: the `return_to_signing_exit_forms` table (D1), its `check_exit_form` and remarks constraints, row-level security copied from `staff_reviewer_questionnaires`, grants, and the realtime publication
+- [x] 1.4 In 054, redefine `check_payload` from its latest copy, splitting `RETURN_TO_SIGNING` from `MARK_READY_TO_EFILE` and accepting optional `exitForm` and `remarks` (D3)
+- [x] 1.5 In 054, redefine `act_return_to_signing`: the case-dependent method rules, the insert when any value is given, and `detail: {exitFormId}` (D2, D3)
+- [x] 1.6 In 054, redefine `apply_fixture_scenario` from migration 039, clearing the new table (D7) — not needed: migration 040 dropped `apply_fixture_scenario`; rows go with their case (on delete cascade)
+- [x] 1.7 Run `npm run db:migrate:test` and `npm run test:database`, all passing
 
 ## 2. Store and contracts
 
