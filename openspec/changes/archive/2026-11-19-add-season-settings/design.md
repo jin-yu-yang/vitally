@@ -114,7 +114,9 @@ The decision log is in `brainstorm.md`.
 
   - "Site coordinators" means active accounts with the flag.
   - `deactivate_account` refuses the last site coordinator (`INVALID_TRANSITION`, `LAST_SITE_COORDINATOR`). It already refuses the default follow-up person through `open_work` (OPEN_WORK).
-  - *My call:* deactivating any other site coordinator also clears their flag, with an audit row (changed_by = the deactivating admin), so no hidden site coordinator comes back on reactivation.
+  - *My call:* deactivating any other site coordinator also clears their flag, with an audit row (changed_by = the deactivating site coordinator), so no hidden site coordinator comes back on reactivation.
+  - *Review fix (PR #237, 2026-11-20):* deactivating a site coordinator's account needs a site coordinator. `vitally_deactivate_account` refuses anyone else with `FORBIDDEN` once it has found the account, before the revision check. Without this, an admin by role could remove the mark, which only a site coordinator may remove, by deactivating the account. A site coordinator can't deactivate themselves (`SELF`), so `LAST_SITE_COORDINATOR` is now reached only below the app (tools, a later Start next season). It stays as the backstop.
+  - The drawer doesn't offer Deactivate on a site coordinator's account to anyone else, and says "Only site coordinators deactivate a site coordinator's account." A `FORBIDDEN` that still arrives (a window drawn before a change) shows the same sentence. *My call:* hide the button rather than only show the refusal, like the locked Admin tick (D3).
   - The roster command grants through `vitally_private.grant_site_coordinator(ws, user_id)`, writing an audit row with a null `changed_by`. It never removes.
 - **Why:** the user's decision D4. Clearing on deactivation keeps "who is a site coordinator" visible in one list.
 - **Alternatives considered:**
@@ -171,8 +173,10 @@ The decision log is in `brainstorm.md`.
 
 ### D8: Migration 052 guard and order
 - **Choice:**
-  - The 043/045-style guard refuses, with counts (`VT008`), if any person with an active staff membership has `'admin'` in `people.capabilities` but no `'admin'` role in their current-season entry.
-  - *My call:* only active memberships are counted, since an inactive one already has no admin.
+  - The 043/045-style guard refuses, with counts (`VT008`), when the recompute would change anyone's admin, in either direction. It changes nothing.
+    - **Losing admin:** a person with an active staff membership has `'admin'` in `people.capabilities` but no `'admin'` role in their current-season entry. *My call:* only active memberships are counted, since an inactive one already has no admin.
+    - **Gaining admin** (*review fix, PR #237, 2026-11-20*): a person with a sign-in has the `'admin'` role in their current-season entry but no `'admin'` in `people.capabilities`. Under the old ceiling, an Admin tick on the Roster didn't make an admin (the reviewer's case: an ordinary volunteer ticked Admin before 052). Without this count, 052 would make them an admin silently. The count matches the mirror (every person with a sign-in) and the pre-deploy query in the Migration Plan.
+    - The message names each nonzero count: `052 refused: people with a sign-in whose admin would change (admin without the Admin role=<n>, the Admin role without admin=<n>)`.
   - Then the migration:
     1. snapshots `(workspace_id, person_id, capabilities)` into `vitally_private.capabilities_before_052`, for rollback;
     2. adds the columns, tables and triggers;
@@ -221,15 +225,22 @@ The decision log is in `brainstorm.md`.
 
 **Hosted (classroom) deploy order. Put this in the PR body.**
 1. In the current Roster, give every admin VSC, IT&QR and the Admin role. Without this, 052's guard refuses, listing the count.
-2. Run migration 052: `tools/admin/migrate.mjs --target classroom`, with `NODE_EXTRA_CA_CERTS` set.
-   - From here until step 3, there is no site coordinator.
+2. Then list who has the Admin role this season without admin today (*review fix, PR #237*), and for each person listed decide: untick Admin before 052 and leave it off, or, to keep them as an admin, untick it before 052 and tick it again after (that makes them an admin on purpose). The Admin tick can't simply stay through 052: the guard refuses while anyone is listed.
+   ```sql
+   select p.name from public.people p
+   join public.workspaces w on w.id=p.workspace_id
+   join public.roster_entries r on r.workspace_id=w.id and r.season=w.current_season and r.person_id=p.id
+   where p.user_id is not null and 'admin'=any(r.roles) and not ('admin'=any(p.capabilities));
+   ```
+3. Run migration 052: `tools/admin/migrate.mjs --target classroom`, with `NODE_EXTRA_CA_CERTS` set.
+   - From here until step 4, there is no site coordinator.
    - The Admin role keeps every admin on the Roster.
    - Escalations, approvals, withdrawals and closes reach the default follow-up person through "`followup` this season", which step 1 gave them.
    - Season settings is read-only to everyone.
-3. Re-run the roster command with `siteCoordinator: true` on Hailey Zheng's entry, and `defaultFollowup` naming her key. That makes her both site coordinator and the default follow-up person.
+4. Re-run the roster command with `siteCoordinator: true` on Hailey Zheng's entry, and `defaultFollowup` naming her key. That makes her both site coordinator and the default follow-up person.
    - The file's old `capabilities` / `siteNumber` are ignored and reported.
    - `initialize_workspace`'s re-run check passes, because the current default holds `followup` from step 1.
-4. Hailey ticks her own SC certificate on the Roster. She stays uncleared but can still reach the Roster.
+5. Hailey ticks her own SC certificate on the Roster. She stays uncleared but can still reach the Roster.
 
 **No-sign-in persons:** under the sign-in-only mirror, a person with no sign-in has no capabilities and is hidden from non-admin staff. On the hosted database, `select count(*) from public.people where user_id is null and cardinality(capabilities) > 0;` returned 0 on 2026-11-19, so 052 hides nobody there and no pre-check step is needed.
 

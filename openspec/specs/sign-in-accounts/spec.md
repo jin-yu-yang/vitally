@@ -292,12 +292,12 @@ A Reactivate that gives `invited` SHALL start a new seven days and a new five si
 - **THEN** it is refused with `OPEN_WORK`, the drawer lists that case, and the account is unchanged
 
 #### Scenario: Deactivating the default follow-up person
-- **WHEN** an admin deactivates the default follow-up person, who is a site coordinator while another site coordinator remains
+- **WHEN** a site coordinator deactivates the default follow-up person, who is another site coordinator
 - **THEN** it is refused with `OPEN_WORK`, and the drawer lists being the default follow-up person
 
 #### Scenario: Deactivating the last site coordinator
-- **WHEN** an admin deactivates the only site coordinator, who is not the default follow-up person
-- **THEN** it is refused with `LAST_SITE_COORDINATOR`, and the account is unchanged
+- **WHEN** an admin who is not a site coordinator deactivates the only site coordinator, who is not the default follow-up person
+- **THEN** it is refused with `FORBIDDEN` (only a site coordinator deactivates a site coordinator, capability `site-coordinators`), and the account is unchanged
 
 #### Scenario: Deactivating yourself
 - **WHEN** an admin deactivates their own account

@@ -217,3 +217,13 @@ f59b466 verify: add-season-settings
   - `syncSiteCoordinatorAdd` inserted between `restoreFormDrafts`' comment and the function.
 - **Docs:** vague SIDN mention in `roadmap.md:123`; `setup.md` step 4 goes beyond the design text (accurate).
 - **Out of scope by design:** the mirror goes stale when `current_season` changes. Start next season owns that, along with dropping `vitally_private.capabilities_before_052` and keeping site coordinators' accounts active.
+
+## Review fixes after archive (PR #237, 2026-11-20)
+
+The reviewer found two gaps after the change was archived. Both were fixed on the branch, and the archived design, the delta specs and the canonical specs were updated to match.
+
+- **052 made new admins silently.** The guard refused only people who would lose admin. Someone with the Admin role ticked under the old ceiling, but no `admin` capability, would have become an admin. The guard now refuses both directions, with a count for each. The new database test is the reviewer's case: an ordinary volunteer with Admin ticked before 052. The hosted deploy order runs the reviewer's query before 052. 052 had not been applied to any shared database, so the migration itself was edited.
+  - *What it teaches:* a guard for a recompute must check both directions of the change, not only the loss the design worried about.
+- **An admin who wasn't a site coordinator could remove the mark by deactivating the account.** `vitally_deactivate_account` now refuses them with `FORBIDDEN`. The drawer hides Deactivate on a site coordinator's account for them and says "Only site coordinators deactivate a site coordinator's account." As a result, `LAST_SITE_COORDINATOR` on deactivation is reached only below the app; its database test now calls the internal function.
+  - *What it teaches:* every path that changes a protected flag needs the same authority as the direct path. Deactivation was a side door to "remove site coordinator".
+- **Tests:** unit 2130 → 2132. The database suite gained the gain-direction guard test and Cal's refused deactivation of Bea. The "last site coordinator" database test now expects `FORBIDDEN` from the app and `LAST_SITE_COORDINATOR` from the internal function.

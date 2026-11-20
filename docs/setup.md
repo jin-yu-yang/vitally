@@ -658,23 +658,42 @@ migration file.
 #### 052's guard
 
 From migration 052 (Season settings), `Migration failed (VT008).` means it refused to run, and
-**nothing was changed**. An active staff member holds `admin` in `people.capabilities` but not the
-Admin role on their current-season Roster entry, and 052 would take their admin access away.
-The message gives the count. Give each of them the Admin role on the Roster (which needs the
-certificates the role asks for), then run the migrator again. Do not edit the migration file.
+**nothing was changed**. 052 would change someone's admin access, and the message gives a count
+for each direction:
+
+- `admin without the Admin role`: an active staff member holds `admin` in `people.capabilities`
+  but not the Admin role on their current-season Roster entry, so 052 would take their admin away.
+  Give each of them the Admin role on the Roster (which needs the certificates the role asks for).
+- `the Admin role without admin`: someone with a sign-in has the Admin role this season but no
+  `admin` today (an Admin tick under the old capabilities ceiling didn't make an admin), so 052
+  would make them one. List them with the query in step 2 below and untick Admin for each; tick
+  it again after 052 for anyone who should be an admin.
+
+Then run the migrator again. Do not edit the migration file.
 
 **Hosted deploy order for 052.** Do these in order, back to back:
 
 1. In the current Roster, give every admin VSC, IT&QR and the Admin role. Without this, 052's guard
    refuses and lists the count.
-2. Run migration 052 (`tools/admin/migrate.mjs --target classroom`, with `NODE_EXTRA_CA_CERTS` set).
-   From here until step 3 there is no site coordinator: Season settings is read-only to everyone,
+2. List who has the Admin role this season without admin today:
+
+   ```sql
+   select p.name from public.people p
+   join public.workspaces w on w.id=p.workspace_id
+   join public.roster_entries r on r.workspace_id=w.id and r.season=w.current_season and r.person_id=p.id
+   where p.user_id is not null and 'admin'=any(r.roles) and not ('admin'=any(p.capabilities));
+   ```
+
+   For each person listed, untick Admin before 052. To keep someone as an admin, tick it again
+   after 052, which makes them one on purpose. 052 refuses while anyone is listed.
+3. Run migration 052 (`tools/admin/migrate.mjs --target classroom`, with `NODE_EXTRA_CA_CERTS` set).
+   From here until step 4 there is no site coordinator: Season settings is read-only to everyone,
    and escalations, approvals, withdrawals and closes reach the default follow-up person through
    the `followup` capability that step 1 gave them.
-3. Re-run the roster command with `siteCoordinator: true` on the site coordinator's entry, and
+4. Re-run the roster command with `siteCoordinator: true` on the site coordinator's entry, and
    `defaultFollowup` naming that entry's key. The file's old `capabilities` and `siteNumber` are
    ignored and reported.
-4. The site coordinator ticks their own SC certificate on the Roster. They stay uncleared until
+5. The site coordinator ticks their own SC certificate on the Roster. They stay uncleared until
    then, but can still reach the Roster and Season settings.
 
 A person with no sign-in loses their capabilities under the mirror and is hidden from non-admin

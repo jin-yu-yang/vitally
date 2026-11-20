@@ -75,12 +75,24 @@ Season settings SHALL have a "Site coordinators" card with the note "Kept across
 - **THEN** neither is offered
 
 ### Requirement: Deactivating a site coordinator
-Deactivating the account of the last site coordinator SHALL be refused with `INVALID_TRANSITION` (`LAST_SITE_COORDINATOR`), and the drawer SHALL say "At least one site coordinator must remain. Make someone else a site coordinator first." Deactivating any other site coordinator SHALL also remove their site coordinator mark in the same transaction, recorded in the history as a removal by the admin who deactivated them; reactivating them SHALL NOT restore it. Deactivating the default follow-up person SHALL stay refused as open work (capability `sign-in-accounts`).
+Deactivating the account of a site coordinator SHALL need a site coordinator. Anyone else SHALL be refused with `FORBIDDEN`, with the account, the site coordinator mark and the history unchanged. The Roster drawer SHALL NOT offer Deactivate on a site coordinator's account to anyone who is not a site coordinator; it SHALL say "Only site coordinators deactivate a site coordinator's account." instead, and a `FORBIDDEN` that still arrives SHALL show the same sentence in the drawer.
+
+A site coordinator cannot deactivate their own account (`VALIDATION`, `SELF`), so the last site coordinator SHALL NOT be deactivated from the app. Below the app, deactivating the last site coordinator SHALL still be refused with `INVALID_TRANSITION` (`LAST_SITE_COORDINATOR`), and the drawer SHALL say "At least one site coordinator must remain. Make someone else a site coordinator first." if it is ever shown that refusal.
+
+Deactivating any other site coordinator SHALL also remove their site coordinator mark in the same transaction, recorded in the history as a removal by the site coordinator who deactivated them; reactivating them SHALL NOT restore it. Deactivating the default follow-up person SHALL stay refused as open work (capability `sign-in-accounts`).
+
+#### Scenario: An admin who isn't a site coordinator
+- **WHEN** an admin by the Admin role who is not a site coordinator deactivates a site coordinator's account
+- **THEN** it is refused with `FORBIDDEN`, and the account, the mark and the history are unchanged
+
+#### Scenario: The drawer for an admin who isn't a site coordinator
+- **WHEN** an admin who is not a site coordinator opens a site coordinator's drawer on the Roster
+- **THEN** it offers no Deactivate and says "Only site coordinators deactivate a site coordinator's account."
 
 #### Scenario: The last site coordinator
-- **WHEN** an admin deactivates the only site coordinator's account
-- **THEN** it is refused with `LAST_SITE_COORDINATOR`, and the account is unchanged
+- **WHEN** the only site coordinator's account is deactivated, by an admin who is not a site coordinator or below the app
+- **THEN** the admin is refused with `FORBIDDEN`, the internal deactivation is refused with `LAST_SITE_COORDINATOR`, and the account is unchanged
 
 #### Scenario: Another site coordinator
-- **WHEN** an admin deactivates a site coordinator who is not the last one and not the default follow-up person
-- **THEN** the account is deactivated, they are no longer a site coordinator, the history records the removal, and reactivating them leaves them not a site coordinator
+- **WHEN** a site coordinator deactivates another site coordinator who is not the last one and not the default follow-up person
+- **THEN** the account is deactivated, they are no longer a site coordinator, the history records the removal by the site coordinator who deactivated them, and reactivating them leaves them not a site coordinator
