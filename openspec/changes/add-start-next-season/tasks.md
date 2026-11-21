@@ -9,10 +9,10 @@
 
 ## 2. Migration 055: Start next season
 
-- [ ] 2.1 Add the `season_starts` table (RLS on, no grants to signed-in users), with a test that signed-in users can't read or write it
-- [ ] 2.2 Database tests (failing first) for the refusal order: FORBIDDEN (no receipt), replay before CONFLICT, CONFLICT, VALIDATION (wrong year, past 2100)
-- [ ] 2.3 Database tests (failing first) for `SEASON_NOT_FINISHED` and its four counts: open cases in any season, open follow-ups, claimed help requests, unclaimed help requests that name a case; no-case help requests and drafts not counted
-- [ ] 2.4 Database tests (failing first) for a successful start:
+- [x] 2.1 Add the `season_starts` table (RLS on, no grants to signed-in users), with a test that signed-in users can't read or write it
+- [x] 2.2 Database tests (failing first) for the refusal order: FORBIDDEN (no receipt), replay before CONFLICT, CONFLICT, VALIDATION (wrong year, past 2100)
+- [x] 2.3 Database tests (failing first) for `SEASON_NOT_FINISHED` and its four counts: open cases in any season, open follow-ups, claimed help requests, unclaimed help requests that name a case; no-case help requests and drafts not counted
+- [x] 2.4 Database tests (failing first) for a successful start:
   - the default follow-up person is moved to the starter, or kept if they are a site coordinator;
   - the season is +1;
   - the starter's roster entry has no roles;
@@ -21,8 +21,8 @@
   - the mirror equals the new season's roles;
   - the history row is written;
   - the new season's first client number is 1.
-- [ ] 2.5 Write `vitally_start_next_season` per design D1â€“D4, under the workspace lock, deactivating through the ordinary `vitally_private.deactivate_account`
-- [ ] 2.6 Push and run `gh workflow run database-quick.yml --ref add-start-next-season -f files="tests/database-past-season.mjs tests/database-open-work-season.mjs tests/database-start-next-season.mjs"` (no local Docker)
+- [x] 2.5 Write `vitally_start_next_season` per design D1â€“D4, under the workspace lock, deactivating through the ordinary `vitally_private.deactivate_account`
+- [x] 2.6 Push and run `gh workflow run database-quick.yml --ref add-start-next-season -f files="tests/database-past-season.mjs tests/database-open-work-season.mjs tests/database-start-next-season.mjs"` (no local Docker)
 
 ## 3. Browser: current season only
 
