@@ -45,9 +45,9 @@
 
 ## 6. Story, docs and checks
 
-- [ ] 6.1 In the story, change only the Exit Form tax-year assertion to season − 1
-- [ ] 6.2 Add a separate Chrome test with its own workspace, "A site coordinator starts the next season", in `tests/browser.mjs`. It covers:
+- [x] 6.1 In the story, change only the Exit Form tax-year assertion to season − 1
+- [x] 6.2 Add a separate Chrome test with its own workspace, "A site coordinator starts the next season", in `tests/browser.mjs`. It covers:
   - a refused start that lists the counts;
   - a successful start: the starter's setup screen, a volunteer's no-access window, and an empty case pool.
-- [ ] 6.3 Update the developer docs that describe seasons, the roster, open work and `capabilities_before_052`
-- [ ] 6.4 Run `npm test` and `npx openspec validate --all` locally. The database, sign-in and story checks are the PR's full CI run, linked in `verify.md`.
+- [x] 6.3 Update the developer docs that describe seasons, the roster, open work and `capabilities_before_052`
+- [x] 6.4 Run `npm test` and `npx openspec validate --all` locally. The database, sign-in and story checks are the PR's full CI run, linked in `verify.md`.
