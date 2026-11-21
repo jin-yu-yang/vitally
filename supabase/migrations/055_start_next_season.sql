@@ -1,5 +1,5 @@
--- 055: Start next season (OpenSpec change add-start-next-season, design D5,
--- D6, D10).
+-- 055: Start next season (OpenSpec change add-start-next-season, design D1-D6,
+-- D10).
 --
 -- In order:
 --   §1 the past-season check: a case numbered in an earlier season than the
@@ -133,3 +133,148 @@ revoke all on function vitally_private.open_work(uuid,uuid) from public,anon,aut
 -- rollback. Nothing reads it.
 
 drop table vitally_private.capabilities_before_052;
+
+-- ---------------------------------------------------------------------------
+-- §4. The record of starts (design D4 step 6): one row per Start next season.
+-- The follow-up columns are both null when the default follow-up person was
+-- kept. The person ids are historical scalars, as receipts' actors are, so no
+-- person key holds them. Row security is on with no policy and no grant to
+-- signed-in users; only §5 writes it.
+
+create table public.season_starts (
+ id uuid primary key default gen_random_uuid(),
+ workspace_id uuid not null references public.workspaces(id) on delete cascade,
+ from_season smallint not null,
+ to_season smallint not null check (to_season=from_season+1),
+ started_by_person_id uuid not null,
+ started_at timestamptz not null default now(),
+ default_followup_from uuid,
+ default_followup_to uuid,
+ deactivated_count integer not null check (deactivated_count>=0)
+);
+alter table public.season_starts enable row level security;
+revoke all on public.season_starts from public,anon,authenticated;
+
+-- ---------------------------------------------------------------------------
+-- §5. Start next season (design D1-D4), for a site coordinator, in one
+-- transaction under the workspace lock. Order of checks: FORBIDDEN (not an
+-- active site coordinator: nothing written, no receipt), the workspace lock,
+-- the stored answer for a repeated action id (so a retry after a lost reply is
+-- not a CONFLICT), CONFLICT (the season already moved), VALIDATION (the typed
+-- year is not the next season, or the next season is past 2100), then
+-- SEASON_NOT_FINISHED with the counts while work is open. Then, in order: the
+-- default follow-up person moves to the starter unless a site coordinator; the
+-- season moves; the starter goes on the new roster with no roles; every other
+-- staff account that is invited or active and isn't a site coordinator's is
+-- deactivated as Deactivate does (the season has moved, so open_work sees no
+-- past case, and the default no longer names them); the mirror is recomputed,
+-- since its triggers don't fire on workspaces; the start is recorded; the
+-- receipt is stored. No email is sent.
+
+create function public.vitally_start_next_season(p_action_id uuid,p_expected_season smallint,p_typed_year smallint)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_receipt public.action_receipts;
+ v_workspace public.workspaces;
+ v_digest text;
+ v_season smallint;
+ v_open_cases integer;
+ v_open_followups integer;
+ v_claimed_help integer;
+ v_unclaimed_help integer;
+ v_default_from uuid;
+ v_default_to uuid;
+ v_user uuid;
+ v_deactivated integer=0;
+ v_result jsonb;
+begin
+ v_member=vitally_private.require_membership();
+ v_person=vitally_private.acting_person(v_member);
+ if v_member.access<>'staff' or v_person.id is null
+  or not vitally_private.is_site_coordinator(v_member.workspace_id,v_person.id) then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ if p_action_id is null or p_expected_season is null or p_typed_year is null then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_member.workspace_id::text,0));
+ -- Case writes don't take the workspace lock, so without these the counts
+ -- below could miss a case reopened, a follow-up opened or a help request
+ -- claimed while the start runs. Writes already in flight finish first; a
+ -- write that comes after waits, then reads the new current_season and is
+ -- refused as PAST_SEASON (§1). Reads are not blocked.
+ -- tools/admin/relabel-season.mjs locks cases the same way.
+ lock table public.cases,public.admin_followups,public.assistance_items in exclusive mode;
+ v_digest=encode(extensions.digest(jsonb_build_object('operation','START_NEXT_SEASON',
+  'expectedSeason',p_expected_season,'typedYear',p_typed_year,'personId',v_person.id)::text,'sha256'),'hex');
+ v_receipt=vitally_private.reserve_receipt(v_member,p_action_id,'START_NEXT_SEASON',v_digest,v_person.id);
+ if v_receipt.receipt is not null then
+  return v_receipt.receipt;
+ end if;
+ select * into v_workspace from public.workspaces where id=v_member.workspace_id for update;
+ if v_workspace.current_season<>p_expected_season then
+  raise sqlstate 'VT003' using message='CONFLICT';
+ end if;
+ if p_typed_year<>p_expected_season+1 or p_expected_season+1>2100 then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ v_season=p_expected_season+1;
+ -- The refusal counts (design D3): open cases in any season, since a past
+ -- case left open could never be finished; help requests with no case carry
+ -- over.
+ select count(*) into v_open_cases from public.cases c
+  where c.workspace_id=v_member.workspace_id and c.stage not in ('draft','accepted','closed');
+ select count(*) into v_open_followups from public.admin_followups t
+  where t.workspace_id=v_member.workspace_id and t.status='open';
+ select count(*) into v_claimed_help from public.assistance_items a
+  where a.workspace_id=v_member.workspace_id and a.status='assigned';
+ select count(*) into v_unclaimed_help from public.assistance_items a
+  where a.workspace_id=v_member.workspace_id and a.status='open' and a.case_id is not null;
+ if v_open_cases+v_open_followups+v_claimed_help+v_unclaimed_help>0 then
+  raise sqlstate 'VT004' using message='SEASON_NOT_FINISHED',
+   detail=jsonb_build_object('openCases',v_open_cases,'openFollowups',v_open_followups,
+    'claimedHelp',v_claimed_help,'unclaimedHelpOnCases',v_unclaimed_help)::text;
+ end if;
+ -- 1. The default follow-up person: the starter, unless a site coordinator.
+ -- Before step 4, since open_work counts the default follow-up person.
+ if v_workspace.default_followup_person_id is null
+  or not vitally_private.is_site_coordinator(v_member.workspace_id,v_workspace.default_followup_person_id) then
+  v_default_from=v_workspace.default_followup_person_id;
+  v_default_to=v_person.id;
+  update public.workspaces set default_followup_person_id=v_person.id where id=v_member.workspace_id;
+ end if;
+ -- 2. The season. Client numbers are per (workspace, season), so the new
+ -- season's start at 1.
+ update public.workspaces set current_season=v_season where id=v_member.workspace_id;
+ -- 3. The starter on the new roster: no roles, no certificates, not new.
+ insert into public.roster_entries(workspace_id,person_id,season,roles,added_by_person_id,is_new,photo_id_checked_at)
+  values(v_member.workspace_id,v_person.id,v_season,'{}',v_person.id,false,null);
+ -- 4. Every other staff sign-in, as Deactivate does. A refusal from it (such
+ -- as OPEN_WORK) aborts the whole start; the counts above leave nothing that
+ -- could cause one.
+ for v_user in select a.user_id from public.accounts a
+  join public.memberships m on m.workspace_id=a.workspace_id and m.user_id=a.user_id
+  where a.workspace_id=v_member.workspace_id and m.access='staff'
+   and a.status in ('invited','active') and not a.is_site_coordinator
+  order by a.person_id
+ loop
+  perform vitally_private.deactivate_account(v_member.workspace_id,v_user,v_person.id);
+  v_deactivated=v_deactivated+1;
+ end loop;
+ -- 5. The mirror: the people trigger (052) stores each person's new-season
+ -- capabilities.
+ update public.people set capabilities=capabilities where workspace_id=v_member.workspace_id;
+ -- 6. The record.
+ insert into public.season_starts(workspace_id,from_season,to_season,started_by_person_id,
+   default_followup_from,default_followup_to,deactivated_count)
+  values(v_member.workspace_id,p_expected_season,v_season,v_person.id,v_default_from,v_default_to,v_deactivated);
+ -- 7. The receipt.
+ v_result=jsonb_build_object('actionId',p_action_id,'season',v_season,'deactivated',v_deactivated,
+  'defaultFollowupMoved',v_default_to is not null);
+ update public.action_receipts set target_id=v_member.workspace_id,receipt=v_result where id=v_receipt.id;
+ return v_result;
+end;
+$$;
+revoke all on function public.vitally_start_next_season(uuid,smallint,smallint) from public,anon,authenticated,service_role;
+grant execute on function public.vitally_start_next_season(uuid,smallint,smallint) to authenticated;
