@@ -70,7 +70,7 @@ first approval (decided against).
   - New copies of:
     - `check_payload` (the `RETURN_TO_SIGNING` branch);
     - `act_return_to_signing`;
-    - `apply_fixture_scenario`, the demo scenario reset that clears a case's rows (latest copy in migration 039).
+  - No reset copy: migration 040 dropped `apply_fixture_scenario`; rows go with their case (on delete cascade).
 - **Browser:**
   - `src/admin-views.mjs`: `returnToSigningDialogBody` and `efiledChoices`.
   - `src/case-actions.mjs`: the `RETURN_TO_SIGNING` payload builder.

@@ -22,8 +22,9 @@
 - Fictional data only in tests and fixtures.
 - Migrations are hand-written, and applied ones are never edited. This change adds only `supabase/migrations/054_return_to_signing_exit_forms.sql`. Redefined functions are copied from their **latest** copy, with `-- 054` on changed lines (the repo's convention):
   - `check_payload`: latest is migration 046;
-  - `act_return_to_signing`: 035;
-  - `apply_fixture_scenario`: 039.
+  - `act_return_to_signing`: 035.
+  - (Not `apply_fixture_scenario`: migration 040 dropped it, found during Task 1. Rows go with their case through
+    `on delete cascade`; see design D7.)
 - Staff screens stay English. No client text, 简体 or 繁體 changes.
 - No account number, routing number or other banking detail is ever stored. `check_exit_form` already refuses unknown keys, so reuse it and don't loosen it.
 - Remarks: at most 2000 characters, as on the reviewer questionnaire.
@@ -69,12 +70,12 @@
   - `"staff can't insert directly"`: an insert as the site coordinator's client rejects.
   - `"exit_form must pass check_exit_form"`: a superuser insert with `{federal: {method: "efile", result: "refund", amount: "1.00", refundBy: "direct_deposit", accountNumber: "1"}, state: null, local: []}` rejects.
   - `"remarks over 2000 characters are refused"`.
-  - `"the scenario reset clears the table"`: after `apply_fixture_scenario` on that case, 0 rows. This one will pass only after Step 3's reset copy.
+  - ~~`"the scenario reset clears the table"`~~: not done. Migration 040 dropped `apply_fixture_scenario`.
 - [ ] **Step 2: Add the table to `tests/database-realtime.mjs`**, as `reviewer_questionnaires` is at line 472: staff receive a change, and the applicant receives none.
 - [ ] **Step 3: Run the tests to see them fail.** Run `npm run db:migrate:test`, then `node --env-file=.env.test --test tests/database-return-to-signing-exit-form.mjs tests/database-realtime.mjs`. Expected: FAIL, the relation doesn't exist.
 - [ ] **Step 4: Write migration 054's table part:**
   - the table, constraints, policy, grants and publication above;
-  - `apply_fixture_scenario`, copied whole from migration 039 line 581, with `delete from public.return_to_signing_exit_forms where workspace_id=p_case.workspace_id and case_id=p_case.id; -- 054` next to the `reviewer_questionnaires` delete.
+  - ~~`apply_fixture_scenario` copy~~: not done. Migration 040 dropped it; the table's `on delete cascade` foreign keys cover deleted cases and workspaces (design D7).
 - [ ] **Step 5: Run the tests to see them pass.** Run `npm run db:migrate:test` and the Step 3 command. Expected: PASS.
 - [ ] **Step 6: Commit.** Message: `Migration 054: return_to_signing_exit_forms table, staff-only access, realtime (#203)`.
 
@@ -110,7 +111,7 @@
   - Then, for `kind` in federal and state, when `exitForm->kind` is not JSON null, raise `VT007 VALIDATION` if:
     - the case's `<kind>_method` is null; or
     - `<kind>_result <> 'rejected'` and the group's `method <> <kind>_method`.
-  - When values are given, insert the row (`entered_by_person_id = p_person.id`, `remarks = nullif(p_payload->>'remarks','')`) and return `detail` with `exitFormId`.
+  - When values are given, insert the row (`entered_by_person_id = p_person.id`, `remarks = btrim(p_payload->>'remarks')`, trimmed as `act_approve_review` does; changed from `nullif(...)` at the final review) and return `detail` with `exitFormId`.
   - Keep the client message exactly.
 - [ ] **Step 5: Run the tests to see them pass.** Run `npm run db:migrate:test`, then `npm run test:database`. Expected: all PASS, including the existing `tests/database-filing.mjs` Return to signing tests.
 - [ ] **Step 6: Commit.** Message: `Migration 054: RETURN_TO_SIGNING carries and stores corrected Exit Form values (#203)`.
@@ -220,8 +221,8 @@
 - [ ] **Step 1: Write the failing tests** for a case at `review_approved` after a Return to signing, rendered through `markEfiledDialogBody`:
   - `"the planned paper method is preselected"`: state rejected, planned `paper`. The state-on-paper choice is `checked` and the e-file choice isn't.
   - `"nothing is preselected without a row"`: no choice is `checked`.
-  - `"two rejected returns select the matching combination"`: federal planned `efile` and state planned `paper` gives `efile_and_paper` `checked`.
-  - `"one planned, one not: nothing is preselected"`: only one of two rejected returns has a stored group, so no combination is `checked`.
+  - `"two rejected returns each preselect their planned method"`: federal planned `efile` and state planned `paper` give the federal e-file radio and the state paper radio `checked`. After a rejection the dialog uses per-return radios, not the four combinations.
+  - `"one planned, one not"`: only one of two rejected returns has a stored group, so that return's planned radio is `checked` and the other return's radios aren't. Changed at the final review from "nothing is preselected", to match the spec's per-return rule (design D6).
 - [ ] **Step 2: Run `npm test` to see them fail.** Expected: FAIL.
 - [ ] **Step 3: Implement.** Preselect only when every rejected return has a planned method.
 - [ ] **Step 4: Run `npm test` to see them pass.** Expected: PASS.

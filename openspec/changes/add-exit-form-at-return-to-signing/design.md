@@ -84,7 +84,8 @@ this change is migration 054.
   - a group whose method differs from a settled return's method (settled = method set and result not
     `rejected`).
 
-  A rejected return's group may carry either method.
+  A rejected return's group may carry either method. The act stores the remarks trimmed (`btrim`), as
+  `act_approve_review` does.
 - **Why:** the shape rules belong to `check_payload`, as for other actions. The rules that need the case row
   belong to the act, as Mark e-filed's do.
 - **Alternative considered:** a new action type, `RECORD_CORRECTED_EXIT_FORM`. Rejected: the values describe this
@@ -98,12 +99,16 @@ this change is migration 054.
   - the five Local groups;
   - a Remarks textarea.
 
-  A settled return's group shows its method as fixed text with a hidden input carrying the value, instead of the
-  method radios. The groups start closed and empty. A group the admin typed in stays open after a refused submit,
-  as `groupsToOpen` does for the reviewer.
+  A settled return's group shows its method as fixed text, instead of the method radios, and carries it in a
+  hidden `<prefix>.fixedMethod`. The groups start closed and empty. A group the admin typed in stays open after a
+  refused submit, as `groupsToOpen` does for the reviewer. "Clear this section" skips hidden inputs
+  (`clearableFields` in `src/form-values.mjs`), so the fixed method survives a Clear.
 
-  The payload builder in `src/case-actions.mjs` calls `exitFormFrom` and adds `exitForm` only when some group is
-  filled, and `remarks` only when not blank. A group left with only its fixed method counts as not filled.
+  The payload builder in `src/case-actions.mjs` copies `<prefix>.fixedMethod` to `<prefix>.method` only when
+  another field of that group is filled, then calls `exitFormFrom`. It adds `exitForm` only when some group is
+  filled, and `remarks` only when not blank. A group left with only its fixed method counts as not filled. A method
+  the admin chose on the radios always reaches `exitFormFrom`, so a group with only a chosen method is refused with
+  the reviewer form's message ("Federal: choose Refund, Owe or None.").
 - **Why:** one set of group fields, one parser and one database check mean the two Exit Form inputs can't drift.
 
 ### D5: `exitFormSource` reads the latest Return to signing's row
@@ -122,6 +127,9 @@ this change is migration 054.
     There's no Other Tax item, because empty means none.
   - The note reads: "The return was corrected after this review (Return to signing). This form was filled from
     the corrected values recorded on <date>." When `fillByHand` is not empty, it adds " Fill in by hand: <list>."
+    The branch is chosen by an explicit "stored values used" flag on the source, not by whether a date exists.
+    When the event's date is missing or can't be read, the sentence ends "…recorded at Return to signing."
+    with no date.
   - Without a matching row, or without `detail.exitFormId`: #173's result, unchanged.
   - A missing `returnToSigningExitForms` array counts as no rows.
 
@@ -130,16 +138,22 @@ this change is migration 054.
   back to #173's blanks rather than an older Return to signing's figures.
 
 ### D6: Mark e-filed preselects the planned method
-- **Choice:** `efiledChoices`, for a case with rejected returns, finds the planned method from the same latest
-  Return to signing row. It selects the matching choice. If there are two rejected returns with different planned
-  methods, it selects the matching combination. With no row, nothing is preselected, as today.
-- **Why:** the decision from Q3. The case's filing record is still set only by Mark e-filed.
+- **Choice:** after a rejection, Mark e-filed offers one choice per rejected return (`method-federal` /
+  `method-state` radios), not the four first-filing combinations. `efiledChoices` reads each rejected return's
+  planned method with `plannedMethod(record, kind)` from `src/exit-form-source.mjs`, the same latest Return to
+  signing row the Exit Form uses. Each rejected return with a planned method starts with that radio selected,
+  independently of the other; a rejected return without one starts unselected. With no stored values, nothing
+  is preselected, as today.
+- **Why:** the decision from Q3, and the spec's "that Mark e-filed SHALL start with that method selected" for each
+  rejected return. The case's filing record is still set only by Mark e-filed.
+- **Alternative considered:** preselect only when every rejected return has a plan. Rejected at the final review:
+  it came from assuming combination radios, and per-return radios make a partial preselection safe.
 
-### D7: Every per-case reset clears the table
-- **Choice:** migration 054 redefines the demo scenario reset, `vitally_private.apply_fixture_scenario`, from its
-  latest copy (migration 039), adding
-  `delete from public.return_to_signing_exit_forms` next to `reviewer_questionnaires`. `on delete cascade` covers
-  deleted cases. The table joins `STAFF_TABLES` in `src/supabase-store.mjs` and the realtime publication, as
+### D7: Rows go with their case
+- **Choice:** no per-case reset copy. Migration 040 dropped the demo scenario reset
+  (`vitally_private.apply_fixture_scenario`), so nothing clears a case's rows apart from deleting the case. The
+  table's foreign keys to `cases` and to `workspaces` are `on delete cascade`, so its rows go with their case and
+  workspace. The table joins `STAFF_TABLES` in `src/supabase-store.mjs` and the realtime publication, as
   `reviewer_questionnaires` does.
 
 ## Risks / Trade-offs
@@ -159,8 +173,8 @@ this change is migration 054.
 
 ## Migration Plan
 
-- Migration 054 adds the table and its row-level security and grants, and replaces `check_payload`,
-  `act_return_to_signing` and `apply_fixture_scenario` with `create or replace`.
+- Migration 054 adds the table and its row-level security and grants, and replaces `check_payload` and
+  `act_return_to_signing` with `create or replace`.
 - The old payload `{confirmed: true}` stays valid, so a browser not yet reloaded keeps working.
 - Rollback: a forward migration that drops the table and restores the earlier function bodies. Applied migrations
   are never edited.

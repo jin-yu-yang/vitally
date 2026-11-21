@@ -65,7 +65,7 @@ When the latest Return to signing stored no corrected values, the note SHALL rea
 - "the federal filing method" and "the Pennsylvania filing method", each when that box is not ticked;
 - then always "the federal and Pennsylvania refund or amount owed and how it is paid", "Other Tax" and "Remarks".
 
-When it stored corrected values, the note SHALL read "The return was corrected after this review (Return to signing). This form was filled from the corrected values recorded on <date>." The date SHALL be when that Return to signing was made. When something is still missing, the note SHALL go on " Fill in by hand: <list>." The list SHALL name, in this order and only when it applies:
+When it stored corrected values, the note SHALL read "The return was corrected after this review (Return to signing). This form was filled from the corrected values recorded on <date>." The date SHALL be when that Return to signing was made. If that date is not known, the sentence SHALL end "…recorded at Return to signing." instead. When something is still missing, the note SHALL go on " Fill in by hand: <list>." The list SHALL name, in this order and only when it applies:
 - "the federal filing method" or "the Pennsylvania filing method", for a return with no box ticked and no stored group;
 - "the federal refund or amount owed and how it is paid" or "the Pennsylvania refund or amount owed and how it is paid", for a return with a method on the case and no stored group;
 - "Remarks", when none were stored.
@@ -79,6 +79,10 @@ Other Tax SHALL not be listed, because no stored entry means none.
 #### Scenario: Nothing missing
 - **WHEN** a case was returned to signing with Federal and State groups and Remarks stored
 - **THEN** both places read "The return was corrected after this review (Return to signing). This form was filled from the corrected values recorded on <date>." with no "Fill in by hand"
+
+#### Scenario: Stored values with no known date
+- **WHEN** a case's latest Return to signing stored corrected values but its date is not known
+- **THEN** the note reads "The return was corrected after this review (Return to signing). This form was filled from the corrected values recorded at Return to signing.", followed by " Fill in by hand: <list>." only when something is missing
 
 #### Scenario: Only the gaps are listed
 - **WHEN** a case with both returns was returned to signing with a Federal group only and no Remarks, its state return being accepted

@@ -29,7 +29,7 @@
 
 ## 5. Mark e-filed preselection
 
-- [x] 5.1 Write unit tests for `efiledChoices`: the planned method is selected, nothing is selected without a row, and two rejected returns select the matching combination
+- [x] 5.1 Write unit tests for `efiledChoices`: the planned method is selected, nothing is selected without a row, and each rejected return with a planned method is preselected (per-return radios)
 - [x] 5.2 Implement the preselection in `src/admin-views.mjs` (D6)
 
 ## 6. Browser story and docs
