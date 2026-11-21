@@ -169,6 +169,13 @@ test("RETURN_TO_SIGNING carries and stores corrected Exit Form values", async (t
       assert.deepEqual(await detail(caseId), { exitFormId: stored[0].id });
     });
 
+    await t.test("remarks are trimmed when stored", async () => {
+      const caseId = await rejectedCase(both);
+      await act(caseId, "RETURN_TO_SIGNING", { confirmed: true, remarks: "  Corrected dependent SSN  " });
+      const stored = await rows(caseId);
+      assert.equal(stored[0].remarks, "Corrected dependent SSN");
+    });
+
     await t.test("remarks alone are stored", async () => {
       const caseId = await rejectedCase(both);
       await act(caseId, "RETURN_TO_SIGNING", { confirmed: true, remarks: "Only a note" });

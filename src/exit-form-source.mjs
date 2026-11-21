@@ -85,7 +85,7 @@ export function exitFormSource(record, review) {
 
   const latest = latestReturnToSigning(record);
   if (latest?.values) {
-    return { ...fromStoredValues(record, latest.values), corrected: true, recordedAt: latest.event.createdAt ?? null };
+    return { ...fromStoredValues(record, latest.values), corrected: true, fromStored: true, recordedAt: latest.event.createdAt ?? null };
   }
 
   const fillByHand = [];
@@ -114,8 +114,9 @@ const noteDate = (iso) => {
 
 export function exitFormNote(source) {
   if (!source?.corrected) return "";
-  if (source.recordedAt) {
-    const base = `The return was corrected after this review (Return to signing). This form was filled from the corrected values recorded on ${noteDate(source.recordedAt)}.`;
+  if (source.fromStored) {
+    const when = source.recordedAt ? noteDate(source.recordedAt) : "";
+    const base = `The return was corrected after this review (Return to signing). This form was filled from the corrected values recorded ${when ? `on ${when}` : "at Return to signing"}.`;
     return source.fillByHand.length ? `${base} Fill in by hand: ${source.fillByHand.join("; ")}.` : base;
   }
   return `${RETURN_TO_SIGNING_NOTE_START}${source.fillByHand.join("; ")}.`;

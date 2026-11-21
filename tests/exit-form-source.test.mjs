@@ -172,6 +172,26 @@ test("nothing missing: no fill-by-hand sentence", () => {
   assert.doesNotMatch(exitFormNote(exitFormSource(withValues(), REVIEW)), /Fill in by hand/);
 });
 
+const NO_DATE = "The return was corrected after this review (Return to signing). This form was filled from the corrected values recorded at Return to signing.";
+
+test("a stored row whose event has no createdAt still uses the stored-values sentence, without a date", () => {
+  const record = withValues({
+    internalHistory: [{ action: "RETURN_TO_SIGNING", createdAt: undefined, detail: { exitFormId: "x1" } }],
+  });
+  const note = exitFormNote(exitFormSource(record, { ...REVIEW, decidedAt: undefined }));
+  assert.equal(note, NO_DATE);
+  assert.doesNotMatch(note, /recorded on|Fill in by hand/);
+});
+
+test("stored row with gaps and no date lists the gaps after the dateless sentence", () => {
+  const record = withValues(
+    { internalHistory: [{ action: "RETURN_TO_SIGNING", createdAt: "not a date", detail: { exitFormId: "x1" } }] },
+    { exitForm: { federal: F.federal, state: null, local: [] }, remarks: "" },
+  );
+  const note = exitFormNote(exitFormSource(record, { ...REVIEW, decidedAt: undefined }));
+  assert.equal(note, `${NO_DATE} Fill in by hand: the Pennsylvania refund or amount owed and how it is paid; Remarks.`);
+});
+
 test("a federal-only case never lists Pennsylvania", () => {
   const source = exitFormSource(
     withValues({ stateMethod: null, stateResult: null }, { exitForm: { federal: F.federal, state: null, local: [] }, remarks: "" }),

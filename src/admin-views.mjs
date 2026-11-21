@@ -895,9 +895,8 @@ function efiledChoices(record) {
       )}: ${word}. Nothing to file again.</p>`;
     })
     .join("");
-  // Start on the method planned at Return to signing, only when every rejected return has one.
+  // Each rejected return starts on the method planned for it at Return to signing, if any.
   const plannedBy = Object.fromEntries(rejected.map((kind) => [kind, plannedMethod(record, kind)]));
-  if (!rejected.every((kind) => plannedBy[kind])) for (const kind of rejected) plannedBy[kind] = null;
   const groups = rejected
     .map((kind) => {
       const title = kind === "federal" ? "Federal return" : "Pennsylvania return";

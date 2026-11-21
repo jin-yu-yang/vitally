@@ -344,7 +344,7 @@ begin
   insert into public.return_to_signing_exit_forms(workspace_id,case_id,entered_by_person_id,exit_form,remarks) -- 054
   values(p_case.workspace_id,p_case.id,p_person.id, -- 054
    coalesce(p_payload->'exitForm','{"federal":null,"state":null,"local":[]}'::jsonb), -- 054
-   nullif(p_payload->>'remarks','')) returning id into v_id; -- 054
+   case when p_payload ? 'remarks' then btrim(p_payload->>'remarks') end) returning id into v_id; -- 054
   v_detail:=jsonb_build_object('exitFormId',v_id); -- 054
  end if; -- 054
  return jsonb_build_object('detail',v_detail, -- 054

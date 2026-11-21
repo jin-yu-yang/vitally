@@ -1807,7 +1807,7 @@ test("nothing is preselected without a row", () => {
   assert.deepEqual(checkedRadios(html), []);
 });
 
-test("two rejected returns select the matching combination", () => {
+test("each rejected return preselects its own planned method", () => {
   const html = markEfiledDialogBody({
     savedCase: plannedCase({ federalResult: "rejected" }, { federal: { method: "efile" }, state: { method: "paper" } }),
   });
@@ -1817,9 +1817,12 @@ test("two rejected returns select the matching combination", () => {
   assert.ok(checked.some((t) => /name="method-state"[^>]*value="paper"/.test(t)));
 });
 
-test("one planned, one not: nothing is preselected", () => {
+test("one planned, one not: only the planned return is preselected", () => {
   const html = markEfiledDialogBody({
     savedCase: plannedCase({ federalResult: "rejected" }, { state: { method: "paper" } }),
   });
-  assert.deepEqual(checkedRadios(html), []);
+  const checked = checkedRadios(html);
+  assert.equal(checked.length, 1);
+  assert.match(checked[0], /name="method-state"[^>]*value="paper"/);
+  assert.ok(!checked.some((t) => /name="method-federal"/.test(t)));
 });
