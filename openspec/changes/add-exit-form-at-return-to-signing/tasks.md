@@ -29,11 +29,11 @@
 
 ## 5. Mark e-filed preselection
 
-- [ ] 5.1 Write unit tests for `efiledChoices`: the planned method is selected, nothing is selected without a row, and two rejected returns select the matching combination
-- [ ] 5.2 Implement the preselection in `src/admin-views.mjs` (D6)
+- [x] 5.1 Write unit tests for `efiledChoices`: the planned method is selected, nothing is selected without a row, and two rejected returns select the matching combination
+- [x] 5.2 Implement the preselection in `src/admin-views.mjs` (D6)
 
 ## 6. Browser story and docs
 
-- [ ] 6.1 Extend the browser story (`tests/browser.mjs`) on the Return to signing path: enter corrected values, confirm, download the Exit Form, check the note, and check Mark e-filed's preselection
-- [ ] 6.2 Update `docs/developer/backend.md`, `docs/developer/frontend.md`, `docs/demo-script.md` and `README.md` where they describe Return to signing or the Exit Form after it
-- [ ] 6.3 Run `npm test` and `npm run test:browser`, all passing; before the PR, check that migration 054 doesn't collide with whatever has merged to main (PR #243's 053)
+- [x] 6.1 Extend the browser story (`tests/browser.mjs`) on the Return to signing path: enter corrected values, confirm, download the Exit Form, check the note, and check Mark e-filed's preselection
+- [x] 6.2 Update `docs/developer/backend.md`, `docs/developer/frontend.md`, `docs/demo-script.md` and `README.md` where they describe Return to signing or the Exit Form after it
+- [x] 6.3 Run `npm test` and `npm run test:browser`, all passing; before the PR, check that migration 054 doesn't collide with whatever has merged to main (PR #243's 053)
