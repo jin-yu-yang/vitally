@@ -3856,9 +3856,8 @@ async function runPermutation(t, roles) {
       assert.equal((await caseById(fixture, classCase.id)).stage, "review_approved");
       // The approval said No to going over the return, so the office's go-over
       // was passed to the first signing and "Your next step" says so. That panel
-      // is on the volunteer case page, so go there first.
-      await openBoard(staff, WORK_BOARD_HEADING);
-      await openCaseByReference(staff, classReference);
+      // is on the volunteer case page, so read it in the Reviewer's window.
+      await use("reviewer", classReference);
       await waitFor(
         staff,
         "the next step to place the go-over at the first signing",
@@ -3887,8 +3886,8 @@ async function runPermutation(t, roles) {
         ),
         1,
       );
-      // Back to the office side, where the next lines expect to be.
-      await openBoard(staff, OFFICE_BOARD_HEADING);
+      // Back to the Site Coordinator's window, on the case page it was on.
+      await use("siteCoordinator", classReference);
       await poolTabShows("signing", classReference);
       await openBoard(staff, OFFICE_BOARD_HEADING);
       await waitFor(
