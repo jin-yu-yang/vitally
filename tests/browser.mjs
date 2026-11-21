@@ -3854,6 +3854,36 @@ async function runPermutation(t, roles) {
         () => fillReturnGroup(staff, "state", { method: "paper", result: "refund", amount: "88.00", refundBy: "check" }),
       );
       assert.equal((await caseById(fixture, classCase.id)).stage, "review_approved");
+      // The approval said No to going over the return, so the office's go-over
+      // was passed to the first signing and "Your next step" says so.
+      await waitFor(
+        staff,
+        "the next step to place the go-over at the first signing",
+        (wanted) => document.querySelector(".panel.next-step")?.innerText.includes(wanted),
+        "At the first signing, going over the return with the client was passed to the office. It isn't gone over again.",
+        ARRIVAL_MS,
+      );
+      assert.equal(
+        await staff.evaluate(() =>
+          document
+            .querySelector(".panel.next-step")
+            .innerText.includes("The office will go over the return with the client."),
+        ),
+        false,
+        "the next step still says the office will go over the return",
+      );
+      assert.equal(
+        Number(
+          (
+            await one(
+              fixture,
+              "select count(*)::int as n from public.admin_followups where case_id=$1 and purpose='go_over_return'",
+              [classCase.id],
+            )
+          ).n,
+        ),
+        1,
+      );
       await poolTabShows("signing", classReference);
       await openBoard(staff, OFFICE_BOARD_HEADING);
       await waitFor(
