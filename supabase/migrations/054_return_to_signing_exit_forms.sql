@@ -27,9 +27,10 @@ create index return_to_signing_exit_forms_case_idx on public.return_to_signing_e
 
 alter table public.return_to_signing_exit_forms enable row level security;
 create policy staff_return_to_signing_exit_forms on public.return_to_signing_exit_forms for select to authenticated using(exists(select 1 from public.memberships m join public.cases c on c.workspace_id=m.workspace_id and c.id=return_to_signing_exit_forms.case_id where m.workspace_id=return_to_signing_exit_forms.workspace_id and m.user_id=(select auth.uid()) and m.active and m.access='staff' and (c.origin<>'client' or c.stage<>'draft') and return_to_signing_exit_forms.workspace_id=(select vitally_policy.cleared_workspace_id())));
-revoke all on public.return_to_signing_exit_forms from public, anon, authenticated;
+revoke all on public.return_to_signing_exit_forms from public, anon, authenticated, service_role;
 grant select on public.return_to_signing_exit_forms to authenticated;
-grant select, insert, update, delete on public.return_to_signing_exit_forms to service_role;
+-- service_role gets nothing, as on 049's and 051's tables: only act_return_to_signing
+-- (security definer) writes rows.
 
 -- Realtime, with 033's pattern.
 do $$
