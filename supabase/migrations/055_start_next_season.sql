@@ -94,3 +94,42 @@ end;
 $$;
 revoke all on function public.vitally_assistance_action(uuid,uuid,bigint,text,text) from public,anon,authenticated,service_role;
 grant execute on function public.vitally_assistance_action(uuid,uuid,bigint,text,text) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- §2. Open work counts only the current season's cases (design D6). open_work
+-- is from 045. A case a past season left behind keeps naming its preparer and
+-- reviewer, so without the season bound a returning volunteer could never lose
+-- Preparer or be deactivated. A case with no season yet still counts. Branches
+-- 3-5 are unchanged.
+
+create or replace function vitally_private.open_work(p_workspace_id uuid,p_person_id uuid)
+returns table(needs text,label text) language sql stable security definer set search_path='' as $$
+ select w.needs,w.label from (
+  select 1 as ord,c.client_number as n,'prepare' as needs,'preparing client '||coalesce(c.client_number::text,c.reference) as label
+   from public.cases c join public.workspaces ws on ws.id=c.workspace_id -- 055
+   where c.workspace_id=p_workspace_id and c.preparer_id=p_person_id and c.stage<>'closed'
+    and (c.season=ws.current_season or c.season is null) -- 055
+  union all
+  select 2,c.client_number,'review','reviewing client '||coalesce(c.client_number::text,c.reference)
+   from public.cases c join public.workspaces ws on ws.id=c.workspace_id -- 055
+   where c.workspace_id=p_workspace_id and c.reviewer_id=p_person_id and c.stage<>'closed'
+    and (c.season=ws.current_season or c.season is null) -- 055
+  union all
+  select 3,c.client_number,'followup','follow-up for client '||coalesce(c.client_number::text,c.reference)
+   from public.admin_followups t join public.cases c on c.workspace_id=t.workspace_id and c.id=t.case_id
+   where t.workspace_id=p_workspace_id and t.assignee_person_id=p_person_id and t.status='open'
+  union all
+  select 4,null,'followup','default follow-up person'
+   from public.workspaces ws where ws.id=p_workspace_id and ws.default_followup_person_id=p_person_id
+  union all
+  select 5,null,'assist','a help request'
+   from public.assistance_items a where a.workspace_id=p_workspace_id and a.assignee_person_id=p_person_id and a.status='assigned'
+ ) w order by w.ord,w.n nulls last,w.label collate "C";
+$$;
+revoke all on function vitally_private.open_work(uuid,uuid) from public,anon,authenticated,service_role;
+
+-- ---------------------------------------------------------------------------
+-- §3. 052 kept a copy of everyone's capabilities from before it, for a
+-- rollback. Nothing reads it.
+
+drop table vitally_private.capabilities_before_052;
