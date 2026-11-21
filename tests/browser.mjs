@@ -9903,6 +9903,8 @@ test(
       assertConsoleQuiet(adminWin, { name: "the Site Coordinator's window", allow: REFUSAL_LINES });
 
       if (noAccess) throw noAccess;
+      // Its released channel's close is not a lost connection.
+      assert.equal(await preparer.locator(".connection-notice").count(), 0, "the no-access window says the connection is lost");
       assert.deepEqual(preparerWin.pageErrors, [], "the Preparer's window threw in the page");
     } finally {
       await fixture.close();

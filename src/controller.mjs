@@ -1089,9 +1089,13 @@ export function createController({
 
   function subscribe() {
     if (releaseStore) return;
-    releaseStore = store.subscribe({
+    // A released channel still reports itself closed (removeChannel): that
+    // is not this window's connection, so it is not heard.
+    let live = true;
+    const release = store.subscribe({
       onChange: (change) => handleChange(change),
       onConnection: (status) => {
+        if (!live) return;
         const previous = state.connection;
         state.connection = status;
         show();
@@ -1100,6 +1104,10 @@ export function createController({
           refresh({ wake: true });
       },
     });
+    releaseStore = () => {
+      live = false;
+      release?.();
+    };
   }
 
   function unsubscribe() {

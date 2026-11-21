@@ -9902,8 +9902,13 @@ test("a wake check refused because the membership is gone shows no-access and dr
     throw refused();
   };
   const from = store.calls.length;
+  const released = store.handlers;
   await events.emit("focus");
+  // The released channel then reports itself closed, as removeChannel does:
+  // it is not a lost connection, so no offline notice joins the screen.
+  released.onConnection("offline");
   const state = controller.getState();
+  assert.notEqual(state.connection, "offline", "the released channel's close reads as a lost connection");
   assert.equal(state.screen, "no-access");
   assert.equal(state.principal, null);
   assert.ok(showsNoAccess(state), "the no-access screen is drawn");
