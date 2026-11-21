@@ -10,6 +10,15 @@ import { LOCAL_TYPES } from "./questionnaires.mjs";
 // The Local taxes, in the questionnaire's order: a row each under Other Tax.
 const LOCAL_TAXES = Object.freeze(LOCAL_TYPES.map(([type]) => type));
 
+// The tax year a case's Exit Form shows: the season is the year the return is
+// filed, so the tax year is one earlier. A case without a season uses the
+// workspace's current season; with neither, null leaves the field blank.
+export function exitFormTaxYear(record, workspace) {
+  if (Number.isInteger(record?.season)) return record.season - 1;
+  if (Number.isInteger(workspace?.currentSeason)) return workspace.currentSeason - 1;
+  return null;
+}
+
 export const EXIT_FORM_FILE = "src/forms/exit-form-pcdc.pdf";
 
 const PAGE_HEIGHT = 792;
