@@ -40,8 +40,8 @@
 
 ## 5. Exit Form tax year
 
-- [ ] 5.1 Unit test (failing first): the Exit Form for a season-2026 case shows tax year 2025
-- [ ] 5.2 Change `src/app.mjs` to pass `season - 1`, falling back to `currentSeason - 1`, with no hard-coded 2025
+- [x] 5.1 Unit test (failing first): the Exit Form for a season-2026 case shows tax year 2025
+- [x] 5.2 Change `src/app.mjs` to pass `season - 1`, falling back to `currentSeason - 1`, with no hard-coded 2025
 
 ## 6. Story, docs and checks
 
