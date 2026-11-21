@@ -428,7 +428,7 @@ test("volunteer clearance against real Supabase", async (t) => {
 });
 
 // ---------------------------------------------------------------------------
-// The read gate (design D3): the 23 case-data policies read only for a cleared
+// The read gate (design D3): the 24 case-data policies read only for a cleared
 // staff member, through the no-argument InitPlan helper
 // `vitally_policy.cleared_workspace_id()`. `people` is not gated, and neither
 // is `posted_updates` (049): it holds no case data, and its audience policy
@@ -456,6 +456,7 @@ const CASE_TABLES = Object.freeze([
   "preparation_participants",
   "preparer_questionnaires",
   "preparer_shaded_fields",
+  "return_to_signing_exit_forms",
   "reviewer_questionnaires",
   "reviews",
 ]);
@@ -602,7 +603,7 @@ test("the read gate against real Supabase", async (t) => {
           where schemaname='public' and qual like '%access = ''staff''%' and tablename not in ('people','posted_updates')
           order by tablename`,
       );
-      assert.equal(rows.length, 23);
+      assert.equal(rows.length, 24);
       assert.deepEqual(rows.map((row) => row.tablename), [...CASE_TABLES]);
       for (const row of rows)
         assert.ok(row.qual.includes("cleared_workspace_id"), `${row.tablename}.${row.policyname}`);
@@ -996,12 +997,13 @@ test("vitally_my_clearance against real Supabase", async (t) => {
       });
       assert.deepEqual(await myClearance(member.client), {
         cleared: false,
-        missing: [{ kind: "form13615" }],
+        missing: [{ kind: "form13615", sentAt: null }],
         capabilities: [],
         isAdmin: false,
         isSiteCoordinator: false,
         siteCheck: false,
         siteCoordinatorName: "Avery Lin",
+        uploadUrl: null,
       });
     });
 
@@ -1014,12 +1016,13 @@ test("vitally_my_clearance against real Supabase", async (t) => {
         isSiteCoordinator: false,
         siteCheck: false,
         siteCoordinatorName: "Avery Lin",
+        uploadUrl: null,
       });
     });
 
     // 047 (add-account-invitations, design D12) adds siteCheck; 052 (design
-    // D4) adds isSiteCoordinator.
-    await t.test("the answer has exactly seven keys", async () => {
+    // D4) adds isSiteCoordinator; 053 (add-clearance-uploads, D5) adds uploadUrl.
+    await t.test("the answer has exactly eight keys", async () => {
       const result = await myClearance(f.preparer);
       assert.deepEqual(Object.keys(result).sort(), [
         "capabilities",
@@ -1029,6 +1032,7 @@ test("vitally_my_clearance against real Supabase", async (t) => {
         "missing",
         "siteCheck",
         "siteCoordinatorName",
+        "uploadUrl",
       ]);
     });
 
@@ -1044,10 +1048,9 @@ test("vitally_my_clearance against real Supabase", async (t) => {
       await setNew(false);
       const unchecked = await myClearance(member.client);
       assert.equal(unchecked.cleared, false);
-      assert.deepEqual(unchecked.missing, [{ kind: "photoId" }]);
-      // The capabilities are the roles' (effective_capabilities); the read gate
-      // and the action gate, not this list, hold an uncleared person back.
-      assert.deepEqual(unchecked.capabilities, ["prepare"]);
+      assert.deepEqual(unchecked.missing, [{ kind: "photoId", sentAt: null }]);
+      // Not cleared: no capabilities (#193 item 7), whatever the roles.
+      assert.deepEqual(unchecked.capabilities, []);
       await setNew(true);
       const checked = await myClearance(member.client);
       assert.equal(checked.cleared, true);

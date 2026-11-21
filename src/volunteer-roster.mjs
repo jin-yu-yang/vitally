@@ -114,6 +114,9 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
       signedInName: profile.signed_in_name ?? null,
       isNew,
       photoIdChecked,
+      // When the volunteer said they sent each document (migration 053); null before.
+      form13615SentAt: entry.form_13615_sent_at ?? null,
+      photoIdSentAt: entry.photo_id_sent_at ?? null,
       account,
       isSiteCoordinator,
       cleared,
@@ -123,9 +126,17 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
   return list.sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
 }
 
-export function filterVolunteers(list, { search = "", role = "all" } = {}) {
+// The Roster's Show select (change add-clearance-uploads, design D7).
+export const SHOW_VIEWS = Object.freeze([
+  { value: "all", label: "Everyone", keep: () => true },
+  { value: "uploads", label: "Uploads to review", keep: (v) => v.form13615SentAt != null || v.photoIdSentAt != null },
+]);
+
+export function filterVolunteers(list, { search = "", role = "all", show = "all" } = {}) {
   const needle = String(search ?? "").trim().toLowerCase();
+  const view = SHOW_VIEWS.find((entry) => entry.value === show) ?? SHOW_VIEWS[0];
   return list.filter((v) => {
+    if (!view.keep(v)) return false;
     if (role && role !== "all" && !v.roles.includes(role)) return false;
     if (!needle) return true;
     return [v.name, v.email, v.phone].some((field) => String(field ?? "").toLowerCase().includes(needle));

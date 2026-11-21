@@ -45,6 +45,7 @@ const STAFF_TABLES = Object.freeze([
   "preparer_questionnaires",
   "reviewer_questionnaires",
   "preparer_shaded_fields",
+  "return_to_signing_exit_forms",
   "case_labels",
   "case_label_links",
   "posted_updates",
@@ -316,6 +317,7 @@ export const mapStaffCase = ({
   materials = [],
   preparerQuestionnaires = [],
   reviewerQuestionnaires = [],
+  returnToSigningExitForms = [],
   preparerShadedFields = [],
   filingAttempts = [],
   filingReturns = [],
@@ -330,6 +332,8 @@ export const mapStaffCase = ({
   internalHistory: internalHistory.map(camelRow),
   preparerQuestionnaires: preparerQuestionnaires.map(camelRow),
   reviewerQuestionnaires: reviewerQuestionnaires.map(camelRow),
+  // Oldest first (relatedRows); `[]` when the case was never corrected.
+  returnToSigningExitForms: returnToSigningExitForms.map(camelRow),
   // One row at most (case_id is unique): `[row]`, or `[]` before the first save.
   preparerShadedFields: preparerShadedFields.map(camelRow),
   filingAttempts: mapFilingAttempts(filingAttempts, filingReturns, filingNotes),
@@ -720,6 +724,8 @@ export function createStore(client) {
         // Staff only: the applicant path above never names these tables.
         preparerQuestionnaires: await relatedRows("preparer_questionnaires", id),
         reviewerQuestionnaires: await relatedRows("reviewer_questionnaires", id),
+        // Staff only (migration 054), and never named on the applicant path.
+        returnToSigningExitForms: await relatedRows("return_to_signing_exit_forms", id),
         // Staff only (migration 038), and never named on the applicant path.
         preparerShadedFields: await relatedRows("preparer_shaded_fields", id),
         // Staff only (migration 035). These tables have no created_at, so they
@@ -804,6 +810,45 @@ export function createStore(client) {
         p_expected_revision: request.expectedRevision ?? null,
         p_volunteer: request.volunteer,
       });
+    },
+
+    // Clearance uploads (migration 053). A volunteer records that they sent a
+    // document; an admin records that they reviewed it.
+    async markUploadSent(request) {
+      return await call("vitally_mark_upload_sent", {
+        p_action_id: actionId(request),
+        p_document: request.document,
+      });
+    },
+
+    async markUploadReviewed(request) {
+      return await call("vitally_mark_upload_reviewed", {
+        p_action_id: actionId(request),
+        p_volunteer_id: request.volunteerId,
+        p_expected_revision: request.expectedRevision,
+        p_document: request.document,
+      });
+    },
+
+    // The Volunteers badge (design D8): current-season roster entries with
+    // either sent date set. A head count, so no rows travel.
+    async countUploadsToReview() {
+      await requireStaffAccess();
+      const season = (await read(client.from("workspaces").select("current_season")))[0]
+        ?.current_season;
+      if (season == null) return 0;
+      let result;
+      try {
+        result = await client
+          .from("roster_entries")
+          .select("person_id", { count: "exact", head: true })
+          .eq("season", season)
+          .or("form_13615_sent_at.not.is.null,photo_id_sent_at.not.is.null");
+      } catch (cause) {
+        throw createAppError(cause);
+      }
+      if (result?.error) throw createAppError(result.error);
+      return result?.count ?? 0;
     },
 
     // Accounts (migration 047). Create, invite and resend go through the

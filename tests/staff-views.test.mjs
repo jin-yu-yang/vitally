@@ -1616,6 +1616,10 @@ test("internal history reads as sentences, with who did it", () => {
     historySentence({ action: "RETURN_TO_SIGNING", actorName: "Sam" }),
     "Sam returned the case to signing.",
   );
+  assert.equal(
+    historySentence({ action: "RETURN_TO_SIGNING", actorName: "Sam", detail: { exitFormId: "x1" } }),
+    historySentence({ action: "RETURN_TO_SIGNING", actorName: "Sam", detail: {} }),
+  );
   // Design D12's four sentences. The client's withdrawal has no staff actor.
   assert.equal(historySentence({ action: "REQUEST_DOCUMENTS_AT_INTAKE", actorName: "Sam" }), "Sam asked for documents.");
   assert.equal(historySentence({ action: "PUT_ON_HOLD", actorName: "Sam" }), "Sam put the case on hold.");

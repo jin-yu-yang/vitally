@@ -1,0 +1,69 @@
+# A quick database run while iterating: a fresh local Supabase stack, then only
+# the named database test files.
+#
+#   gh workflow run database-quick.yml --ref <branch> -f files="tests/database-x.mjs"
+#
+# It is its own workflow with its own check name, so it never leaves a
+# `checks`, `database`, `sign-in` or `story` result on a commit and can't be
+# mistaken for CI. It never stands in for CI (CLAUDE.md, Verification).
+
+name: Database quick run
+
+on:
+  workflow_dispatch:
+    inputs:
+      files:
+        description: "Database test files to run (space-separated, tests/database*.mjs)"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: database-quick-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  database-quick:
+    name: database quick run (chosen files)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      TZ: America/New_York
+    steps:
+      # Checked first, before anything is installed. The input is passed
+      # through the environment, never interpolated into the script, and
+      # accepted only as one or more existing tests/database*.mjs files.
+      - uses: actions/checkout@v7
+
+      - name: Chosen files are database test files
+        env:
+          FILES: ${{ inputs.files }}
+        run: |
+          read -r -a files <<< "$FILES"
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::Name at least one database test file."
+            exit 1
+          fi
+          for file in "${files[@]}"; do
+            if [[ ! "$file" =~ ^tests/database[a-z0-9-]*\.mjs$ ]] || [ ! -f "$file" ]; then
+              echo "::error::Not a database test file: $file"
+              exit 1
+            fi
+          done
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.21.0
+          cache: npm
+
+      - run: npm ci
+
+      - uses: ./.github/actions/test-stack
+
+      - name: Chosen database files
+        env:
+          FILES: ${{ inputs.files }}
+        run: |
+          read -r -a files <<< "$FILES"
+          node --env-file=.env.test --test "${files[@]}"

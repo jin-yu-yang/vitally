@@ -1705,15 +1705,13 @@ function preparerForm(record, previous, ui = {}) {
 // the debit date only for a direct debit. Showing and hiding is CSS alone
 // (q-exit-when-*); the payload builder (questionnaires.mjs, group) drops whatever
 // the Result does not use.
-function exitGroup(title, prefix) {
-  const scope = "rev";
-  return `<details class="q-exit-group" data-exit-group="${esc(prefix)}"><summary>${esc(title)}</summary><div class="q-exit-group-body">${radios(
-    "How it was filed",
-    scope,
-    `${prefix}.method`,
-    FILING_METHODS,
-    "",
-  )}${radios("Result", scope, `${prefix}.result`, RESULTS, "")}<div class="q-exit-when-amount">${input(
+// With fixedMethod (a return already settled at Return to signing) the method
+// is text plus a hidden field instead of radios.
+export function exitGroup(title, prefix, { scope = "rev", fixedMethod = null } = {}) {
+  const method = fixedMethod
+    ? `<p class="hint">How it was filed: ${esc(optionLabel(FILING_METHODS, fixedMethod))}</p><input type="hidden" name="${esc(prefix)}.fixedMethod" value="${esc(fixedMethod)}">`
+    : radios("How it was filed", scope, `${prefix}.method`, FILING_METHODS, "");
+  return `<details class="q-exit-group" data-exit-group="${esc(prefix)}"><summary>${esc(title)}</summary><div class="q-exit-group-body">${method}${radios("Result", scope, `${prefix}.result`, RESULTS, "")}<div class="q-exit-when-amount">${input(
     "Amount",
     `${prefix}.amount`,
     "",

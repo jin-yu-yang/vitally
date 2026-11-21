@@ -39,6 +39,10 @@ export function formValuesWithLists(form, data = new FormData(form)) {
 
 export const isCheckable = (field) => field?.type === "checkbox" || field?.type === "radio";
 
+// The fields "Clear this section" empties: a hidden input (a settled return's
+// fixed method) is not something the volunteer typed, so it stays.
+export const clearableFields = (fields) => [...fields].filter((field) => field?.type !== "hidden");
+
 /**
  * The draft one input event on a text box (or select) records, or null for
  * none. A select has no defaultValue, and on this path (staff forms' unsent

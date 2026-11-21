@@ -26,6 +26,7 @@ The front end **predicts** what a person may do so it can show the right buttons
 - [Live updates](#live-updates)
 - [The contact log](#the-contact-log)
 - [Case labels](#case-labels)
+- [Clearance uploads](#clearance-uploads)
 - [Posted updates](#posted-updates)
 - [Sign-in](#sign-in)
 - [Window state](#window-state)
@@ -506,10 +507,25 @@ in the browser from an approval's reviewer questionnaire, and nothing is uploade
   the return was corrected. The PDF itself carries no note, only the blanks. Without staff history,
   no form is offered. Fixed in
   [#173](https://github.com/jin-yu-yang/vitally/issues/173). Still open:
-  [#203](https://github.com/jin-yu-yang/vitally/issues/203) (collect the corrected
-  values at Return to signing) and
   [#204](https://github.com/jin-yu-yang/vitally/issues/204) (the review-contact
   line after a Return to signing).
+- **Corrected values at Return to signing (#203).** The Return to signing dialog
+  (`returnToSigningDialogBody` in `admin-views.mjs`) optionally collects the corrected Exit Form
+  values: a closed `<details class="q-exit-group">` for each return the case has a method for and
+  for each of the five Local types, and Remarks. A settled return shows its method as text with a
+  hidden `<prefix>.fixedMethod`; a rejected return has method radios. The payload builder
+  (`returnToSigning` in `case-actions.mjs`) sends `exitForm` and `remarks` only when something is
+  filled, and refuses a method-only group or a bad amount in the browser (the dialog stays open and
+  the typed group stays open). The values go to `return_to_signing_exit_forms`
+  ([database](database.md#action-catalogue)), and the event's `detail.exitFormId` names the row.
+  `exitFormSource` then prints the stored values: the settled methods come from the case, the rest
+  from the row, and the note reads "This form was filled from the corrected values recorded on
+  <date>." (the New York date of the event), plus " Fill in by hand: <list>." only for what is
+  still missing. With no stored values the #173 note and blank form are unchanged.
+- **Mark e-filed after a Return to signing.** Each rejected return's method radios
+  (`method-federal`, `method-state`) start with the method planned at Return to signing checked
+  (`plannedMethod`), but only when every rejected return has a plan; otherwise nothing is
+  preselected. The admin can change it.
 - **Who may make it.** `viewExitForm` in `app.mjs` returns at once for anything but a staff window
   (`isStaffWindow`). Like the drafts, it opens a new tab and, if the browser blocks the tab,
   offers a link instead (`draftOffers`). A blocked tab's link is drawn on the Intake answers tab, so
@@ -656,7 +672,7 @@ choice "given to the client to mail") and sends `{confirmed, methods}`; filing a
 rejected returns and lists the rest as done. "Record filing result…" (`efiled`, or `rejected` while an
 e-filed return is waiting) asks for e-filed returns only, never a paper one, and sends each waiting
 return's result, date and, when rejected, a code, plus an optional fix note. "Return to signing…" (`rejected`
-with every return answered) sends `{confirmed: true}`; "Close case…" is also offered at `rejected`.
+with every return answered) sends `{confirmed: true}` plus the optional corrected Exit Form values (`exitForm`, `remarks`; see [The Exit Form](#the-exit-form)); "Close case…" is also offered at `rejected`.
 A staff-only Filing panel on the case page lists every attempt, newest first, with each return's
 method, result, date and code, and the fix notes in the order recorded. The case pool has two more
 tabs, Needs attention (`rejected`) and Done (`accepted`), and Follow-ups gains the kinds "Filing
@@ -893,6 +909,37 @@ database side is in [Database: the contact log](database.md#the-contact-log).
   re-read the case. The store reads `contact_log` and `contact_log_versions` for `getCase`.
 - **Copy** writes to the system clipboard with `navigator.clipboard.writeText` (`copyContacts` in
   `app.mjs`). A refused clipboard shows a warning toast instead. Tests that check the text read the clipboard back.
+
+## Clearance uploads
+
+A volunteer says they sent their Form 13615 or photo ID, and a workspace admin sees what is waiting.
+The database side is in [Database: clearance uploads](database.md#clearance-uploads).
+
+- **The setup screen** ([`setup-views.mjs`](../../src/setup-views.mjs)). The `form13615` and
+  `photoId` items show **Upload** (a link to the clearance's `uploadUrl`, `target="_blank"
+  rel="noopener"`) or, with no link, "Ask your site coordinator how to send it.", and an **I've
+  uploaded it** button carrying the document. Once the item has a `sentAt`, the button is replaced by
+  "Waiting for review · sent Nov 20" (New York, as `SENT_DAY` in `ui.mjs`, which the drawer's sent line also uses); Upload stays so a
+  corrected file can be sent. Role and SC items are unchanged.
+- **`controller.markUploadSent(document)`** calls the store's `markUploadSent` with a fresh action
+  id, or the same one when the last send's outcome was unknown, then re-reads the clearance as Check
+  again does. `VALIDATION` details `PHOTO_ID_NOT_NEEDED` and `NO_ROSTER_ENTRY` get their own
+  sentences; other failures use the usual notice.
+- **The Roster's Show filter.** `SHOW_VIEWS` in [`volunteer-roster.mjs`](../../src/volunteer-roster.mjs)
+  lists the views (`all` "Everyone", `uploads` "Uploads to review"); `filterVolunteers` ANDs the
+  chosen view's predicate with Role and search, and `setVolunteerFilter` accepts `show`. A new view
+  is one more entry in the list. `combineVolunteers` carries `form13615SentAt` and `photoIdSentAt`,
+  and the row status adds "Form 13615 to review" and "Photo ID to review".
+- **The drawer** shows "Form 13615 sent <date>" and "Photo ID sent <date>" with a **Mark reviewed**
+  button for each. `controller.markUploadReviewed(document)` sends the drawer's revision, re-reads
+  the Roster, and keeps the admin's unsaved edits (Mark reviewed changes nothing Save sends). A
+  `CONFLICT` shows the drawer's usual conflict message.
+- **The sidebar count.** For a workspace admin (cleared or not) Volunteers reads "Volunteers · n"
+  with `aria-label="Volunteers, n uploads to review"` ("1 upload" at one); at 0 it is plain
+  "Volunteers". `state.uploadsToReview` counts people, from the store's `countUploadsToReview()`
+  (`roster_entries` is not live). It is re-read with the data load, every clearance check, a cleared
+  window's wake refresh, the admin's Save and Mark reviewed, and every Roster read. A failed read
+  keeps the last count; it is reset on sign-out and on losing admin.
 
 ## Posted updates
 
