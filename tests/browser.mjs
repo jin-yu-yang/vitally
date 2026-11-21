@@ -6251,8 +6251,13 @@ async function runPermutation(t, roles) {
         // ---- Documents (spec 2026-10-04 §6) ------------------------------
         await jump("documents.identity");
         const photo = page.locator("#doc-photo_id-tp");
-        assert.match(await photo.textContent(), /Online upload is not available/);
-        assert.equal(await photo.locator(".doc-upload button, .doc-upload a").count(), 0);
+        const photoText = await photo.textContent();
+        assert.match(photoText, /Upload to PCDC/);
+        assert.match(photoText, /I've uploaded it/);
+        assert.match(photoText, /The file goes to PCDC's OneDrive, not ViTally/);
+        assert.match(photoText, /Only PCDC staff can confirm receipt/);
+        assert.equal(await photo.locator(".doc-upload a").count(), 1);
+        assert.equal(await photo.locator(".doc-upload button").count(), 1);
         assert.deepEqual(await cardStatus("photo_id.tp"), {
           className: "doc-status is-not_done",
           text: "Status: Not done",

@@ -330,7 +330,7 @@ test("document requests, receipts and verification keep the preparer in charge",
         // The client-facing note is neutral: nobody claims a client uploaded.
         const message = staff.history.at(-1).message;
         assert.equal(staff.history.at(-1).action, "RECORD_DOCUMENT_RESPONSE");
-        assert.ok(message.includes("staff"), message);
+        assert.ok(message.includes("office"), message);
         // The preparer still has to verify it.
         await f.act(f.preparer, caseId, "VERIFY_DOCUMENT", {});
         staff = await f.readStaffCase(caseId);

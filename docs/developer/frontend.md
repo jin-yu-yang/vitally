@@ -1157,5 +1157,5 @@ its existing `VERIFY_DOCUMENT` action. If there is no configured URL, the
 client is told to bring documents to PCDC and no upload control appears. The
 application never reads OneDrive or checks whether a file arrived.
 
-Migration `053_onedrive_client_documents.sql` adds an applicant-safe URL read
+Migration `055_onedrive_client_documents.sql` adds an applicant-safe URL read
 RPC and expands card statuses; *clients cannot set* `received` or `verified`.

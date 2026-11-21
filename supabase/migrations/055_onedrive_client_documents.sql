@@ -6,7 +6,7 @@
 -- Applicant-safe access to the *client* link only. The site coordinator's
 -- certificate / ID upload URL is never exposed through this function.
 create or replace function public.vitally_client_documents_link()
-returns jsonb language plpgsql stable security definer set search_path='' as $$
+returns jsonb language plpgsql security definer set search_path='' as $$
 declare v_member public.memberships;
 begin
  v_member=vitally_private.require_membership();
@@ -199,11 +199,20 @@ begin
     or (p_payload->>'reason'='other' and not p_payload ? 'note') then -- 036
     raise sqlstate 'VT007' using message='VALIDATION';
    end if;
-  when 'MARK_READY_TO_EFILE','RETURN_TO_SIGNING' then -- 035
+  when 'MARK_READY_TO_EFILE' then -- 054
    if vitally_private.payload_keys(p_payload)<>array['confirmed'] -- 032
     or p_payload->'confirmed'<>'true'::jsonb then -- 032
     raise sqlstate 'VT007' using message='VALIDATION'; -- 032
    end if; -- 032
+  when 'RETURN_TO_SIGNING' then -- 054
+   -- The confirmation, and optionally the corrected Exit Form values and remarks. -- 054
+   -- Which groups fit the case is the handler's. -- 054
+   if p_payload->'confirmed' is distinct from 'true'::jsonb -- 054
+    or not (vitally_private.payload_keys(p_payload)<@array['confirmed','exitForm','remarks']) -- 054
+    or (p_payload ? 'exitForm' and not coalesce(vitally_private.check_exit_form(p_payload->'exitForm'),false)) -- 054
+    or (p_payload ? 'remarks' and not vitally_private.payload_text(p_payload,'remarks',2000)) then -- 054
+    raise sqlstate 'VT007' using message='VALIDATION'; -- 054
+   end if; -- 054
   when 'MARK_EFILED' then -- 035
    -- The case-dependent rules (which returns, which pairs) are the handler's.
    if vitally_private.payload_keys(p_payload)<>array['confirmed','methods'] -- 035
