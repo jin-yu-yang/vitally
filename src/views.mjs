@@ -737,7 +737,9 @@ export function dialog(state) {
   // Start next season (change add-start-next-season, design D8). The typed
   // year is the wiring's draft, put back after a redraw (app.mjs).
   if (state.dialog === "start-season") {
-    const season = state.seasonSettings?.season ?? state.workspace?.currentSeason ?? null;
+    // The season it was opened at (the controller closes it if that moves).
+    const season =
+      state.dialogContext?.expectedSeason ?? state.seasonSettings?.season ?? state.workspace?.currentSeason ?? null;
     title = season == null ? "Start the next season" : `Start the ${Number(season) + 1} season`;
     body = startSeasonDialogBody({
       season,

@@ -10545,6 +10545,63 @@ test("start next season: a lost answer sends the same action id again; a new pre
   controller.stop();
 });
 
+test("start next season: a lost answer whose start landed closes the dialog and routes the starter", async () => {
+  const { store, controller } = await onStartSeason();
+  const send = store.startNextSeason;
+  store.startNextSeason = async (request) => {
+    await send(request);
+    throw Object.assign(new Error("Network error."), { code: "OFFLINE" });
+  };
+  const checks = clearanceCalls(store);
+  await controller.startNextSeason("2027");
+  const state = controller.getState();
+  assert.equal(state.seasonSettings.season, 2027);
+  assert.equal(state.dialog, null, "the dialog never asks for 2028");
+  assert.ok(clearanceCalls(store) > checks, "the clearance is read again");
+  assert.equal(state.principal.clearance.cleared, false);
+  assert.equal(state.screen, "staff");
+  assert.match(staffScreen(state), /Finish your setup for this season/);
+  assert.equal(store.writes.filter((entry) => entry.type === "startNextSeason").length, 1, "nothing more is sent");
+  controller.stop();
+});
+
+test("start next season: a realtime workspace change to the next season closes the open dialog", async () => {
+  const { store, controller } = await onStartSeason();
+  // Another site coordinator started 2027.
+  store.workspace = { ...store.workspace, currentSeason: 2027 };
+  store.settings.season = 2027;
+  store.nextClearance = { ...SC_UNCLEARED };
+  await store.handlers.onChange({ table: "workspaces" });
+  await new Promise((resolve) => setImmediate(resolve));
+  const state = controller.getState();
+  assert.equal(state.dialog, null);
+  assert.equal(state.screen, "staff");
+  assert.equal(store.calls.includes("startNextSeason"), false);
+  controller.stop();
+});
+
+test("start next season: a season moved to any other value closes the dialog", async () => {
+  const { store, controller } = await onStartSeason();
+  store.workspace = { ...store.workspace, currentSeason: 2029 };
+  await store.handlers.onChange({ table: "workspaces" });
+  assert.equal(controller.getState().dialog, null);
+  controller.stop();
+});
+
+test("start next season: SEASON_NOT_FINISHED with no lines to show is the window's own error", async () => {
+  const { store, controller } = await onStartSeason();
+  store.failNextSettings = settingsRefusal(
+    "INVALID_TRANSITION",
+    "SEASON_NOT_FINISHED",
+    JSON.stringify({ openCases: 0, openFollowups: 0, somethingElse: 4 }),
+  );
+  assert.equal(await controller.startNextSeason("2027"), null);
+  const state = controller.getState();
+  assert.equal(state.seasonSettingsUi.startRefusal, null);
+  assert.equal(state.error.code, "INVALID_TRANSITION");
+  controller.stop();
+});
+
 test("start next season: success re-reads the workspace, clearance and lists", async () => {
   const { store, controller } = await onStartSeason();
   const workspaceReads = callCount(store, "getWorkspace");

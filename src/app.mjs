@@ -1491,7 +1491,8 @@ if (!config) {
     const state = controller.getState();
     const typed = form.querySelector("#start-season-year")?.value ?? "";
     const submit = form.querySelector("#start-season-submit");
-    if (submit) submit.disabled = !startSeasonReady(state.seasonSettings?.season, typed) || state.busy === true;
+    const season = state.dialogContext?.expectedSeason ?? state.seasonSettings?.season;
+    if (submit) submit.disabled = !startSeasonReady(season, typed) || state.busy === true;
   }
 
   // A landed start leaves the dialog closed and the page redrawn (the setup

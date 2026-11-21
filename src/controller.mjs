@@ -39,6 +39,7 @@ import { isLang, readLanguage, writeLanguage } from "./language.mjs";
 import { volunteerProblem, withoutLostRoles, roleNeedsMessage, openWorkMessage, accountMessage } from "./volunteer-roster.mjs";
 import { emptyUpdateForm, toUpdateRequest, validateUpdate } from "./posted-updates.mjs";
 import { nowInput } from "./contact-log.mjs";
+import { seasonRefusalLines } from "./season-settings-views.mjs";
 
 // The one place browser state lives. It owns what is loaded, what is being
 // edited, and which action envelope is in flight; it renders nothing and knows
@@ -911,6 +912,7 @@ export function createController({
     state.workspace = await store.getWorkspace();
     noteConnected();
     enterOfficeDraftIfNeeded();
+    await seasonMovedUnderDialog(state.workspace?.currentSeason);
   }
 
   async function loadSelected() {
@@ -1143,6 +1145,12 @@ export function createController({
       if (touchesUpdates) await readFeed();
       if (touchesList) await loadList();
       if (touchesWorkspace) await loadWorkspace();
+      // A start that landed (seasonMovedUnderDialog) may have left this
+      // window uncleared: nothing more of the work is read.
+      if (!state.principal || (staffWindow() && awaitingClearance(state))) {
+        show();
+        return;
+      }
       if (touchesAssistance) await loadAssistance();
       if (touchesUpdates && state.screen === "office-updates") await readPostedUpdates();
       // The open case comes last, because it is the one read that may
@@ -1534,6 +1542,7 @@ export function createController({
       state.seasonSettings = await store.getSeasonSettings();
       state.lists = { ...state.lists, seasonSettings: "ready" };
       noteConnected();
+      await seasonMovedUnderDialog(state.seasonSettings?.season);
     } catch (error) {
       if (state.lists.seasonSettings !== "ready") state.lists = { ...state.lists, seasonSettings: "failed" };
       throw error;
@@ -1656,37 +1665,82 @@ export function createController({
     const season = Number(state.seasonSettings?.season);
     const typed = String(typedYear ?? "").trim();
     if (!Number.isInteger(season) || typed !== String(season + 1)) return null;
-    const answer = await settingsWrite(
-      JSON.stringify({ type: "start-season", expectedSeason: season, typed }),
-      () => ({ actionId: newActionId(), expectedSeason: season, typedYear: season + 1 }),
-      (request) => store.startNextSeason(request),
-      (error) => {
-        if (error?.code === "INVALID_TRANSITION" && error?.cause?.message === "SEASON_NOT_FINISHED") {
-          let counts = null;
-          try {
-            counts = JSON.parse(String(error.cause.details ?? ""));
-          } catch {
-            counts = null;
+    if (state.busy || startingSeason) return null;
+    // The season this dialog is about, for a re-read that shows it moved.
+    if (state.dialog === "start-season" && state.dialogContext?.expectedSeason == null)
+      state.dialogContext = { ...state.dialogContext, expectedSeason: season };
+    startingSeason = true;
+    let answer;
+    try {
+      answer = await settingsWrite(
+        JSON.stringify({ type: "start-season", expectedSeason: season, typed }),
+        () => ({ actionId: newActionId(), expectedSeason: season, typedYear: season + 1 }),
+        (request) => store.startNextSeason(request),
+        (error) => {
+          if (error?.code === "INVALID_TRANSITION" && error?.cause?.message === "SEASON_NOT_FINISHED") {
+            let counts = null;
+            try {
+              counts = JSON.parse(String(error.cause.details ?? ""));
+            } catch {
+              counts = null;
+            }
+            if (!counts || typeof counts !== "object" || Array.isArray(counts)) return false;
+            // Nothing to list: the window's own error, never an empty refusal.
+            if (!seasonRefusalLines(counts).length) return false;
+            state.seasonSettingsUi = { ...state.seasonSettingsUi, startRefusal: counts };
+            return true;
           }
-          if (!counts || typeof counts !== "object" || Array.isArray(counts)) return false;
-          state.seasonSettingsUi = { ...state.seasonSettingsUi, startRefusal: counts };
-          return true;
-        }
-        if (error?.code === "CONFLICT") {
-          state.dialog = null;
-          state.dialogContext = null;
-          state.seasonSettingsUi = {
-            ...state.seasonSettingsUi,
-            notice: { place: "next-season", text: STAFF_SEASON_MOVED_MESSAGE },
-          };
-          return true;
-        }
-        return false;
-      },
-    );
-    if (!answer) return null;
+          if (error?.code === "CONFLICT") {
+            state.dialog = null;
+            state.dialogContext = null;
+            state.seasonSettingsUi = {
+              ...state.seasonSettingsUi,
+              notice: { place: "next-season", text: STAFF_SEASON_MOVED_MESSAGE },
+            };
+            return true;
+          }
+          return false;
+        },
+      );
+    } finally {
+      startingSeason = false;
+    }
+    if (answer) return await seasonStartLanded(Number(answer.season ?? season + 1));
+    // An answer that never came, for a start that did land: the re-read
+    // already shows the next season (I1).
+    return await seasonMovedUnderDialog(state.seasonSettings?.season);
+  }
+
+  // The start is out: its own answer decides, not a re-read in the middle.
+  let startingSeason = false;
+
+  // The Start next season dialog is open for the season it was opened at,
+  // and a re-read (Season settings, the workspace) shows another. One more
+  // is that start having landed, here or in another window: the success
+  // tail runs, and pressing again can never start the season after. Any
+  // other season just closes the dialog. Resolves to the toast's text when
+  // it landed, else null.
+  async function seasonMovedUnderDialog(current) {
+    if (startingSeason || state.dialog !== "start-season") return null;
+    const expected = Number(state.dialogContext?.expectedSeason);
+    if (current == null || !Number.isInteger(expected) || Number(current) === expected) return null;
+    if (Number(current) === expected + 1) return await seasonStartLanded(expected + 1);
     state.dialog = null;
     state.dialogContext = null;
+    show();
+    return null;
+  }
+
+  // A start landed: close the dialog, forget a lost answer kept for it, and
+  // read the workspace and the clearance again. The starter has no roles in
+  // the new season, so the clearance routing gives them the setup screen; a
+  // window still cleared reads the lists again.
+  async function seasonStartLanded(season) {
+    state.dialog = null;
+    state.dialogContext = null;
+    if (pendingSettingsWrite && JSON.parse(pendingSettingsWrite.key)?.type === "start-season") pendingSettingsWrite = null;
+    // A lost answer's notice is answered: the start went through.
+    if (UNKNOWN_OUTCOME.includes(state.error?.code)) state.error = null;
     try {
       await loadWorkspace();
     } catch (error) {
@@ -1703,7 +1757,7 @@ export function createController({
       await refresh();
       show();
     }
-    return `The ${Number(answer.season ?? season + 1)} season has started`;
+    return `The ${season} season has started`;
   }
 
   // Add (the picker's volunteer) or Remove (a row's), at the account
@@ -2506,6 +2560,9 @@ export function createController({
     if (name === "start-season") state.seasonSettingsUi = { ...state.seasonSettingsUi, startRefusal: null };
     state.dialog = name;
     state.dialogContext = context ? { ...context } : null;
+    // Start next season is about the season the page read when it opened.
+    if (name === "start-season" && state.seasonSettings?.season != null)
+      state.dialogContext = { ...state.dialogContext, expectedSeason: Number(state.seasonSettings.season) };
     show();
   }
 
