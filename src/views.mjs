@@ -436,6 +436,7 @@ export function staffScreen(state) {
         // The demo-tools switch: it shows the Auto-fill button on the forms.
         demoTools: state.demoTools === true,
         busy: state.busy,
+        clientDocumentsUrl: state.clientDocumentsUrl,
         // A dialog opened from the case page holds the only copy of the error.
         error: state.dialog ? null : state.error,
         retryable: state.retryable,

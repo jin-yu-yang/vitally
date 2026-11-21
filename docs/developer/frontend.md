@@ -1092,3 +1092,23 @@ If you migrate, keep the parts that are framework-independent and already tested
 A build step also means GitHub Pages needs a build workflow, or a host that builds for you. Keep
 `public-config.json` loaded at runtime, not baked in at build time, so one build can serve several
 environments.
+
+
+### Client document uploads (Issue #157)
+
+The site coordinator sets **Client documents upload link** in Season settings; use a
+OneDrive **file request** (upload-only) link. Client Intake document cards and open
+document requests open that URL in a new tab. They do not send file bytes or
+filenames to ViTally. Clients name their OneDrive file with the client number, or
+with the `VT-…` application reference before one is assigned.
+
+`I've uploaded it` is a client declaration only: the corresponding card moves
+from `not_done` / `later` to `sent`, or an open document request becomes
+`awaiting_verification`. Staff see the date and a OneDrive folder link, then
+confirm a card as `received` / `verified` or verify a document request using
+its existing `VERIFY_DOCUMENT` action. If there is no configured URL, the
+client is told to bring documents to PCDC and no upload control appears. The
+application never reads OneDrive or checks whether a file arrived.
+
+Migration `053_onedrive_client_documents.sql` adds an applicant-safe URL read
+RPC and expands card statuses; *clients cannot set* `received` or `verified`.

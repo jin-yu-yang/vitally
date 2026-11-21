@@ -77,9 +77,7 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
       "REQUEST_DOCUMENT",
       f.sampleRequest,
     );
-    await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
-      filename: f.sampleFilename,
-    });
+    await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {});
     const other = await f.draftCase(f.applicantB);
     await f.act(f.applicantB, other.caseId, "SUBMIT", { confirmed: true });
 
@@ -201,7 +199,7 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
       assert.equal(found.requests.length, 1);
       assert.equal(found.requests[0].title, f.sampleRequest.title);
       assert.equal(found.documents.length, 1);
-      assert.equal(found.documents[0].filename, f.sampleFilename);
+      assert.equal(found.documents[0].filename, "OneDrive upload reported");
       assert.ok(found.history.length >= 2, "client-visible progress is there");
       for (const section of STAFF_SECTIONS)
         assert.ok(!(section in found), `${section} is absent, not empty`);

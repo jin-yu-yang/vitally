@@ -36,6 +36,7 @@ import {
 } from "./intake-views.mjs";
 import { viewLang } from "./language.mjs";
 import { t, sentence, historyLine } from "./client-text.mjs";
+import { uploadControls } from "./document-upload.mjs";
 
 // Every client screen, as pure functions of one controller snapshot. No state,
 // no store, no timers, no DOM: each returns an HTML string, and everything that
@@ -342,16 +343,15 @@ function progressTrack(record, lang = "en") {
 // them bare, as it always has.
 function documentRequest(request, state, lang = "en") {
   const say = (key) => esc(t(key, {}, lang));
-  const failed = state.openPanels.includes("upload-failed");
-  const simulate = state.openPanels.includes("upload-failure");
-  const simulateId = fieldId("simulate-upload-failure", request.id);
   const label = (key) => (lang === "en" ? "" : `<span class="request-label">${say(key)}</span>`);
-  return `<div class="action-card"><div class="action-label">${icon("clock")} ${say("progress.action_needed")}</div>${label("progress.request_title")}<h2>${esc(request.title)}</h2>${label("progress.request_message")}<p>${esc(request.message)}</p><div class="upload-zone has-file">${icon("file")}<strong>demo-mileage-record-2025.pdf</strong><span>${say("progress.sample_note")}</span></div><label class="checkbox-row small" for="${simulateId}"><input type="checkbox" id="${simulateId}" ${simulate ? "checked" : ""} data-action="toggle-upload-failure" data-request-id="${esc(request.id)}"><span>${say("progress.simulate_failure")}</span></label>${when(failed, `<p class="error" role="alert">${say("progress.upload_failed")}</p>`)}${caseButton(
-    `${say("progress.send_sample")} ${icon("arrow")}`,
-    "RESPOND_DOCUMENT",
-    "primary",
-    `data-request-id="${esc(request.id)}" ${state.busy ? "disabled" : ""}`,
-  )}<small class="block">${say("progress.checks_first")}</small></div>`;
+  const controls = uploadControls({
+    url: state.clientDocumentsUrl,
+    record: state.savedCase,
+    lang,
+    off: state.busy ? " disabled" : "",
+    action: `data-case-action="RESPOND_DOCUMENT" data-request-id="${esc(request.id)}"`,
+  });
+  return `<div class="action-card"><div class="action-label">${icon("clock")} ${say("progress.action_needed")}</div>${label("progress.request_title")}<h2>${esc(request.title)}</h2>${label("progress.request_message")}<p>${esc(request.message)}</p>${controls}<small class="block">${say("progress.checks_first")}</small></div>`;
 }
 
 function reviewProgress(record, lang = "en") {
@@ -413,7 +413,7 @@ export function progressScreen(state) {
     `<section class="panel sent-panel"><div class="section-head"><h2>${say("progress.sent")}</h2></div>${documents
       .map(
         (document) =>
-          `<div class="document-row">${icon("file")}<div><strong>${esc(document.filename)}</strong><small>${say("progress.sent_waiting")}</small></div><span class="document-check pending">${icon("clock")}</span></div>`,
+          `<div class="document-row">${icon("file")}<div><strong>${esc((record.requests ?? []).find((request) => request.id === document.requestId)?.title ?? t("progress.sent", {}, lang))}</strong><small>${(record.requests ?? []).find((request) => request.id === document.requestId)?.status === "verified" ? say("doc.status.verified") : say("progress.upload_reported")} · ${esc(formatTime(document.createdAt, lang))}</small></div><span class="document-check pending">${icon("clock")}</span></div>`,
       )
       .join("")}</section>`,
   )}${reviewProgress(record, lang)}<section class="panel history-panel"><div class="section-head"><h2>${say("progress.history")}</h2><span class="muted small">${say("progress.history_note")}</span></div>${

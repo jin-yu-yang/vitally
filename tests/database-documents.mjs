@@ -69,7 +69,7 @@ test("document requests, receipts and verification keep the preparer in charge",
           f.applicantA,
           caseId,
           "RESPOND_DOCUMENT",
-          { filename: f.sampleFilename },
+          {  },
         );
         assert.equal(responded.revision, requested.revision + 1);
         staff = await f.readStaffCase(caseId);
@@ -77,7 +77,7 @@ test("document requests, receipts and verification keep the preparer in charge",
         assert.equal(staff.requests[0].status, "awaiting_verification");
         assert.equal(staff.documents.length, 1);
         assert.equal(staff.documents[0].requestId, staff.requests[0].id);
-        assert.equal(staff.documents[0].filename, f.sampleFilename);
+        assert.equal(staff.documents[0].filename, "OneDrive upload reported");
         assert.equal(staff.documents[0].source, "client");
         assert.equal(staff.documents[0].submittedByUserId, f.applicantAUserId);
         assert.equal(staff.documents[0].submittedByPersonId, null);
@@ -207,9 +207,7 @@ test("document requests, receipts and verification keep the preparer in charge",
           () => f.act(f.siteCoordinator, caseId, "VERIFY_DOCUMENT", {}),
           rejected("INELIGIBLE"),
         );
-        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
-          filename: f.sampleFilename,
-        });
+        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {});
         // The Reviewer role gives `prepare` (052), so the second unqualified
         // caller is the Intaker.
         for (const client of [f.siteCoordinator, f.intaker])
@@ -238,9 +236,7 @@ test("document requests, receipts and verification keep the preparer in charge",
         );
         await assert.rejects(
           () =>
-            f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
-              filename: f.sampleFilename,
-            }),
+            f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {}),
           rejected("INVALID_TRANSITION"),
         );
       },
@@ -256,7 +252,6 @@ test("document requests, receipts and verification keep the preparer in charge",
           type: "RESPOND_DOCUMENT",
           payload: {
             requestId: before.requests[0].id,
-            filename: f.sampleFilename,
           },
         });
         const accepted = await f.applicantA.rpc("vitally_apply_action", respond);
@@ -290,7 +285,6 @@ test("document requests, receipts and verification keep the preparer in charge",
             type: "RESPOND_DOCUMENT",
             payload: {
               requestId: before.requests[0].id,
-              filename: f.sampleFilename,
             },
           }),
         );
@@ -310,7 +304,6 @@ test("document requests, receipts and verification keep the preparer in charge",
           type: "RECORD_DOCUMENT_RESPONSE",
           payload: {
             requestId: before.requests[0].id,
-            filename: f.sampleFilename,
           },
         });
         const accepted = await f.siteCoordinator.rpc("vitally_apply_action", record);
@@ -353,18 +346,14 @@ test("document requests, receipts and verification keep the preparer in charge",
         // The staff receipt exists only where there is no client to answer.
         await assert.rejects(
           () =>
-            f.act(f.siteCoordinator, owned, "RECORD_DOCUMENT_RESPONSE", {
-              filename: f.sampleFilename,
-            }),
+            f.act(f.siteCoordinator, owned, "RECORD_DOCUMENT_RESPONSE", {}),
           rejected("FORBIDDEN"),
         );
         // Recording a response is staff work: the client answers with their own action.
         const beforeClientAttempt = await f.stateSnapshot();
         await assert.rejects(
           () =>
-            f.act(f.applicantA, owned, "RECORD_DOCUMENT_RESPONSE", {
-              filename: f.sampleFilename,
-            }),
+            f.act(f.applicantA, owned, "RECORD_DOCUMENT_RESPONSE", {}),
           rejected("FORBIDDEN"),
         );
         assert.deepEqual(await f.stateSnapshot(), beforeClientAttempt);
@@ -377,7 +366,6 @@ test("document requests, receipts and verification keep the preparer in charge",
             type: "RESPOND_DOCUMENT",
             payload: {
               requestId: ownedStaff.requests[0].id,
-              filename: f.sampleFilename,
             },
           }),
         );
@@ -386,9 +374,7 @@ test("document requests, receipts and verification keep the preparer in charge",
         for (const staff of [f.siteCoordinator, f.preparer])
           await assert.rejects(
             () =>
-              f.act(staff, owned, "RESPOND_DOCUMENT", {
-                filename: f.sampleFilename,
-              }),
+              f.act(staff, owned, "RESPOND_DOCUMENT", {}),
             rejected("FORBIDDEN"),
           );
         const assisted = await f.assistedCase();
@@ -400,7 +386,7 @@ test("document requests, receipts and verification keep the preparer in charge",
                 client,
                 assisted,
                 "RECORD_DOCUMENT_RESPONSE",
-                { filename: f.sampleFilename },
+                {  },
               ),
             rejected("FORBIDDEN"),
           );
@@ -414,16 +400,13 @@ test("document requests, receipts and verification keep the preparer in charge",
             type: "RESPOND_DOCUMENT",
             payload: {
               requestId: assistedStaff.requests[0].id,
-              filename: f.sampleFilename,
             },
           }),
         );
         assert.equal(client.error.code, "VT002");
         assert.deepEqual((await f.readStaffCase(assisted)).documents, []);
         // Positive control.
-        await f.act(f.siteCoordinator, assisted, "RECORD_DOCUMENT_RESPONSE", {
-          filename: f.sampleFilename,
-        });
+        await f.act(f.siteCoordinator, assisted, "RECORD_DOCUMENT_RESPONSE", {});
         assert.equal((await f.readStaffCase(assisted)).documents.length, 1);
         assert.deepEqual((await f.readStaffCase(owned)).documents, []);
       },
@@ -456,15 +439,14 @@ test("document requests, receipts and verification keep the preparer in charge",
           f.sampleRequest,
         );
         const requestId = (await f.readStaffCase(caseId)).requests[0].id;
-        // Only the one simulated file the demo describes is accepted.
+        // A client may report the upload by request ID only, never a file name.
         for (const payload of [
-          { requestId },
           { requestId, filename: "mileage.pdf" },
           { requestId, filename: "" },
           { requestId, filename: 7 },
-          { requestId, filename: f.sampleFilename, extra: 1 },
-          { requestId: "not-a-uuid", filename: f.sampleFilename },
-          { filename: f.sampleFilename },
+          { requestId, extra: 1 },
+          { requestId: "not-a-uuid",  },
+          {  },
         ]) {
           const response = await f.applicantA.rpc(
             "vitally_apply_action",
@@ -501,7 +483,6 @@ test("document requests, receipts and verification keep the preparer in charge",
           () =>
             f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
               requestId: foreignRequest,
-              filename: f.sampleFilename,
             }),
           rejected("VALIDATION"),
         );
@@ -524,7 +505,6 @@ test("document requests, receipts and verification keep the preparer in charge",
         // Positive controls for the shapes the payload table does define.
         await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
           requestId,
-          filename: f.sampleFilename,
         });
         await f.act(f.preparer, caseId, "VERIFY_DOCUMENT", {
           requestId,
@@ -557,7 +537,7 @@ test("document requests, receipts and verification keep the preparer in charge",
               f.applicantA,
               "client",
               "RESPOND_DOCUMENT",
-              { requestId, filename: f.sampleFilename },
+              { requestId },
             ],
           ])
             await assert.rejects(
@@ -588,7 +568,6 @@ test("document requests, receipts and verification keep the preparer in charge",
           });
           await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
             requestId,
-            filename: f.sampleFilename,
           });
         } finally {
           await f.sql("update public.cases set stage='preparing' where id=$1", [
@@ -718,9 +697,7 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
           { ...SAMPLE_CONTACT(), outcome: "no_answer", note: "Left a message" },
           task.id,
         );
-        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
-          filename: f.sampleFilename,
-        });
+        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {});
         let staff = await f.readStaffCase(caseId);
         // Both histories survive: the receipt does not close the contact task.
         assert.equal(staff.requests[0].status, "awaiting_verification");
@@ -808,9 +785,7 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
         }
         assert.deepEqual((await f.readStaffCase(fresh)).followups, []);
         // An answered request is no longer escalatable.
-        await f.act(f.applicantA, fresh, "RESPOND_DOCUMENT", {
-          filename: f.sampleFilename,
-        });
+        await f.act(f.applicantA, fresh, "RESPOND_DOCUMENT", {});
         await assert.rejects(
           () =>
             f.act(f.preparer, fresh, "ESCALATE_CONTACT", {
@@ -1216,7 +1191,7 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
               caseId,
               revision,
               type: "RESPOND_DOCUMENT",
-              payload: { requestId, filename: f.sampleFilename },
+              payload: { requestId },
             },
             "VT002",
           ],

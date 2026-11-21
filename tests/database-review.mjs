@@ -760,9 +760,7 @@ test("review submission waits for documents, not for office contact", async (t) 
         await f.act(f.preparer, caseId, "ESCALATE_CONTACT", {
           reason: ESCALATION_REASON,
         });
-        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
-          filename: f.sampleFilename,
-        });
+        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {});
         await f.act(f.preparer, caseId, "VERIFY_DOCUMENT", {});
         const held = await f.readStaffCase(caseId);
         // The office task is deliberately left open.
@@ -832,9 +830,7 @@ test("review submission waits for documents, not for office contact", async (t) 
             () => f.act(client, caseId, "SUBMIT_REVIEW", { questionnaire: PREPARER }),
             rejected("INELIGIBLE"),
           );
-        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
-          filename: f.sampleFilename,
-        });
+        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {});
         // A received but unverified document is still a blocker.
         await assert.rejects(
           () => f.act(f.preparer, caseId, "SUBMIT_REVIEW", { questionnaire: PREPARER }),
@@ -915,9 +911,7 @@ test("review submission waits for documents, not for office contact", async (t) 
               }),
             rejected("INELIGIBLE"),
           );
-        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
-          filename: f.sampleFilename,
-        });
+        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {});
         await f.act(f.preparer, caseId, "VERIFY_DOCUMENT", {});
         for (const payload of [
           {},
@@ -1133,17 +1127,13 @@ test("a reassigned case excludes its former preparer from review", async (t) => 
             }),
           rejected("FORBIDDEN"),
         );
-        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
-          filename: f.sampleFilename,
-        });
+        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {});
         await assert.rejects(
           () =>
             f.act(drew.client, caseId, "VERIFY_DOCUMENT", { requestId }),
           rejected("FORBIDDEN"),
         );
-        await f.act(casey.client, caseId, "VERIFY_DOCUMENT", {
-          requestId,
-        });
+        await f.act(casey.client, caseId, "VERIFY_DOCUMENT", { requestId });
         assert.equal(
           (await f.readStaffCase(caseId)).requests[0].status,
           "verified",

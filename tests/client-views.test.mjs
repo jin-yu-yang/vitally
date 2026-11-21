@@ -417,6 +417,7 @@ test("the conflict form offers both choices and neither is automatic", () => {
 
 test("progress names the stage, shows client history and answers a document request", () => {
   const state = baseState({
+    clientDocumentsUrl: "https://example.org/client-upload",
     screen: "progress",
     savedCase: caseRecord({
       stage: "preparing",
@@ -443,7 +444,9 @@ test("progress names the stage, shows client history and answers a document requ
   assert.ok(html.includes("Application received."));
   assert.ok(html.includes("2025 mileage record"));
   const button = /<button[^>]*data-case-action="RESPOND_DOCUMENT"[^>]*>/.exec(html);
-  assert.ok(button, "the sample response uses the canonical action name");
+  assert.ok(button, "the confirmation uses the canonical action name");
+  assert.match(html, /Upload to PCDC/);
+  assert.match(html, /target="_blank" rel="noopener noreferrer"/);
   assert.match(button[0], /data-request-id="req-1"/);
   // A settled request offers no second response.
   const settled = progressScreen({
@@ -457,44 +460,26 @@ test("progress names the stage, shows client history and answers a document requ
     },
   });
   assert.ok(!/data-case-action="RESPOND_DOCUMENT"/.test(settled));
-  assert.ok(settled.includes("demo-mileage-record-2025.pdf"));
+  assert.ok(settled.includes("You reported this upload"));
+  assert.ok(!settled.includes("demo-mileage-record-2025.pdf"));
 });
 
-test("two open requests render two distinct simulate-failure boxes", () => {
-  // A shared id would make both labels address the first box, so clicking the
-  // second request's label would tick the first request's checkbox.
+test("two open document requests get distinct confirmation buttons, never simulated uploads", () => {
   const requests = ["req-1", "req-2"].map((id) => ({
-    id,
-    caseId: "case-a",
-    title: `Document ${id}`,
-    message: "Please add the fictional sample.",
-    status: "open",
+    id, caseId: "case-a", title: `Document ${id}`, message: "Please send it.", status: "open",
   }));
-  const html = progressScreen(
-    baseState({
-      screen: "progress",
-      savedCase: caseRecord({
-        stage: "preparing",
-        revision: 6,
-        intakeVerified: true,
-        requests,
-      }),
-    }),
-  );
-  const boxes = [
-    ...html.matchAll(/<input[^>]*data-action="toggle-upload-failure"[^>]*>/g),
-  ].map(([tag]) => tag);
-  assert.equal(boxes.length, 2);
-  const ids = boxes.map((tag) => /id="([^"]+)"/.exec(tag)[1]);
-  assert.equal(new Set(ids).size, 2, "the two boxes carry the same id");
-  for (const [index, id] of ids.entries()) {
-    assert.ok(id.includes(requests[index].id), "the id names its request");
-    assert.match(boxes[index], /data-request-id="req-[12]"/);
-    assert.ok(
-      html.includes(`<label class="checkbox-row small" for="${id}">`),
-      "each label addresses its own box",
-    );
-  }
+  const html = progressScreen(baseState({
+    screen: "progress",
+    clientDocumentsUrl: "https://example.org/client-upload",
+    savedCase: caseRecord({ stage: "preparing", intakeVerified: true, requests }),
+  }));
+  const buttons = [...html.matchAll(/<button[^>]*data-case-action="RESPOND_DOCUMENT"[^>]*>/g)]
+    .map(([tag]) => tag);
+  assert.equal(buttons.length, 2);
+  assert.match(buttons[0], /data-request-id="req-1"/);
+  assert.match(buttons[1], /data-request-id="req-2"/);
+  assert.doesNotMatch(html, /simulate-upload-failure|demo-mileage-record/);
+  assert.equal((html.match(/Upload to PCDC/g) ?? []).length >= 2, true);
 });
 
 test("review progress is plain and never carries findings", () => {
@@ -1097,7 +1082,11 @@ test("the document requests show at Waiting for documents and at a documents Hol
     ["awaiting_documents", {}],
     ["on_hold", WAITING],
   ]) {
-    const html = progressAt(stage, "en", { ...overrides, requests });
+    const html = progressScreen(baseState({
+      screen: "progress",
+      clientDocumentsUrl: "https://example.org/client-upload",
+      savedCase: caseRecord({ stage, ...overrides, requests }),
+    }));
     assert.ok(html.includes("W-2 from Acme"), stage);
     assert.match(html, /data-case-action="RESPOND_DOCUMENT"/, stage);
   }
@@ -1409,10 +1398,9 @@ test("a Documents sub-step: Needed cards, then the Maybe needed group, each card
   assert.ok(photo, "the photo ID card is rendered");
   assert.match(photo, /<h3>Photo ID \(driver&#39;s license, state ID, passport\)<\/h3>/);
   assert.match(photo, /<p class="doc-owner">Mei Chen<\/p>/);
-  // Upload buttons, disabled, described by the note.
-  for (const name of ["Take a photo", "Choose a file"])
-    assert.match(photo, new RegExp(`<button type="button" class="btn secondary" disabled aria-describedby="doc-photo_id-tp-note">[\\s\\S]*?${name}</button>`));
-  assert.match(photo, /<p class="doc-note" id="doc-photo_id-tp-note">Uploading arrives soon\. For now, bring it or mark it below\.<\/p>/);
+  // Without a configured link, clients are instructed to bring documents.
+  assert.match(photo, /Online upload is not available/);
+  assert.doesNotMatch(photo, /Take a photo|Choose a file|I&#39;ve uploaded it/);
   assert.match(photo, /<button type="button" class="btn secondary" data-action="mark-card" data-slot="photo_id\.tp" data-status="later">I will send it later<\/button>/);
   assert.match(photo, /<button type="button" class="btn secondary" data-action="mark-card" data-slot="photo_id\.tp" data-status="none">I don&#39;t have this<\/button>/);
   assert.doesNotMatch(photo, /data-status="not_done"/);
@@ -1500,7 +1488,7 @@ test("the optional Other documents card has the upload buttons but no marks and 
   assert.match(other, /<h3>Other documents<\/h3>/);
   assert.match(other, /<p class="doc-owner">For your household<\/p>/);
   assert.match(other, /For example, a city tax notice, or a blank local tax form you received\./);
-  assert.match(other, /disabled aria-describedby="doc-other-household-note"/);
+  assert.match(other, /Online upload is not available/);
   assert.match(other, /class="doc-note"/);
   assert.doesNotMatch(other, /mark-card/);
   assert.doesNotMatch(other, /doc-status/);
@@ -1927,10 +1915,8 @@ test("the progress page labels service and language codes", () => {
 test("docCard without office is unchanged; with office it speaks to the office", () => {
   const cards = cardsFor(makeSampleAnswers(), []);
   const w2 = cards.find((card) => card.slotId === "w2.household");
-  assert.equal(
-    docCard(w2, { links: false }),
-    `<article class="doc-card" id="doc-w2-household" data-slot="w2.household" tabindex="-1"><h3>W-2 from each job</h3><p class="doc-owner">For you</p><p class="doc-why">You said you had wages from a job</p><p class="doc-hint">You said 1 job. Upload 1 W-2.</p><div class="doc-upload"><button type="button" class="btn secondary" disabled aria-describedby="doc-w2-household-note">${icon("camera")} Take a photo</button><button type="button" class="btn secondary" disabled aria-describedby="doc-w2-household-note">${icon("upload")} Choose a file</button></div><p class="doc-note" id="doc-w2-household-note">Uploading arrives soon. For now, bring it or mark it below.</p><div class="doc-marks"><button type="button" class="btn secondary" data-action="mark-card" data-slot="w2.household" data-status="later">I will send it later</button><button type="button" class="btn secondary" data-action="mark-card" data-slot="w2.household" data-status="none">I don&#39;t have this</button></div><p class="doc-status is-not_done" id="doc-w2-household-status" tabindex="-1">${icon("upload")}<span class="sr-only">Status: </span>Not done</p></article>`,
-  );
+  assert.match(docCard(w2, { links: false }), /Online upload is not available/);
+  assert.doesNotMatch(docCard(w2, { links: false }), /Take a photo|Choose a file/);
   assert.match(docCard(w2), /<p class="doc-why"><button type="button" class="inline" data-action="go-substep" data-substep="income\.wages">You said you had wages from a job<\/button><\/p>/);
 
   const office = docCard({ ...w2, status: "later" }, { links: false, off: " disabled", office: true });
@@ -1941,7 +1927,7 @@ test("docCard without office is unchanged; with office it speaks to the office",
   // The reason line never quotes the client ("You said…", "You wrote…").
   assert.doesNotMatch(office, /<p class="doc-why">[^<]*You (said|wrote)/);
   assert.doesNotMatch(office, /I will send|I don&#39;t have/);
-  assert.match(office, /<p class="doc-note" id="doc-w2-household-note">Uploads come later\. Mark what the client will send later or doesn&#39;t have\.<\/p>/);
+  assert.doesNotMatch(office, /Online upload is not available|doc-upload/);
   // A card with no asking question has no reason line on the office's side.
   const photo = cards.find((card) => card.slotId === "photo_id.tp");
   assert.equal(photo.ask ?? null, null);

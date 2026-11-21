@@ -464,11 +464,12 @@ test("the office records a document only for a client with no account", () => {
     html,
     /data-case-action="RECORD_DOCUMENT_RESPONSE" data-request-id="req-1"/,
   );
-  assert.match(html, /Record sample document received/);
+  assert.match(html, /Record document received/);
   assert.match(html, /staff-recorded/);
   assert.match(html, /awaiting preparer verification/);
   assert.match(html, /taking delivery is not verifying, and it never changes the preparer/);
-  assert.match(html, /demo-mileage-record-2025\.pdf/);
+  assert.doesNotMatch(html, /demo-mileage-record-2025\.pdf/);
+  assert.match(html, /No document bytes are stored in ViTally/);
 
   // A client who has their own account sends it themselves.
   const owned = renderAdminCase(

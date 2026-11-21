@@ -38,7 +38,7 @@ const LINKS = Object.freeze([
     key: "clientDocumentsUrl",
     id: "settings-documents-link",
     label: "Client documents upload link",
-    help: "Clients open this to send documents.",
+    help: "Clients open this to send documents. Use a OneDrive file-request (upload-only) link so clients cannot see one another's files.",
   },
 ]);
 

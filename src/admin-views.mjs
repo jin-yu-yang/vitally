@@ -16,7 +16,6 @@ import {
   FOLLOWUP_RESOLUTION_OUTCOMES,
   SCREENING_CHECK_LABELS,
   screeningCheckKeys,
-  SAMPLE_DOCUMENT_FILENAME,
 } from "./case-actions.mjs";
 import {
   when,
@@ -514,7 +513,7 @@ function receiptPanel(record, person, ui) {
           )}</span></div><p>${esc(request?.message)}</p>${
             each.recordDocumentResponse.allowed
               ? caseButton(
-                  `${icon("file")} Record sample document received`,
+                  `${icon("file")} Record document received`,
                   "RECORD_DOCUMENT_RESPONSE",
                   "primary",
                   `data-request-id="${esc(request.id)}" ${busy}`,
@@ -527,9 +526,7 @@ function receiptPanel(record, person, ui) {
         !rights.recordDocumentResponse.allowed && requests.length,
         explain(rights.recordDocumentResponse),
       )}`;
-  return `<section class="panel" aria-labelledby="receipt-title"><div class="section-head"><h2 id="receipt-title">Documents the office took in</h2></div><p class="field-note">Requesting a document and verifying one are the preparer's work, shown above; this is the office's own step. The office records a document it received in person for a client with no account. It is marked <strong>staff-recorded</strong> and stays <strong>awaiting preparer verification</strong>: taking delivery is not verifying, and it never changes the preparer. The one fictional file this demo accepts is <code>${esc(
-    SAMPLE_DOCUMENT_FILENAME,
-  )}</code>.</p>${when(
+  return `<section class="panel" aria-labelledby="receipt-title"><div class="section-head"><h2 id="receipt-title">Documents the office took in</h2></div><p class="field-note">Requesting a document and verifying one are the preparer's work, shown above; this is the office's own step. The office records a document it received in person for a client with no account. It is marked <strong>staff-recorded</strong> and stays <strong>awaiting preparer verification</strong>: taking delivery is not verifying, and it never changes the preparer. No document bytes are stored in ViTally; the office records receipt and the preparer verifies it.</p>${when(
     recorded.length,
     `<ul class="document-list">${recorded
       .map(

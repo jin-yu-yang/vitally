@@ -36,7 +36,7 @@ test("documents at intake against real Supabase", async (t) => {
         { requests: titles.map((title) => ({ title, message: "A fictional note." })) },
       );
     const answer = (caseId, requestId) =>
-      f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", { requestId, filename: f.sampleFilename });
+      f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", { requestId });
 
     await t.test("the stage check and origin constraints", async () => {
       const { caseId } = await f.submittedClientCase();
@@ -217,10 +217,10 @@ test("documents at intake against real Supabase", async (t) => {
       await asSiteCoordinator(caseId, "VERIFY_INTAKE", { checks: await f.checksFor(caseId) });
       await ask(caseId, ["Photo ID", "W-2"]);
       const [first, second] = await requests(caseId);
-      await asSiteCoordinator(caseId, "RECORD_DOCUMENT_RESPONSE", { requestId: first.id, filename: f.sampleFilename });
+      await asSiteCoordinator(caseId, "RECORD_DOCUMENT_RESPONSE", { requestId: first.id });
       assert.equal((await requests(caseId)).find((r) => r.id === first.id).status, "awaiting_verification");
       await hold(caseId);
-      await asSiteCoordinator(caseId, "RECORD_DOCUMENT_RESPONSE", { requestId: second.id, filename: f.sampleFilename });
+      await asSiteCoordinator(caseId, "RECORD_DOCUMENT_RESPONSE", { requestId: second.id });
       assert.equal((await requests(caseId)).find((r) => r.id === second.id).status, "awaiting_verification");
       assert.equal((await columns(caseId)).stage, "on_hold");
     });
