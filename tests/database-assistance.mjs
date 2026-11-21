@@ -96,10 +96,7 @@ async function pendingCase(f) {
   const answered = staff.requests.find(
     (request) => request.title === "Second mileage record",
   );
-  await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
-    requestId: answered.id,
-    filename: f.sampleFilename,
-  });
+  await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", { requestId: answered.id });
   return {
     caseId,
     itemId,
@@ -739,10 +736,7 @@ test("closure cancels pending work without erasing its history", async (t) => {
             f.applicantA,
             {
               type: "RESPOND_DOCUMENT",
-              payload: {
-                requestId: pending.openRequestId,
-                filename: f.sampleFilename,
-              },
+              payload: { requestId: pending.openRequestId },
             },
           ],
           [

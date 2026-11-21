@@ -864,6 +864,12 @@ export function createStore(client) {
       return await call("vitally_season_settings");
     },
 
+    // Applicant-safe: returns only the client document upload URL, never the
+    // coordinator-only certificate URL or the rest of Season settings.
+    async getClientDocumentsUrl() {
+      return (await call("vitally_client_documents_link"))?.clientDocumentsUrl ?? null;
+    },
+
     async saveSeasonSettings(request) {
       return await call("vitally_save_season_settings", {
         p_action_id: actionId(request),

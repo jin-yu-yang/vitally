@@ -205,10 +205,7 @@ async function openRequest(f, owner) {
 }
 
 async function respondTo(f, owner, requestId) {
-  await f.act(owner.client, owner.caseId, "RESPOND_DOCUMENT", {
-    requestId,
-    filename: f.sampleFilename,
-  });
+  await f.act(owner.client, owner.caseId, "RESPOND_DOCUMENT", { requestId });
   const [row] = (
     await f.sql(
       "select id from public.documents where request_id=$1 order by created_at desc limit 1",

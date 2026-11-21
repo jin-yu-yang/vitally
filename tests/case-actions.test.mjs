@@ -79,13 +79,13 @@ test("every action builds exactly the payload the contract names", () => {
       "RESPOND_DOCUMENT",
       { requestId: "req-1" },
       {},
-      { requestId: "req-1", filename: SAMPLE_DOCUMENT_FILENAME },
+      { requestId: "req-1" },
     ],
     [
       "RECORD_DOCUMENT_RESPONSE",
       { requestId: "req-1" },
       {},
-      { requestId: "req-1", filename: SAMPLE_DOCUMENT_FILENAME },
+      { requestId: "req-1" },
     ],
     ["VERIFY_DOCUMENT", { requestId: "req-1" }, {}, { requestId: "req-1" }],
     [
@@ -346,14 +346,14 @@ test("an outcome outside its own list is refused", () => {
   }
 });
 
-test("a form value never overrides the file name or the confirmation flag", () => {
-  assert.equal(
+test("a form value never sends a file name, and never overrides the confirmation flag", () => {
+  assert.deepEqual(
     payloadFor(
       "RESPOND_DOCUMENT",
       { requestId: "req-1" },
       { filename: "real-taxpayer-w2.pdf" },
-    ).payload.filename,
-    SAMPLE_DOCUMENT_FILENAME,
+    ).payload,
+    { requestId: "req-1" },
   );
   assert.deepEqual(payloadFor("SUBMIT", {}, { confirmed: "false" }).payload, {
     confirmed: true,
