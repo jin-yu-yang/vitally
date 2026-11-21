@@ -526,6 +526,49 @@ test("a staff case list reads the filing notes", async () => {
   assert.ok(tables.includes("filing_notes"));
 });
 
+const seasonRows = (season) => ({ workspaces: [{ id: "workspace-1", current_season: season }] });
+
+test("staff listCases asks only for the current season and drafts", async () => {
+  const client = fakeClient({ access: "staff", rows: seasonRows(2027) });
+  await createStore(client).listCases();
+  const cases = client.reads.find((read) => read.table === "cases");
+  assert.equal(cases.or, "season.eq.2027,season.is.null");
+});
+
+test("client listCases is unchanged", async () => {
+  const client = fakeClient({ access: "applicant", rows: seasonRows(2027) });
+  await createStore(client).listCases();
+  assert.equal(client.reads.find((read) => read.table === "cases").or, undefined);
+  assert.ok(!client.reads.some((read) => read.table === "workspaces"));
+});
+
+test("staff listCases with no season set asks for every season", async () => {
+  const client = fakeClient({ access: "staff", rows: seasonRows(null) });
+  await createStore(client).listCases();
+  assert.equal(client.reads.find((read) => read.table === "cases").or, undefined);
+});
+
+test("staff getCase of a past-season case is not found", async () => {
+  const client = fakeClient({ access: "staff", rows: seasonRows(2026) });
+  await assert.rejects(() => createStore(client).getCase("case-1"), { code: "NOT_FOUND" });
+});
+
+test("staff getCase reads a current-season case and a draft", async () => {
+  for (const season of [2025, null]) {
+    const client = fakeClient({
+      access: "staff",
+      rows: { ...seasonRows(2025), cases: [{ ...CASE_ROW, season }] },
+    });
+    assert.equal((await createStore(client).getCase("case-1")).id, "case-1");
+  }
+});
+
+test("a client getCase does not read the workspace season", async () => {
+  const client = fakeClient({ access: "applicant", rows: seasonRows(2026) });
+  await createStore(client).getCase("case-1");
+  assert.ok(!client.reads.some((read) => read.table === "workspaces"));
+});
+
 test("a staff case read adds the staff sections, filing tables too", async () => {
   const client = fakeClient({ access: "staff" });
   await createStore(client).getCase("case-1");
@@ -791,7 +834,7 @@ test("an empty staff list asks for no summaries at all", async () => {
   assert.deepEqual(await createStore(client).listCases(), []);
   assert.deepEqual(
     client.reads.map((read) => read.table),
-    ["memberships", "cases"],
+    ["memberships", "workspaces", "cases"],
   );
 });
 
@@ -974,6 +1017,7 @@ test("a staff case read adds exactly the staff sections", async () => {
       "return_to_signing_exit_forms",
       "reviewer_questionnaires",
       "reviews",
+      "workspaces",
     ],
   );
   assert.equal(found.intakeVersion, 2);

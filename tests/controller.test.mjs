@@ -5587,6 +5587,23 @@ test("a reload on the case page starts screening", async () => {
   controller.stop();
 });
 
+test("a restored staff window on a past-season case goes home", async () => {
+  // The store answers a past-season case as absent (NOT_FOUND, from VT002),
+  // so the restore takes the same path as any gone case: home, no error.
+  const store = adminStaffStore({ cases: [RECEIVED], people: adminPeople });
+  const sessionStorage = fakeSession({
+    "vitally:client:v1:p1": JSON.stringify({ screen: "staff-case", selectedCaseId: "case-2025" }),
+  });
+  const { controller } = build({ store, sessionStorage });
+  await controller.start();
+  const state = controller.getState();
+  assert.ok(store.calls.includes("getCase:case-2025"), "the saved id was read");
+  assert.equal(state.screen, "staff");
+  assert.equal(state.selectedCaseId, null);
+  assert.equal(state.error, null, "no error toast");
+  controller.stop();
+});
+
 test("the connection's return sends the held start, unchanged", async () => {
   const store = adminStaffStore({ cases: [RECEIVED], people: adminPeople });
   store.failNext = Object.assign(new Error("offline"), { code: "OFFLINE" });
