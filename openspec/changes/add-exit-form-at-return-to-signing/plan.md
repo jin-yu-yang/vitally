@@ -224,7 +224,7 @@
   - `"two rejected returns each preselect their planned method"`: federal planned `efile` and state planned `paper` give the federal e-file radio and the state paper radio `checked`. After a rejection the dialog uses per-return radios, not the four combinations.
   - `"one planned, one not"`: only one of two rejected returns has a stored group, so that return's planned radio is `checked` and the other return's radios aren't. Changed at the final review from "nothing is preselected", to match the spec's per-return rule (design D6).
 - [ ] **Step 2: Run `npm test` to see them fail.** Expected: FAIL.
-- [ ] **Step 3: Implement.** Preselect only when every rejected return has a planned method.
+- [ ] **Step 3: Implement.** Preselect each rejected return's planned method on its own (per-return radios). The first version preselected only when every rejected return had a plan; the final review changed that to match the spec (design D6).
 - [ ] **Step 4: Run `npm test` to see them pass.** Expected: PASS.
 - [ ] **Step 5: Commit.** Message: `Mark e-filed preselects the method planned at Return to signing (#203)`.
 

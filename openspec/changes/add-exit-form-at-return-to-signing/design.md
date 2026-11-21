@@ -133,7 +133,8 @@ this change is migration 054.
   - Without a matching row, or without `detail.exitFormId`: #173's result, unchanged.
   - A missing `returnToSigningExitForms` array counts as no rows.
 
-  The return value adds `recordedAt`.
+  On the stored-values path, the return value adds `fromStored: true` and `recordedAt`. The return for a case not
+  corrected keeps #173's shape, with no new keys.
 - **Why:** the latest Return to signing decides, so a second rejection and Return to signing without values falls
   back to #173's blanks rather than an older Return to signing's figures.
 
