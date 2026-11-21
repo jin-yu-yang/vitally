@@ -26,10 +26,10 @@
 
 ## 3. Browser: current season only
 
-- [ ] 3.1 Unit tests (failing first): staff `listCases` asks only for `season = current or season is null`; clients' query is unchanged; staff `getCase` for a past-season case answers as unavailable
-- [ ] 3.2 Add the staff season filter to `listCases` and `getCase` in `src/supabase-store.mjs`, reading the current season from the workspace row
-- [ ] 3.3 Make the controller send a staff window opening or restoring a past-season case to its home screen, with a unit test
-- [ ] 3.4 Show a `PAST_SEASON` refusal with the existing "not available" handling, with a unit test
+- [x] 3.1 Unit tests (failing first): staff `listCases` asks only for `season = current or season is null`; clients' query is unchanged; staff `getCase` for a past-season case answers as unavailable
+- [x] 3.2 Add the staff season filter to `listCases` and `getCase` in `src/supabase-store.mjs`, reading the current season from the workspace row
+- [x] 3.3 Make the controller send a staff window opening or restoring a past-season case to its home screen, with a unit test
+- [x] 3.4 Show a `PAST_SEASON` refusal with the existing "not available" handling, with a unit test
 
 ## 4. Browser: Start next season on Season settings
 
