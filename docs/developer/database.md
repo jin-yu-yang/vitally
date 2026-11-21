@@ -83,6 +83,7 @@ in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 | `051_case_labels.sql` | Hand-written: case labels ([below](#case-labels)). The tables `case_labels` (a workspace's labels: name trimmed of spaces, tabs and line breaks, 1 to 24 characters on one line, unique ignoring case, one of six colors, its own `revision`) and `case_label_links` (which labels a case carries; a link is switched off, never deleted), both staff-only and cleared-gated, with no write grant for a browser role, no grant at all for `service_role` (as on 049's tables), and both in the Realtime publication; the trigger `vitally_private.add_starter_labels` on `workspaces` (City Tax, MFS and Multi-state for each new workspace) and a one-time backfill for the existing ones; `vitally_private.check_label`; and the two RPCs `vitally_save_label` and `vitally_set_case_label`, which write the case events `ADD_CASE_LABEL` and `REMOVE_CASE_LABEL`. It redefines no earlier function and leaves `cases.revision` and `updated_at` alone |
 | `052_season_settings.sql` | Hand-written: Season settings and site coordinators (change `add-season-settings`; [below](#season-settings-and-site-coordinators)). A guard refuses with `VT008` if the recompute would change anyone's admin: an active staff member holds `admin` in `people.capabilities` without the Admin role this season, or someone with a sign-in has the Admin role without `admin` ([setup](../setup.md#052s-guard)); the snapshot `vitally_private.capabilities_before_052`; `people.capabilities` becomes a mirror of this season's roles; `accounts.is_site_coordinator`, the audit table `site_coordinator_changes` and `vitally_set_site_coordinator`; `season_settings` with `vitally_season_settings` and `vitally_save_season_settings`; `is_workspace_admin` and `vitally_my_clearance` (`isAdmin`, `isSiteCoordinator`); `can_be_default_followup`; `add_staff_member` without capabilities. It marks nobody as a site coordinator |
 | `053_clearance_uploads.sql` | Hand-written: clearance uploads (change `add-clearance-uploads`; [below](#clearance-uploads)). `roster_entries.form_13615_sent_at` and `photo_id_sent_at`; the RPCs `vitally_mark_upload_sent` and `vitally_mark_upload_reviewed` (receipts `MARK_UPLOAD_SENT` and `MARK_UPLOAD_REVIEWED`); `vitally_save_volunteer` re-created from 052 to clear the sent dates when it acts on them; `vitally_my_clearance` re-created from 052 with `sentAt`, `uploadUrl` and empty `capabilities` when not cleared. No backfill: existing rows start null |
+| `054_return_to_signing_exit_forms.sql` | Hand-written: the staff-only `return_to_signing_exit_forms` table (the corrected Exit Form values entered at Return to signing; select for cleared staff only, no write grant for a browser role, no grant at all for `service_role`, as on 049's and 051's tables); `check_payload` accepts optional `exitForm` and `remarks` on `RETURN_TO_SIGNING`; `act_return_to_signing` stores them and puts `exitFormId` in the event's detail. `apply_fixture_scenario` is not touched: 040 dropped it |
 **Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
 never edit an applied one.** The build writes a file only when the hash differs from the newest
 catalogue migration's. The hash covers the catalogue and `LOADER_VERSION` in
@@ -152,7 +153,7 @@ do not copy them from older files:
 | `vitally_private.act_submit`, `act_start_screening` | `032_screening_and_efiling_stages.sql` |
 | `vitally_private.act_request_documents_at_intake`, `act_put_on_hold`, `act_resume_from_hold`, `act_withdraw` | `036_hold_and_closing.sql` |
 | `vitally_private.act_mark_ready_to_efile`, `act_mark_efiled`, `act_record_filing_result`, `filing_line`, `efiled_line` | `037_adjust_filing_to_pcdc.sql` |
-| `vitally_private.act_return_to_signing` | `035_post_efiling_stages.sql` |
+| `vitally_private.act_return_to_signing` | `054_return_to_signing_exit_forms.sql` |
 | `vitally_private.load_intake_catalogue`, `check_intake_value`, `intake_holds`, `intake_missing` | `011_intake_v2.sql` |
 | `vitally_private.works_on_case` | `013_contact_materials.sql` |
 | `public.vitally_assistance_action` | `038_staff_identity.sql` |
@@ -625,6 +626,14 @@ admin-only actions and one submit rule shape the earlier stages:
 - `RETURN_TO_SIGNING` moves `rejected` to `review_approved`, and is refused until every return has
   an answer. The methods and results are kept: "returned to signing" is `review_approved` with
   `federal_method` set, so no preparation or review pass repeats and the client signs again.
+  Since 054 the action may also carry the corrected Exit Form values (`exitForm`, `remarks`), both
+  optional. When it does, `act_return_to_signing` inserts one row into
+  `public.return_to_signing_exit_forms` (`id`, `workspace_id`, `case_id`, `entered_by_person_id`,
+  `created_at`, `exit_form`, `remarks`) and records its id in the event's detail as
+  `{exitFormId}`; with neither, no row is written and the event has no `exitFormId`. The table is
+  staff-only: staff members cleared for the workspace and the case (the reviewer questionnaire's
+  gate) may select, no browser role may write, and the rows go with their case. A case may have
+  one row for each Return to signing; the Exit Form reads the one the latest event names.
 
 ## Action catalogue
 
@@ -661,7 +670,7 @@ shorthands in the table:
 | `MARK_READY_TO_EFILE` | Staff + `admin` person | `review_approved` | The approved review's contact step is `completed`, and no `go_over_return` follow-up is open (else `INVALID_TRANSITION`): it waits for the contact step and for the office's go-over | → `ready_to_efile` | Yes |
 | `MARK_EFILED` | Staff + `admin` person | `ready_to_efile` | Any of the four method pairs; a second filing takes exactly the rejected returns | Sets the methods, gives a paper return to the client (`given_to_client`), resets the outstanding e-filed results, adds a filing attempt; → `efiled`, or `accepted` when no e-filed return waits | Yes |
 | `RECORD_FILING_RESULT` | Staff + `admin` person | `efiled`; `rejected` while a return is waiting | Only waiting e-filed returns; `accepted` or `rejected` only; date not future and not before the filing; a reject code exactly when rejected | Saves results on `cases` and `filing_returns`, plus a `filing_notes` row for a fix note; → `rejected`, `accepted` or stays | Yes (per return; no code, no note) |
-| `RETURN_TO_SIGNING` | Staff + `admin` person | `rejected` | No return waiting | → `review_approved`; methods and results kept | Yes |
+| `RETURN_TO_SIGNING` | Staff + `admin` person | `rejected` | No return waiting | → `review_approved`; methods and results kept; corrected Exit Form values stored when sent (054) | Yes |
 | `REMIND` | Staff + `admin` person | `preparation_ready` with no preparer, or `review_ready` with no reviewer | | Sets `last_reminded_at` (no message is sent) | No |
 | `REQUEST_DOCUMENTS_AT_INTAKE` | Staff + `admin` person | `screening`, `preparation_ready` | | New `open` requests (1 to 5); → `awaiting_documents`; sets `documents_origin` | Yes (titles) |
 | `PUT_ON_HOLD` | Staff + `admin` person | `awaiting_documents`, `review_approved` | | → `on_hold`; sets `hold_origin`; the note is staff history only | Yes (no note, no phone) |
@@ -686,7 +695,8 @@ Payload shapes are whitelisted exactly in `vitally_private.check_payload`; an ex
 | `VERIFY_INTAKE` | `{checks: {phone: true, documents: true, in_scope: true}}`, plus `identity: true` exactly when the case's `answers.service` is `online`; any other set is a `VALIDATION` error (034). The browser builds the set with `screeningCheckKeys(service)` |
 | `START_SCREENING`, `CLAIM_PREPARATION`, `CLAIM_REVIEW`, `REMIND` | `{}` |
 | `SUBMIT_REVIEW`, `APPROVE_REVIEW` | `{questionnaire}` (the preparer's or the reviewer's, see design D2 and D3) |
-| `MARK_READY_TO_EFILE`, `RETURN_TO_SIGNING` | `{confirmed: true}` |
+| `MARK_READY_TO_EFILE` | `{confirmed: true}` |
+| `RETURN_TO_SIGNING` | `{confirmed: true, exitForm?, remarks?}` (054); `exitForm` is the reviewer questionnaire's Exit Form object (`federal`, `state` and `local` groups, checked by `check_exit_form` as before, so no account or routing number is ever stored), `remarks` is at most 2000 characters. `{confirmed: true}` alone is still valid and behaves as before |
 | `MARK_EFILED` | `{confirmed: true, methods: {federal?, state?}}`, each `efile` or `paper` (035; all four pairs since 037) |
 | `RECORD_FILING_RESULT` | `{confirmed: true, results: {federal?: {result, date, code?}, state?: {…}}, fixNote? (≤1000)}` (035); `result` is `accepted` or `rejected` (037); `code` ≤40 characters |
 | `REQUEST_DOCUMENT` | `{title (≤120), message (≤2000)}` |

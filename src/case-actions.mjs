@@ -16,7 +16,13 @@ import {
   findQuestion,
   isAnswered,
 } from "./intake-catalogue.mjs";
-import { preparerQuestionnaire, reviewerQuestionnaire } from "./questionnaires.mjs";
+import {
+  GROUP_FIELDS,
+  LOCAL_TYPES,
+  exitFormFrom,
+  preparerQuestionnaire,
+  reviewerQuestionnaire,
+} from "./questionnaires.mjs";
 
 // The one fictional file the demo ever sends (Ruling R18); the database accepts
 // no other name.
@@ -52,6 +58,32 @@ export const SCREENING_CHECK_LABELS = Object.freeze({
   identity:
     "Identity confirmed: the client's face matches their photo ID (in person or on video), checked by a certified volunteer.",
 });
+
+// The corrected Exit Form values are optional. A group whose only filled field
+// is its fixed method (`<prefix>.fixedMethod`) counts as empty. Sent only when
+// some group is filled.
+function returnToSigning(values) {
+  const out = { confirmed: confirmation(values, "Confirm that the fix is done.") };
+  const filled = { ...values };
+  const prefixes = ["federal", "state", ...LOCAL_TYPES.map(([type]) => `local.${type}`)];
+  let any = false;
+  for (const prefix of prefixes) {
+    const others = GROUP_FIELDS.filter((key) => key !== "method").some(
+      (key) => String(values?.[`${prefix}.${key}`] ?? "").trim() !== "",
+    );
+    const fixed = String(values?.[`${prefix}.fixedMethod`] ?? "").trim();
+    delete filled[`${prefix}.fixedMethod`];
+    // The settled return's fixed method only travels with other values; a
+    // method the admin chose is always passed on, so a lone one is refused.
+    if (others && fixed && !filled[`${prefix}.method`]) filled[`${prefix}.method`] = fixed;
+    if (others || String(filled[`${prefix}.method`] ?? "").trim() !== "") any = true;
+  }
+  if (any) out.exitForm = exitFormFrom(filled);
+  const remarks = String(values?.remarks ?? "").trim();
+  if (remarks.length > 2000) throw validation("Keep the remarks to 2000 characters or fewer.");
+  if (remarks) out.remarks = remarks;
+  return out;
+}
 
 function validation(message) {
   return Object.assign(new Error(message), { code: "VALIDATION" });
@@ -299,9 +331,7 @@ const BUILDERS = Object.freeze({
     methods: filingMethods(values),
   }),
   RECORD_FILING_RESULT: (dataset, values) => filingResults(dataset, values),
-  RETURN_TO_SIGNING: (dataset, values) => ({
-    confirmed: confirmation(values, "Confirm that the fix is done."),
-  }),
+  RETURN_TO_SIGNING: (dataset, values) => returnToSigning(values),
   REQUEST_DOCUMENTS_AT_INTAKE: (dataset, values) => ({ requests: intakeRequests(values) }),
   PUT_ON_HOLD: (dataset, values) => {
     const note = String(values?.["hold-note"] ?? "").trim();

@@ -488,6 +488,22 @@ const INTERNAL = Object.freeze([
     },
   },
   {
+    // 054: the corrected values entered at Return to signing are staff work.
+    table: "return_to_signing_exit_forms",
+    identity: (row) => row.id,
+    commit: async (f) => {
+      const caseId = await f.preparedCase();
+      const [row] = (
+        await f.sql(
+          `insert into public.return_to_signing_exit_forms(workspace_id,case_id,entered_by_person_id,exit_form)
+           values($1,$2,$3,'{"federal":null,"state":null,"local":[]}') returning id`,
+          [f.workspaceId, caseId, f.reviewerId],
+        )
+      ).rows;
+      return { id: row.id };
+    },
+  },
+  {
     // Assistance items are staff work the client never sees (Ruling R12), and
     // migration 007 publishes the table. No action creates one in this scope,
     // so the row is written through the privileged connection exactly as

@@ -43,6 +43,7 @@ const POLICIES = Object.freeze([
   ["preparation_participants", "staff_preparation_participants"],
   ["preparer_questionnaires", "staff_preparer_questionnaires"],
   ["preparer_shaded_fields", "staff_preparer_shaded_fields"],
+  ["return_to_signing_exit_forms", "staff_return_to_signing_exit_forms"],
   ["reviewer_questionnaires", "staff_reviewer_questionnaires"],
   ["reviews", "staff_reviews"],
   ["roster_entries", "admin_roster_entries"],

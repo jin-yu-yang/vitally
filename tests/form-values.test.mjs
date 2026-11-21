@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { checkDrafts, forgetDrafts, formValuesWithLists, groupsToOpen, restoreDraft, textDraft } from "../src/form-values.mjs";
+import { checkDrafts, clearableFields, forgetDrafts, formValuesWithLists, groupsToOpen, restoreDraft, textDraft } from "../src/form-values.mjs";
 
 // A form is only read through `new FormData(form)` and `querySelectorAll`, so
 // a tiny stand-in with a real FormData is enough (node has no DOM).
@@ -193,3 +193,9 @@ test("forgetDrafts drops only the cleared group's drafts", () => {
   assert.deepEqual([...drafts.keys()], ["field-rev-state.amount"]);
   assert.deepEqual(groupsToOpen([["field-rev-federal.amount"], ["field-rev-state.amount"]], drafts), [1]);
 });
+
+test("Clear this section leaves a hidden fixed method alone", () => {
+  const fields = [{ type: "text" }, { type: "radio" }, { type: "hidden" }, { type: "date" }];
+  assert.deepEqual(clearableFields(fields).map((f) => f.type), ["text", "radio", "date"]);
+});
+

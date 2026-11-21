@@ -78,6 +78,12 @@ names are fictional:
 | Diego Fairbanks | Hold | Office: Got in touch, or Close |
 | Yuki Morrow | Closed, withdrawn | Closed |
 
+At **Return to signing** (Rafael Lindqvist), the dialog can also take the corrected Exit Form values:
+open a part (for example the Pennsylvania return), choose how it was filed this time, the result, the
+amount and how the refund is paid, and optionally add Remarks. Everything is optional, and a part left
+empty is filled in by hand. The office's Exit Form panel then says the form was filled from the
+corrected values, and **Mark e-filed** starts with the planned method chosen.
+
 Only Lena Okafor's case has a client account. The others were entered by the office, so no client
 window shows them.
 
