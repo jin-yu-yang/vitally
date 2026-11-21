@@ -371,8 +371,13 @@ function fakeClient({
       const read = { table: name, filters: [], orders: [] };
       client.reads.push(read);
       const builder = {
-        select(columns) {
+        select(columns, options) {
           read.columns = columns;
+          if (options) read.options = options;
+          return builder;
+        },
+        or(expression) {
+          read.or = expression;
           return builder;
         },
         eq(column, value) {
@@ -401,6 +406,17 @@ function fakeClient({
               // PostgREST returns the columns that were asked for and no
               // others, so the double projects them too: a read that names its
               // columns cannot quietly deliver the rest of the row.
+              // A head count returns the count of the matching rows and no data.
+              if (read.options?.head) {
+                const set = (read.or ?? "")
+                  .split(",")
+                  .map((part) => part.match(/^(\w+)\.not\.is\.null$/)?.[1])
+                  .filter(Boolean);
+                const counted = matches.filter(
+                  (row) => !set.length || set.some((column) => row[column] != null),
+                );
+                return { data: null, count: counted.length, error: null };
+              }
               if (!read.columns || read.columns === "*")
                 return { data: matches, error: null };
               const wanted = read.columns.split(",").map((name_) => name_.trim());
@@ -1776,6 +1792,65 @@ test("saveVolunteer sends the RPC parameters, nulls for an Add", async () => {
     p_expected_revision: 3,
     p_volunteer: volunteer,
   });
+});
+
+test("markUploadSent calls vitally_mark_upload_sent", async () => {
+  const client = fakeClient({
+    access: "staff",
+    rpc: (name, args) => ({ data: { actionId: args.p_action_id, document: args.p_document, sentAt: "2026-11-20T15:00:00Z" }, error: null }),
+  });
+  const store = createStore(client);
+  const request = { document: "form13615" };
+  const result = await store.markUploadSent(request);
+  assert.ok(request.actionId);
+  assert.deepEqual(client.rpcCalls[0], {
+    name: "vitally_mark_upload_sent",
+    args: { p_action_id: request.actionId, p_document: "form13615" },
+  });
+  assert.equal(result.sentAt, "2026-11-20T15:00:00Z");
+  await store.markUploadSent({ actionId: "a-2", document: "photoId" });
+  assert.deepEqual(client.rpcCalls[1].args, { p_action_id: "a-2", p_document: "photoId" });
+});
+
+test("markUploadReviewed sends the four arguments", async () => {
+  const client = fakeClient({ access: "staff" });
+  const store = createStore(client);
+  await store.markUploadReviewed({ actionId: "a-3", volunteerId: "person-ana", expectedRevision: 4, document: "photoId" });
+  assert.deepEqual(client.rpcCalls[0], {
+    name: "vitally_mark_upload_reviewed",
+    args: { p_action_id: "a-3", p_volunteer_id: "person-ana", p_expected_revision: 4, p_document: "photoId" },
+  });
+  const request = { volunteerId: "person-ana", expectedRevision: 4, document: "form13615" };
+  await store.markUploadReviewed(request);
+  assert.ok(request.actionId);
+});
+
+test("countUploadsToReview counts the current season's rows with a sent date", async () => {
+  const rows = {
+    ...ROSTER_ROWS,
+    roster_entries: [
+      { person_id: "a", season: 2026, form_13615_sent_at: "2026-11-20T15:00:00Z", photo_id_sent_at: null },
+      { person_id: "b", season: 2026, form_13615_sent_at: null, photo_id_sent_at: "2026-11-20T15:00:00Z" },
+      { person_id: "c", season: 2026, form_13615_sent_at: null, photo_id_sent_at: null },
+      { person_id: "d", season: 2025, form_13615_sent_at: "2025-11-20T15:00:00Z", photo_id_sent_at: null },
+    ],
+  };
+  const client = fakeClient({ access: "staff", rows });
+  assert.equal(await createStore(client).countUploadsToReview(), 2);
+  const head = client.reads.find((read) => read.table === "roster_entries");
+  assert.deepEqual(head.options, { count: "exact", head: true });
+  assert.equal(head.columns, "person_id");
+  assert.deepEqual(head.filters, [["season", 2026]]);
+  assert.equal(head.or, "form_13615_sent_at.not.is.null,photo_id_sent_at.not.is.null");
+});
+
+test("countUploadsToReview is 0 with no season, staff-only, and maps a failed read", async () => {
+  assert.equal(await createStore(fakeClient({ access: "staff", rows: { workspaces: [{ id: "workspace-1", current_season: null }] } })).countUploadsToReview(), 0);
+  await assert.rejects(() => createStore(fakeClient({ access: "applicant", rows: ROSTER_ROWS })).countUploadsToReview());
+  await assert.rejects(
+    () => createStore(fakeClient({ access: "staff", readError: { code: "VT001" } })).countUploadsToReview(),
+    { code: "FORBIDDEN" },
+  );
 });
 
 test("listVolunteers reads the accounts and puts each on its volunteer", async () => {

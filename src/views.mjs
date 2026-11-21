@@ -232,12 +232,25 @@ export function staffSidebar(state, person, office, { volunteers = office, board
         onPool ? 'aria-current="page"' : "",
       )
     : "";
+  // The uploads waiting for review (change add-clearance-uploads): the count
+  // is drawn for the eye, and the name says it.
+  const toReview = Math.max(0, Number(state?.uploadsToReview) || 0);
   const roster = volunteers
     ? button(
-        `${icon("user")} Volunteers`,
+        `${icon("user")} Volunteers${when(
+          toReview > 0,
+          `<span class="nav-count" aria-hidden="true"> · ${toReview}</span>`,
+        )}`,
         "open-volunteers",
         `nav-link${onRoster ? " current" : ""}`,
-        onRoster ? 'aria-current="page"' : "",
+        [
+          onRoster ? 'aria-current="page"' : "",
+          toReview > 0
+            ? `aria-label="Volunteers, ${toReview} upload${toReview === 1 ? "" : "s"} to review"`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
       )
     : "";
   // Post an update follows the Roster: the workspace admin's, cleared or not.

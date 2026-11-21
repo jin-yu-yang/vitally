@@ -146,6 +146,7 @@ export const RPC_SIGNATURES = Object.freeze([
       "missing",
       "siteCheck",
       "siteCoordinatorName",
+      "uploadUrl",
     ]),
     args: () => ({}),
   }),
@@ -288,6 +289,35 @@ export const RPC_SIGNATURES = Object.freeze([
     authorized: (f) => f.siteCoordinator,
     receiptKeys: Object.freeze(["set", "updatedAt"]),
     args: () => ({ p_action_id: crypto.randomUUID(), p_sidn: TEST_SITE_NUMBER }),
+  }),
+  // A volunteer marking their own document sent (change add-clearance-uploads,
+  // design D2). The Site Coordinator has a current-season entry of their own.
+  Object.freeze({
+    name: "vitally_mark_upload_sent",
+    signature: "vitally_mark_upload_sent(uuid,text)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["actionId", "document", "sentAt"]),
+    args: () => ({ p_action_id: crypto.randomUUID(), p_document: "form13615" }),
+  }),
+  // An admin marking a sent document reviewed, at the volunteer revision
+  // (design D3).
+  Object.freeze({
+    name: "vitally_mark_upload_reviewed",
+    signature: "vitally_mark_upload_reviewed(uuid,uuid,bigint,text)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["actionId", "personId", "revision"]),
+    context: async (f) => {
+      const key = `sig_rv_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+      const { personId } = await f.staff({ key, name: "Quinn Harlow", capabilities: ["prepare"], cleared: false });
+      const { rows } = await f.sql("select revision::int as revision from public.volunteer_profiles where person_id=$1", [personId]);
+      return { reviewVolunteerId: personId, reviewRevision: rows[0].revision };
+    },
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_volunteer_id: context.reviewVolunteerId,
+      p_expected_revision: context.reviewRevision,
+      p_document: "form13615",
+    }),
   }),
   // The office panel's client list: an array, each element of this shape.
   Object.freeze({

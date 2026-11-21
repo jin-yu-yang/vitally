@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ceilingAdmin, missingLines, siteCoordinator, withOwnCapabilities } from "../src/clearance.mjs";
+import { ceilingAdmin, missingLines, uploadItems, siteCoordinator, withOwnCapabilities } from "../src/clearance.mjs";
 
 const clearance = (extra = {}) => ({
   cleared: false,
@@ -80,4 +80,22 @@ test("missingLines says a site coordinator needs the SC certificate, after the r
     }),
   );
   assert.deepEqual(lines, ["Admin needs IT&QR.", "Site coordinators need the SC certificate."]);
+});
+
+test("uploadItems gives the two upload kinds with their lines and sent times", () => {
+  const items = uploadItems(
+    clearance({
+      missing: [
+        { kind: "form13615", sentAt: "2026-11-20T15:00:00Z" },
+        { kind: "photoId", sentAt: null },
+        { kind: "role", role: "greeter", certificates: ["IT&QR"] },
+      ],
+    }),
+  );
+  assert.deepEqual(items, [
+    { document: "form13615", line: "Upload your signed Form 13615.", sentAt: "2026-11-20T15:00:00Z" },
+    { document: "photoId", line: "Have your photo ID checked.", sentAt: null },
+  ]);
+  assert.deepEqual(uploadItems(null), []);
+  assert.equal(uploadItems(clearance({ missing: [{ kind: "form13615" }] }))[0].sentAt, null);
 });

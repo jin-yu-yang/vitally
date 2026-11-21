@@ -1527,3 +1527,46 @@ test("the Workload's styles: tabs, table, bar and drawer list, on tokens only", 
   assert.doesNotMatch(block, /border-(left|right)\s*:/, "no vertical lines in the table");
   assert.doesNotMatch(block, /(?<![-\w])width:\s*\d+px/, "no fixed widths");
 });
+
+// ---- The Volunteers link's uploads count (change add-clearance-uploads, D8) ----
+
+const sidebarWith = (overrides = {}, isAdmin = true) =>
+  staffScreen({
+    principal: { access: "staff", personName: "Sam", clearance: cleared({ isAdmin }) },
+    connection: "online",
+    screen: "staff",
+    people: [],
+    cases: [],
+    assistance: [],
+    ...overrides,
+  });
+const volunteersLink = (html) =>
+  html.match(/<button[^>]*data-action="open-volunteers"[^>]*>[\s\S]*?<\/button>/)?.[0] ?? "";
+
+test("the Volunteers link shows the count", () => {
+  const link = volunteersLink(sidebarWith({ uploadsToReview: 3 }));
+  assert.match(link, /aria-label="Volunteers, 3 uploads to review"/);
+  assert.match(link, /<span class="nav-count" aria-hidden="true"> · 3<\/span>/);
+  assert.equal(link.replace(/<svg[\s\S]*?<\/svg>/, "").replace(/<[^>]+>/g, "").trim(), "Volunteers · 3");
+});
+
+test("the Volunteers link is singular at one", () => {
+  assert.match(volunteersLink(sidebarWith({ uploadsToReview: 1 })), /aria-label="Volunteers, 1 upload to review"/);
+});
+
+test("the Volunteers link is plain at zero", () => {
+  const link = volunteersLink(sidebarWith({ uploadsToReview: 0 }));
+  assert.ok(link, "the link is there");
+  assert.doesNotMatch(link, /aria-label/);
+  assert.doesNotMatch(link, /nav-count/);
+});
+
+test("the Volunteers link keeps the current page marker beside the count", () => {
+  const link = volunteersLink(sidebarWith({ uploadsToReview: 2, screen: "office-volunteers" }));
+  assert.match(link, /aria-current="page"/);
+  assert.match(link, /aria-label="Volunteers, 2 uploads to review"/);
+});
+
+test("a non-admin has no Volunteers link, whatever the count", () => {
+  assert.doesNotMatch(sidebarWith({ uploadsToReview: 3 }, false), /open-volunteers/);
+});

@@ -387,6 +387,8 @@ export function createController({
     // highlights them until it closes, though they are marked read at once.
     updates: [],
     updatesUnread: 0,
+    // Volunteers with an upload to review (a workspace admin's sidebar; D8).
+    uploadsToReview: 0,
     notificationsOpen: false,
     notificationsFresh: [],
     // The Post an update screen (a workspace admin's): the table, the form as
@@ -488,6 +490,8 @@ export function createController({
   // The Roster save whose outcome is unknown, likewise the very request sent
   // (`saveVolunteer`). Window memory only: a reload starts without it.
   let pendingVolunteerSave = null;
+  // An upload send whose answer never came (change add-clearance-uploads).
+  let pendingUploadSend = null;
   // An account action whose answer never came, kept with the revision it was
   // sent at, so pressing the same button again sends the same action id.
   let pendingAccountAction = null;
@@ -989,6 +993,8 @@ export function createController({
       }
       // A client who signed in since shows as Active (never throws).
       await readInvitations();
+      // The sidebar's uploads count (never throws).
+      await readUploadsCount();
       if (state.screen === "office-updates")
         try {
           await readPostedUpdates();
@@ -1164,6 +1170,7 @@ export function createController({
       await loadWorkspace();
       // The Roster is read only where it is shown (a restored window on it).
       if (state.screen === "office-volunteers") await readVolunteers();
+      else await readUploadsCount();
       await readInvitations();
       if (state.screen === "office-updates") await readPostedUpdates();
       if (state.screen === "office-settings") await readSeasonSettings();
@@ -1187,6 +1194,32 @@ export function createController({
     } catch (error) {
       if (state.lists.volunteers !== "ready") state.lists.volunteers = "failed";
       throw error;
+    } finally {
+      // After the list, and whatever the list did: the count is its own read,
+      // started here and not waited for, so the list's callers never wait on it.
+      if (staffWindow() && ceilingAdmin(state.principal)) {
+        const asked = state.principal.userId;
+        void redrawIfUploadsChanged(() => staffWindow() && state.principal?.userId === asked);
+      }
+    }
+  }
+
+  // The sidebar's uploads-to-review count (design D8): only a workspace
+  // admin's staff window asks, cleared or not. Returns whether the number
+  // changed. A failed read keeps the last count; it never throws and never
+  // changes what its caller does.
+  async function readUploadsCount() {
+    try {
+      if (!staffWindow() || !ceilingAdmin(state.principal)) return false;
+      const asked = state.principal.userId;
+      const count = Number(await store.countUploadsToReview());
+      if (!Number.isFinite(count) || count < 0) return false;
+      if (!staffWindow() || state.principal.userId !== asked) return false;
+      if (state.uploadsToReview === count) return false;
+      state.uploadsToReview = count;
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -1217,7 +1250,7 @@ export function createController({
   }
 
   function setVolunteerFilter(key, value) {
-    if (key !== "search" && key !== "role") return;
+    if (key !== "search" && key !== "role" && key !== "show") return;
     state.volunteerFilters = { ...state.volunteerFilters, [key]: String(value ?? "") };
     show();
   }
@@ -2093,6 +2126,8 @@ export function createController({
     const was = !awaitingClearance(state);
     const oldClearance = state.principal.clearance;
     state.principal = { ...state.principal, clearance: answer };
+    // No longer a workspace admin: a later regain must not flash an old number.
+    if (!ceilingAdmin(state.principal)) state.uploadsToReview = 0;
     // The person's own entry follows what they may do now.
     state.people = withOwnCapabilities(state.people, state.principal);
     // An earlier failed check's notice is answered.
@@ -2110,7 +2145,8 @@ export function createController({
     if (now && was) {
       // Cleared before and after: nothing to reload, and nothing to draw unless
       // what the person may do changed. Their entry is already narrowed above.
-      if (sameStanding(oldClearance, answer)) return;
+      // The uploads count is the one thing that can still have moved.
+      if (sameStanding(oldClearance, answer)) return redrawIfUploadsChanged(same);
       // All cases is Admin's; the other screens stay, and Admin coming back
       // moves nobody.
       let focus = false;
@@ -2120,13 +2156,21 @@ export function createController({
       }
       persistSession();
       show(focus);
-      return;
+      return redrawIfUploadsChanged(same);
     }
     if (!now && was) dropWork();
     // Still not cleared: the feed re-reads with the check.
     await readFeed();
     persistSession();
     show();
+    await redrawIfUploadsChanged(same);
+  }
+
+  // The uploads count, read after the clearance's own outcome is drawn, so a
+  // slow or failed count never delays or changes it. Redraws only when the
+  // number moved and the window is still the one that asked.
+  async function redrawIfUploadsChanged(same) {
+    if ((await readUploadsCount()) && same()) show();
   }
 
   async function start() {
@@ -2296,10 +2340,12 @@ export function createController({
     state.volunteerTab = "roster";
     state.workload = freshWorkloadView();
     pendingVolunteerSave = null;
+    pendingUploadSend = null;
     pendingAccountAction = null;
     pendingInviteAction = null;
     state.updates = [];
     state.updatesUnread = 0;
+    state.uploadsToReview = 0;
     endNotifications();
     state.postedUpdates = [];
     state.updateForm = emptyUpdateForm();
@@ -3991,6 +4037,91 @@ export function createController({
   // instead of a second save (which an Add's own email would refuse). It skips
   // the window's checks, which the re-read list may now fail on the save's own
   // result. Changed values are a new save, with a new action id.
+  // "I've uploaded it" on the setup screen (change add-clearance-uploads,
+  // design D6). A send whose answer never came may have landed, so, as
+  // saveVolunteer does, pressing it again for the same document sends the same
+  // action id and the stored receipt answers. Refusals are said on the screen.
+  // A refusal's reason is the database's detail (`cause.details`; its message
+  // is VALIDATION), and it means the screen is stale (a photo ID no longer
+  // needed, an entry removed): the clearance is asked again. After a send, a
+  // check already out (a focus fired by the same click, say) was asked before
+  // the send landed, so, as saveVolunteer does, it is followed by one more.
+  const UPLOAD_REFUSALS = Object.freeze({
+    PHOTO_ID_NOT_NEEDED: "Your photo ID doesn't need sending any more.",
+    NO_ROSTER_ENTRY: "You're not on this season's roster yet. Ask your site coordinator.",
+  });
+  async function markUploadSent(document) {
+    if (state.busy || !staffWindow()) return false;
+    const request =
+      pendingUploadSend?.request.document === document
+        ? pendingUploadSend.request
+        : { actionId: newActionId(), document };
+    pendingUploadSend = null;
+    state.busy = true;
+    state.error = null;
+    show();
+    try {
+      await store.markUploadSent(request);
+    } catch (error) {
+      state.busy = false;
+      // An earlier action's Try again does not belong beside this refusal.
+      state.retryable = false;
+      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingUploadSend = { request };
+      const known = error?.code === "VALIDATION" ? UPLOAD_REFUSALS[String(error?.cause?.details ?? "")] : null;
+      noteFailure(error, { message: known ?? (error?.code === "OFFLINE" ? undefined : "Something went wrong.") });
+      show();
+      if (error?.code === "VALIDATION") void recheckAfterOwnSave();
+      return false;
+    }
+    state.busy = false;
+    await recheckAfterOwnSave();
+    show();
+    return true;
+  }
+
+  // The drawer's Mark reviewed (change add-clearance-uploads, design D7): the
+  // admin has looked at a document the volunteer said they sent. It sends the
+  // drawer volunteer's revision, as Save does, and then re-reads the Roster so
+  // the next Save sends the new one. The drawer stays open and its typed
+  // values are untouched. Returns the toast's text, or null when it did not
+  // land (the banner says why).
+  async function markUploadReviewed(document) {
+    if (state.busy || state.dialog !== "volunteer") return null;
+    const volunteerId = state.dialogContext?.volunteerId ?? null;
+    const current = volunteerId ? (state.volunteers.find((entry) => entry?.id === volunteerId) ?? null) : null;
+    if (!current) throw refuse("NOT_FOUND", STAFF_VOLUNTEER_GONE_MESSAGE);
+    state.busy = true;
+    state.error = null;
+    show();
+    try {
+      await store.markUploadReviewed({
+        actionId: newActionId(),
+        volunteerId,
+        expectedRevision: Number(current.revision),
+        document,
+      });
+    } catch (error) {
+      state.busy = false;
+      // An earlier action's Try again does not belong beside this refusal.
+      state.retryable = false;
+      noteFailure(error, error?.code === "CONFLICT" ? { message: VOLUNTEER_CONFLICT_MESSAGE } : undefined);
+      // What changed under it: the list as it is now.
+      await readVolunteers().catch(() => {});
+      show();
+      return null;
+    }
+    state.busy = false;
+    noteConnected();
+    try {
+      await readVolunteers();
+      state.error = null;
+    } catch (error) {
+      noteFailure(error);
+    }
+    show();
+    return "Marked reviewed";
+  }
+
   async function saveVolunteer(values) {
     if (state.busy) return false;
     const volunteerId = state.dialogContext?.volunteerId ?? null;
@@ -4631,6 +4762,7 @@ export function createController({
     completeSiteCheck,
     setVolunteerFilter,
     saveVolunteer,
+    markUploadReviewed,
     createAccount,
     resendAccount,
     deactivateAccount,
@@ -4687,6 +4819,7 @@ export function createController({
     cancelShadedReview,
     retryLast,
     checkClearance,
+    markUploadSent,
     navigate,
     togglePanel,
     setLookup,

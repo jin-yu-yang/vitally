@@ -696,3 +696,78 @@ test("the drawer's Admin tick follows whether the signed-in person is a site coo
   assert.match(open(false), /Only site coordinators change the Admin role\./);
   assert.doesNotMatch(adminTick(open(true)), /disabled/);
 });
+
+// ---- uploads to review (change add-clearance-uploads) ----
+
+test("the toolbar has a Show select", () => {
+  const html = renderRoster([volunteer()], { list: "ready", filters: { show: "uploads" } });
+  assert.match(html, /<select id="volunteer-show-filter" data-volunteer-filter="show">/);
+  const options = [...html.match(/id="volunteer-show-filter"[^]*?<\/select>/)[0].matchAll(/<option value="([^"]*)"( selected)?>([^<]*)</g)];
+  assert.deepEqual(options.map((m) => [m[1], Boolean(m[2]), m[3]]), [
+    ["all", false, "Everyone"],
+    ["uploads", true, "Uploads to review"],
+  ]);
+  const plain = renderRoster([volunteer()], { list: "ready", filters: {} });
+  assert.match(plain, /<option value="all" selected>Everyone/);
+});
+
+test("the Show filter narrows the rows", () => {
+  const html = renderRoster(
+    [volunteer({ id: "a", name: "A One", form13615SentAt: "2026-11-20T15:00:00Z" }), volunteer({ id: "b", name: "B Two" })],
+    { list: "ready", filters: { show: "uploads" } },
+  );
+  assert.match(html, /A One/);
+  assert.doesNotMatch(html, /B Two/);
+  assert.match(html, /1 of 2 volunteers/);
+});
+
+test("a row says Form 13615 to review and Photo ID to review", () => {
+  const sentAt = "2026-11-20T15:00:00Z";
+  const rows = (v) => renderRoster([v], { list: "ready", filters: {} });
+  const uncleared = rows(volunteer({ cleared: false, missing: ["form13615"], form13615SentAt: sentAt }));
+  assert.match(uncleared, /Not cleared<\/span> <span class="muted">Form 13615 missing<\/span> <span class="volunteer-to-review">Form 13615 to review<\/span>/);
+  const clearedRow = rows(volunteer({ cleared: true, photoIdSentAt: sentAt }));
+  assert.match(clearedRow, /Cleared<\/span> <span class="volunteer-to-review">Photo ID to review<\/span>/);
+  assert.match(rows(volunteer({ form13615SentAt: sentAt, photoIdSentAt: sentAt })), /Form 13615 to review, Photo ID to review/);
+  assert.doesNotMatch(rows(volunteer()), /volunteer-to-review/);
+});
+
+test("the drawer shows Form 13615 sent Nov 20 with Mark reviewed", () => {
+  const html = volunteerDrawerBody({
+    volunteer: volunteer({ form13615SentAt: "2026-11-20T15:00:00Z", photoIdSentAt: "2026-11-19T15:00:00Z" }),
+    isNew: false,
+    ui: {},
+  });
+  assert.match(html, /Form 13615 sent Nov 20/);
+  assert.match(html, /Photo ID sent Nov 19/);
+  assert.match(html, /<button type="button" class="btn secondary" data-action="mark-upload-reviewed" data-document="form13615">Mark reviewed<\/button>/);
+  assert.match(html, /data-action="mark-upload-reviewed" data-document="photoId"/);
+  assert.ok(html.indexOf("Form 13615 sent") < html.indexOf("<legend>Certificates</legend>"));
+  assert.ok(html.indexOf("Photo ID sent") > html.indexOf('id="volunteer-photoIdChecked"'));
+});
+
+test("drawer date is the New York day", () => {
+  // 02:30 UTC on Nov 21 is 9:30 pm on Nov 20 in New York.
+  const html = volunteerDrawerBody({ volunteer: volunteer({ form13615SentAt: "2026-11-21T02:30:00Z" }), isNew: false, ui: {} });
+  assert.match(html, /Form 13615 sent Nov 20/);
+});
+
+test("no sent line when nothing is waiting", () => {
+  const html = volunteerDrawerBody({ volunteer: volunteer(), isNew: false, ui: {} });
+  assert.doesNotMatch(html, /sent|mark-upload-reviewed/);
+});
+
+test("no sent line in Add a volunteer", () => {
+  const html = volunteerDrawerBody({ volunteer: null, isNew: true, ui: {} });
+  assert.doesNotMatch(html, /mark-upload-reviewed/);
+  const withData = volunteerDrawerBody({ volunteer: volunteer({ form13615SentAt: "2026-11-20T15:00:00Z" }), isNew: true, ui: {} });
+  assert.doesNotMatch(withData, /mark-upload-reviewed/);
+});
+
+test("Mark reviewed is off while the drawer is busy", () => {
+  const v = volunteer({ form13615SentAt: "2026-11-20T15:00:00Z", photoIdSentAt: "2026-11-20T15:00:00Z" });
+  const busy = volunteerDrawerBody({ volunteer: v, isNew: false, ui: { busy: true } });
+  assert.equal([...busy.matchAll(/data-action="mark-upload-reviewed" data-document="[A-Za-z0-9]+" disabled/g)].length, 2);
+  const idle = volunteerDrawerBody({ volunteer: v, isNew: false, ui: {} });
+  assert.doesNotMatch(idle, /mark-upload-reviewed"[^>]*disabled/);
+});

@@ -9663,6 +9663,288 @@ test(
   },
 );
 
+// Clearance uploads (change add-clearance-uploads) have their own test, outside
+// the story and its time limit, like the Roster's: it adds no phase to either
+// order. Chrome only, on a fixture of its own. Two uncleared volunteers say
+// they sent their Form 13615 and their photo ID; the Site Coordinator sees the
+// count on Volunteers, filters the Roster, reviews them (by saving the
+// certificates and role, and by Mark reviewed) and a window with no realtime
+// channel re-reads on focus. Fictional people and example.org only.
+test(
+  "A volunteer says their uploads were sent, and an admin reviews them",
+  { timeout: 300_000 },
+  async () => {
+    const fixture = await createBrowserFixture();
+    const SETUP_HEADING = "Finish your setup for this season";
+    const LINK = "https://example.org/certificates";
+    const ROBIN = "Robin Vale";
+    const SASHA = "Sasha Kerr";
+    const NEW_PHONE = "(215) 555-0142";
+    const alertMark = (page) => page.evaluate(() => (window.__vitallyAlerts ?? []).length);
+    const toastSince = (page, text, mark) =>
+      waitFor(
+        page,
+        `the toast ${JSON.stringify(text)}`,
+        ([wanted, from]) =>
+          (window.__vitallyAlerts ?? []).slice(from).some((line) => line.startsWith("toast: ") && line.includes(wanted)),
+        [text, mark],
+        ARRIVAL_MS,
+      );
+    const rowOf = (page, name) =>
+      page.locator("tr.volunteer-row").filter({
+        has: page.locator(".volunteer-name", { hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&")}$`) }),
+      });
+    const rowNames = (page) =>
+      page.evaluate(() => [...document.querySelectorAll("tr.volunteer-row .volunteer-name")].map((n) => n.textContent.trim()));
+    const drawerOpen = (page, title) =>
+      waitFor(
+        page,
+        `the volunteer drawer titled ${JSON.stringify(title)}`,
+        (wanted) =>
+          Boolean(document.querySelector("#volunteer-form")) &&
+          (document.querySelector(".modal")?.innerText ?? "").includes(wanted),
+        title,
+        RENDER_MS,
+      );
+    const drawerClosed = (page) =>
+      waitFor(page, "the volunteer drawer to close", () => !document.querySelector("#volunteer-form"), undefined, ARRIVAL_MS);
+    const volunteersLabel = (page) =>
+      page.locator('.sidebar-nav [data-action="open-volunteers"]').first().getAttribute("aria-label");
+    // A window with no realtime channel re-reads on focus: bring it forward,
+    // fire focus until the page says what is wanted, as the posted-updates test does.
+    const regainFocusUntil = async (page, what, predicate, arg) => {
+      const until = Date.now() + ARRIVAL_MS;
+      let seen = false;
+      while (!seen && Date.now() < until) {
+        await page.bringToFront();
+        await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+        seen = await page
+          .waitForFunction(predicate, arg, { timeout: 3_000, polling: 100 })
+          .then(() => true, () => false);
+      }
+      assert.ok(seen, `${what} did not appear on focus within ${ARRIVAL_MS}ms`);
+    };
+    const setLink = (url) =>
+      fixture.database.sql(
+        "insert into public.season_settings(workspace_id,certificate_upload_url) values($1,$2) on conflict(workspace_id) do update set certificate_upload_url=excluded.certificate_upload_url",
+        [fixture.database.workspaceId, url],
+      );
+    try {
+      await setLink(LINK);
+      const robin = await fixture.database.staff({ key: "uploads_volunteer", name: ROBIN, capabilities: [], cleared: false });
+      const sasha = await fixture.database.staff({ key: "uploads_new_volunteer", name: SASHA, capabilities: [], cleared: false });
+      // Sasha is new, with no photo ID check; Robin is not new.
+      await fixture.database.sql(
+        `update public.roster_entries r set is_new=(r.person_id=$2)
+          from public.workspaces w
+          where w.id=r.workspace_id and r.season=w.current_season and r.workspace_id=$1 and r.person_id in ($2,$3)`,
+        [fixture.database.workspaceId, sasha.personId, robin.personId],
+      );
+      await fixture.database.sql(
+        `update public.roster_entries r set photo_id_checked_at=null
+          from public.workspaces w
+          where w.id=r.workspace_id and r.season=w.current_season and r.workspace_id=$1 and r.person_id=$2`,
+        [fixture.database.workspaceId, sasha.personId],
+      );
+
+      const engine = await fixture.launch("chrome");
+
+      // 1. Robin signs in to Finish your setup: the Form 13615 item links to the
+      //    certificate page, and I've uploaded it turns into the waiting line.
+      const robinWin = await engine.newPage({ viewport: DESKTOP });
+      const robinPage = robinWin.page;
+      await guardToast(robinPage);
+      await loginTestUser({
+        page: robinPage,
+        actor: { key: "uploads_volunteer", email: robin.email, userId: robin.userId },
+        fixture,
+        heading: SETUP_HEADING,
+      });
+      await waitForText(robinPage, "Upload your signed Form 13615.");
+      const upload = robinPage.locator("#main .setup-upload a");
+      await upload.first().waitFor({ timeout: RENDER_MS });
+      assert.equal(await upload.first().getAttribute("href"), LINK, "the Upload link");
+      assert.equal(await upload.first().getAttribute("target"), "_blank", "the Upload link's target");
+      await clickAction(robinPage, "mark-upload-sent", { attributes: '[data-document="form13615"]' });
+      await waitForText(robinPage, "Waiting for review · sent");
+      assert.equal(await robinPage.locator('[data-action="mark-upload-sent"]').count(), 0, "I've uploaded it stays after it was sent");
+
+      // 2. The Site Coordinator sees one upload to review, and Show filters to Robin.
+      const adminWin = await engine.newPage({ viewport: DESKTOP });
+      const admin = adminWin.page;
+      await guardToast(admin);
+      await loginTestUser({ page: admin, actor: fixture.actor("siteCoordinator"), fixture, heading: OFFICE_BOARD_HEADING });
+      await watchAlerts(admin);
+      await waitFor(
+        admin,
+        "Volunteers to name the one upload",
+        () =>
+          document.querySelector('.sidebar-nav [data-action="open-volunteers"]')?.getAttribute("aria-label") ===
+          "Volunteers, 1 upload to review",
+        undefined,
+        ARRIVAL_MS,
+      );
+      await clickAction(admin, "open-volunteers");
+      await rowOf(admin, ROBIN).waitFor({ timeout: ARRIVAL_MS });
+      await admin.locator("#volunteer-show-filter").selectOption("uploads");
+      await waitFor(
+        admin,
+        "the Roster to list only Robin",
+        (name) => {
+          const names = [...document.querySelectorAll("tr.volunteer-row .volunteer-name")].map((n) => n.textContent.trim());
+          return names.length === 1 && names[0] === name;
+        },
+        ROBIN,
+        RENDER_MS,
+      );
+      assert.ok((await rowOf(admin, ROBIN).innerText()).includes("Form 13615 to review"), "Robin's row names the form");
+
+      // 3. Edit Robin: the drawer says the form was sent. Ticking the
+      //    certificates and the role and saving clears the sent date, so the row
+      //    leaves the filter and Volunteers loses its count.
+      const editButton = (id) => `[data-action="open-edit-volunteer"][data-volunteer-id="${id}"]`;
+      await waitForQuiet(admin);
+      await admin.locator(editButton(robin.personId)).click({ timeout: CLICK_MS });
+      await drawerOpen(admin, ROBIN);
+      await waitForText(admin, "Form 13615 sent");
+      await admin.locator("#volunteer-certificate-vsc").check();
+      await admin.locator("#volunteer-certificate-itqr").check();
+      await admin.locator("#volunteer-role-intaker").check();
+      await admin.locator('#volunteer-form button[type="submit"]').click({ timeout: CLICK_MS });
+      await drawerClosed(admin);
+      await waitFor(
+        admin,
+        "Robin to leave Uploads to review",
+        () => document.querySelectorAll("tr.volunteer-row").length === 0,
+        undefined,
+        ARRIVAL_MS,
+      );
+      await waitFor(
+        admin,
+        "Volunteers to lose its count",
+        () => {
+          const link = document.querySelector('.sidebar-nav [data-action="open-volunteers"]');
+          return Boolean(link) && !link.hasAttribute("aria-label") && link.textContent.trim() === "Volunteers";
+        },
+        undefined,
+        ARRIVAL_MS,
+      );
+
+      // 4. Robin's window regains focus, and the work board opens.
+      await regainFocusUntil(
+        robinPage,
+        "the work board",
+        (heading) => [...document.querySelectorAll("h1, h2")].some((h) => h.textContent.trim() === heading),
+        WORK_BOARD_HEADING,
+      );
+      await robinPage.getByRole("heading", { name: WORK_BOARD_HEADING, exact: true }).first().waitFor({ timeout: RENDER_MS });
+      assert.equal(await robinPage.getByRole("heading", { name: SETUP_HEADING, exact: true }).count(), 0);
+      assertConsoleQuiet(robinWin, { name: "Robin's window" });
+
+      // 5. Sasha, who is new, says the photo ID was sent. The Site Coordinator's
+      //    window re-reads on focus and counts it. In Sasha's drawer a typed phone
+      //    survives Mark reviewed, and Save then lands with no conflict.
+      const sashaWin = await engine.newPage({ viewport: DESKTOP });
+      const sashaPage = sashaWin.page;
+      await guardToast(sashaPage);
+      await loginTestUser({
+        page: sashaPage,
+        actor: { key: "uploads_new_volunteer", email: sasha.email, userId: sasha.userId },
+        fixture,
+        heading: SETUP_HEADING,
+      });
+      await waitForText(sashaPage, "Upload your signed Form 13615.");
+      await clickAction(sashaPage, "mark-upload-sent", { attributes: '[data-document="photoId"]' });
+      await waitFor(
+        sashaPage,
+        "the photo ID item to wait for review",
+        () => !document.querySelector('[data-action="mark-upload-sent"][data-document="photoId"]'),
+        undefined,
+        ARRIVAL_MS,
+      );
+      await waitForText(sashaPage, "Waiting for review · sent");
+      assertConsoleQuiet(sashaWin, { name: "Sasha's window" });
+
+      await regainFocusUntil(
+        admin,
+        "Volunteers naming one upload",
+        () =>
+          document.querySelector('.sidebar-nav [data-action="open-volunteers"]')?.getAttribute("aria-label") ===
+          "Volunteers, 1 upload to review",
+        undefined,
+      );
+      // Focus re-reads the count but not the Roster list, which only
+      // open-volunteers reads (app.mjs): so the Roster is reopened, on Everyone.
+      await admin.locator("#volunteer-show-filter").selectOption("all");
+      await clickAction(admin, "open-board");
+      await admin.getByRole("heading", { name: OFFICE_BOARD_HEADING, exact: true }).first().waitFor({ timeout: ARRIVAL_MS });
+      await clickAction(admin, "open-volunteers");
+      await rowOf(admin, SASHA).waitFor({ timeout: ARRIVAL_MS });
+      await waitForQuiet(admin);
+      await admin.locator(editButton(sasha.personId)).click({ timeout: CLICK_MS });
+      await drawerOpen(admin, SASHA);
+      const photoLine = admin.locator('.volunteer-sent[data-document="photoId"]');
+      await photoLine.waitFor({ timeout: RENDER_MS });
+      assert.ok((await photoLine.innerText()).includes("Photo ID sent"), "the drawer's photo ID line");
+      assert.equal(await admin.locator('.volunteer-sent[data-document="form13615"]').count(), 0, "a Form 13615 line for Sasha");
+      await admin.locator("#volunteer-phone").fill(NEW_PHONE);
+      const mark = await alertMark(admin);
+      await pressControl(admin, photoLine.locator('[data-action="mark-upload-reviewed"]'), {
+        selector: '[data-action="mark-upload-reviewed"]',
+        what: "Mark reviewed",
+      });
+      await toastSince(admin, "Marked reviewed", mark);
+      await waitFor(
+        admin,
+        "the Photo ID sent line to go",
+        () => !document.querySelector('.volunteer-sent[data-document="photoId"]'),
+        undefined,
+        ARRIVAL_MS,
+      );
+      assert.equal(await admin.locator("#volunteer-phone").inputValue(), NEW_PHONE, "Mark reviewed dropped the typed phone");
+      await admin.locator('#volunteer-form button[type="submit"]').click({ timeout: CLICK_MS });
+      await drawerClosed(admin);
+      // A CONFLICT keeps the drawer open (app.mjs), so the drawer closing and the
+      // row showing the new phone prove the save landed with no conflict.
+      await waitFor(
+        admin,
+        "Sasha's row to show the new phone",
+        ([name, phone]) =>
+          [...document.querySelectorAll("tr.volunteer-row")].some(
+            (row) =>
+              row.querySelector(".volunteer-name")?.textContent.trim() === name &&
+              (row.querySelector(".volunteer-contact")?.textContent ?? "").includes(phone),
+          ),
+        [SASHA, NEW_PHONE],
+        ARRIVAL_MS,
+      );
+      // Nothing is left to review.
+      await admin.locator("#volunteer-show-filter").selectOption("uploads");
+      await waitFor(
+        admin,
+        "nobody to match Uploads to review",
+        () => document.querySelectorAll("tr.volunteer-row").length === 0,
+        undefined,
+        RENDER_MS,
+      );
+      assert.deepEqual(await rowNames(admin), [], "somebody still matches Uploads to review");
+      assert.ok((await admin.locator("#app").innerText()).includes("Nobody matches."), "Nobody matches is not shown");
+      await waitFor(
+        admin,
+        "Volunteers to lose its count",
+        () => !document.querySelector('.sidebar-nav [data-action="open-volunteers"]')?.hasAttribute("aria-label"),
+        undefined,
+        ARRIVAL_MS,
+      );
+      assert.equal(await volunteersLabel(admin), null);
+      assertConsoleQuiet(adminWin, { name: "the Site Coordinator's uploads window" });
+    } finally {
+      await setLink(null).catch(() => {});
+      await fixture.close();
+    }
+  },
+);
+
 // Posted updates (change add-posted-updates) have their own test, outside the
 // story and its time limit, like the Roster's: it adds no phase to either
 // order. Chrome only, on a fixture of its own. Three windows: the Site
