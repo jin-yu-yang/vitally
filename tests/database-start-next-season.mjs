@@ -99,17 +99,11 @@ const defaultFollowupOf = async (f) =>
 test("starting the next season is refused", async (t) => {
   const f = await createDatabaseFixture();
   try {
-    const season = await seasonOf(f);
     // Unfinished work of every kind, plus what doesn't count: an Accepted
-    // case, a help request with no case, and a draft.
-    const readyToEfile = await f.approvedCase();
-    await f.act(f.siteCoordinator, readyToEfile, "MARK_READY_TO_EFILE", { confirmed: true });
-    const efiled = await f.approvedCase();
-    await f.act(f.siteCoordinator, efiled, "MARK_READY_TO_EFILE", { confirmed: true });
-    await f.act(f.siteCoordinator, efiled, "MARK_EFILED", {
-      confirmed: true,
-      methods: { federal: "efile", state: "efile" },
-    });
+    // case, a help request with no case, and a draft. First the older-season
+    // case: a case's season is fixed once it is numbered (010), so it is left
+    // at Rejected and the workspace's season moves on by SQL. Clearance is per
+    // season (045), so the staff are cleared for the new one too.
     const rejectedCase = await f.approvedCase();
     await f.act(f.siteCoordinator, rejectedCase, "MARK_READY_TO_EFILE", { confirmed: true });
     await f.act(f.siteCoordinator, rejectedCase, "MARK_EFILED", {
@@ -121,8 +115,27 @@ test("starting the next season is refused", async (t) => {
       confirmed: true,
       results: { federal: { result: "rejected", date: day, code: "C1" } },
     });
-    // The older-season case: set by SQL once it is written for the last time.
-    await f.sql("update public.cases set season=season-1 where id=$1 and workspace_id=$2", [rejectedCase, f.workspaceId]);
+    await f.sql("update public.workspaces set current_season=current_season+1 where id=$1", [f.workspaceId]);
+    for (const member of f.setup.staff) {
+      const { id } = await one(f, "select id from public.people where workspace_id=$1 and person_key=$2", [
+        f.workspaceId,
+        member.personKey,
+      ]);
+      await f.clearStaff(id, member.capabilities, f.workspaceId, { siteCoordinator: member.siteCoordinator });
+    }
+    const season = await seasonOf(f);
+    assert.equal(
+      Number((await one(f, "select season from public.cases where id=$1 and workspace_id=$2", [rejectedCase, f.workspaceId])).season),
+      season - 1,
+    );
+    const readyToEfile = await f.approvedCase();
+    await f.act(f.siteCoordinator, readyToEfile, "MARK_READY_TO_EFILE", { confirmed: true });
+    const efiled = await f.approvedCase();
+    await f.act(f.siteCoordinator, efiled, "MARK_READY_TO_EFILE", { confirmed: true });
+    await f.act(f.siteCoordinator, efiled, "MARK_EFILED", {
+      confirmed: true,
+      methods: { federal: "efile", state: "efile" },
+    });
     const accepted = await acceptedCase(f);
     await f.sql(
       `insert into public.admin_followups(workspace_id,case_id,request_id,purpose,assignee_person_id,status,reason,created_by_person_id)
