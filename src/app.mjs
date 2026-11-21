@@ -32,7 +32,7 @@ import { cardsFor } from "./document-cards.mjs";
 import { FORM_FILES, draftFields } from "./draft-form.mjs";
 import { FORM_14446_FILES, draft14446Fields } from "./draft-virtual-consent.mjs";
 import { exitFormSource } from "./exit-form-source.mjs";
-import { EXIT_FORM_FILE, buildExitFormPdf, exitFormFontFields, exitFormMarks, exitFormNeedsFont } from "./exit-form.mjs";
+import { EXIT_FORM_FILE, buildExitFormPdf, exitFormFontFields, exitFormMarks, exitFormNeedsFont, exitFormTaxYear } from "./exit-form.mjs";
 import {
   buildDraftPdf,
   buildEditingCopy,
@@ -1955,15 +1955,10 @@ if (!config) {
     try {
       const answers = state.draftAnswers ?? record.answers ?? {};
       const visible = visibleAnswers(2, answers);
-      const season = Number.isInteger(record.season)
-        ? record.season
-        : Number.isInteger(state.workspace?.currentSeason)
-          ? state.workspace.currentSeason
-          : 2025;
       const marks = exitFormMarks(
         source.questionnaire,
         {
-          taxYear: season,
+          taxYear: exitFormTaxYear(record, state.workspace),
           clientNumber: record.clientNumber ?? "",
           firstName: answers.tp_first_name,
           lastName: answers.tp_last_name,
