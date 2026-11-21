@@ -25,7 +25,7 @@ it. Run everything described here against the local stack from [`docs/setup.md`]
 
 ## Migrations
 
-The schema is fifty-four plain SQL files (001 to 054) in [`supabase/migrations/`](../../supabase/migrations/), applied
+The schema is fifty-five plain SQL files (001 to 055) in [`supabase/migrations/`](../../supabase/migrations/), applied
 in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 
 | File | Adds |
@@ -170,7 +170,7 @@ grep -n -E "^create (or replace )?function" supabase/migrations/*.sql
 
 Two schemas:
 
-- **`public`**: the application tables and the thirty browser-callable functions.
+- **`public`**: the application tables and the thirty-one browser-callable functions.
 - **`vitally_private`**: helper functions, the migration ledger, and tables browsers must never
   reach. Every function here is `SECURITY DEFINER` with `search_path=''`, and `EXECUTE` is revoked
   from every role, including `service_role`.
@@ -302,7 +302,7 @@ policy and `vitally_private.lock_case` (which applies the same rule to writes) i
 
 ## The action API
 
-Browsers can call exactly thirty functions. Each runs as its owner (`SECURITY DEFINER`), checks the
+Browsers can call exactly thirty-one functions. Each runs as its owner (`SECURITY DEFINER`), checks the
 caller itself, and returns a JSON receipt. The table below lists the case, Roster, clearance, update and label
 functions. The account functions (047, [migrations](#migrations)) and Season settings' four
 (`vitally_season_settings`, `vitally_save_season_settings`, `vitally_set_site_coordinator`,
@@ -334,7 +334,7 @@ None of them takes a person parameter (043 removed `p_person_id`). The database 
 the caller acts as ([below](#who-is-acting)).
 
 The exact signatures are pinned by a test ([`tests/support/rpc-signatures.mjs`](../../tests/support/rpc-signatures.mjs)),
-so adding a thirty-first function or changing an argument fails the database suite until the list is
+so adding a thirty-second function or changing an argument fails the database suite until the list is
 updated.
 
 ### Who is acting
@@ -451,6 +451,14 @@ Season settings.
   `VALIDATION`. While work is open it is `VT004` with message `SEASON_NOT_FINISHED` and its counts
   as JSON in the detail: `openCases` (any stage but `draft`, `accepted` and `closed`),
   `openFollowups`, `claimedHelp` and `unclaimedHelpOnCases`.
+- **Locks, in order:** the workspace advisory lock (which removing a site coordinator and Deactivate
+  also take). Then the caller is checked again: one removed or deactivated while waiting is
+  `FORBIDDEN`, with no receipt. Then every staff membership row of the workspace (`for update`, in
+  user order). Then `cases`, `admin_followups` and `assistance_items` in exclusive mode. Then the
+  workspace row (`for no key update`). A staff write takes `for share` on its own membership before
+  its case row, so locking memberships before the tables keeps the two from deadlocking. A staff
+  write that comes after the start is refused once it commits: a deactivated person's by the
+  membership check, a site coordinator's as `PAST_SEASON`.
 - **What a start does,** in one transaction: the default follow-up person moves to the starter
   unless a site coordinator; `workspaces.current_season` goes up by one; the starter gets a
   new-season roster entry with no roles; every other invited or active staff account that isn't a
