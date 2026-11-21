@@ -190,6 +190,7 @@ Working notes from apply are scratch:
     - it ran on the commit you are verifying: the pull request's run, or `gh workflow run ci.yml --ref <branch>` on a pushed branch;
     - every job that covers the change passed. A skipped or cancelled job doesn't count. A job that passes on a re-run counts, but say that it failed first;
     - you link the run wherever you say which checks you ran (the PR body, `verify.md`), and review the story's screenshots from the run's artifacts (kept 7 days).
+  - **A quick database run** (`gh workflow run ci.yml --ref <branch> -f database_files="tests/database-x.mjs"`) runs only those files and skips every other job. Use it while iterating; it never stands in for the checks above.
   - **CI starts from an empty database.** A migration that changes existing rows still needs a local `npm run db:migrate:test` and `npm run test:database` on a stack that already has `main`'s migrations.
 - **Git:**
   - Teammates merge into `main`, so sync with `main` before pushing.
