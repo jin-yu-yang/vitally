@@ -453,8 +453,10 @@ Season settings.
   `openFollowups`, `claimedHelp` and `unclaimedHelpOnCases`.
 - **Locks, in order:** the workspace advisory lock (which removing a site coordinator and Deactivate
   also take). Then the caller is checked again: one removed or deactivated while waiting is
-  `FORBIDDEN`, with no receipt. Then every staff membership row of the workspace (`for update`, in
-  user order). Then `cases`, `admin_followups` and `assistance_items` in exclusive mode. Then the
+  `FORBIDDEN`, with no receipt. Then the membership rows it will deactivate (`for update`, in user
+  order: staff whose account is invited or active and not a site coordinator's). Site coordinators'
+  memberships are not locked, so a second site coordinator's start gets `CONFLICT`, not a
+  deadlock. Then `cases`, `admin_followups` and `assistance_items` in exclusive mode. Then the
   workspace row (`for no key update`). A staff write takes `for share` on its own membership before
   its case row, so locking memberships before the tables keeps the two from deadlocking. A staff
   write that comes after the start is refused once it commits: a deactivated person's by the

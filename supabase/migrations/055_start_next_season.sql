@@ -206,17 +206,25 @@ begin
  if not vitally_private.is_site_coordinator(v_member.workspace_id,v_person.id) then
   raise sqlstate 'VT001' using message='FORBIDDEN';
  end if;
- -- Every staff membership of the workspace, in user order, before the table
- -- locks. A staff write takes FOR SHARE on its own membership first
- -- (require_membership), then its case or follow-up row. Step 4 below
- -- deactivates memberships, so without this a write holding FOR SHARE and
- -- waiting on the table locks, and this call waiting on that FOR SHARE, would
- -- deadlock. A write already holding its membership finishes first; one that
- -- comes later waits here. Client memberships are not changed, so they are
- -- not locked.
+ -- The memberships step 4 will deactivate, in user order, before the table
+ -- locks: staff, with an invited or active account that isn't a site
+ -- coordinator's (the same set as step 4's loop). A staff write takes FOR
+ -- SHARE on its own membership first (require_membership), then its case or
+ -- follow-up row. Without this, a write holding FOR SHARE and waiting on the
+ -- table locks, and this call waiting on that FOR SHARE, would deadlock. A
+ -- write already holding its membership finishes first; one that comes later
+ -- waits here. The set can't change while this runs: granting or removing site
+ -- coordinator, and every account change, take the workspace lock above.
+ -- Site coordinators' memberships are not locked. Another site coordinator
+ -- pressing Start, or saving Season settings, holds FOR SHARE on their own
+ -- membership while waiting for the workspace lock, so locking theirs would
+ -- deadlock (40P01) instead of answering CONFLICT. Client memberships are not
+ -- changed, so they are not locked either.
  perform 1 from public.memberships m
+  join public.accounts a on a.workspace_id=m.workspace_id and a.user_id=m.user_id
   where m.workspace_id=v_member.workspace_id and m.access='staff'
-  order by m.user_id for update;
+   and a.status in ('invited','active') and not a.is_site_coordinator
+  order by m.user_id for update of m;
  -- Case writes don't take the workspace lock, so without these the counts
  -- below could miss a case reopened, a follow-up opened or a help request
  -- claimed while the start runs. Writes already in flight finish first. A

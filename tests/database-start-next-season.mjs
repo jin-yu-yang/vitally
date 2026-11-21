@@ -516,3 +516,69 @@ test("a start waits on a staff write's membership before locking the case tables
     await f.close();
   }
 });
+
+// PR #255 review (Zeye): two site coordinators press Start together while
+// Bea's own membership is held FOR SHARE (as a write of hers would). Bea's
+// start holds FOR SHARE on her membership while it waits for the workspace
+// lock, and the start only locks the memberships it deactivates, never a site
+// coordinator's. So one start lands and the other is CONFLICT, the season
+// moves once, and neither is a deadlock (40P01).
+test("two site coordinators starting together: one lands, the other is CONFLICT", async () => {
+  const f = await createDatabaseFixture();
+  const holder = await openDatabase({ kind: "test" });
+  let open = false;
+  try {
+    const season = await seasonOf(f);
+    const bea = await f.staff({
+      key: "bea_sc",
+      name: "Bea Lindqvist",
+      capabilities: ["admin", "followup"],
+      siteCoordinator: true,
+    });
+    await holder.query("begin");
+    open = true;
+    await holder.query("select 1 from public.memberships where workspace_id=$1 and user_id=$2 and active for share", [
+      f.workspaceId,
+      bea.userId,
+    ]);
+    const settled = (promise) => {
+      const box = { done: false };
+      box.promise = promise.then((answer) => {
+        box.done = true;
+        return answer;
+      });
+      return box;
+    };
+    // Each start either finishes or is seen waiting before the next step.
+    const finishedOrWaiting = async (box) => {
+      for (let i = 0; i < 100 && !box.done; i += 1) {
+        const { w } = await one(
+          f,
+          "select exists(select 1 from pg_stat_activity where wait_event_type='Lock' and query ilike '%vitally_start_next_season%' and pid<>pg_backend_pid()) as w",
+        );
+        if (w) return;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    };
+    const ada = settled(start(f.siteCoordinator, { expected: season, typed: season + 1 }));
+    await finishedOrWaiting(ada);
+    const second = settled(start(bea.client, { expected: season, typed: season + 1 }));
+    await finishedOrWaiting(second);
+    await holder.query("commit");
+    open = false;
+    const answers = [await ada.promise, await second.promise];
+    const errors = answers.map(({ error }) => error).filter(Boolean);
+    assert.deepEqual(
+      errors.map(refusal),
+      [{ code: "VT003", message: "CONFLICT" }],
+      `one start lands, the other is CONFLICT: ${errors.map(failure).join("; ")}`,
+    );
+    assert.equal(answers.filter(({ data }) => data).length, 1);
+    assert.equal(await seasonOf(f), season + 1);
+    assert.equal((await startsOf(f)).length, 1);
+  } finally {
+    if (open) await holder.query("rollback");
+    await holder.end();
+    await f.close();
+  }
+});
