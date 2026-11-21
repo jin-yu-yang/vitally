@@ -3487,6 +3487,13 @@ textarea::placeholder {
   font-weight: 400;
   color: var(--vt-muted);
 }
+/* "Signed in as …" under the account status, on its own line like the contact line. */
+.volunteer-roster td .volunteer-signed-in {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--vt-muted);
+}
 .volunteer-roster .board-table td,
 .volunteer-roster .board-table tbody th {
   white-space: normal;
