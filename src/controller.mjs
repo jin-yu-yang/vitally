@@ -2221,6 +2221,29 @@ export function createController({
     );
   };
 
+  // A clearance read refused FORBIDDEN may mean the account lost its
+  // membership (Deactivate, or Start next season): a deactivated member gets
+  // no realtime, so a wake is how its window learns. The principal is read
+  // once more. Refused, or no longer staff, the window becomes the first
+  // load's no-access window, holding nothing of the work and no channel.
+  // A member still active keeps the refusal as it was. Resolves true when
+  // the window went to no-access.
+  async function lostMembership(asked) {
+    let gone;
+    try {
+      gone = (await store.getPrincipal())?.access !== "staff";
+    } catch (error) {
+      gone = error?.code === "FORBIDDEN";
+    }
+    if (!gone || !staffWindow() || state.principal.userId !== asked) return false;
+    forgetUser();
+    // Still signed in: focus, online and Try again ask for the principal
+    // again, as on a first load with no membership.
+    state.session = "present";
+    showNoAccess({ code: "FORBIDDEN" });
+    return true;
+  }
+
   async function recheckClearance() {
     if (!staffWindow()) return;
     // A cancelled site check has no membership left to ask about: the screen
@@ -2234,6 +2257,7 @@ export function createController({
       if (!answer || typeof answer !== "object" || Array.isArray(answer) || !Array.isArray(answer.capabilities))
         throw controllerError("SERVER_ERROR", "Something went wrong.");
     } catch (error) {
+      if (same() && error?.code === "FORBIDDEN" && (await lostMembership(asked))) return;
       if (same()) noteLocalFailure(error, checkClearance, { clearanceRead: true });
       // The feed re-reads with every check, answered or not.
       await readFeed();

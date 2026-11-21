@@ -5,7 +5,7 @@ import { SHADED_EDITOR, SHADED_UPLOAD } from "../src/contracts.mjs";
 import { POOL_FILTER_KEYS } from "../src/pool-views.mjs";
 import { saveStatus } from "../src/client-views.mjs";
 import { closeUnsignedDialogBody, closeUnsignedListKey } from "../src/office-views.mjs";
-import { dialog, staffScreen } from "../src/views.mjs";
+import { dialog, showsNoAccess, staffScreen } from "../src/views.mjs";
 import { staffEligibility } from "../src/staff-views.mjs";
 import { CONTACT_FIELDS, findQuestion, isMemberId } from "../src/intake-catalogue.mjs";
 import { newMemberId, renderQuestion, reviewAlerts, valuesFromControls, withholdInvalid } from "../src/intake-form.mjs";
@@ -9882,6 +9882,63 @@ test("a wake check that fails keeps the work and still re-reads the lists", asyn
   assert.equal(state.principal.clearance.cleared, true);
   assert.equal(state.cases.length, 1);
   assert.ok(store.calls.filter((c) => c === "listCases").length > lists);
+  controller.stop();
+});
+
+// A deactivated account (Deactivate, or Start next season; add-start-next-season
+// R10): a deactivated member gets no realtime, so its window learns on a wake.
+// The clearance re-read is refused FORBIDDEN; the principal is read once more,
+// and with no active staff membership the window becomes the no-access
+// window the first load shows, with nothing of the work left.
+test("a wake check refused because the membership is gone shows no-access and drops the work", async () => {
+  const store = staffStore({ cases: [{ ...SETUP_CASE }] });
+  const { controller, events } = build({ store });
+  await controller.start();
+  assert.equal(store.subscriptions, 1);
+  const refused = () => Object.assign(new Error("no access"), { code: "FORBIDDEN" });
+  store.nextClearance = refused();
+  store.getPrincipal = async () => {
+    store.calls.push("getPrincipal");
+    throw refused();
+  };
+  const from = store.calls.length;
+  await events.emit("focus");
+  const state = controller.getState();
+  assert.equal(state.screen, "no-access");
+  assert.equal(state.principal, null);
+  assert.ok(showsNoAccess(state), "the no-access screen is drawn");
+  assert.equal(state.retryable, false, "a retryable banner is shown");
+  assert.equal(store.released, 1, "realtime is still subscribed");
+  assert.deepEqual(state.cases, []);
+  assert.deepEqual(state.people, []);
+  assert.deepEqual(state.assistance, []);
+  assert.equal(state.workspace, null);
+  assert.equal(state.selectedCaseId, null);
+  // Once: the clearance read, the principal read, and nothing after them.
+  assert.deepEqual(store.calls.slice(from), ["getClearance", "getPrincipal"]);
+  // Later wakes ask only for the principal, as the first load's window does.
+  const after = store.calls.length;
+  await events.emit("focus");
+  assert.ok(store.calls.slice(after).every((call) => call === "getPrincipal"), store.calls.slice(after).join());
+  assert.equal(controller.getState().screen, "no-access");
+  controller.stop();
+});
+
+test("a wake check refused FORBIDDEN for a member still active keeps the window and its work", async () => {
+  const store = staffStore({ cases: [{ ...SETUP_CASE }] });
+  const { controller, events } = build({ store });
+  await controller.start();
+  store.nextClearance = Object.assign(new Error("no access"), { code: "FORBIDDEN" });
+  const from = store.calls.length;
+  await events.emit("focus");
+  const state = controller.getState();
+  assert.equal(store.calls.slice(from).filter((call) => call === "getPrincipal").length, 1, "the principal is read once");
+  assert.ok(state.principal, "the principal was dropped");
+  assert.notEqual(state.screen, "no-access");
+  assert.equal(state.cases.length, 1);
+  assert.equal(store.released, 0);
+  assert.equal(state.error?.code, "FORBIDDEN");
+  assert.equal(state.retryable, true, "the refusal keeps its Try again");
   controller.stop();
 });
 
