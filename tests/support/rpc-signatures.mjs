@@ -255,6 +255,7 @@ export const RPC_SIGNATURES = Object.freeze([
       "clientDocumentsUrl",
       "history",
       "revision",
+      "schedule",
       "season",
       "siteCoordinators",
       "siteNumber",
@@ -278,6 +279,29 @@ export const RPC_SIGNATURES = Object.freeze([
       p_action_id: crypto.randomUUID(),
       p_expected_revision: context.seasonSettingsRevision,
       p_settings: { certificateUploadUrl: "https://example.org/certificates", clientDocumentsUrl: null },
+    }),
+  }),
+  // Saving the site hours and coverage targets at the schedule settings
+  // revision (add-volunteer-schedule, design D4): 0 while the workspace has no
+  // row.
+  Object.freeze({
+    name: "vitally_save_schedule_settings",
+    signature: "vitally_save_schedule_settings(uuid,bigint,jsonb)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["revision", "siteHours", "targets"]),
+    context: async (f) => {
+      const { rows } = await f.sql("select revision::int as revision from public.schedule_settings where workspace_id=$1", [
+        f.workspaceId,
+      ]);
+      return { scheduleSettingsRevision: rows[0]?.revision ?? 0 };
+    },
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_expected_revision: context.scheduleSettingsRevision,
+      p_settings: {
+        siteHours: { 6: { open: 10, close: 16 } },
+        targets: { preparersNeeded: 2, reviewersNeeded: 1, onSiteNeeded: 1 },
+      },
     }),
   }),
   // Setting the site's SIDN (design D5): the answer says only that it is set.

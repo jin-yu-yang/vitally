@@ -9,8 +9,9 @@
 --      helper, and the SELECT policies on both tables. Both tables are
 --      granted SELECT for realtime only, and no write grant; the RPCs of
 --      later sections are the only writers;
---   §3 realtime (design D10): both tables join the publication.
--- Later sections add the RPCs, the seed and the Workload read.
+--   §3 realtime (design D10): both tables join the publication;
+--   §4 the site hours and targets save, and the Season settings read.
+-- Later sections add the other RPCs, the seed and the Workload read.
 -- Nothing existing changes except volunteer_profiles gaining one column and
 -- the publication.
 
@@ -20,7 +21,10 @@
 -- Site hours: an object keyed "1".."7" (ISO weekday, Monday = 1), each value
 -- {open, close} with whole hours, 0 <= open < close <= 24. A missing key means
 -- closed; an empty object means every day is closed. A null or non-object
--- answers false rather than null, so a caller can test it directly.
+-- answers false rather than null, so a caller can test it directly. Hours of
+-- more than three digits are false without being cast, so a huge number never
+-- overflows an integer. Extra keys inside a day are not refused here; the save
+-- (section 4) stores only open and close.
 create function vitally_private.valid_site_hours(p_hours jsonb)
 returns boolean language sql immutable set search_path='' as $$
  select coalesce(
@@ -30,8 +34,9 @@ returns boolean language sql immutable set search_path='' as $$
    where d.day not in ('1','2','3','4','5','6','7')
     or coalesce(jsonb_typeof(d.hours),'')<>'object'
     or coalesce(jsonb_typeof(d.hours->'open'),'')<>'number' or coalesce(jsonb_typeof(d.hours->'close'),'')<>'number'
-    or (d.hours->>'open') !~ '^[0-9]+$' or (d.hours->>'close') !~ '^[0-9]+$'
-    or not ((d.hours->>'open')::int < (d.hours->>'close')::int and (d.hours->>'close')::int<=24)),
+    or case when (d.hours->>'open') ~ '^[0-9]{1,3}$' and (d.hours->>'close') ~ '^[0-9]{1,3}$'
+     then not ((d.hours->>'open')::int < (d.hours->>'close')::int and (d.hours->>'close')::int<=24)
+     else true end),
   false);
 $$;
 revoke all on function vitally_private.valid_site_hours(jsonb) from public,anon,authenticated,service_role;
@@ -170,3 +175,159 @@ begin
   end if;
  end loop;
 end $$;
+
+-- ---------------------------------------------------------------------------
+-- §4. Site hours and coverage targets on Season settings (design D4, D5).
+
+-- The settings answer: the site hours and the three targets with the
+-- revision. A workspace with no row has every day closed, the default
+-- targets and revision 0.
+create function vitally_private.schedule_settings_answer(p_workspace_id uuid)
+returns jsonb language sql stable security definer set search_path='' as $$
+ select jsonb_build_object('siteHours',coalesce(s.site_hours,'{}'::jsonb),
+  'targets',jsonb_build_object('preparersNeeded',coalesce(s.preparers_needed,2),
+   'reviewersNeeded',coalesce(s.reviewers_needed,1),'onSiteNeeded',coalesce(s.on_site_needed,1)),
+  'revision',coalesce(s.revision,0))
+ from (select 1) one
+ left join public.schedule_settings s on s.workspace_id=p_workspace_id;
+$$;
+revoke all on function vitally_private.schedule_settings_answer(uuid) from public,anon,authenticated,service_role;
+
+-- One coverage target as sent: a whole number 0-9 or VALIDATION naming the
+-- field (p_field).
+create function vitally_private.schedule_target(p_value jsonb,p_field text)
+returns smallint language plpgsql immutable security definer set search_path='' as $$
+begin
+ if jsonb_typeof(p_value) is distinct from 'number' or (p_value #>> '{}') !~ '^[0-9]$' then
+  raise sqlstate 'VT007' using message='VALIDATION',detail=p_field;
+ end if;
+ return (p_value #>> '{}')::smallint;
+end;
+$$;
+revoke all on function vitally_private.schedule_target(jsonb,text) from public,anon,authenticated,service_role;
+
+-- The Season settings read, replaced from 052 to add `schedule`, the answer
+-- above (design D5). Everything else is 052's body, unchanged.
+create or replace function public.vitally_season_settings()
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_workspace uuid;
+begin
+ v_member=vitally_private.require_membership();
+ v_person=vitally_private.acting_person(v_member);
+ if v_member.access<>'staff' or v_person.id is null
+  or not vitally_policy.is_workspace_admin(v_member.workspace_id) then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ v_workspace=v_member.workspace_id;
+ return vitally_private.season_settings_answer(v_workspace)
+  || jsonb_build_object(
+   'siteNumber',(select jsonb_build_object('set',n.workspace_id is not null,'updatedAt',n.updated_at)
+    from (select 1) one left join vitally_private.site_numbers n on n.workspace_id=v_workspace),
+   'canEdit',vitally_private.is_site_coordinator(v_workspace,v_person.id),
+   'schedule',vitally_private.schedule_settings_answer(v_workspace), -- 056
+   'siteCoordinators',coalesce((select jsonb_agg(jsonb_build_object(
+     'volunteerId',p.id,'name',p.name,'email',v.email,
+     'since',(select max(c.changed_at) from public.site_coordinator_changes c
+      where c.workspace_id=v_workspace and c.person_id=p.id and c.granted),
+     'onRoster',exists(select 1 from public.roster_entries r join public.workspaces w on w.id=r.workspace_id
+      where r.workspace_id=v_workspace and r.person_id=p.id and r.season=w.current_season),
+     'accountRevision',a.revision) order by p.name,p.id)
+    from public.accounts a
+    join public.people p on p.workspace_id=a.workspace_id and p.id=a.person_id
+    left join public.volunteer_profiles v on v.workspace_id=p.workspace_id and v.person_id=p.id
+    where a.workspace_id=v_workspace and a.status='active' and a.is_site_coordinator),'[]'::jsonb),
+   'candidates',coalesce((select jsonb_agg(jsonb_build_object('volunteerId',p.id,'name',p.name,
+     'accountRevision',a.revision) order by p.name,p.id)
+    from public.accounts a
+    join public.memberships m on m.workspace_id=a.workspace_id and m.user_id=a.user_id
+    join public.people p on p.workspace_id=a.workspace_id and p.id=a.person_id
+    where a.workspace_id=v_workspace and a.status='active' and not a.is_site_coordinator
+     and m.active and m.access='staff'),'[]'::jsonb),
+   'history',coalesce((select jsonb_agg(jsonb_build_object('personName',h.person_name,'granted',h.granted,
+     'changedByName',h.changed_by_name,'changedAt',h.changed_at) order by h.changed_at desc,h.id desc)
+    from (select c.id,c.granted,c.changed_at,p.name as person_name,b.name as changed_by_name
+     from public.site_coordinator_changes c
+     join public.people p on p.workspace_id=c.workspace_id and p.id=c.person_id
+     left join public.people b on b.workspace_id=c.workspace_id and b.id=c.changed_by_person_id
+     where c.workspace_id=v_workspace
+     order by c.changed_at desc,c.id desc limit 50) h),'[]'::jsonb));
+end;
+$$;
+revoke all on function public.vitally_season_settings() from public,anon,authenticated,service_role;
+grant execute on function public.vitally_season_settings() to authenticated;
+
+-- Saves the site hours and targets at the revision the page read, for a site
+-- coordinator only. Order: FORBIDDEN (nothing written, no receipt), VALIDATION
+-- (a missing argument or settings not an object; then siteHours.<weekday>,
+-- preparersNeeded, reviewersNeeded or onSiteNeeded as detail), then under the
+-- workspace lock the receipt (a replay returns the stored answer) and CONFLICT
+-- (a stale revision; with no row the revision is 0, and a save at 0 inserts).
+-- Each day is stored as {open, close} only, whatever else was sent. Answers
+-- with the settings answer.
+create function public.vitally_save_schedule_settings(p_action_id uuid,p_expected_revision bigint,p_settings jsonb)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_receipt public.action_receipts;
+ v_settings public.schedule_settings;
+ v_hours jsonb='{}'::jsonb;
+ v_day record;
+ v_preparers smallint;
+ v_reviewers smallint;
+ v_on_site smallint;
+ v_digest text;
+ v_result jsonb;
+begin
+ v_member=vitally_private.require_membership();
+ v_person=vitally_private.acting_person(v_member);
+ if v_member.access<>'staff' or v_person.id is null
+  or not vitally_private.is_site_coordinator(v_member.workspace_id,v_person.id) then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ if p_action_id is null or p_expected_revision is null or p_settings is null
+  or jsonb_typeof(p_settings)<>'object' then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ if jsonb_typeof(p_settings->'siteHours') is distinct from 'object' then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='siteHours';
+ end if;
+ for v_day in select e.key,e.value from jsonb_each(p_settings->'siteHours') e order by e.key loop
+  if not vitally_private.valid_site_hours(jsonb_build_object(v_day.key,v_day.value)) then
+   raise sqlstate 'VT007' using message='VALIDATION',detail='siteHours.'||left(v_day.key,20);
+  end if;
+  v_hours=v_hours||jsonb_build_object(v_day.key,jsonb_build_object(
+   'open',(v_day.value->>'open')::int,'close',(v_day.value->>'close')::int));
+ end loop;
+ v_preparers=vitally_private.schedule_target(p_settings#>'{targets,preparersNeeded}','preparersNeeded');
+ v_reviewers=vitally_private.schedule_target(p_settings#>'{targets,reviewersNeeded}','reviewersNeeded');
+ v_on_site=vitally_private.schedule_target(p_settings#>'{targets,onSiteNeeded}','onSiteNeeded');
+ perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_member.workspace_id::text,0));
+ v_digest=encode(extensions.digest(jsonb_build_object('operation','SAVE_SCHEDULE_SETTINGS',
+  'expectedRevision',p_expected_revision,'siteHours',v_hours,'preparersNeeded',v_preparers,
+  'reviewersNeeded',v_reviewers,'onSiteNeeded',v_on_site,'personId',v_person.id)::text,'sha256'),'hex');
+ v_receipt=vitally_private.reserve_receipt(v_member,p_action_id,'SAVE_SCHEDULE_SETTINGS',v_digest,v_person.id);
+ if v_receipt.receipt is not null then
+  return v_receipt.receipt;
+ end if;
+ select * into v_settings from public.schedule_settings where workspace_id=v_member.workspace_id for update;
+ if coalesce(v_settings.revision,0)<>p_expected_revision then
+  raise sqlstate 'VT003' using message='CONFLICT';
+ end if;
+ if v_settings.workspace_id is null then
+  insert into public.schedule_settings(workspace_id,site_hours,preparers_needed,reviewers_needed,on_site_needed,updated_by_person_id)
+   values(v_member.workspace_id,v_hours,v_preparers,v_reviewers,v_on_site,v_person.id);
+ else
+  update public.schedule_settings set site_hours=v_hours,preparers_needed=v_preparers,
+   reviewers_needed=v_reviewers,on_site_needed=v_on_site,
+   revision=revision+1,updated_at=now(),updated_by_person_id=v_person.id
+   where workspace_id=v_member.workspace_id;
+ end if;
+ v_result=vitally_private.schedule_settings_answer(v_member.workspace_id);
+ update public.action_receipts set target_id=v_member.workspace_id,receipt=v_result where id=v_receipt.id;
+ return v_result;
+end;
+$$;
+revoke all on function public.vitally_save_schedule_settings(uuid,bigint,jsonb) from public,anon,authenticated,service_role;
+grant execute on function public.vitally_save_schedule_settings(uuid,bigint,jsonb) to authenticated;

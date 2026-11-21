@@ -4,9 +4,9 @@ import { randomUUID } from "node:crypto";
 import { createDatabaseFixture } from "./support/database-fixture.mjs";
 
 // OpenSpec change add-volunteer-schedule (design D1, D3, D10), migration 056
-// sections 1 to 3: the shifts and schedule_settings tables, the usual days on
+// sections 1 to 4: the shifts and schedule_settings tables, the usual days on
 // the volunteer profile, the site hours validator, who reads which rows
-// directly (for realtime), and the publication. The RPCs come in later tasks.
+// directly (for realtime), and the publication, and the site hours and targets save. The other RPCs come in later tasks.
 // One shared fixture; fictional people only.
 
 const one = async (f, text, values) => (await f.sql(text, values)).rows[0];
@@ -112,6 +112,82 @@ test("Volunteer schedule against real Supabase", async (t) => {
         [f.workspaceId],
         "settings with bad hours",
       );
+    });
+
+    await t.test("schedule settings save", async () => {
+      const sc = f.siteCoordinator;
+      const settingsRow = () =>
+        one(f, "select site_hours,revision::int as revision from public.schedule_settings where workspace_id=$1", [f.workspaceId]);
+      const args = (revision, settings, actionId = randomUUID()) => ({
+        p_action_id: actionId,
+        p_expected_revision: revision,
+        p_settings: settings,
+      });
+      const targets = { preparersNeeded: 2, reviewersNeeded: 1, onSiteNeeded: 0 };
+      const refused = async (client, input, code, detail, label) => {
+        const { error } = await client.rpc("vitally_save_schedule_settings", input);
+        assert.equal(error?.code, code, `${label}: ${error?.code} ${error?.message}`);
+        if (detail !== undefined) assert.equal(error.details, detail, `${label} detail`);
+        assert.equal(await f.receiptsFor(input.p_action_id), 0, `${label} receipt`);
+      };
+      const before = await rpc(sc, "vitally_season_settings");
+      assert.equal(before.schedule.revision, 0);
+      assert.equal(await settingsRow(), undefined);
+      try {
+        const ada = await f.staff({ key: "ada_admin", name: "Ada Fenwick", capabilities: ["admin"] });
+        await refused(ada.client, args(0, { siteHours: {}, targets }), "VT001", undefined, "admin who is not a site coordinator");
+
+        const settings = {
+          siteHours: { 2: { open: 17, close: 20 }, 4: { open: 17, close: 20 }, 6: { open: 10, close: 16 } },
+          targets,
+        };
+        const first = await rpc(sc, "vitally_save_schedule_settings", args(0, settings));
+        assert.deepEqual(first, { ...settings, revision: 1 });
+        assert.deepEqual((await rpc(sc, "vitally_season_settings")).schedule, first);
+        assert.deepEqual((await rpc(ada.client, "vitally_season_settings")).schedule, first);
+
+        await refused(sc, args(1, { siteHours: { 6: { open: 16, close: 10 } }, targets }), "VT007", "siteHours.6", "close before open");
+        await refused(sc, args(1, { siteHours: { 6: { open: 99999999999, close: 1 } }, targets }), "VT007", "siteHours.6", "huge hour");
+        await refused(sc, args(1, { siteHours: { 8: { open: 1, close: 2 } }, targets }), "VT007", "siteHours.8", "weekday 8");
+        await refused(sc, args(1, { siteHours: {}, targets: { ...targets, onSiteNeeded: 10 } }), "VT007", "onSiteNeeded", "target 10");
+        await refused(sc, args(1, { siteHours: {}, targets: { ...targets, preparersNeeded: 1.5 } }), "VT007", "preparersNeeded", "fraction");
+        await refused(sc, args(1, { siteHours: {}, targets: { ...targets, reviewersNeeded: "2" } }), "VT007", "reviewersNeeded", "string target");
+        await refused(sc, args(1, { targets }), "VT007", "siteHours", "no site hours");
+        await refused(sc, args(1, []), "VT007", undefined, "settings not an object");
+        await refused(sc, args(null, settings), "VT007", undefined, "no revision");
+        await refused(sc, args(0, settings), "VT003", undefined, "stale revision");
+        assert.equal((await settingsRow()).revision, 1, "refusals changed nothing");
+
+        // A day is stored as open and close only.
+        const padded = await rpc(
+          sc,
+          "vitally_save_schedule_settings",
+          args(1, { siteHours: { 6: { open: 9, close: 12, x: 1 } }, targets: { preparersNeeded: 3, reviewersNeeded: 2, onSiteNeeded: 1 } }),
+        );
+        assert.deepEqual(padded, {
+          siteHours: { 6: { open: 9, close: 12 } },
+          targets: { preparersNeeded: 3, reviewersNeeded: 2, onSiteNeeded: 1 },
+          revision: 2,
+        });
+        assert.deepEqual((await settingsRow()).site_hours, { 6: { open: 9, close: 12 } });
+
+        // The same action id twice: the same answer, one revision.
+        const again = args(2, settings);
+        const one1 = await rpc(sc, "vitally_save_schedule_settings", again);
+        const one2 = await rpc(sc, "vitally_save_schedule_settings", again);
+        assert.deepEqual(one2, one1);
+        assert.equal(one1.revision, 3);
+        assert.equal((await settingsRow()).revision, 3);
+      } finally {
+        await f.sql("delete from public.schedule_settings where workspace_id=$1", [f.workspaceId]);
+      }
+    });
+
+    await t.test("a huge hour is not valid, not an overflow", async () => {
+      const { ok } = await one(f, "select vitally_private.valid_site_hours($1::jsonb) as ok", [
+        '{"6":{"open":99999999999,"close":1}}',
+      ]);
+      assert.equal(ok, false);
     });
 
     await t.test("who reads shifts directly", async () => {
