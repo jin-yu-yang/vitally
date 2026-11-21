@@ -179,6 +179,7 @@ The brainstorm (`brainstorm.md`) records the decisions and who made them. This d
 - **[Trade-off] Cleared staff can still read past-season rows directly.** Read access is unchanged. → Accepted. Narrowing it is a compliance decision for the later change.
 - **[Risk] Scoping `open_work` changes ordinary Deactivate and volunteer saves.** → **Mitigation:** current-season behaviour is unchanged, including Accepted. Only past-season cases stop counting, and that is tested.
 - **[Risk] `capabilities_before_052` is dropped before someone wants it.** → Accepted. The user confirmed 052 on hosted.
+- **[Trade-off] A deactivated person's open window switches to "This account has no access" only on its next wake (D8).** Data access ends at once: RLS and the RPCs refuse every read and write from the moment the start commits. Only the screen switch waits, so a window left untouched keeps showing what it had already loaded. → Accepted (user, at verify). An instant switch would need new polling, since a deactivated user gets no realtime.
 
 ## Migration Plan
 
