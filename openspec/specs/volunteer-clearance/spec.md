@@ -467,7 +467,7 @@ Every dialog SHALL be in exactly one category: an effective capability (`admin`,
 ### Requirement: A person's capabilities mirror this season's roles while they have a sign-in
 `people.capabilities` SHALL equal the capabilities of the person's roles on their roster entry for the workspace's current season while the person has a sign-in (`user_id` set), and SHALL be empty otherwise. The database SHALL keep it so whoever writes `people` or `roster_entries`: a direct write of a different value SHALL be replaced by the mirror. Neither the roster command, workspace setup, account creation nor the site check SHALL choose a person's capabilities. A person with no current-season entry SHALL have none. Changes SHALL reach open staff windows through the existing `people` realtime messages, under the existing `people` read policy.
 
-Start next season (a later change) SHALL recompute the mirror when `current_season` changes; until then, a change of `current_season` SHALL NOT be relied on to update it.
+Start next season (capability `season-rollover`) SHALL recompute every person's mirror in the same transaction that changes `current_season`. Any other change of `current_season` SHALL NOT be relied on to update it.
 
 #### Scenario: The mirror follows a role change
 - **WHEN** an admin adds the Reviewer role to a signed-in Preparer and saves
@@ -488,6 +488,10 @@ Start next season (a later change) SHALL recompute the mirror when `current_seas
 #### Scenario: An invited volunteer given the Admin role
 - **WHEN** an invited volunteer passes the site check, and a site coordinator then gives them VSC, IT&QR and the Admin role
 - **THEN** their `people.capabilities` are `admin`, `assist`, `followup` and `receive_documents`, and they open the Roster
+
+#### Scenario: The season starts
+- **WHEN** a site coordinator who is a cleared Admin and Reviewer in 2026 starts 2027
+- **THEN** their `people.capabilities` are empty until 2027 roles are saved for them, and every other person's capabilities equal the mirror of their 2027 roles
 
 ### Requirement: Migration 052 refuses when someone with a sign-in would lose admin
 Before changing anything, migration 052 SHALL count the people with an active `staff` membership whose `people.capabilities` include `admin` but whose current-season roster entry has no Admin role, and SHALL refuse with `VT008`, the count in its message, changing nothing, if there are any. People with no sign-in SHALL NOT be counted. Otherwise it SHALL keep a private copy of every person's capabilities from before the migration, and then recompute every person's capabilities as the mirror.

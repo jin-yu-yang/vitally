@@ -265,7 +265,7 @@ The drawer SHALL offer Deactivate for an `invited` or `active` staff account, af
 Deactivate SHALL:
 - in one transaction, set the account to `deactivated` with `deactivated_at`, and make the membership inactive;
 - keep the auth user and the person's link, so the email stays locked and the person stays on the Roster;
-- be refused with `OPEN_WORK` (SQLSTATE VT004), the open work as its detail, while the person holds open work as defined for a volunteer save. Being the default follow-up person SHALL always count as open work here, site coordinator or not. The drawer SHALL say "<name> still has open work: <list>. Finish it or hand it over first.";
+- be refused with `OPEN_WORK` (SQLSTATE VT004), the open work as its detail, while the person holds open work as defined for a volunteer save, which counts only current-season cases (capability `volunteer-roster`). Being the default follow-up person SHALL always count as open work here, site coordinator or not. The drawer SHALL say "<name> still has open work: <list>. Finish it or hand it over first.";
 - be refused with `INVALID_TRANSITION` (`LAST_SITE_COORDINATOR`) for the last site coordinator, and the drawer SHALL say "At least one site coordinator must remain. Make someone else a site coordinator first.";
 - for any other site coordinator, remove their site coordinator mark in the same transaction (capability `site-coordinators`);
 - be refused with `VALIDATION` (`SELF`) for the caller's own account.
@@ -277,7 +277,7 @@ Reactivate SHALL:
 - restore the account only: the person SHALL still need roles, certificates and any photo ID check to be cleared, and SHALL NOT be a site coordinator again;
 - be refused with `VALIDATION` (`EMAIL_IN_USE`) when the user meanwhile has an active membership in another workspace.
 
-Deactivate and reactivate SHALL each be built on one internal function that acts on a single membership, so a season rollover can reuse them.
+Deactivate and reactivate SHALL each be built on one internal function that acts on a single membership, so Start next season can reuse them (capability `season-rollover`), deactivating each account as Deactivate does.
 
 Clients SHALL NOT be deactivated in this release.
 
@@ -285,7 +285,7 @@ A Reactivate that gives `invited` SHALL start a new seven days and a new five si
 
 #### Scenario: Deactivating
 - **WHEN** an admin deactivates a volunteer who holds no open work
-- **THEN** the account is `deactivated`, the membership is inactive, the Roster shows "Deactivated", and the volunteer's open window shows "This account has no access"
+- **THEN** the account is `deactivated`, the membership is inactive, the Roster shows "Deactivated", and the volunteer's open window shows "This account has no access" the next time it wakes (focus, the tab becoming visible, `online`, or a realtime reconnect), without a reload
 
 #### Scenario: Deactivating with open work
 - **WHEN** an admin deactivates a volunteer who is preparing an open case
@@ -314,6 +314,10 @@ A Reactivate that gives `invited` SHALL start a new seven days and a new five si
 #### Scenario: A stale drawer
 - **WHEN** two admins open the same volunteer, one deactivates, and the other then presses Deactivate
 - **THEN** the second is refused with `CONFLICT`
+
+#### Scenario: A past-season case is not open work
+- **WHEN** an admin deactivates a volunteer whose only cases are Accepted cases from an earlier season
+- **THEN** the account is `deactivated`
 
 ### Requirement: An admin can cancel an invitation that was never completed
 The drawer SHALL offer Cancel invitation, after a confirmation, for a volunteer whose account is `invited` and was never `active`; the office panel SHALL offer Cancel for such a client. It SHALL be a database RPC that takes an action id, the target (the volunteer, or the client's email) and the account revision the window read. It SHALL refuse a stale revision with `CONFLICT`, an account that is not `invited`, or was ever `active`, with `INVALID_TRANSITION`, and a membership that is in use (anything other than the person's link and the account refers to it) with `INVALID_TRANSITION` and the reason `IN_USE`. It SHALL store a receipt, and a replay SHALL return it.
