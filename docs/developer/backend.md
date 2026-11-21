@@ -168,6 +168,7 @@ so each tool must prove it is pointed at the intended target before doing anythi
 | `migrate.mjs` | Applies pending migrations with a SHA-256 ledger. `--target test` (default) or `--target classroom` |
 | `workspace-setup.mjs` | `initializeWorkspace`: creates a workspace, its three demo people, memberships, and staff members (038) |
 | `roster.mjs` | Reads a roster file, creates confirmed password-free accounts, and calls `initializeWorkspace`. Never prints an address ([roster format](#the-roster)) |
+| `relabel-season.mjs` | Renames the current season, keeping what is in it (roster entries, certificates, cases, the client-number counter). Not Start next season. Dry run unless `--apply`; refuses if anyone's capabilities or clearance would change, or the new season already has rows. Prints counts only |
 | `seed.mjs` | `npm run seed:local`: builds rehearsal cases on the **local test stack only**. Needs `VITALLY_ALLOW_LOCAL_SEED=1` (checked before any file is read) and refuses any other target as `TARGET_REJECTED`. Records its case ids in `.vitally-runs/seed-<workspaceId>.json`, which the next run uses to replace the previous set. Never prints an address |
 | `seed-cases.mjs` | The cases it builds, acting as the role accounts through `vitally_create_case` and `vitally_apply_action`. The only direct insert is the help request |
 

@@ -995,6 +995,17 @@ privileged test cleanup against the classroom project.**
      --target classroom --roster .vitally-roster.json
    ```
 
+5. **If the season label is wrong**, rename it with the relabel command rather than Start next
+   season (which begins an empty season). It moves the roster, certificates, cases and the
+   client-number counter to the new label and changes nobody's roles or clearance. Run it once
+   without `--apply` (a dry run that reports counts), then with it:
+
+   ```sh
+   NODE_EXTRA_CA_CERTS="$HOME/.vitally/supabase-ca.crt" \
+     "$VITALLY_NODE" --env-file=.env.admin tools/admin/relabel-season.mjs \
+     --target classroom --roster .vitally-roster.json --from 2025 --to 2026
+   ```
+
 ### Invitation emails (the accounts function)
 
 Create account, Invite and Resend send their own invitation email. It has no sign-in code: the
