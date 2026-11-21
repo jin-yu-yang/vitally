@@ -869,7 +869,9 @@ live in [`src/case-labels.mjs`](../../src/case-labels.mjs); the database decides
 - **State.** The labels and the open menu (`state.labels`, `state.labelMenu`) are window-local and
   never saved. The labels ride with the case list: `loadList` reads `store.listLabels()` for a
   staff window. The chips on a board or pool row come from `listCases`, which joins
-  `case_labels` and the active `case_label_links`.
+  `case_labels` and the active `case_label_links`. For staff, `listCases` reads only the
+  current season's cases plus drafts (no season yet), and `getCase` answers `VT002` for a
+  past-season case, as for an absent one (`add-start-next-season` design D7).
 - **Writes.** `controller.toggleCaseLabel` and `saveLabelEdit` call the store's
   `setCaseLabel` and `saveLabel`. A write whose answer never came (`UNKNOWN_OUTCOME`) is kept, so
   pressing it again sends the same action id, before the form's own checks: after a create whose

@@ -107,12 +107,12 @@ returns table(needs text,label text) language sql stable security definer set se
  select w.needs,w.label from (
   select 1 as ord,c.client_number as n,'prepare' as needs,'preparing client '||coalesce(c.client_number::text,c.reference) as label
    from public.cases c join public.workspaces ws on ws.id=c.workspace_id -- 055
-   where c.workspace_id=p_workspace_id and c.preparer_id=p_person_id and c.stage<>'closed'
+   where c.workspace_id=p_workspace_id and c.preparer_id=p_person_id and c.stage<>'closed' -- 055
     and (c.season=ws.current_season or c.season is null) -- 055
   union all
   select 2,c.client_number,'review','reviewing client '||coalesce(c.client_number::text,c.reference)
    from public.cases c join public.workspaces ws on ws.id=c.workspace_id -- 055
-   where c.workspace_id=p_workspace_id and c.reviewer_id=p_person_id and c.stage<>'closed'
+   where c.workspace_id=p_workspace_id and c.reviewer_id=p_person_id and c.stage<>'closed' -- 055
     and (c.season=ws.current_season or c.season is null) -- 055
   union all
   select 3,c.client_number,'followup','follow-up for client '||coalesce(c.client_number::text,c.reference)
@@ -153,7 +153,7 @@ create table public.season_starts (
  deactivated_count integer not null check (deactivated_count>=0)
 );
 alter table public.season_starts enable row level security;
-revoke all on public.season_starts from public,anon,authenticated;
+revoke all on public.season_starts from public,anon,authenticated,service_role;
 
 -- ---------------------------------------------------------------------------
 -- §5. Start next season (design D1-D4), for a site coordinator, in one
@@ -212,7 +212,13 @@ begin
  if v_receipt.receipt is not null then
   return v_receipt.receipt;
  end if;
- select * into v_workspace from public.workspaces where id=v_member.workspace_id for update;
+ -- No key update, not update: a case RPC that has stored its receipt holds
+ -- KEY SHARE on this row (the receipt's workspace key) and may be waiting on
+ -- the table locks above, so FOR UPDATE could deadlock with it. The advisory
+ -- lock already orders this against other writers of the row, and the updates
+ -- below change no key column. The later locks (accounts, memberships,
+ -- people, all without key changes) don't conflict with KEY SHARE either.
+ select * into v_workspace from public.workspaces where id=v_member.workspace_id for no key update;
  if v_workspace.current_season<>p_expected_season then
   raise sqlstate 'VT003' using message='CONFLICT';
  end if;

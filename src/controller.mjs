@@ -2239,6 +2239,8 @@ export function createController({
   async function lostMembership(asked) {
     let gone;
     try {
+      // An applicant answer counts as gone too: a deactivated staff membership
+      // never reads as applicant, and the next wake's load() corrects it.
       gone = (await store.getPrincipal())?.access !== "staff";
     } catch (error) {
       gone = error?.code === "FORBIDDEN";

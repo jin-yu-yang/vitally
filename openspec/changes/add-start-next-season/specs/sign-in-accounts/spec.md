@@ -26,7 +26,7 @@ A Reactivate that gives `invited` SHALL start a new seven days and a new five si
 
 #### Scenario: Deactivating
 - **WHEN** an admin deactivates a volunteer who holds no open work
-- **THEN** the account is `deactivated`, the membership is inactive, the Roster shows "Deactivated", and the volunteer's open window shows "This account has no access"
+- **THEN** the account is `deactivated`, the membership is inactive, the Roster shows "Deactivated", and the volunteer's open window shows "This account has no access" the next time it wakes (focus, the tab becoming visible, `online`, or a realtime reconnect), without a reload
 
 #### Scenario: Deactivating with open work
 - **WHEN** an admin deactivates a volunteer who is preparing an open case

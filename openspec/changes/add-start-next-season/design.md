@@ -143,7 +143,7 @@ The brainstorm (`brainstorm.md`) records the decisions and who made them. This d
   - On success, every window re-reads:
     - the starter lands on "Finish your setup";
     - other site coordinators keep the admin screens, and their Roster shows only the starter;
-    - everyone else sees "This account has no access".
+    - everyone else's open window shows "This account has no access" the next time it wakes (focus, the tab becoming visible, `online`, or a realtime reconnect), without a reload.
   - Staff screens stay English.
 - **Why:** Season settings is where site coordinators already govern the season (052).
 - **Alternatives:** a button on the Roster. Rejected: the Roster is per season, and the action is about the workspace.

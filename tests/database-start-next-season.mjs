@@ -100,7 +100,7 @@ test("starting the next season is refused", async (t) => {
   const f = await createDatabaseFixture();
   try {
     // Unfinished work of every kind, plus what doesn't count: an Accepted
-    // case, a help request with no case, and a draft. First the older-season
+    // case, a Closed case, a help request with no case, and a draft. First the older-season
     // case: a case's season is fixed once it is numbered (010), so it is left
     // at Rejected and the workspace's season moves on by SQL. Clearance is per
     // season (045), so the staff are cleared for the new one too.
@@ -137,6 +137,17 @@ test("starting the next season is refused", async (t) => {
       methods: { federal: "efile", state: "efile" },
     });
     const accepted = await acceptedCase(f);
+    const closed = await f.approvedCase();
+    await f.act(f.siteCoordinator, closed, "MARK_READY_TO_EFILE", { confirmed: true });
+    await f.act(f.siteCoordinator, closed, "MARK_EFILED", {
+      confirmed: true,
+      methods: { federal: "efile", state: "efile" },
+    });
+    await f.act(f.siteCoordinator, closed, "RECORD_FILING_RESULT", {
+      confirmed: true,
+      results: { federal: { result: "rejected", date: day, code: "C1" } },
+    });
+    await f.act(f.siteCoordinator, closed, "CLOSE_CASE", { confirmed: true, reason: "dismissed" });
     await f.sql(
       `insert into public.admin_followups(workspace_id,case_id,request_id,purpose,assignee_person_id,status,reason,created_by_person_id)
        values($1,$2,null,'go_over_return',$3,'open','Fictional: go over the return with the client.',$3)`,
@@ -152,9 +163,17 @@ test("starting the next season is refused", async (t) => {
         efiled: await stageOf(f, efiled),
         rejected: await stageOf(f, rejectedCase),
         accepted: await stageOf(f, accepted),
+        closed: await stageOf(f, closed),
         draft: await stageOf(f, draft),
       },
-      { readyToEfile: "ready_to_efile", efiled: "efiled", rejected: "rejected", accepted: "accepted", draft: "draft" },
+      {
+        readyToEfile: "ready_to_efile",
+        efiled: "efiled",
+        rejected: "rejected",
+        accepted: "accepted",
+        closed: "closed",
+        draft: "draft",
+      },
     );
     const admin = await f.staff({ key: "ines_admin", name: "Ines Dalton", capabilities: ["admin", "followup"] });
     const before = await f.stateSnapshot();
@@ -240,6 +259,10 @@ test("a start moves the season and resets staff", async (t) => {
     const accepted = await acceptedCase(f);
     assert.equal(await stageOf(f, accepted), "accepted");
 
+    // A client's draft from the old season: it has no season yet, so it
+    // submits into the new one after the start.
+    const { caseId: draft } = await f.draftCase(f.applicantB);
+
     const kept = [sc.userId, sc2.userId, f.applicantAUserId, gone.userId];
     const keptBefore = {};
     for (const userId of kept)
@@ -323,11 +346,11 @@ test("a start moves the season and resets staff", async (t) => {
       assert.equal((await startsOf(f)).length, 1);
     });
 
-    await t.test("the new season's first client number is 1", async () => {
-      const { caseId } = await f.draftCase(f.applicantB);
-      await f.act(f.applicantB, caseId, "SUBMIT", { confirmed: true });
+    await t.test("a draft from before the start submits as the new season's client 1", async () => {
+      assert.equal(await stageOf(f, draft), "draft");
+      await f.act(f.applicantB, draft, "SUBMIT", { confirmed: true });
       const row = await one(f, "select client_number,season from public.cases where id=$1 and workspace_id=$2", [
-        caseId,
+        draft,
         f.workspaceId,
       ]);
       assert.deepEqual({ clientNumber: Number(row.client_number), season: Number(row.season) }, {
