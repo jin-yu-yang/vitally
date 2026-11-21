@@ -917,6 +917,13 @@ test("installed entry points deny anonymous callers and serve members", async (t
           const allowed = await entry
             .authorized(f)
             .rpc(entry.name, entry.args(context));
+          // A one-way entry point is refused here by its own domain check,
+          // writing nothing: the member got past the access checks.
+          if (entry.memberRefusal) {
+            assert.equal(allowed.error?.message, entry.memberRefusal, `${entry.name} member refusal`);
+            assert.deepEqual(await f.stateSnapshot(), before);
+            continue;
+          }
           assert.equal(
             allowed.error,
             null,

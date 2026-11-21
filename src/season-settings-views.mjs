@@ -83,6 +83,66 @@ function seasonCard(view, canEdit, ui) {
   )} <span class="badge neutral">Current</span></h2></div>${notice(ui, "links")}${links}${sidnRow(view, canEdit, busy)}</section>`;
 }
 
+// ---- Start next season (change add-start-next-season, design D8) --------
+
+// The confirm opens only for the next season's year, typed (spaces aside).
+export const startSeasonReady = (season, typed) =>
+  Number.isInteger(Number(season)) && season != null && String(typed ?? "").trim() === String(Number(season) + 1);
+
+// A SEASON_NOT_FINISHED refusal's counts, one line for each above zero, in
+// the order the database counts them; singular for one.
+const REFUSAL_LINES = Object.freeze([
+  ["openCases", "open case", "open cases"],
+  ["openFollowups", "open follow-up", "open follow-ups"],
+  ["claimedHelp", "claimed help request", "claimed help requests"],
+  ["unclaimedHelpOnCases", "unclaimed help request on cases", "unclaimed help requests on cases"],
+]);
+export function seasonRefusalLines(counts) {
+  if (!counts || typeof counts !== "object") return [];
+  return REFUSAL_LINES.flatMap(([key, one, many]) => {
+    const n = Number(counts[key]);
+    return Number.isInteger(n) && n > 0 ? [`${n} ${n === 1 ? one : many}`] : [];
+  });
+}
+
+// The card: what starting the next season does, and for a site coordinator
+// the button. Any other workspace admin reads the same text.
+function nextSeasonCard(view, canEdit, ui) {
+  const busy = ui?.busy === true;
+  const next = Number(view.season) + 1;
+  const start = canEdit
+    ? `<div class="settings-actions">${button("Start next season…", "open-start-season", "secondary", `aria-describedby="next-season-title"${disabled(busy)}`)}</div>`
+    : "";
+  return `<section class="panel settings-card" aria-labelledby="next-season-title"><div class="card-head"><h2 id="next-season-title">Next season</h2><span class="muted small">${esc(
+    seasonLabel(next),
+  )}</span></div>${notice(ui, "next-season")}<p>When this season's work is finished, a site coordinator starts the next one. Site coordinators keep their sign-in; every other staff account loses it, and the new roster starts with only the person who starts it.</p>${start}</section>`;
+}
+
+/**
+ * The Start next season dialog's body. `season` is the season the page read;
+ * `typed` what the year field holds; `refusal` a SEASON_NOT_FINISHED
+ * refusal's counts. The confirm stays disabled until the year is typed.
+ */
+export function startSeasonDialogBody({ season, typed = "", refusal = null, busy = false } = {}) {
+  const next = Number(season) + 1;
+  const lines = seasonRefusalLines(refusal);
+  const refused = lines.length
+    ? `<div class="notice error" role="alert" id="start-season-refusal"><p>Finish these first:</p><ul>${lines
+        .map((line) => `<li>${esc(line)}</li>`)
+        .join("")}</ul></div>`
+    : "";
+  const ready = startSeasonReady(season, typed) && !busy;
+  return `${refused}<form id="start-season-form" class="staff-form" novalidate><ul class="start-season-effects"><li>Site coordinators keep their sign-in.</li><li>Every other staff account loses its sign-in.</li><li>The ${esc(
+    next,
+  )} roster starts with only you.</li></ul><p class="field-note">${esc(
+    "Export this season's roster and cases first if you need them.",
+  )}</p><label class="field" for="start-season-year"><span>Type ${esc(next)} to confirm</span><input type="text" id="start-season-year" name="year" inputmode="numeric" maxlength="4" autocomplete="off" spellcheck="false" value="${esc(
+    typed,
+  )}"${disabled(busy)}></label><div class="drawer-actions"><button type="submit" class="btn primary" id="start-season-submit"${
+    ready ? "" : " disabled"
+  }>Start the ${esc(next)} season</button>${button("Cancel", "close-dialog", "text")}</div></form>`;
+}
+
 function coordinatorRow(person, { canEdit, selfId, busy }) {
   const details = [
     person.email ?? "",
@@ -147,7 +207,7 @@ export function renderSeasonSettings(view, { canEdit = false, selfId = null, lis
     return loadingLine("Loading Season settings…");
   }
   const readOnly = canEdit ? "" : `<p class="notice settings-readonly" role="note">${esc(READ_ONLY_NOTE)}</p>`;
-  return `<div class="season-settings">${readOnly}${seasonCard(view, canEdit, ui)}${coordinatorsCard(view, { canEdit, selfId, ui })}</div>`;
+  return `<div class="season-settings">${readOnly}${seasonCard(view, canEdit, ui)}${nextSeasonCard(view, canEdit, ui)}${coordinatorsCard(view, { canEdit, selfId, ui })}</div>`;
 }
 
 /** The Change the SIDN dialog's body: one field, Save and Cancel. */

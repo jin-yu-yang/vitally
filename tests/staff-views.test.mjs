@@ -3023,6 +3023,37 @@ test("approved with no says the office takes over", () => {
   assert.match(html, /The office will go over the return with the client\./);
 });
 
+const returnedStep = (record) => nextStep(record, staffEligibility(record, MORGAN), {});
+const nextStepPanel = (html) => html.slice(html.indexOf('class="panel next-step"'), html.indexOf("</section>", html.indexOf('class="panel next-step"')));
+
+test("after Return to signing, a yes approval is placed at the first signing (#204)", () => {
+  const html = returnedStep(returnedCase());
+  assert.match(html, /At the first signing, the reviewer went over the return with the client on 10\/16\/2026\. It isn(?:'|&#39;)t gone over again./);
+});
+
+test("after Return to signing, a no approval names no coming go-over (#204)", () => {
+  const html = returnedStep(returnedCase({ reviewerQuestionnaires: [revQ({ wentOver: false, wentOverOn: null, wentOverHow: null })] }));
+  assert.match(html, /At the first signing, going over the return with the client was passed to the office\. It isn(?:'|&#39;)t gone over again./);
+  assert.doesNotMatch(html, /The office will go over the return with the client\./);
+});
+
+test("after Return to signing, an approval with no questionnaire keeps its fallback (#204)", () => {
+  const html = returnedStep(returnedCase({
+    reviewerQuestionnaires: [],
+    reviews: [reviewRow({ status: "approved", clientContactStatus: "completed", decidedAt: "2026-10-17T15:00:00.000Z" })],
+  }));
+  assert.match(html, /The client conversation for this review is recorded\. Nothing further is needed here\./);
+  assert.doesNotMatch(html, /At the first signing/);
+});
+
+test("after Return to signing, the review history row is unchanged (#204)", () => {
+  const yes = renderStaffCase(returnedCase(), MORGAN);
+  assert.match(yes, /<span>Client conversation<\/span><strong>The reviewer went over the return with the client on 10\/16\/2026\.<\/strong>/);
+  const no = renderStaffCase(returnedCase({ reviewerQuestionnaires: [revQ({ wentOver: false, wentOverOn: null, wentOverHow: null })] }), MORGAN);
+  assert.match(no, /<span>Client conversation<\/span><strong>The office will go over the return with the client\.<\/strong>/);
+  assert.doesNotMatch(nextStepPanel(no), /The office will go over the return with the client\./);
+});
+
 test("legacy pending approval still shows the conversation form", () => {
   assert.match(approvedStep(approvedWith(null)), /data-case-action="RECORD_REVIEW_CONTACT"/);
 });

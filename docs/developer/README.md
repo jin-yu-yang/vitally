@@ -71,7 +71,7 @@ src/
   app.mjs                  Bootstrap and DOM event wiring. No state, no HTML, no queries.
   controller.mjs           All browser state and every user-level operation.
   window-state.mjs         Per-window, per-user navigation memory (sessionStorage).
-  supabase-store.mjs       The only data adapter: reads, the 8 RPCs, Realtime, row mapping.
+  supabase-store.mjs       The only data adapter: reads, the thirty-one RPCs, Realtime, row mapping.
   auth.mjs                 Email one-time-code sign-in, resend cooldown, neutral messages.
   contact-log.mjs          The contact log's summary line, labels and New York time helpers.
   contracts.mjs            Shared vocabulary: stages, actions, error codes.
@@ -106,7 +106,7 @@ src/
   vendor/pdfjs.mjs, vendor/pdfjs-worker.mjs
                            Committed copy of pdfjs-dist's legacy build (the shaded-section editor).
 supabase/
-  migrations/001-050       The whole schema, RLS, business logic and intake catalogue, in order.
+  migrations/001-054       The whole schema, RLS, business logic and intake catalogue, in order.
   test-stack.config.example.toml   Reference config for the local test stack.
 tools/
   admin/                   Privileged tooling: target guards, migrate, roster, workspace setup.

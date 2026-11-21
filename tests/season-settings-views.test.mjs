@@ -4,6 +4,9 @@ import { readFileSync } from "node:fs";
 import {
   renderSeasonSettings,
   changeSidnDialogBody,
+  startSeasonDialogBody,
+  seasonRefusalLines,
+  startSeasonReady,
   seasonLabel,
   LINK_MESSAGE,
 } from "../src/season-settings-views.mjs";
@@ -139,8 +142,9 @@ test("a notice is said in its own card", () => {
 
 test("busy disables the page's buttons", () => {
   const html = renderSeasonSettings(view(), { canEdit: true, ui: { busy: true } });
-  // Save, Change…, Add, and Remove on each of the two rows; idle, only Add (nothing picked).
-  assert.equal((html.match(/<button[^>]* disabled/g) ?? []).length, 5);
+  // Save, Change…, Start next season…, Add, and Remove on each of the two
+  // rows; idle, only Add (nothing picked).
+  assert.equal((html.match(/<button[^>]* disabled/g) ?? []).length, 6);
   assert.equal((renderSeasonSettings(view(), { canEdit: true, ui: {} }).match(/<button[^>]* disabled/g) ?? []).length, 1);
 });
 
@@ -175,6 +179,89 @@ test("the Change the SIDN dialog: one field, Save and Cancel, and its error", ()
   assert.match(refused, /id="sidn-input"[^>]*aria-invalid="true"[^>]*aria-describedby="sidn-error"/);
   assert.match(refused, /id="sidn-error"[^>]*>Enter the site&#39;s SIDN: S followed by eight digits\.</);
   assert.match(refused, /type="submit"[^>]*disabled/);
+});
+
+// ---------------------------------------------------------------------------
+// Start next season (change add-start-next-season, design D8)
+// ---------------------------------------------------------------------------
+
+test("a site coordinator sees Start next season…", () => {
+  const html = renderSeasonSettings(view({ season: 2026 }), { canEdit: true, selfId: "p-dana", ui: {} });
+  assert.match(html, /<h2 id="next-season-title">Next season<\/h2>/);
+  assert.match(html, /data-action="open-start-season"[^>]*>Start next season…</);
+  // After the season card and before the Site coordinators card.
+  assert.ok(html.indexOf("season-card-title") < html.indexOf("next-season-title"));
+  assert.ok(html.indexOf("next-season-title") < html.indexOf('id="sc-title"'));
+});
+
+test("another admin sees the card without the button", () => {
+  const html = renderSeasonSettings(view({ season: 2026, canEdit: false }), { canEdit: false, selfId: "p-ana", ui: {} });
+  assert.match(html, /<h2 id="next-season-title">Next season<\/h2>/);
+  assert.doesNotMatch(html, /open-start-season/);
+  assert.doesNotMatch(html, /<button/);
+});
+
+test("a notice for the next season is said in its card", () => {
+  const html = renderSeasonSettings(view(), {
+    canEdit: true,
+    ui: { notice: { place: "next-season", text: "The season has already moved." } },
+  });
+  assert.match(html, /aria-labelledby="next-season-title">[\s\S]*role="alert">The season has already moved\.</);
+});
+
+test("the dialog for season 2026", () => {
+  const html = startSeasonDialogBody({ season: 2026 });
+  assert.match(html, /<form id="start-season-form" class="staff-form"/);
+  // The three things that happen (spec: season-rollover, requirement 1).
+  assert.match(html, /Site coordinators keep their sign-in\./);
+  assert.match(html, /Every other staff account loses its sign-in\./);
+  assert.match(html, /The 2027 roster starts with only you\./);
+  assert.ok(html.includes("Export this season&#39;s roster and cases first if you need them."));
+  assert.match(html, /<label class="field" for="start-season-year"><span>Type 2027 to confirm<\/span><input[^>]*id="start-season-year"/);
+  assert.match(html, /data-action="close-dialog"[^>]*>Cancel</);
+  const confirm = (typed) => startSeasonDialogBody({ season: 2026, typed }).match(/<button type="submit"[^>]*>/)[0];
+  assert.match(confirm(""), /disabled/);
+  assert.match(confirm("2026"), /disabled/);
+  assert.doesNotMatch(confirm("2027"), /disabled/);
+  assert.doesNotMatch(confirm(" 2027 "), /disabled/);
+  // Busy holds it even with the year typed.
+  assert.match(startSeasonDialogBody({ season: 2026, typed: "2027", busy: true }).match(/<button type="submit"[^>]*>/)[0], /disabled/);
+  assert.match(html, /id="start-season-submit"[^>]*>Start the 2027 season</);
+  assert.doesNotMatch(html, /Finish these first/);
+});
+
+test("the typed-year gate", () => {
+  assert.equal(startSeasonReady(2026, "2027"), true);
+  assert.equal(startSeasonReady(2026, " 2027"), true);
+  assert.equal(startSeasonReady(2026, "2026"), false);
+  assert.equal(startSeasonReady(2026, "02027"), false);
+  assert.equal(startSeasonReady(2026, ""), false);
+  assert.equal(startSeasonReady(null, ""), false);
+});
+
+test("seasonRefusalLines: one line per count above zero, singular for one", () => {
+  assert.deepEqual(seasonRefusalLines({ openCases: 2, openFollowups: 1, claimedHelp: 0, unclaimedHelpOnCases: 1 }), [
+    "2 open cases",
+    "1 open follow-up",
+    "1 unclaimed help request on cases",
+  ]);
+  assert.ok(seasonRefusalLines({ openCases: 0, openFollowups: 0, claimedHelp: 3, unclaimedHelpOnCases: 0 }).includes("3 claimed help requests"));
+  assert.deepEqual(seasonRefusalLines({ openCases: 1, openFollowups: 2, claimedHelp: 1, unclaimedHelpOnCases: 2 }), [
+    "1 open case",
+    "2 open follow-ups",
+    "1 claimed help request",
+    "2 unclaimed help requests on cases",
+  ]);
+  assert.deepEqual(seasonRefusalLines(null), []);
+});
+
+test("a refusal lists what to finish first, in the dialog", () => {
+  const html = startSeasonDialogBody({
+    season: 2026,
+    typed: "2027",
+    refusal: { openCases: 2, openFollowups: 1, claimedHelp: 0, unclaimedHelpOnCases: 0 },
+  });
+  assert.match(html, /role="alert"[^>]*>[\s\S]*Finish these first:[\s\S]*<li>2 open cases<\/li><li>1 open follow-up<\/li><\/ul>/);
 });
 
 // ---------------------------------------------------------------------------
@@ -223,13 +310,28 @@ test("the Change the SIDN dialog is framed with its title and overline", () => {
   assert.match(html, /<form id="sidn-form"/);
 });
 
+test("the Start next season dialog is framed with its title and overline", () => {
+  const html = dialog(
+    staffState(cleared({ isAdmin: true, isSiteCoordinator: true }), {
+      dialog: "start-season",
+      seasonSettings: view({ season: 2026 }),
+      seasonSettingsUi: { startRefusal: { openCases: 1, openFollowups: 0, claimedHelp: 0, unclaimedHelpOnCases: 0 } },
+    }),
+  );
+  assert.match(html, /<h2 id="modal-title">Start the 2027 season<\/h2>/);
+  assert.match(html, />OFFICE · ADMIN</);
+  assert.match(html, /<form id="start-season-form"/);
+  assert.match(html, /<li>1 open case<\/li>/);
+});
+
 test("app.mjs handles every Season settings action", () => {
   const app = readFileSync(new URL("../src/app.mjs", import.meta.url), "utf8");
-  for (const action of ["open-season-settings", "open-change-sidn", "add-site-coordinator", "remove-site-coordinator"])
+  for (const action of ["open-season-settings", "open-change-sidn", "open-start-season", "add-site-coordinator", "remove-site-coordinator"])
     assert.match(app, new RegExp(`case "${action}"`), action);
   assert.match(app, /"open-season-settings": \(\) => \{[\s\S]{0,120}controller\.navigate\("office-settings"\);[\s\S]{0,60}controller\.loadSeasonSettings\(\)/);
   assert.match(app, /form\.id === "season-settings-form"/);
   assert.match(app, /form\.id === "sidn-form"/);
+  assert.match(app, /form\.id === "start-season-form"/);
 });
 
 test("the stylesheet lays the cards out at phone width", () => {

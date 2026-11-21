@@ -276,7 +276,7 @@ Some production features cannot run in the browser or in SQL alone: sending stat
 storing and scanning uploaded documents, generating IRS forms (13614-C, 14446) as PDFs, reports,
 and any integration. When you need one:
 
-- **Keep the database contract.** Let workflow changes keep going through the twenty-two RPC functions
+- **Keep the database contract.** Let workflow changes keep going through the thirty-one RPC functions
   (or new ones added the same way), so every rule stays enforced in one place, for every caller.
 - **Run it server-side with the secret key**, as a Supabase Edge Function or a small separate
   service. Never ship the secret key to a browser.
