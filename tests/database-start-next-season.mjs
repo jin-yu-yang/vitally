@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createDatabaseFixture } from "./support/database-fixture.mjs";
+import { openDatabase } from "../tools/admin/database.mjs";
 
 // OpenSpec change add-start-next-season (design D1-D4), migration 055 §4 and
 // §5: a site coordinator starts the next season with one call. It is refused
@@ -398,6 +399,120 @@ test("a site coordinator default follow-up person is kept", async () => {
     assert.equal(rows[0].default_followup_from, null);
     assert.equal(rows[0].default_followup_to, null);
   } finally {
+    await f.close();
+  }
+});
+
+// Waits until another connection is blocked on a lock inside a start.
+async function startIsWaiting(f) {
+  for (let i = 0; i < 100; i += 1) {
+    const { w } = await one(
+      f,
+      "select exists(select 1 from pg_stat_activity where wait_event_type='Lock' and query ilike '%vitally_start_next_season%' and pid<>pg_backend_pid()) as w",
+    );
+    if (w) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return false;
+}
+const staffStatuses = async (f) =>
+  (
+    await f.sql(
+      `select a.user_id,a.status,m.active from public.accounts a
+        join public.memberships m on m.workspace_id=a.workspace_id and m.user_id=a.user_id
+        where a.workspace_id=$1 and m.access='staff' order by a.user_id`,
+      [f.workspaceId],
+    )
+  ).rows;
+
+// PR #255 review: B removes A as site coordinator in an open transaction; A
+// presses Start and waits on the workspace lock; B commits. A's start checks
+// again under the lock and is FORBIDDEN, with no receipt and nothing changed.
+test("a start by someone removed as site coordinator while it waited is FORBIDDEN", async () => {
+  const f = await createDatabaseFixture();
+  const holder = await openDatabase({ kind: "test" });
+  let open = false;
+  try {
+    const season = await seasonOf(f);
+    const b = await f.staff({
+      key: "morgan_sc",
+      name: "Morgan Hale",
+      capabilities: ["admin", "followup"],
+      siteCoordinator: true,
+    });
+    await setDefaultFollowup(f, "morgan_sc");
+    const { revision } = await one(f, "select revision from public.accounts where workspace_id=$1 and user_id=$2", [
+      f.workspaceId,
+      f.siteCoordinatorUserId,
+    ]);
+    const statuses = await staffStatuses(f);
+    await holder.query("begin");
+    open = true;
+    await holder.query("select set_config('request.jwt.claims',$1,true)", [
+      JSON.stringify({ sub: b.userId, role: "authenticated" }),
+    ]);
+    await holder.query("set local role authenticated");
+    await holder.query("select public.vitally_set_site_coordinator($1,$2,$3,false)", [
+      randomUUID(),
+      f.siteCoordinatorId,
+      revision,
+    ]);
+    const actionId = randomUUID();
+    const pending = start(f.siteCoordinator, { actionId, expected: season, typed: season + 1 }).then((answer) => answer);
+    assert.equal(await startIsWaiting(f), true, "the start waits on the workspace lock");
+    await holder.query("commit");
+    open = false;
+    const { data, error } = await pending;
+    assert.equal(data, null);
+    assert.deepEqual(refusal(error), { code: "VT001", message: "FORBIDDEN" });
+    assert.equal(await f.receiptsFor(actionId), 0);
+    assert.equal(await seasonOf(f), season);
+    assert.deepEqual(await startsOf(f), []);
+    assert.deepEqual(await seasonRows(f, "roster_entries", season + 1), []);
+    assert.deepEqual(await staffStatuses(f), statuses);
+    assert.equal((await accountOf(f, f.siteCoordinatorUserId)).is_site_coordinator, false);
+  } finally {
+    if (open) await holder.query("rollback");
+    await holder.end();
+    await f.close();
+  }
+});
+
+// PR #255 review: a staff write holds FOR SHARE on its own membership, then
+// needs its case table. The start locks staff memberships before the table
+// locks, so it waits on that membership holding no table lock, and the write
+// can still take the case table (a deadlock otherwise).
+test("a start waits on a staff write's membership before locking the case tables", async () => {
+  const f = await createDatabaseFixture();
+  const holder = await openDatabase({ kind: "test" });
+  let open = false;
+  try {
+    const season = await seasonOf(f);
+    const admin = await f.staff({ key: "ines_admin", name: "Ines Dalton", capabilities: ["admin", "followup"] });
+    await holder.query("begin");
+    open = true;
+    await holder.query("select 1 from public.memberships where workspace_id=$1 and user_id=$2 and active for share", [
+      f.workspaceId,
+      admin.userId,
+    ]);
+    const pending = start(f.siteCoordinator, { expected: season, typed: season + 1 }).then((answer) => answer);
+    assert.equal(await startIsWaiting(f), true, "the start waits on the membership");
+    const taken = await holder
+      .query("lock table public.cases,public.admin_followups,public.assistance_items in row exclusive mode nowait")
+      .then(
+        () => null,
+        (error) => error,
+      );
+    assert.equal(taken, null, `the write can still take the case tables: ${taken?.code} ${taken?.message}`);
+    await holder.query("commit");
+    open = false;
+    const { data, error } = await pending;
+    assert.equal(error, null, failure(error));
+    assert.equal(data.season, season + 1);
+    assert.equal((await accountOf(f, admin.userId)).status, "deactivated");
+  } finally {
+    if (open) await holder.query("rollback");
+    await holder.end();
     await f.close();
   }
 });

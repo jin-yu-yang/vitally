@@ -159,7 +159,8 @@ revoke all on public.season_starts from public,anon,authenticated,service_role;
 -- §5. Start next season (design D1-D4), for a site coordinator, in one
 -- transaction under the workspace lock. Order of checks: FORBIDDEN (not an
 -- active site coordinator: nothing written, no receipt), the workspace lock,
--- the stored answer for a repeated action id (so a retry after a lost reply is
+-- FORBIDDEN again (removed or deactivated while waiting for the lock), the
+-- staff membership locks and the table locks, the stored answer for a repeated action id (so a retry after a lost reply is
 -- not a CONFLICT), CONFLICT (the season already moved), VALIDATION (the typed
 -- year is not the next season, or the next season is past 2100), then
 -- SEASON_NOT_FINISHED with the counts while work is open. Then, in order: the
@@ -199,11 +200,30 @@ begin
   raise sqlstate 'VT007' using message='VALIDATION';
  end if;
  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_member.workspace_id::text,0));
+ -- Again under the lock: removing a site coordinator and Deactivate take the
+ -- same lock, so one that committed while this call waited is seen here. Still
+ -- FORBIDDEN with no receipt.
+ if not vitally_private.is_site_coordinator(v_member.workspace_id,v_person.id) then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ -- Every staff membership of the workspace, in user order, before the table
+ -- locks. A staff write takes FOR SHARE on its own membership first
+ -- (require_membership), then its case or follow-up row. Step 4 below
+ -- deactivates memberships, so without this a write holding FOR SHARE and
+ -- waiting on the table locks, and this call waiting on that FOR SHARE, would
+ -- deadlock. A write already holding its membership finishes first; one that
+ -- comes later waits here. Client memberships are not changed, so they are
+ -- not locked.
+ perform 1 from public.memberships m
+  where m.workspace_id=v_member.workspace_id and m.access='staff'
+  order by m.user_id for update;
  -- Case writes don't take the workspace lock, so without these the counts
  -- below could miss a case reopened, a follow-up opened or a help request
- -- claimed while the start runs. Writes already in flight finish first; a
- -- write that comes after waits, then reads the new current_season and is
- -- refused as PAST_SEASON (§1). Reads are not blocked.
+ -- claimed while the start runs. Writes already in flight finish first. A
+ -- staff write that comes after is refused once this commits: a deactivated
+ -- person's by the membership check (their membership is no longer active), a
+ -- site coordinator's as PAST_SEASON (§1), since it reads the new
+ -- current_season. Reads are not blocked.
  -- tools/admin/relabel-season.mjs locks cases the same way.
  lock table public.cases,public.admin_followups,public.assistance_items in exclusive mode;
  v_digest=encode(extensions.digest(jsonb_build_object('operation','START_NEXT_SEASON',
@@ -265,6 +285,12 @@ begin
    and a.status in ('invited','active') and not a.is_site_coordinator
   order by a.person_id
  loop
+  -- The starter is a site coordinator (checked under the lock), so never in
+  -- this set. If they were, the whole start is refused rather than leaving no
+  -- one signed in to finish it.
+  if v_user=v_member.user_id then
+   raise sqlstate 'VT001' using message='FORBIDDEN';
+  end if;
   perform vitally_private.deactivate_account(v_member.workspace_id,v_user,v_person.id);
   v_deactivated=v_deactivated+1;
  end loop;
