@@ -1,14 +1,14 @@
 ## 1. Migration 056: storage and visibility
 
-- [ ] 1.1 Add `volunteer_profiles.usual_days smallint[] not null default '{}'`, with a check for values 1–7, no duplicates, sorted (design D1).
-- [ ] 1.2 Add `public.schedule_settings` (one row per workspace; `site_hours jsonb` keyed `"1"`…`"7"` with `{open, close}`; three targets 0–9 defaulting 2/1/1; revision; updater) and a private validator for `site_hours` (D1).
-- [ ] 1.3 Add `public.shifts`:
+- [x] 1.1 Add `volunteer_profiles.usual_days smallint[] not null default '{}'`, with a check for values 1–7, no duplicates, sorted (design D1).
+- [x] 1.2 Add `public.schedule_settings` (one row per workspace; `site_hours jsonb` keyed `"1"`…`"7"` with `{open, close}`; three targets 0–9 defaulting 2/1/1; revision; updater) and a private validator for `site_hours` (D1).
+- [x] 1.3 Add `public.shifts`:
   - columns: id, workspace, season, person, `shift_date`, `start_hour`, `end_hour`, role, revision, created/updated by and at, `removed_at`;
   - checks: `0 ≤ start < end ≤ 24` and the five roles;
   - an index on `(workspace_id, season, shift_date)` (D1, D2).
-- [ ] 1.4 Add `vitally_policy.is_schedule_viewer(ws)`, which answers only for the caller: workspace admin, or `audience_member(…, 'everyone', '{}')`. Add SELECT policies with no write grants: on `shifts`, a viewer, with no-sign-in people's rows for workspace admins only; on `schedule_settings`, a viewer (D3).
-- [ ] 1.5 Add `shifts` and `schedule_settings` to `supabase_realtime` with 049's DO block (D10).
-- [ ] 1.6 Database tests:
+- [x] 1.4 Add `vitally_policy.is_schedule_viewer(ws)`, which answers only for the caller: workspace admin, or `audience_member(…, 'everyone', '{}')`. Add SELECT policies with no write grants: on `shifts`, a viewer, with no-sign-in people's rows for workspace admins only; on `schedule_settings`, a viewer (D3).
+- [x] 1.5 Add `shifts` and `schedule_settings` to `supabase_realtime` with 049's DO block (D10).
+- [x] 1.6 Database tests:
   - the column checks;
   - the RLS: a viewer, a non-viewer, a client, the no-sign-in rule for direct reads;
   - realtime: a non-admin gets no change for a no-sign-in person's shift, and an admin does;
