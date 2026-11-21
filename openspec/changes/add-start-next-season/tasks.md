@@ -33,10 +33,10 @@
 
 ## 4. Browser: Start next season on Season settings
 
-- [ ] 4.1 Unit tests (failing first) for the "Next season" card: the button for site coordinators only, none for other admins
-- [ ] 4.2 Unit tests (failing first) for the dialog: title, export reminder, the typed-year gate, the `SEASON_NOT_FINISHED` lines (singular and plural), `CONFLICT` re-read and close
-- [ ] 4.3 Add the store call, controller action and view for the card and dialog (staff text in English)
-- [ ] 4.4 After success, every window re-reads: the starter's window shows the setup screen, and deactivated windows show "This account has no access"
+- [x] 4.1 Unit tests (failing first) for the "Next season" card: the button for site coordinators only, none for other admins
+- [x] 4.2 Unit tests (failing first) for the dialog: title, export reminder, the typed-year gate, the `SEASON_NOT_FINISHED` lines (singular and plural), `CONFLICT` re-read and close
+- [x] 4.3 Add the store call, controller action and view for the card and dialog (staff text in English)
+- [x] 4.4 After success, every window re-reads: the starter's window shows the setup screen, and deactivated windows show "This account has no access"
 
 ## 5. Exit Form tax year
 
