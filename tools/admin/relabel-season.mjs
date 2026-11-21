@@ -87,13 +87,17 @@ export async function relabelSeason(client, { workspaceId, from, to, apply = fal
   if (!UUID.test(workspaceId ?? "")) throw failure("RELABEL_USAGE", "workspaceId must be a UUID.");
   try {
     await client.query("begin");
-    // Every Roster and case write in the workspace takes this lock first.
+    // Roster writes in the workspace take this lock first. Case actions don't:
+    // they lock only their own case row (see the next lock).
     await client.query("select pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended($1::text, 0))", [
       workspaceId,
     ]);
-    // Taken before any row lock, so nothing holding a case row waits on us
-    // while we wait on it.
-    await client.query("lock table public.cases in share row exclusive mode");
+    // EXCLUSIVE conflicts with the ROW SHARE a case action takes when it locks
+    // its case row, so this waits for in-flight actions to finish before the
+    // tool touches any row, and new ones wait for the tool. A weaker mode let an
+    // action holding its row wait on the tool while the tool waited on that row
+    // (40P01, found in review of #248).
+    await client.query("lock table public.cases in exclusive mode");
     const workspace = (
       await client.query("select current_season from public.workspaces where id = $1 for update", [workspaceId])
     ).rows[0];
