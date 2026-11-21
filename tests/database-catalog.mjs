@@ -14,7 +14,8 @@ import { openDatabase } from "../tools/admin/database.mjs";
 // sixteen staff-only policies and drops or adds none; 044 adds the three
 // admin-only Roster policies; 047 adds the admin-only accounts policy;
 // 049 adds the two posted_updates policies (an admin's and the audience's).
-// 051 adds the two staff-only case label policies. update_reads has none.
+// 051 adds the two staff-only case label policies. 056 adds the two schedule
+// viewer policies (shifts and schedule_settings). update_reads has none.
 const POLICIES = Object.freeze([
   ["accounts", "admin_accounts"],
   ["admin_followups", "staff_admin_followups"],
@@ -47,6 +48,8 @@ const POLICIES = Object.freeze([
   ["reviewer_questionnaires", "staff_reviewer_questionnaires"],
   ["reviews", "staff_reviews"],
   ["roster_entries", "admin_roster_entries"],
+  ["schedule_settings", "viewer_schedule_settings"],
+  ["shifts", "viewer_shifts"],
   ["volunteer_profiles", "admin_volunteer_profiles"],
   ["workspaces", "member_workspace"],
 ]);
@@ -331,7 +334,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
     });
 
-    await t.test("vitally_policy holds exactly the admin check, the clearance check, the update audience check and the unpublished window, with exactly their grants", async () => {
+    await t.test("vitally_policy holds exactly the admin check, the clearance check, the update audience check, the schedule viewer check and the unpublished window, with exactly their grants", async () => {
       const { rows } = await sql(
         `select p.oid, p.oid::regprocedure::text as signature, p.prosecdef, p.provolatile, p.proconfig,
                 p.proargnames, p.pronargs
@@ -343,13 +346,16 @@ test("the catalog after the sample-case tools and presenter access are removed",
         [
           "cleared_workspace_id()",
           "in_update_audience(uuid,text,text[])",
+          "is_schedule_viewer(uuid)",
           "is_workspace_admin(uuid)",
           "unpublished_read_window()",
         ],
       );
-      const [cleared, audience, admin, readWindow] = rows;
+      const [cleared, audience, viewer, admin, readWindow] = rows;
       assert.equal(cleared.proargnames, null);
       assert.equal(cleared.pronargs, 0);
+      assert.deepEqual(viewer.proargnames, ["p_workspace_id"]); // 056
+      assert.equal(viewer.pronargs, 1);
       assert.deepEqual(admin.proargnames, ["p_workspace_id"]);
       assert.equal(admin.pronargs, 1);
       assert.deepEqual(audience.proargnames, ["p_workspace_id", "p_audience", "p_roles"]);
