@@ -1582,7 +1582,7 @@ export function nextStep(record, rights, ui = {}) {
       break;
     }
     case "review_approved": {
-      const line = contactStepLine(approved, reviewerQuestionnaireOf(record, approved));
+      const line = contactStepLine(approved, reviewerQuestionnaireOf(record, approved), { returned: returnedToSigning(record) });
       body = line
         ? `<p class="muted">${esc(line)}</p>`
         : approved?.clientContactStatus === "pending"
@@ -1879,10 +1879,18 @@ function submissionComparison(previous, current, version) {
 
 /**
  * The review-contact step's line once the approval carries a questionnaire
- * (D10), or null for an approval from before the questionnaires.
+ * (D10), or null for an approval from before the questionnaires. After a
+ * Return to signing (`returned`), the second signing is under way and the
+ * conversation belongs to the first one, so the line places it there and says
+ * it is not gone over again (#204).
  */
-function contactStepLine(attempt, questionnaire) {
+function contactStepLine(attempt, questionnaire, { returned = false } = {}) {
   if (!attempt || !questionnaire) return null;
+  if (returned) {
+    return questionnaire.wentOver
+      ? `At the first signing, the reviewer went over the return with the client on ${staffDate(questionnaire.wentOverOn)}. It isn't gone over again.`
+      : "At the first signing, going over the return with the client was passed to the office. It isn't gone over again.";
+  }
   return questionnaire.wentOver
     ? `The reviewer went over the return with the client on ${staffDate(questionnaire.wentOverOn)}.`
     : "The office will go over the return with the client.";
