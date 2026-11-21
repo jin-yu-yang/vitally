@@ -9732,7 +9732,7 @@ test(
 // confirm waits for the next year typed, and is refused with "1 open case"
 // while the fixture's one case is open. The case is closed (a duplicate) and
 // the start lands: the starter gets Finish your setup, and the Preparer's
-// open window gets "This account has no access". The starter then records
+// open window gets "This account has no access" when it regains focus. The starter then records
 // their own new-season roster entry (the fixture's setup helper, Ruling R7)
 // and their case pool is empty. Fictional people only.
 test(
@@ -9868,11 +9868,17 @@ test(
       await waitForQuiet(admin);
       await shoot(admin, "3-setup");
 
-      // 5. The Preparer's window, opened before the start and left alone,
-      //    shows "This account has no access". Recorded here and asserted at
-      //    the end, so the steps after it still run if it does not.
-      const noAccess = await waitFor(preparer, `the text ${JSON.stringify(NO_ACCESS_HEADING)}`, (needle) =>
-        (document.querySelector("#app")?.innerText ?? "").includes(needle), NO_ACCESS_HEADING, ARRIVAL_MS).then(
+      // 5. The Preparer's window, opened before the start, shows "This account
+      //    has no access" the next time it wakes, without a reload (Ruling R9:
+      //    a deactivated member gets no realtime, so a wake event re-reads).
+      //    Recorded here and asserted at the end, so the steps after it still
+      //    run if it does not.
+      const noAccess = await regainFocusUntil(
+        preparer,
+        `the text ${JSON.stringify(NO_ACCESS_HEADING)}`,
+        (needle) => (document.querySelector("#app")?.innerText ?? "").includes(needle),
+        NO_ACCESS_HEADING,
+      ).then(
         () => null,
         (error) => error,
       );

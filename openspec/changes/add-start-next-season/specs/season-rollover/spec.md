@@ -90,7 +90,7 @@ Client accounts, already deactivated accounts and site coordinators' accounts SH
 After the start:
 - the starter's window SHALL show the setup screen, since they have no roles;
 - other site coordinators SHALL keep the admin screens, and their Roster SHALL list only the starter;
-- every deactivated person's open window SHALL show "This account has no access".
+- every deactivated person's open window SHALL show "This account has no access" the next time it wakes (focus, the tab becoming visible, `online`, or a realtime reconnect), without a reload.
 
 #### Scenario: A rollover
 - **WHEN** site coordinator Dana Wu starts 2027 in a workspace with two site coordinators, five other staff with active or invited accounts, and three client accounts
@@ -109,8 +109,8 @@ After the start:
 - **THEN** the starter's window shows "Finish your setup", their sidebar still has the Roster and Season settings, and Season settings shows the new season's label
 
 #### Scenario: A deactivated volunteer's window
-- **WHEN** a preparer has the work board open when the season starts
-- **THEN** their window shows "This account has no access"
+- **WHEN** a preparer has the work board open when the season starts, and the window then regains focus
+- **THEN** their window shows "This account has no access", without a reload
 
 #### Scenario: The new season's first case
 - **WHEN** a client submits an application after the start
