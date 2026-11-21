@@ -3,9 +3,9 @@
 - [x] 1.1 Inventory every write path to case rows (RPCs, direct table grants, storage policies) and list them in the task's report
 - [x] 1.2 Database tests (failing first): every case-writing RPC on a past-season case is refused with `PAST_SEASON`; a draft (`season is null`) stays writable and submits into the current season
 - [x] 1.3 Add the past-season check to `vitally_private.lock_case`, to `vitally_assistance_action` for items that name a case, and to any direct write path found in 1.1
-- [ ] 1.4 Database tests (failing first): `open_work` ignores past-season cases; a returning volunteer with a past-season Accepted case has Preparer removed in the new season; Deactivate succeeds for a volunteer whose only cases are past-season; a current-season Accepted case still counts
-- [ ] 1.5 Scope `vitally_private.open_work`'s preparer and reviewer branches to the current season (or a null season)
-- [ ] 1.6 Drop `vitally_private.capabilities_before_052`, with a test that it is gone
+- [x] 1.4 Database tests (failing first): `open_work` ignores past-season cases; a returning volunteer with a past-season Accepted case has Preparer removed in the new season; Deactivate succeeds for a volunteer whose only cases are past-season; a current-season Accepted case still counts
+- [x] 1.5 Scope `vitally_private.open_work`'s preparer and reviewer branches to the current season (or a null season)
+- [x] 1.6 Drop `vitally_private.capabilities_before_052`, with a test that it is gone
 
 ## 2. Migration 055: Start next season
 
