@@ -81,9 +81,10 @@ in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 | `049_posted_updates.sql` | Hand-written: posted updates ([below](#posted-updates)). The tables `posted_updates` and `update_reads`, written only through the RPCs; the live audience `vitally_private.audience_member` and the policy helper `vitally_policy.in_update_audience`; two SELECT policies on `posted_updates` (the audience reads an unpublished update only for `vitally_policy.unpublished_read_window()`, 10 minutes, after Unpublish) and none on `update_reads`; the RPCs `vitally_save_update` and `vitally_update_action` (workspace admins, with receipts), `vitally_mark_updates` and `vitally_my_updates` (every staff member, cleared or not) and `vitally_posted_updates` (workspace admins); `posted_updates` joins the Realtime publication and `update_reads` does not. No clearance check: an update holds no case data |
 | `050_hidden_household_rows.sql` | Hand-written: `vitally_private.household_rows(version, answers)`, the number of household rows the case shows, and `act_save_preparer_fields` re-created from 039 to use it (#175) |
 | `051_case_labels.sql` | Hand-written: case labels ([below](#case-labels)). The tables `case_labels` (a workspace's labels: name trimmed of spaces, tabs and line breaks, 1 to 24 characters on one line, unique ignoring case, one of six colors, its own `revision`) and `case_label_links` (which labels a case carries; a link is switched off, never deleted), both staff-only and cleared-gated, with no write grant for a browser role, no grant at all for `service_role` (as on 049's tables), and both in the Realtime publication; the trigger `vitally_private.add_starter_labels` on `workspaces` (City Tax, MFS and Multi-state for each new workspace) and a one-time backfill for the existing ones; `vitally_private.check_label`; and the two RPCs `vitally_save_label` and `vitally_set_case_label`, which write the case events `ADD_CASE_LABEL` and `REMOVE_CASE_LABEL`. It redefines no earlier function and leaves `cases.revision` and `updated_at` alone |
-| `052_season_settings.sql` | Hand-written: Season settings and site coordinators (change `add-season-settings`; [below](#season-settings-and-site-coordinators)). A guard refuses with `VT008` if the recompute would change anyone's admin: an active staff member holds `admin` in `people.capabilities` without the Admin role this season, or someone with a sign-in has the Admin role without `admin` ([setup](../setup.md#052s-guard)); the snapshot `vitally_private.capabilities_before_052`; `people.capabilities` becomes a mirror of this season's roles; `accounts.is_site_coordinator`, the audit table `site_coordinator_changes` and `vitally_set_site_coordinator`; `season_settings` with `vitally_season_settings` and `vitally_save_season_settings`; `is_workspace_admin` and `vitally_my_clearance` (`isAdmin`, `isSiteCoordinator`); `can_be_default_followup`; `add_staff_member` without capabilities. It marks nobody as a site coordinator |
+| `052_season_settings.sql` | Hand-written: Season settings and site coordinators (change `add-season-settings`; [below](#season-settings-and-site-coordinators)). A guard refuses with `VT008` if the recompute would change anyone's admin: an active staff member holds `admin` in `people.capabilities` without the Admin role this season, or someone with a sign-in has the Admin role without `admin` ([setup](../setup.md#052s-guard)); the snapshot `vitally_private.capabilities_before_052` (dropped by 055); `people.capabilities` becomes a mirror of this season's roles; `accounts.is_site_coordinator`, the audit table `site_coordinator_changes` and `vitally_set_site_coordinator`; `season_settings` with `vitally_season_settings` and `vitally_save_season_settings`; `is_workspace_admin` and `vitally_my_clearance` (`isAdmin`, `isSiteCoordinator`); `can_be_default_followup`; `add_staff_member` without capabilities. It marks nobody as a site coordinator |
 | `053_clearance_uploads.sql` | Hand-written: clearance uploads (change `add-clearance-uploads`; [below](#clearance-uploads)). `roster_entries.form_13615_sent_at` and `photo_id_sent_at`; the RPCs `vitally_mark_upload_sent` and `vitally_mark_upload_reviewed` (receipts `MARK_UPLOAD_SENT` and `MARK_UPLOAD_REVIEWED`); `vitally_save_volunteer` re-created from 052 to clear the sent dates when it acts on them; `vitally_my_clearance` re-created from 052 with `sentAt`, `uploadUrl` and empty `capabilities` when not cleared. No backfill: existing rows start null |
 | `054_return_to_signing_exit_forms.sql` | Hand-written: the staff-only `return_to_signing_exit_forms` table (the corrected Exit Form values entered at Return to signing; select for cleared staff only, no write grant for a browser role, no grant at all for `service_role`, as on 049's and 051's tables); `check_payload` accepts optional `exitForm` and `remarks` on `RETURN_TO_SIGNING`; `act_return_to_signing` stores them and puts `exitFormId` in the event's detail. `apply_fixture_scenario` is not touched: 040 dropped it |
+| `055_start_next_season.sql` | Hand-written: Start next season (change `add-start-next-season`; [below](#start-next-season)). `lock_case` and `vitally_assistance_action` refuse a write to a past-season case (`VT004` `INVALID_TRANSITION`, detail `PAST_SEASON`); `open_work` counts only current-season cases; drops `vitally_private.capabilities_before_052`; the table `season_starts`; the RPC `vitally_start_next_season` |
 **Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
 never edit an applied one.** The build writes a file only when the hash differs from the newest
 catalogue migration's. The hash covers the catalogue and `LOADER_VERSION` in
@@ -132,12 +133,13 @@ do not copy them from older files:
 | `vitally_private.check_payload`, `check_operation_authority`, `act_assign_case`, and the RPC `public.vitally_apply_action` | `046_volunteer_workload.sql` |
 | `vitally_private.household_rows`, `act_save_preparer_fields` | `050_hidden_household_rows.sql` |
 | `vitally_private.check_preparer_fields` | `039_preparer_shaded_fields.sql` |
-| `vitally_private.acting_person`, `contact_person`, `require_cleared`, `open_work`, the role helpers, `role_certificates_check`, `vitally_policy.cleared_workspace_id`, and the RPCs `public.vitally_assistance_action`, `vitally_create_case`, `vitally_log_contact`, `vitally_edit_contact` | `045_volunteer_clearance.sql` |
+| `vitally_private.lock_case`, `open_work`, and the RPCs `public.vitally_assistance_action`, `vitally_start_next_season` | `055_start_next_season.sql` |
+| `vitally_private.acting_person`, `contact_person`, `require_cleared`, the role helpers, `role_certificates_check`, `vitally_policy.cleared_workspace_id`, and the RPCs `public.vitally_create_case`, `vitally_log_contact`, `vitally_edit_contact` | `045_volunteer_clearance.sql` |
 | `vitally_private.audience_member`, `vitally_policy.in_update_audience`, `vitally_policy.unpublished_read_window`, and the RPCs `public.vitally_save_update`, `vitally_update_action`, `vitally_mark_updates`, `vitally_my_updates`, `vitally_posted_updates` | `049_posted_updates.sql` |
 | `public.vitally_save_volunteer`, `vitally_my_clearance`, `vitally_mark_upload_sent`, `vitally_mark_upload_reviewed` | `053_clearance_uploads.sql` |
 | `vitally_private.add_starter_labels`, `check_label`, and the RPCs `public.vitally_save_label`, `vitally_set_case_label` | `051_case_labels.sql` |
 | `vitally_private.add_staff_member`, `vitally_policy.is_workspace_admin` | `044_volunteer_roster_records.sql` |
-| `vitally_private.lock_case`, `lock_assistance_item`, `initialize_workspace` | `043_remove_presenter_access.sql` |
+| `vitally_private.lock_assistance_item`, `initialize_workspace` | `043_remove_presenter_access.sql` |
 | `vitally_private.check_staff_links`, `set_default_followup` | `038_staff_identity.sql` |
 | `vitally_private.filing_notes_append_only`, `reserve_receipt` | `040_remove_sample_case_tools.sql` |
 | `vitally_private.check_authority`, `receive_document`, `act_verify_document` | `036_hold_and_closing.sql` |
@@ -237,6 +239,7 @@ erDiagram
 | `vitally_private.intake_fields` | The version-2 question catalogue | Private; one row per question and per household sub-field (`hh.dob`), with type, options, required flag and show-if rule. Loaded (replaced whole) by each catalogue migration through `load_intake_catalogue`; read by the server-side answer checks. It holds no wording |
 | `vitally_private.intake_substeps` | The version-2 sub-steps, in order | Private; one row per catalogue sub-step (id, step, position), loaded with the catalogue through 015's `load_intake_catalogue`; read by SAVE_ANSWERS' `visited` check |
 | `assistance_items` | Requests for help with forms, beside the tax workflow | Own `revision`; `status`: `open` → `assigned` → `resolved`; optional `case_id`; `language`, `contact_preference` |
+| `season_starts` | One row per Start next season (055) | `from_season`, `to_season` (always `from_season` + 1), `started_by_person_id`, `started_at`, `default_followup_from` and `default_followup_to` (both null when the default follow-up person was kept), `deactivated_count`. Row security on, no policy and no grant to signed-in users; written only by `vitally_start_next_season`; not published |
 | `vitally_private.schema_migrations` | Migration ledger | `name`, `digest` (SHA-256 of the file) |
 | `vitally_private.test_workspaces` | Workspaces created by test runs | Test only |
 
@@ -416,8 +419,8 @@ Migration 052 (change `add-season-settings`; the behaviour is in the change's sp
   sign-in, and to empty for one without, so a direct write to the column is replaced. A trigger on
   `roster_entries` recomputes the person when roles or the season change. The column and 042's
   `followup` needs `admin` check stay; nothing but the mirror writes it. The old ceiling is gone:
-  052 copied it into `vitally_private.capabilities_before_052` for rollback, and **Start next
-  season** (a later change) drops that table, after which the old ceiling cannot be restored.
+  052 copied it into `vitally_private.capabilities_before_052` for rollback, and 055 ([Start next
+  season](#start-next-season)) dropped that table, so the old ceiling cannot be restored.
 - **Workspace admin.** `vitally_policy.is_workspace_admin` is true for a staff member with an active
   account who is a site coordinator or holds the Admin role this season. There is no clearance
   check, so an uncleared admin can still reach the Roster and tick their own certificates.
@@ -435,6 +438,31 @@ Migration 052 (change `add-season-settings`; the behaviour is in the change's sp
   `initialize_workspace` re-run check, the case RPCs' assignee checks and `open_work`.
 
 A person with no sign-in has no capabilities and is hidden from non-admin staff.
+
+### Start next season
+
+Migration 055 (change `add-start-next-season`; the behaviour is in the change's specs, and in
+`openspec/specs/` once archived) lets a site coordinator move the workspace to the next season from
+Season settings.
+
+- **`vitally_start_next_season(p_action_id, p_expected_season, p_typed_year)`** is for a site
+  coordinator only (`FORBIDDEN`, no receipt). A repeated action id returns the stored answer. A
+  season that already moved is `CONFLICT`; a typed year that is not the next season is
+  `VALIDATION`. While work is open it is `VT004` with message `SEASON_NOT_FINISHED` and its counts
+  as JSON in the detail: `openCases` (any stage but `draft`, `accepted` and `closed`),
+  `openFollowups`, `claimedHelp` and `unclaimedHelpOnCases`.
+- **What a start does,** in one transaction: the default follow-up person moves to the starter
+  unless a site coordinator; `workspaces.current_season` goes up by one; the starter gets a
+  new-season roster entry with no roles; every other invited or active staff account that isn't a
+  site coordinator's is deactivated (no email); the capability mirror is recomputed; one
+  `season_starts` row is written.
+- **Past seasons are read-only.** `lock_case` refuses any write to a case whose season is set and
+  is not the current one (`VT004`, detail `PAST_SEASON`), so every case action, the season-end
+  close, contact logging and case labels are covered; `vitally_assistance_action` does the same for
+  a help request that names such a case. A draft has no season, so it stays writable. Reads are
+  unchanged.
+- **Open work is this season's.** `open_work` counts only current-season cases (and cases with no
+  season yet), so a past season's cases never block a role change or a deactivation.
 
 ### Clearance uploads
 
