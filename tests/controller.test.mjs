@@ -101,6 +101,14 @@ function fakeStore({
       if (answer instanceof Error) throw answer;
       return answer;
     },
+    // The sidebar's uploads count (change add-clearance-uploads, D8).
+    uploadsCount: 0,
+    failCount: false,
+    async countUploadsToReview() {
+      store.calls.push("countUploadsToReview");
+      if (store.failCount) throw Object.assign(new Error("offline"), { code: "OFFLINE" });
+      return store.uploadsCount;
+    },
     async listPeople() {
       store.calls.push("listPeople");
       return people;
@@ -10417,5 +10425,475 @@ test("season settings: another refusal is the window's own error, and the page r
   assert.equal(state.error.code, "OFFLINE");
   assert.equal(state.busy, false);
   assert.equal(settingsReads(store), 2);
+  controller.stop();
+});
+
+// ---------------------------------------------------------------------------
+// Setup screen uploads (change add-clearance-uploads, design D6)
+// ---------------------------------------------------------------------------
+
+const uploadStore = () => {
+  const store = staffStore({ clearance: { ...UNCLEARED_VOLUNTEER, uploadUrl: null } });
+  store.sends = [];
+  store.failSend = null;
+  store.markUploadSent = async (request) => {
+    store.calls.push("markUploadSent");
+    store.sends.push(request);
+    if (store.failSend) {
+      const error = store.failSend;
+      store.failSend = null;
+      throw error;
+    }
+    return { actionId: request.actionId, document: request.document, sentAt: "2026-11-20T15:00:00Z" };
+  };
+  return store;
+};
+
+test("markUploadSent sends and re-checks the clearance", async () => {
+  const store = uploadStore();
+  const { controller } = build({ store, newActionId: () => "action-up" });
+  await controller.start();
+  const before = callCount(store, "getClearance");
+  await controller.markUploadSent("form13615");
+  assert.deepEqual(store.sends, [{ document: "form13615", actionId: "action-up" }]);
+  assert.equal(callCount(store, "getClearance"), before + 1);
+  assert.equal(controller.getState().busy, false);
+  assert.equal(controller.getState().error, null);
+  controller.stop();
+});
+
+test("markUploadSent retries a lost send with the same action id", async () => {
+  const store = uploadStore();
+  let next = 0;
+  const { controller } = build({ store, newActionId: () => `action-${(next += 1)}` });
+  await controller.start();
+  store.failSend = domainError("OFFLINE");
+  await controller.markUploadSent("form13615");
+  await controller.markUploadSent("form13615");
+  assert.equal(store.sends.length, 2);
+  assert.equal(store.sends[1].actionId, store.sends[0].actionId);
+  // A send that was answered is not repeated: the next press is new.
+  await controller.markUploadSent("form13615");
+  assert.notEqual(store.sends[2].actionId, store.sends[0].actionId);
+  controller.stop();
+});
+
+test("markUploadSent says a refusal in plain words", async () => {
+  const store = uploadStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.failSend = Object.assign(domainError("VALIDATION"), { cause: { message: "VALIDATION", details: "PHOTO_ID_NOT_NEEDED" } });
+  await controller.markUploadSent("photoId");
+  assert.equal(controller.getState().error.message, "Your photo ID doesn't need sending any more.");
+  assert.equal(controller.getState().busy, false);
+  store.failSend = Object.assign(domainError("VALIDATION"), { cause: { message: "VALIDATION", details: "NO_ROSTER_ENTRY" } });
+  await controller.markUploadSent("form13615");
+  assert.equal(
+    controller.getState().error.message,
+    "You're not on this season's roster yet. Ask your site coordinator.",
+  );
+  store.failSend = domainError("SERVER_ERROR");
+  await controller.markUploadSent("form13615");
+  assert.equal(controller.getState().error.message, "Something went wrong.");
+  controller.stop();
+});
+
+test("markUploadSent: a VALIDATION refusal re-reads the clearance, so a stale item goes", async () => {
+  const store = uploadStore();
+  store.nextClearance = { ...UNCLEARED_VOLUNTEER, missing: [{ kind: "form13615" }, { kind: "photoId", sentAt: null }] };
+  const { controller } = build({ store });
+  await controller.start();
+  const before = callCount(store, "getClearance");
+  // Someone ticked Photo ID checked meanwhile: the send is refused, and the
+  // re-read answer no longer lists the photo ID.
+  store.nextClearance = { ...UNCLEARED_VOLUNTEER, missing: [{ kind: "form13615" }] };
+  store.failSend = Object.assign(domainError("VALIDATION"), {
+    cause: { message: "VALIDATION", details: "PHOTO_ID_NOT_NEEDED" },
+  });
+  assert.equal(await controller.markUploadSent("photoId"), false);
+  await new Promise((resolve) => setImmediate(resolve));
+  const state = controller.getState();
+  assert.equal(callCount(store, "getClearance"), before + 1, "the refusal asks for the clearance again");
+  assert.deepEqual(
+    state.principal.clearance.missing.map((item) => item.kind),
+    ["form13615"],
+  );
+  assert.equal(state.error.message, "Your photo ID doesn't need sending any more.", "the refusal stays said");
+  controller.stop();
+});
+
+test("markUploadSent: a check already out when the send lands is followed by one more", async () => {
+  const store = uploadStore();
+  const { controller } = build({ store });
+  await controller.start();
+  const before = callCount(store, "getClearance");
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  const sentAt = "2026-11-20T15:00:00Z";
+  let asked = 0;
+  store.nextClearance = () => {
+    asked += 1;
+    // The first (a focus, say) was asked before the send; the next one after it.
+    return asked === 1 ? gate : { ...UNCLEARED_VOLUNTEER, missing: [{ kind: "form13615", sentAt }] };
+  };
+  const focus = controller.checkClearance();
+  const sent = controller.markUploadSent("form13615");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(store.calls.includes("markUploadSent"), "the send went out");
+  release({ ...UNCLEARED_VOLUNTEER, missing: [{ kind: "form13615", sentAt: null }] });
+  assert.equal(await sent, true);
+  await focus;
+  const state = controller.getState();
+  assert.equal(callCount(store, "getClearance"), before + 2, "the held check, then one more");
+  assert.ok(
+    store.calls.lastIndexOf("getClearance") > store.calls.indexOf("markUploadSent"),
+    "a clearance read after the send",
+  );
+  assert.equal(state.principal.clearance.missing[0].sentAt, sentAt, "the later answer is shown");
+  controller.stop();
+});
+
+test("markUploadSent: busy blocks a second press", async () => {
+  const store = uploadStore();
+  const { controller } = build({ store });
+  await controller.start();
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  const send = store.markUploadSent;
+  store.markUploadSent = async (request) => {
+    await gate;
+    return send(request);
+  };
+  const first = controller.markUploadSent("form13615");
+  assert.equal(controller.getState().busy, true);
+  assert.equal(await controller.markUploadSent("form13615"), false);
+  release();
+  await first;
+  assert.equal(store.sends.length, 1);
+  controller.stop();
+});
+
+test("markUploadSent: a refusal drops an earlier action's Try again", async () => {
+  const store = uploadStore();
+  store.records.set("case-a", { id: "case-a", reference: "VT-AAAA-BBBB", stage: "preparation_ready", revision: 2, answers: {} });
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.selectCase("case-a");
+  // A store action lost to an unknown outcome keeps its own Try again.
+  store.failNext = domainError("OFFLINE");
+  await assert.rejects(controller.runAction("CLAIM_PREPARATION", {}));
+  assert.equal(controller.getState().retryable, true);
+  store.failSend = Object.assign(domainError("VALIDATION"), { cause: { message: "VALIDATION", details: "PHOTO_ID_NOT_NEEDED" } });
+  await controller.markUploadSent("photoId");
+  assert.equal(controller.getState().retryable, false);
+  controller.stop();
+});
+
+// ---- Mark reviewed (change add-clearance-uploads, design D7) ----
+
+const uploadReviewStore = () => {
+  const store = rosterStore();
+  store.failReview = null;
+  store.markUploadReviewed = async (request) => {
+    store.calls.push("markUploadReviewed");
+    store.writes.push({ type: "markUploadReviewed", ...request });
+    if (store.failReview) {
+      const error = store.failReview;
+      store.failReview = null;
+      throw error;
+    }
+    // The review bumps the row's revision, as the database does.
+    store.volunteers = store.volunteers.map((entry) =>
+      entry.id === request.volunteerId ? { ...entry, revision: entry.revision + 1 } : entry,
+    );
+    return { actionId: request.actionId, personId: request.volunteerId, revision: 5 };
+  };
+  return store;
+};
+
+const openReviewDrawer = async (store, ids = ["action-1", "action-2"]) => {
+  const built = build({ store, newActionId: () => ids.shift() });
+  await built.controller.start();
+  built.controller.navigate("office-volunteers");
+  await built.controller.loadVolunteers();
+  built.controller.openDialog("volunteer", { volunteerId: "v-1" });
+  return built;
+};
+
+test("Mark reviewed sends the drawer volunteer's revision", async () => {
+  const store = uploadReviewStore();
+  const { controller } = await openReviewDrawer(store);
+  const text = await controller.markUploadReviewed("form13615");
+  assert.equal(text, "Marked reviewed");
+  assert.deepEqual(store.writes.at(-1), {
+    type: "markUploadReviewed",
+    actionId: "action-1",
+    volunteerId: "v-1",
+    expectedRevision: 4,
+    document: "form13615",
+  });
+  assert.equal(controller.getState().busy, false);
+  controller.stop();
+});
+
+test("Mark reviewed re-reads the Roster", async () => {
+  const store = uploadReviewStore();
+  const { controller } = await openReviewDrawer(store);
+  const reads = volunteerReads(store);
+  await controller.markUploadReviewed("photoId");
+  assert.equal(volunteerReads(store), reads + 1);
+  assert.equal(controller.getState().volunteers.find((entry) => entry.id === "v-1").revision, 5);
+  controller.stop();
+});
+
+test("Mark reviewed keeps the drawer open and the next Save sends the new revision", async () => {
+  const store = uploadReviewStore();
+  const { controller } = await openReviewDrawer(store);
+  // The typed values live in the page (app.mjs drafts). Their survival is checked by the browser test (Task 8): it types into the drawer, presses Mark reviewed and saves.
+  const before = controller.getState();
+  const { dialog, dialogContext } = before;
+  await controller.markUploadReviewed("form13615");
+  const after = controller.getState();
+  assert.equal(after.dialog, dialog);
+  assert.deepEqual(after.dialogContext, dialogContext);
+  assert.equal(after.volunteerFormError, before.volunteerFormError);
+  assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
+  assert.equal(store.writes.at(-1).type, "saveVolunteer");
+  assert.equal(store.writes.at(-1).expectedRevision, 5);
+  controller.stop();
+});
+
+test("a CONFLICT on Mark reviewed says VOLUNTEER_CONFLICT_MESSAGE and re-reads", async () => {
+  const store = uploadReviewStore();
+  const { controller } = await openReviewDrawer(store);
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, revision: 9 }];
+  store.failReview = Object.assign(new Error("stale"), { code: "CONFLICT" });
+  const reads = volunteerReads(store);
+  assert.equal(await controller.markUploadReviewed("form13615"), null);
+  const state = controller.getState();
+  assert.equal(state.error.code, "CONFLICT");
+  assert.equal(state.error.message, VOLUNTEER_CONFLICT_MESSAGE);
+  assert.equal(state.retryable, false);
+  assert.equal(state.busy, false);
+  assert.equal(state.dialog, "volunteer");
+  assert.equal(volunteerReads(store), reads + 1);
+  assert.equal(state.volunteers[0].revision, 9);
+  controller.stop();
+});
+
+test("Mark reviewed does nothing while another action is busy", async () => {
+  const store = uploadReviewStore();
+  const { controller } = await openReviewDrawer(store);
+  let release;
+  const held = new Promise((resolve) => (release = resolve));
+  const send = store.markUploadReviewed;
+  store.markUploadReviewed = async (request) => {
+    await held;
+    return send(request);
+  };
+  const first = controller.markUploadReviewed("form13615");
+  assert.equal(controller.getState().busy, true);
+  assert.equal(await controller.markUploadReviewed("photoId"), null);
+  release();
+  assert.equal(await first, "Marked reviewed");
+  assert.equal(store.writes.filter((w) => w.type === "markUploadReviewed").length, 1);
+  controller.stop();
+});
+
+test("Mark reviewed says NOT_FOUND when the drawer's volunteer is gone", async () => {
+  const store = uploadReviewStore();
+  const { controller } = await openReviewDrawer(store);
+  store.volunteers = [];
+  await controller.loadVolunteers();
+  await assert.rejects(() => controller.markUploadReviewed("form13615"), (error) => error.code === "NOT_FOUND");
+  assert.equal(store.calls.includes("markUploadReviewed"), false);
+  controller.stop();
+});
+
+test("Mark reviewed does nothing outside the volunteer dialog", async () => {
+  const store = uploadReviewStore();
+  const { controller } = await openReviewDrawer(store);
+  controller.closeDialog();
+  assert.equal(await controller.markUploadReviewed("form13615"), null);
+  assert.equal(store.calls.includes("markUploadReviewed"), false);
+  controller.stop();
+});
+
+// ---- The sidebar count (change add-clearance-uploads, design D8) ----
+
+const settled = () => new Promise((resolve) => setTimeout(resolve, 5));
+const countReads = (store) => store.calls.filter((entry) => entry === "countUploadsToReview").length;
+
+test("an admin window reads the count with its data", async () => {
+  const store = adminStaffStore();
+  store.uploadsCount = 3;
+  const { controller } = build({ store });
+  assert.equal(controller.getState().uploadsToReview, 0, "the count starts at zero");
+  await controller.start();
+  assert.equal(controller.getState().uploadsToReview, 3);
+  controller.stop();
+});
+
+test("a non-admin window never reads the count", async () => {
+  const store = fakeStore({
+    principal: { userId: "p2", workspaceId: "w1", access: "staff", personId: "person-alex" },
+    people: [{ id: "person-alex", name: "Alex", capabilities: ["prepare"] }],
+    clearance: { cleared: true, missing: [], capabilities: ["prepare"], isAdmin: false },
+  });
+  store.uploadsCount = 5;
+  const { controller, events } = build({ store });
+  await controller.start();
+  await events.emit("focus");
+  assert.equal(countReads(store), 0);
+  assert.equal(controller.getState().uploadsToReview, 0);
+  controller.stop();
+});
+
+test("the clearance check re-reads the count for a cleared admin", async () => {
+  const store = adminStaffStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.uploadsCount = 2;
+  const reads = countReads(store);
+  await controller.checkClearance();
+  assert.equal(countReads(store), reads + 1);
+  assert.equal(controller.getState().uploadsToReview, 2);
+  controller.stop();
+});
+
+test("a cleared check with the same standing still redraws when the count changed", async () => {
+  const store = adminStaffStore();
+  const { controller, renders } = build({ store });
+  await controller.start();
+  const quiet = renders.count;
+  await controller.checkClearance();
+  assert.equal(renders.count, quiet, "same standing, same count: no redraw");
+  store.uploadsCount = 3;
+  await controller.checkClearance();
+  assert.equal(renders.count, quiet + 1, "the new count is drawn");
+  controller.stop();
+});
+
+test("an uncleared admin's clearance check re-reads the count", async () => {
+  const store = adminStaffStore({ clearance: { ...UNCLEARED_ADMIN } });
+  store.uploadsCount = 1;
+  const { controller, events, renders } = build({ store });
+  await controller.start();
+  assert.equal(controller.getState().principal.clearance.cleared, false);
+  assert.equal(controller.getState().uploadsToReview, 0, "no data load while uncleared: the first check reads it");
+  store.uploadsCount = 4;
+  const drawn = renders.count;
+  await events.emit("focus");
+  assert.equal(controller.getState().uploadsToReview, 4);
+  assert.ok(renders.count > drawn);
+  controller.stop();
+});
+
+test("a cleared window's wake refresh re-reads the count", async () => {
+  const store = adminStaffStore();
+  const { controller, events } = build({ store });
+  await controller.start();
+  store.uploadsCount = 6;
+  await events.emit("focus");
+  assert.equal(controller.getState().uploadsToReview, 6);
+  controller.stop();
+});
+
+test("a failed count read keeps the last count and fails nothing else", async () => {
+  const store = adminStaffStore({ cases: [sampleCase()] });
+  store.uploadsCount = 2;
+  const { controller, events } = build({ store });
+  await controller.start();
+  assert.equal(controller.getState().uploadsToReview, 2);
+  store.failCount = true;
+  await events.emit("focus");
+  const state = controller.getState();
+  assert.equal(state.uploadsToReview, 2);
+  assert.equal(state.error, null);
+  assert.equal(state.cases.length, 1);
+  controller.stop();
+});
+
+test("a hanging count read never holds back the clearance outcome", async () => {
+  const store = adminStaffStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.countUploadsToReview = () => new Promise(() => {});
+  store.nextClearance = { ...UNCLEARED_ADMIN };
+  void controller.checkClearance();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(controller.getState().principal.clearance.cleared, false, "the check's outcome is applied");
+  controller.stop();
+});
+
+test("Save and Mark reviewed re-read the count", async () => {
+  const store = uploadReviewStore();
+  store.uploadsCount = 2;
+  const { controller } = await openReviewDrawer(store);
+  assert.equal(controller.getState().uploadsToReview, 2);
+  store.uploadsCount = 1;
+  await controller.markUploadReviewed("form13615");
+  await settled();
+  assert.equal(controller.getState().uploadsToReview, 1);
+  store.uploadsCount = 0;
+  assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
+  await settled();
+  assert.equal(controller.getState().uploadsToReview, 0);
+  controller.stop();
+});
+
+test("reading the Roster's list re-reads the count", async () => {
+  const store = rosterStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.uploadsCount = 7;
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  await settled();
+  assert.equal(controller.getState().uploadsToReview, 7);
+  controller.stop();
+});
+
+test("the Roster's list does not wait for the count, and a late count redraws", async () => {
+  const store = rosterStore();
+  const { controller, renders } = build({ store });
+  await controller.start();
+  let release;
+  store.countUploadsToReview = () => new Promise((resolve) => (release = () => resolve(9)));
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  assert.equal(controller.getState().lists.volunteers, "ready", "the list finished with the count still out");
+  const drawn = renders.count;
+  release();
+  await settled();
+  assert.equal(controller.getState().uploadsToReview, 9);
+  assert.ok(renders.count > drawn);
+  controller.stop();
+});
+
+test("signing out forgets the count", async () => {
+  const store = adminStaffStore();
+  store.uploadsCount = 3;
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(controller.getState().uploadsToReview, 3);
+  await controller.signOut();
+  assert.equal(controller.getState().uploadsToReview, 0);
+  controller.stop();
+});
+
+test("losing the workspace admin standing resets the count", async () => {
+  const store = adminStaffStore();
+  store.uploadsCount = 3;
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(controller.getState().uploadsToReview, 3);
+  store.nextClearance = { cleared: true, missing: [], capabilities: ["prepare"], isAdmin: false };
+  await controller.checkClearance();
+  assert.equal(controller.getState().uploadsToReview, 0);
+  store.nextClearance = { cleared: true, missing: [], capabilities: ["admin"], isAdmin: true };
+  store.uploadsCount = 3;
+  await controller.checkClearance();
+  assert.equal(controller.getState().uploadsToReview, 3);
   controller.stop();
 });

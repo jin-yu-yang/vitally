@@ -26,6 +26,7 @@ The front end **predicts** what a person may do so it can show the right buttons
 - [Live updates](#live-updates)
 - [The contact log](#the-contact-log)
 - [Case labels](#case-labels)
+- [Clearance uploads](#clearance-uploads)
 - [Posted updates](#posted-updates)
 - [Sign-in](#sign-in)
 - [Window state](#window-state)
@@ -908,6 +909,37 @@ database side is in [Database: the contact log](database.md#the-contact-log).
   re-read the case. The store reads `contact_log` and `contact_log_versions` for `getCase`.
 - **Copy** writes to the system clipboard with `navigator.clipboard.writeText` (`copyContacts` in
   `app.mjs`). A refused clipboard shows a warning toast instead. Tests that check the text read the clipboard back.
+
+## Clearance uploads
+
+A volunteer says they sent their Form 13615 or photo ID, and a workspace admin sees what is waiting.
+The database side is in [Database: clearance uploads](database.md#clearance-uploads).
+
+- **The setup screen** ([`setup-views.mjs`](../../src/setup-views.mjs)). The `form13615` and
+  `photoId` items show **Upload** (a link to the clearance's `uploadUrl`, `target="_blank"
+  rel="noopener"`) or, with no link, "Ask your site coordinator how to send it.", and an **I've
+  uploaded it** button carrying the document. Once the item has a `sentAt`, the button is replaced by
+  "Waiting for review · sent Nov 20" (New York, as `SENT_DAY` in `ui.mjs`, which the drawer's sent line also uses); Upload stays so a
+  corrected file can be sent. Role and SC items are unchanged.
+- **`controller.markUploadSent(document)`** calls the store's `markUploadSent` with a fresh action
+  id, or the same one when the last send's outcome was unknown, then re-reads the clearance as Check
+  again does. `VALIDATION` details `PHOTO_ID_NOT_NEEDED` and `NO_ROSTER_ENTRY` get their own
+  sentences; other failures use the usual notice.
+- **The Roster's Show filter.** `SHOW_VIEWS` in [`volunteer-roster.mjs`](../../src/volunteer-roster.mjs)
+  lists the views (`all` "Everyone", `uploads` "Uploads to review"); `filterVolunteers` ANDs the
+  chosen view's predicate with Role and search, and `setVolunteerFilter` accepts `show`. A new view
+  is one more entry in the list. `combineVolunteers` carries `form13615SentAt` and `photoIdSentAt`,
+  and the row status adds "Form 13615 to review" and "Photo ID to review".
+- **The drawer** shows "Form 13615 sent <date>" and "Photo ID sent <date>" with a **Mark reviewed**
+  button for each. `controller.markUploadReviewed(document)` sends the drawer's revision, re-reads
+  the Roster, and keeps the admin's unsaved edits (Mark reviewed changes nothing Save sends). A
+  `CONFLICT` shows the drawer's usual conflict message.
+- **The sidebar count.** For a workspace admin (cleared or not) Volunteers reads "Volunteers · n"
+  with `aria-label="Volunteers, n uploads to review"` ("1 upload" at one); at 0 it is plain
+  "Volunteers". `state.uploadsToReview` counts people, from the store's `countUploadsToReview()`
+  (`roster_entries` is not live). It is re-read with the data load, every clearance check, a cleared
+  window's wake refresh, the admin's Save and Mark reviewed, and every Roster read. A failed read
+  keeps the last count; it is reset on sign-out and on losing admin.
 
 ## Posted updates
 

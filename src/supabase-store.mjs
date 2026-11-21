@@ -812,6 +812,45 @@ export function createStore(client) {
       });
     },
 
+    // Clearance uploads (migration 053). A volunteer records that they sent a
+    // document; an admin records that they reviewed it.
+    async markUploadSent(request) {
+      return await call("vitally_mark_upload_sent", {
+        p_action_id: actionId(request),
+        p_document: request.document,
+      });
+    },
+
+    async markUploadReviewed(request) {
+      return await call("vitally_mark_upload_reviewed", {
+        p_action_id: actionId(request),
+        p_volunteer_id: request.volunteerId,
+        p_expected_revision: request.expectedRevision,
+        p_document: request.document,
+      });
+    },
+
+    // The Volunteers badge (design D8): current-season roster entries with
+    // either sent date set. A head count, so no rows travel.
+    async countUploadsToReview() {
+      await requireStaffAccess();
+      const season = (await read(client.from("workspaces").select("current_season")))[0]
+        ?.current_season;
+      if (season == null) return 0;
+      let result;
+      try {
+        result = await client
+          .from("roster_entries")
+          .select("person_id", { count: "exact", head: true })
+          .eq("season", season)
+          .or("form_13615_sent_at.not.is.null,photo_id_sent_at.not.is.null");
+      } catch (cause) {
+        throw createAppError(cause);
+      }
+      if (result?.error) throw createAppError(result.error);
+      return result?.count ?? 0;
+    },
+
     // Accounts (migration 047). Create, invite and resend go through the
     // `accounts` Edge Function; a refusal is its `{code, reason}` body, mapped
     // like an RPC refusal (`cause.message` is the code, `cause.details` the reason).

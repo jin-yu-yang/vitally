@@ -2152,6 +2152,12 @@ if (!config) {
         // Said in the drawer (a refusal) or thrown to the safety net.
         await controller[{ "account-resend": "resendAccount", "account-reactivate": "reactivateAccount" }[action]]();
         break;
+      case "mark-upload-reviewed": {
+        // Stays in the drawer and keeps what was typed (no forgetVolunteerDrafts).
+        const text = await controller.markUploadReviewed(target.dataset.document);
+        if (text) notify("success", text, by);
+        break;
+      }
       case "account-create":
         // Asks first (decision 5): nothing is sent until the question's Send.
         // The button is off while the form has unsaved changes.
@@ -2684,6 +2690,9 @@ if (!config) {
       // through the controller's own focus listener (refresh).
       case "check-clearance":
         await controller.checkClearance();
+        break;
+      case "mark-upload-sent":
+        await controller.markUploadSent(target.dataset.document);
         break;
       case "dismiss-error":
         controller.dismissError();

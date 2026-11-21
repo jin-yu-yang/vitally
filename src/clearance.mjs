@@ -36,3 +36,14 @@ export const missingLines = (clearance) =>
 // does not say cleared. A missing or unread clearance is never a clearance.
 export const awaitingClearance = (state) =>
   state?.principal?.access === "staff" && state.principal.clearance?.cleared !== true;
+
+// The two items that are sent for review (change add-clearance-uploads):
+// the document, its line, and when it was sent (null: not yet).
+export const uploadItems = (clearance) =>
+  (clearance?.missing ?? [])
+    .filter((item) => item.kind === "form13615" || item.kind === "photoId")
+    .map((item) => ({
+      document: item.kind,
+      line: missingLines({ missing: [item] })[0],
+      sentAt: item.sentAt ?? null,
+    }));

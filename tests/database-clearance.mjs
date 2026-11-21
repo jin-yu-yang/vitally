@@ -997,12 +997,13 @@ test("vitally_my_clearance against real Supabase", async (t) => {
       });
       assert.deepEqual(await myClearance(member.client), {
         cleared: false,
-        missing: [{ kind: "form13615" }],
+        missing: [{ kind: "form13615", sentAt: null }],
         capabilities: [],
         isAdmin: false,
         isSiteCoordinator: false,
         siteCheck: false,
         siteCoordinatorName: "Avery Lin",
+        uploadUrl: null,
       });
     });
 
@@ -1015,12 +1016,13 @@ test("vitally_my_clearance against real Supabase", async (t) => {
         isSiteCoordinator: false,
         siteCheck: false,
         siteCoordinatorName: "Avery Lin",
+        uploadUrl: null,
       });
     });
 
     // 047 (add-account-invitations, design D12) adds siteCheck; 052 (design
-    // D4) adds isSiteCoordinator.
-    await t.test("the answer has exactly seven keys", async () => {
+    // D4) adds isSiteCoordinator; 053 (add-clearance-uploads, D5) adds uploadUrl.
+    await t.test("the answer has exactly eight keys", async () => {
       const result = await myClearance(f.preparer);
       assert.deepEqual(Object.keys(result).sort(), [
         "capabilities",
@@ -1030,6 +1032,7 @@ test("vitally_my_clearance against real Supabase", async (t) => {
         "missing",
         "siteCheck",
         "siteCoordinatorName",
+        "uploadUrl",
       ]);
     });
 
@@ -1045,10 +1048,9 @@ test("vitally_my_clearance against real Supabase", async (t) => {
       await setNew(false);
       const unchecked = await myClearance(member.client);
       assert.equal(unchecked.cleared, false);
-      assert.deepEqual(unchecked.missing, [{ kind: "photoId" }]);
-      // The capabilities are the roles' (effective_capabilities); the read gate
-      // and the action gate, not this list, hold an uncleared person back.
-      assert.deepEqual(unchecked.capabilities, ["prepare"]);
+      assert.deepEqual(unchecked.missing, [{ kind: "photoId", sentAt: null }]);
+      // Not cleared: no capabilities (#193 item 7), whatever the roles.
+      assert.deepEqual(unchecked.capabilities, []);
       await setNew(true);
       const checked = await myClearance(member.client);
       assert.equal(checked.cleared, true);

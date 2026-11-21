@@ -82,6 +82,7 @@ in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 | `050_hidden_household_rows.sql` | Hand-written: `vitally_private.household_rows(version, answers)`, the number of household rows the case shows, and `act_save_preparer_fields` re-created from 039 to use it (#175) |
 | `051_case_labels.sql` | Hand-written: case labels ([below](#case-labels)). The tables `case_labels` (a workspace's labels: name trimmed of spaces, tabs and line breaks, 1 to 24 characters on one line, unique ignoring case, one of six colors, its own `revision`) and `case_label_links` (which labels a case carries; a link is switched off, never deleted), both staff-only and cleared-gated, with no write grant for a browser role, no grant at all for `service_role` (as on 049's tables), and both in the Realtime publication; the trigger `vitally_private.add_starter_labels` on `workspaces` (City Tax, MFS and Multi-state for each new workspace) and a one-time backfill for the existing ones; `vitally_private.check_label`; and the two RPCs `vitally_save_label` and `vitally_set_case_label`, which write the case events `ADD_CASE_LABEL` and `REMOVE_CASE_LABEL`. It redefines no earlier function and leaves `cases.revision` and `updated_at` alone |
 | `052_season_settings.sql` | Hand-written: Season settings and site coordinators (change `add-season-settings`; [below](#season-settings-and-site-coordinators)). A guard refuses with `VT008` if the recompute would change anyone's admin: an active staff member holds `admin` in `people.capabilities` without the Admin role this season, or someone with a sign-in has the Admin role without `admin` ([setup](../setup.md#052s-guard)); the snapshot `vitally_private.capabilities_before_052`; `people.capabilities` becomes a mirror of this season's roles; `accounts.is_site_coordinator`, the audit table `site_coordinator_changes` and `vitally_set_site_coordinator`; `season_settings` with `vitally_season_settings` and `vitally_save_season_settings`; `is_workspace_admin` and `vitally_my_clearance` (`isAdmin`, `isSiteCoordinator`); `can_be_default_followup`; `add_staff_member` without capabilities. It marks nobody as a site coordinator |
+| `053_clearance_uploads.sql` | Hand-written: clearance uploads (change `add-clearance-uploads`; [below](#clearance-uploads)). `roster_entries.form_13615_sent_at` and `photo_id_sent_at`; the RPCs `vitally_mark_upload_sent` and `vitally_mark_upload_reviewed` (receipts `MARK_UPLOAD_SENT` and `MARK_UPLOAD_REVIEWED`); `vitally_save_volunteer` re-created from 052 to clear the sent dates when it acts on them; `vitally_my_clearance` re-created from 052 with `sentAt`, `uploadUrl` and empty `capabilities` when not cleared. No backfill: existing rows start null |
 | `054_return_to_signing_exit_forms.sql` | Hand-written: the staff-only `return_to_signing_exit_forms` table (the corrected Exit Form values entered at Return to signing; select for cleared staff only, no write grant for a browser role); `check_payload` accepts optional `exitForm` and `remarks` on `RETURN_TO_SIGNING`; `act_return_to_signing` stores them and puts `exitFormId` in the event's detail. `apply_fixture_scenario` is not touched: 040 dropped it |
 **Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
 never edit an applied one.** The build writes a file only when the hash differs from the newest
@@ -131,8 +132,9 @@ do not copy them from older files:
 | `vitally_private.check_payload`, `check_operation_authority`, `act_assign_case`, and the RPC `public.vitally_apply_action` | `046_volunteer_workload.sql` |
 | `vitally_private.household_rows`, `act_save_preparer_fields` | `050_hidden_household_rows.sql` |
 | `vitally_private.check_preparer_fields` | `039_preparer_shaded_fields.sql` |
-| `vitally_private.acting_person`, `contact_person`, `require_cleared`, `open_work`, the role helpers, `role_certificates_check`, `vitally_policy.cleared_workspace_id`, and the RPCs `public.vitally_assistance_action`, `vitally_create_case`, `vitally_log_contact`, `vitally_edit_contact`, `vitally_save_volunteer`, `vitally_my_clearance` | `045_volunteer_clearance.sql` |
+| `vitally_private.acting_person`, `contact_person`, `require_cleared`, `open_work`, the role helpers, `role_certificates_check`, `vitally_policy.cleared_workspace_id`, and the RPCs `public.vitally_assistance_action`, `vitally_create_case`, `vitally_log_contact`, `vitally_edit_contact` | `045_volunteer_clearance.sql` |
 | `vitally_private.audience_member`, `vitally_policy.in_update_audience`, `vitally_policy.unpublished_read_window`, and the RPCs `public.vitally_save_update`, `vitally_update_action`, `vitally_mark_updates`, `vitally_my_updates`, `vitally_posted_updates` | `049_posted_updates.sql` |
+| `public.vitally_save_volunteer`, `vitally_my_clearance`, `vitally_mark_upload_sent`, `vitally_mark_upload_reviewed` | `053_clearance_uploads.sql` |
 | `vitally_private.add_starter_labels`, `check_label`, and the RPCs `public.vitally_save_label`, `vitally_set_case_label` | `051_case_labels.sql` |
 | `vitally_private.add_staff_member`, `vitally_policy.is_workspace_admin` | `044_volunteer_roster_records.sql` |
 | `vitally_private.lock_case`, `lock_assistance_item`, `initialize_workspace` | `043_remove_presenter_access.sql` |
@@ -166,7 +168,7 @@ grep -n -E "^create (or replace )?function" supabase/migrations/*.sql
 
 Two schemas:
 
-- **`public`**: the application tables and the twenty-four browser-callable functions.
+- **`public`**: the application tables and the thirty browser-callable functions.
 - **`vitally_private`**: helper functions, the migration ledger, and tables browsers must never
   reach. Every function here is `SECURITY DEFINER` with `search_path=''`, and `EXECUTE` is revoked
   from every role, including `service_role`.
@@ -214,7 +216,7 @@ erDiagram
 | `admin_followups` | An office task to contact a client: about a document request, or (033) to go over the return with the client | `purpose` (`request_documents`, `go_over_return` or (036) `withdrawal_notice`, the contact log's keys; a `withdrawal_notice` has no request, and tells the office to stop the preparer's or reviewer's work); `request_id` is set for `request_documents` and null for the other two; `status`: `open`, `resolved`, `cancelled`; at most one open task per request; resolution outcome `reached` or `no_further_contact` |
 | `contact_attempts` | Old call attempts on a follow-up | Empty since 031 moved its rows into `contact_log`; kept until a later cleanup. Nothing reads or writes it |
 | `volunteer_profiles` | A volunteer's email, phone and availability (044) | Primary key `(workspace_id, person_id)`; `email` (stored trimmed and lower-case, unique per workspace), `phone`, `works` (`on_site`, `remote`, `on_site_and_remote`), `languages` (`english`, `mandarin`, `cantonese`, `other`), `other_language` (set exactly when `other` is chosen), `revision` (a stale Edit gets `CONFLICT`). Admin-only select; written only by `vitally_save_volunteer`; not published |
-| `roster_entries` | A volunteer's roles for a season (044) | Primary key `(workspace_id, person_id, season)`; `roles` from `greeter`, `intaker`, `preparer`, `reviewer`, `admin`; `added_by_person_id`; `is_new` and `photo_id_checked_at` (045). A role needs its confirmed certificates (045, [roster clearance](#roster-clearance)). Admin-only select; not published |
+| `roster_entries` | A volunteer's roles for a season (044) | Primary key `(workspace_id, person_id, season)`; `roles` from `greeter`, `intaker`, `preparer`, `reviewer`, `admin`; `added_by_person_id`; `is_new` and `photo_id_checked_at` (045); `form_13615_sent_at` and `photo_id_sent_at` (053; set when the volunteer says they sent the document, null when nothing waits for review). A role needs its confirmed certificates (045, [roster clearance](#roster-clearance)). Admin-only select; not published |
 | `certificates` | The certificates an admin has confirmed for a roster entry (044) | One row per certificate per entry, from `vsc`, `itqr`, `sc`, `basic`, `advanced`; `status` (only `confirmed` is written), `confirmed_at`, `confirmed_by_person_id`. Unticking deletes the row. Admin-only select; not published |
 | `posted_updates` | An update an admin posts to volunteers (049) | `kind` (`irs_policy`, `office_notice`), `title` (1 to 120 characters), `message` (1 to 2000), `irs_link` (an https link on irs.gov, IRS policy updates only), `audience` (`everyone` or `roles`) with `audience_roles`, `keep_top_until` (a New York date), `ask_confirm`, `status` (`draft`, `posted`, `unpublished`), `created_by_person_id`, `posted_by_person_id`, `posted_at`, `edited_at`, `unpublished_at`, `revision`. Written only by `vitally_save_update` and `vitally_update_action`; published to Realtime |
 | `update_reads` | Who has read and confirmed each update (049) | Primary key `(update_id, person_id)`; `read_at` (the first read), `confirmed_at` (the first confirmation). Written only by `vitally_mark_updates`; Ask everyone to read it again deletes the update's rows. No policy, so browsers read none of it directly; not published |
@@ -297,8 +299,12 @@ policy and `vitally_private.lock_case` (which applies the same rule to writes) i
 
 ## The action API
 
-Browsers can call exactly twenty-four functions. Each runs as its owner (`SECURITY DEFINER`), checks the
-caller itself, and returns a JSON receipt.
+Browsers can call exactly thirty functions. Each runs as its owner (`SECURITY DEFINER`), checks the
+caller itself, and returns a JSON receipt. The table below lists the case, Roster, clearance, update and label
+functions. The account functions (047, [migrations](#migrations)) and Season settings' four
+(`vitally_season_settings`, `vitally_save_season_settings`, `vitally_set_site_coordinator`,
+`vitally_set_site_number`; 052, [below](#season-settings-and-site-coordinators)) are described where
+they belong.
 
 | Function | Purpose | Returns |
 | --- | --- | --- |
@@ -309,7 +315,9 @@ caller itself, and returns a JSON receipt.
 | `vitally_edit_contact(p_action_id uuid, p_contact_id uuid, p_expected_revision bigint, p_entry jsonb)` | Edit a logged contact; appends a version | `{actionId, contactId, caseId, revision}` |
 | `vitally_close_unsigned(p_action_id uuid, p_cases jsonb, p_confirmed boolean)` | Season end (037): close the listed signing cases as Dismissed, all or nothing ([below](#season-end-close)) | `{actionId, cases: [{caseId, reference, revision}]}` |
 | `vitally_save_volunteer(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_volunteer jsonb)` | Add or edit a volunteer on the Roster (044; workspace admins, that is a site coordinator or the Admin role this season; only a site coordinator changes the Admin role; 045 adds role needs, the photo ID check and the open-work rule) | `{actionId, personId, revision}` |
-| `vitally_my_clearance()` | The caller's own clearance (045, [below](#roster-clearance)) | `{cleared, missing, capabilities, isAdmin, siteCoordinatorName}` |
+| `vitally_my_clearance()` | The caller's own clearance (045, [below](#roster-clearance); 053 adds the sent dates, the upload link and empty capabilities when not cleared) | `{cleared, missing, capabilities, isAdmin, isSiteCoordinator, siteCoordinatorName, siteCheck, uploadUrl}`; `missing` items for `form13615` and `photoId` carry `sentAt` (053) |
+| `vitally_mark_upload_sent(p_action_id uuid, p_document text)` | The caller says they sent their own `form13615` or `photoId` (053; any staff member with a current-season entry, cleared or not; [below](#clearance-uploads)) | `{actionId, document, sentAt}` |
+| `vitally_mark_upload_reviewed(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_document text)` | A workspace admin clears a volunteer's sent date (053; [below](#clearance-uploads)) | `{actionId, personId, revision}` |
 | `vitally_save_update(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_update jsonb)` | Save a draft, post it, or edit a draft, a posted update or an unpublished one (049; workspace admins). An unpublished update stays unpublished, with its reads and `unpublished_at`; `post` changes nothing there and `askAgain` is refused (`VT007`, detail `askAgain`). `askAgain` on a posted update clears every read and confirmation | `{actionId, updateId, revision, status}` |
 | `vitally_update_action(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_type text)` | `POST` a draft, `UNPUBLISH` a posted update, or `DELETE` a draft (049; workspace admins). A replayed delete answers `deleted` | `{actionId, updateId, revision, status}` |
 | `vitally_mark_updates(p_update_ids uuid[], p_confirm boolean)` | Record that the caller read up to 200 updates in their feed, and with `p_confirm` that they confirmed them (049; any staff member). No receipt: a repeat changes nothing | `{marked}` |
@@ -323,7 +331,7 @@ None of them takes a person parameter (043 removed `p_person_id`). The database 
 the caller acts as ([below](#who-is-acting)).
 
 The exact signatures are pinned by a test ([`tests/support/rpc-signatures.mjs`](../../tests/support/rpc-signatures.mjs)),
-so adding a twenty-fifth function or changing an argument fails the database suite until the list is
+so adding a thirty-first function or changing an argument fails the database suite until the list is
 updated.
 
 ### Who is acting
@@ -392,8 +400,11 @@ and the behaviour in the canonical spec
   mirrors the roles (see [Season settings and site coordinators](#season-settings-and-site-coordinators)).
 - **`vitally_my_clearance()`** answers for the caller only: `cleared`, what is `missing` (the Form
   13615, the photo ID check, each role's missing certificates), the effective `capabilities`,
-  `isAdmin` (workspace admin, since 052), `isSiteCoordinator` and `siteCoordinatorName`. A rostered
-  site coordinator also needs the SC certificate to be cleared.
+  `isAdmin` (workspace admin, since 052), `isSiteCoordinator`, `siteCoordinatorName` and
+  `siteCheck` (true while the caller's account is still `invited`). A rostered
+  site coordinator also needs the SC certificate to be cleared. Since 053 the `form13615` and
+  `photoId` missing items carry `sentAt`, there is a top-level `uploadUrl`, and `capabilities` is
+  `[]` whenever `cleared` is false (#193).
 
 ### Season settings and site coordinators
 
@@ -424,6 +435,35 @@ Migration 052 (change `add-season-settings`; the behaviour is in the change's sp
   `initialize_workspace` re-run check, the case RPCs' assignee checks and `open_work`.
 
 A person with no sign-in has no capabilities and is hidden from non-admin staff.
+
+### Clearance uploads
+
+Migration 053 (change `add-clearance-uploads`; the behaviour is in the change's specs, and in
+`openspec/specs/` once archived) lets a volunteer say they sent their signed Form 13615 or photo ID
+through the certificate upload link, and lets an admin see and clear what is waiting. ViTally stores
+no file, only a date.
+
+- **Two dates.** `roster_entries.form_13615_sent_at` and `photo_id_sent_at`: null means nothing is
+  waiting, a value means "to review". They sit on the current-season entry, so only workspace admins
+  read them (the 044 policy); `roster_entries` is not published to Realtime.
+- **`vitally_mark_upload_sent`** acts only on the caller (`require_membership`; a client or a staff
+  caller with no person row gets `FORBIDDEN`), with no clearance check. The document is `form13615`
+  or `photoId`. `NO_ROSTER_ENTRY` and `PHOTO_ID_NOT_NEEDED` (the entry is not new, or its photo ID
+  is already checked) are `VT007` `VALIDATION` refusals. The receipt `MARK_UPLOAD_SENT` is reserved
+  before those entry checks, and a refusal rolls it back. It sets the column to `now()` (sending again
+  updates the date) and raises `volunteer_profiles.revision`, so an admin's Save from an older drawer gets
+  `CONFLICT` instead of silently clearing a date.
+- **`vitally_mark_upload_reviewed`** opens like `vitally_save_volunteer` (workspace admin, cleared or
+  not, else `FORBIDDEN`) and takes the same revision check (`NOT_FOUND`, `CONFLICT`). It clears the
+  column and raises the revision; with nothing waiting it writes nothing and returns the current
+  revision. The receipt is `MARK_UPLOAD_REVIEWED`.
+- **`vitally_save_volunteer`** clears `form_13615_sent_at` when the roles change (as sets) or the
+  confirmed certificates change (including an uploaded certificate being confirmed), and `photo_id_sent_at` when the Photo ID check is newly set or New
+  is unticked. A save that changes neither leaves both dates. Its payload and other refusals are
+  unchanged.
+- **`vitally_my_clearance`** returns the workspace's `season_settings.certificate_upload_url` as
+  `uploadUrl` to any caller with a current-season entry (null otherwise), so a caller who cannot read
+  `season_settings` still gets the link.
 
 ### Posted updates
 

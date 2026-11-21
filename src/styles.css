@@ -2373,6 +2373,13 @@ textarea::placeholder {
 .setup-screen ul {
   padding-left: 20px;
 }
+.setup-upload {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 6px;
+}
 .review-panel {
   margin-bottom: 20px;
 }
@@ -3523,6 +3530,27 @@ textarea::placeholder {
   align-items: center;
   gap: 8px 12px;
   margin-top: 18px;
+}
+/* Uploads to review (change add-clearance-uploads, design D7): the Roster's
+   note stands out from the muted missing list, in the attention colours the
+   Workload's stalled chip uses; the drawer's sent line keeps its Mark reviewed
+   beside the text. */
+.volunteer-to-review {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: var(--vt-attention-bg);
+  color: var(--vt-age-soon-ink);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.volunteer-sent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 6px 0 12px;
 }
 /* end Volunteers */
 
@@ -6275,6 +6303,10 @@ html:lang(zh-Hant) {
   flex: 1 1 auto;
   text-align: left;
 }
+.nav-count {
+  font-weight: 700;
+}
+
 .nav-badge {
   min-width: 20px;
   height: 20px;
