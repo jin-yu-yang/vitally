@@ -971,6 +971,7 @@ test("a staff case read adds exactly the staff sections", async () => {
       "preparation_participants",
       "preparer_questionnaires",
       "preparer_shaded_fields",
+      "return_to_signing_exit_forms",
       "reviewer_questionnaires",
       "reviews",
     ],
@@ -1449,6 +1450,7 @@ test("a subscription watches only the tables its principal may read", async () =
     "preparer_questionnaires",
     "reviewer_questionnaires",
     "preparer_shaded_fields",
+    "return_to_signing_exit_forms",
     "case_labels",
     "case_label_links",
     "posted_updates",
@@ -1704,6 +1706,57 @@ test("a staff case read carries the shaded section, an applicant read never name
   const applicant = await createStore(client).getCase("case-1");
   assert.ok(!("preparerShadedFields" in applicant));
   assert.ok(!client.reads.some((entry) => entry.table === "preparer_shaded_fields"));
+});
+
+test("a staff case read carries the corrected Exit Form rows oldest first, an applicant read never names the table", async () => {
+  const rows = {
+    return_to_signing_exit_forms: [
+      {
+        id: "rtse-1",
+        case_id: "case-1",
+        entered_by_person_id: "person-sam",
+        created_at: "2026-11-02T14:00:00Z",
+        exit_form: { federal: null, state: null, local: [] },
+        remarks: "First correction",
+      },
+      {
+        id: "rtse-2",
+        case_id: "case-1",
+        entered_by_person_id: "person-alex",
+        created_at: "2026-11-03T14:00:00Z",
+        exit_form: { federal: { method: "efile", result: "none" }, state: null, local: [] },
+        remarks: null,
+      },
+    ],
+  };
+  const staffClient = fakeClient({ access: "staff", rows });
+  const staff = await createStore(staffClient).getCase("case-1");
+  assert.deepEqual(staff.returnToSigningExitForms, [
+    {
+      id: "rtse-1",
+      caseId: "case-1",
+      enteredByPersonId: "person-sam",
+      createdAt: "2026-11-02T14:00:00Z",
+      exitForm: { federal: null, state: null, local: [] },
+      remarks: "First correction",
+    },
+    {
+      id: "rtse-2",
+      caseId: "case-1",
+      enteredByPersonId: "person-alex",
+      createdAt: "2026-11-03T14:00:00Z",
+      exitForm: { federal: { method: "efile", result: "none" }, state: null, local: [] },
+      remarks: null,
+    },
+  ]);
+  const [read] = staffClient.reads.filter((entry) => entry.table === "return_to_signing_exit_forms");
+  assert.deepEqual(read.filters, [["case_id", "case-1"]]);
+  assert.deepEqual(read.orders, ["created_at", "id"]);
+  assert.deepEqual((await createStore(fakeClient({ access: "staff" })).getCase("case-1")).returnToSigningExitForms, []);
+  const client = fakeClient({ access: "applicant", rows });
+  const applicant = await createStore(client).getCase("case-1");
+  assert.ok(!("returnToSigningExitForms" in applicant));
+  assert.ok(!client.reads.some((entry) => entry.table === "return_to_signing_exit_forms"));
 });
 
 test("closeUnsigned calls vitally_close_unsigned", async () => {

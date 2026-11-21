@@ -507,10 +507,25 @@ in the browser from an approval's reviewer questionnaire, and nothing is uploade
   the return was corrected. The PDF itself carries no note, only the blanks. Without staff history,
   no form is offered. Fixed in
   [#173](https://github.com/jin-yu-yang/vitally/issues/173). Still open:
-  [#203](https://github.com/jin-yu-yang/vitally/issues/203) (collect the corrected
-  values at Return to signing) and
   [#204](https://github.com/jin-yu-yang/vitally/issues/204) (the review-contact
   line after a Return to signing).
+- **Corrected values at Return to signing (#203).** The Return to signing dialog
+  (`returnToSigningDialogBody` in `admin-views.mjs`) optionally collects the corrected Exit Form
+  values: a closed `<details class="q-exit-group">` for each return the case has a method for and
+  for each of the five Local types, and Remarks. A settled return shows its method as text with a
+  hidden `<prefix>.fixedMethod`; a rejected return has method radios. The payload builder
+  (`returnToSigning` in `case-actions.mjs`) sends `exitForm` and `remarks` only when something is
+  filled, and refuses a method-only group or a bad amount in the browser (the dialog stays open and
+  the typed group stays open). The values go to `return_to_signing_exit_forms`
+  ([database](database.md#action-catalogue)), and the event's `detail.exitFormId` names the row.
+  `exitFormSource` then prints the stored values: the settled methods come from the case, the rest
+  from the row, and the note reads "This form was filled from the corrected values recorded on
+  <date>." (the New York date of the event), plus " Fill in by hand: <list>." only for what is
+  still missing. With no stored values the #173 note and blank form are unchanged.
+- **Mark e-filed after a Return to signing.** Each rejected return's method radios
+  (`method-federal`, `method-state`) start with the method planned at Return to signing checked
+  (`plannedMethod`), but only when every rejected return has a plan; otherwise nothing is
+  preselected. The admin can change it.
 - **Who may make it.** `viewExitForm` in `app.mjs` returns at once for anything but a staff window
   (`isStaffWindow`). Like the drafts, it opens a new tab and, if the browser blocks the tab,
   offers a link instead (`draftOffers`). A blocked tab's link is drawn on the Intake answers tab, so
@@ -657,7 +672,7 @@ choice "given to the client to mail") and sends `{confirmed, methods}`; filing a
 rejected returns and lists the rest as done. "Record filing result…" (`efiled`, or `rejected` while an
 e-filed return is waiting) asks for e-filed returns only, never a paper one, and sends each waiting
 return's result, date and, when rejected, a code, plus an optional fix note. "Return to signing…" (`rejected`
-with every return answered) sends `{confirmed: true}`; "Close case…" is also offered at `rejected`.
+with every return answered) sends `{confirmed: true}` plus the optional corrected Exit Form values (`exitForm`, `remarks`; see [The Exit Form](#the-exit-form)); "Close case…" is also offered at `rejected`.
 A staff-only Filing panel on the case page lists every attempt, newest first, with each return's
 method, result, date and code, and the fix notes in the order recorded. The case pool has two more
 tabs, Needs attention (`rejected`) and Done (`accepted`), and Follow-ups gains the kinds "Filing

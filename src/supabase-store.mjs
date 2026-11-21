@@ -45,6 +45,7 @@ const STAFF_TABLES = Object.freeze([
   "preparer_questionnaires",
   "reviewer_questionnaires",
   "preparer_shaded_fields",
+  "return_to_signing_exit_forms",
   "case_labels",
   "case_label_links",
   "posted_updates",
@@ -316,6 +317,7 @@ export const mapStaffCase = ({
   materials = [],
   preparerQuestionnaires = [],
   reviewerQuestionnaires = [],
+  returnToSigningExitForms = [],
   preparerShadedFields = [],
   filingAttempts = [],
   filingReturns = [],
@@ -330,6 +332,8 @@ export const mapStaffCase = ({
   internalHistory: internalHistory.map(camelRow),
   preparerQuestionnaires: preparerQuestionnaires.map(camelRow),
   reviewerQuestionnaires: reviewerQuestionnaires.map(camelRow),
+  // Oldest first (relatedRows); `[]` when the case was never corrected.
+  returnToSigningExitForms: returnToSigningExitForms.map(camelRow),
   // One row at most (case_id is unique): `[row]`, or `[]` before the first save.
   preparerShadedFields: preparerShadedFields.map(camelRow),
   filingAttempts: mapFilingAttempts(filingAttempts, filingReturns, filingNotes),
@@ -720,6 +724,8 @@ export function createStore(client) {
         // Staff only: the applicant path above never names these tables.
         preparerQuestionnaires: await relatedRows("preparer_questionnaires", id),
         reviewerQuestionnaires: await relatedRows("reviewer_questionnaires", id),
+        // Staff only (migration 054), and never named on the applicant path.
+        returnToSigningExitForms: await relatedRows("return_to_signing_exit_forms", id),
         // Staff only (migration 038), and never named on the applicant path.
         preparerShadedFields: await relatedRows("preparer_shaded_fields", id),
         // Staff only (migration 035). These tables have no created_at, so they
