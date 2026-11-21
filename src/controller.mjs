@@ -138,7 +138,9 @@ const STAFF_SETTINGS_CONFLICT_MESSAGE = "Someone else changed these settings. Ch
 const STAFF_SIDN_FORMAT_MESSAGE = "Enter the site's SIDN: S followed by eight digits.";
 const STAFF_SIDN_UPDATED = "SIDN updated";
 const SETTINGS_LINK_FIELDS = Object.freeze(["certificateUploadUrl", "clientDocumentsUrl"]);
-const freshSettingsUi = () => ({ notice: null, fieldErrors: null, sidnError: null });
+// Start next season (change add-start-next-season, design D8).
+const STAFF_SEASON_MOVED_MESSAGE = "The season has already moved.";
+const freshSettingsUi = () => ({ notice: null, fieldErrors: null, sidnError: null, startRefusal: null });
 // Post an update (change add-posted-updates): the table is read again and
 // the form keeps what was typed. Staff-only, so named STAFF_.
 const STAFF_UPDATE_CONFLICT_MESSAGE = "Someone changed this update. Check the table and try again.";
@@ -1641,6 +1643,69 @@ export function createController({
     return answer ? STAFF_SIDN_UPDATED : null;
   }
 
+  // Start next season (change add-start-next-season, design D8): the year
+  // typed must be the next one (the dialog's confirm waits for it too), sent
+  // with the season the page read. SEASON_NOT_FINISHED keeps the dialog open
+  // with its counts; CONFLICT closes it and says so in the card. On success
+  // the workspace and the clearance are read again: the starter has no roles
+  // in the new season, so the clearance routing gives them the setup screen;
+  // a starter still cleared reads the lists again. Other windows learn
+  // through the realtime `workspaces` change and their own account checks.
+  // Resolves to the toast's text, or null.
+  async function startNextSeason(typedYear) {
+    const season = Number(state.seasonSettings?.season);
+    const typed = String(typedYear ?? "").trim();
+    if (!Number.isInteger(season) || typed !== String(season + 1)) return null;
+    const answer = await settingsWrite(
+      JSON.stringify({ type: "start-season", expectedSeason: season, typed }),
+      () => ({ actionId: newActionId(), expectedSeason: season, typedYear: season + 1 }),
+      (request) => store.startNextSeason(request),
+      (error) => {
+        if (error?.code === "INVALID_TRANSITION" && error?.cause?.message === "SEASON_NOT_FINISHED") {
+          let counts = null;
+          try {
+            counts = JSON.parse(String(error.cause.details ?? ""));
+          } catch {
+            counts = null;
+          }
+          if (!counts || typeof counts !== "object" || Array.isArray(counts)) return false;
+          state.seasonSettingsUi = { ...state.seasonSettingsUi, startRefusal: counts };
+          return true;
+        }
+        if (error?.code === "CONFLICT") {
+          state.dialog = null;
+          state.dialogContext = null;
+          state.seasonSettingsUi = {
+            ...state.seasonSettingsUi,
+            notice: { place: "next-season", text: STAFF_SEASON_MOVED_MESSAGE },
+          };
+          return true;
+        }
+        return false;
+      },
+    );
+    if (!answer) return null;
+    state.dialog = null;
+    state.dialogContext = null;
+    try {
+      await loadWorkspace();
+    } catch (error) {
+      noteFailure(error);
+    }
+    await recheckAfterOwnSave();
+    if (!staffWindow()) return null;
+    if (awaitingClearance(state)) {
+      // Finish your setup: the new season's roster has no roles for them yet.
+      state.screen = homeScreen();
+      persistSession();
+      show(true);
+    } else {
+      await refresh();
+      show();
+    }
+    return `The ${Number(answer.season ?? season + 1)} season has started`;
+  }
+
   // Add (the picker's volunteer) or Remove (a row's), at the account
   // revision the page read. Resolves to the toast's text, or null.
   async function changeSiteCoordinator(volunteerId, granted) {
@@ -2436,8 +2501,9 @@ export function createController({
 
   function openDialog(name, context = null) {
     if (name !== "notifications") endNotifications();
-    // Change the SIDN opens without an earlier refusal.
+    // Change the SIDN and Start next season open without an earlier refusal.
     if (name === "change-sidn") state.seasonSettingsUi = { ...state.seasonSettingsUi, sidnError: null };
+    if (name === "start-season") state.seasonSettingsUi = { ...state.seasonSettingsUi, startRefusal: null };
     state.dialog = name;
     state.dialogContext = context ? { ...context } : null;
     show();
@@ -4781,6 +4847,7 @@ export function createController({
     loadSeasonSettings,
     saveSeasonSettings,
     saveSidn,
+    startNextSeason,
     addSiteCoordinator,
     removeSiteCoordinator,
     saveUpdate,

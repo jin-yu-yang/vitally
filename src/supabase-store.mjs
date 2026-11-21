@@ -944,6 +944,16 @@ export function createStore(client) {
       });
     },
 
+    // Start next season (change add-start-next-season): the answer is
+    // `{actionId, season, deactivated, defaultFollowupMoved}`.
+    async startNextSeason(request) {
+      return await call("vitally_start_next_season", {
+        p_action_id: actionId(request),
+        p_expected_season: request.expectedSeason,
+        p_typed_year: request.typedYear,
+      });
+    },
+
     async setSiteCoordinator(request) {
       return await call("vitally_set_site_coordinator", {
         p_action_id: actionId(request),

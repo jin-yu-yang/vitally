@@ -68,6 +68,7 @@ import { contactEntryFromForm, contactSummary, contactSummaries } from "./contac
 import { decorateStaffCase, outcomeGroup, staffEligibility } from "./staff-views.mjs";
 import { volunteerFromForm, volunteerFormChanged, roleBoxesToUntick, untickedRolesMessage } from "./volunteer-roster.mjs";
 import { actionToast, renderUpdatePreview, saveToast, updateFormFromValues } from "./update-views.mjs";
+import { startSeasonReady } from "./season-settings-views.mjs";
 
 // Bootstrap and DOM wiring, and nothing else. No state lives here (the
 // controller owns it), no HTML is written here (the view modules own it), and
@@ -311,6 +312,7 @@ if (!config) {
     restoreFormDrafts();
     syncContactForms();
     syncCloseUnsigned();
+    syncStartSeason();
     syncVolunteerOther();
     syncCreateAccount();
     showDraftLink();
@@ -1478,6 +1480,41 @@ if (!config) {
     root.querySelector("#sidn-input")?.focus();
   }
 
+  // Start next season (change add-start-next-season, design D8). The typed
+  // year is a draft like any staff field: its confirm opens only for the
+  // next season's year, set here on every input and after every redraw (the
+  // view draws it disabled, since it never sees the draft), so typing never
+  // redraws the dialog.
+  function syncStartSeason() {
+    const form = root.querySelector("#start-season-form");
+    if (!form) return;
+    const state = controller.getState();
+    const typed = form.querySelector("#start-season-year")?.value ?? "";
+    const submit = form.querySelector("#start-season-submit");
+    if (submit) submit.disabled = !startSeasonReady(state.seasonSettings?.season, typed) || state.busy === true;
+  }
+
+  // A landed start leaves the dialog closed and the page redrawn (the setup
+  // screen, for a starter with no roles yet). A CONFLICT closes it too, with
+  // its sentence in the Next season card; any other refusal keeps it, with
+  // the lines to finish first.
+  async function submitStartSeason(form, by) {
+    const text = await controller.startNextSeason(String(new FormData(form).get("year") ?? ""));
+    if (text) {
+      formDrafts.delete("start-season-year");
+      focusBeforeDialog = null;
+      notify("success", text, by);
+      return;
+    }
+    if (!controller.getState().dialog) {
+      formDrafts.delete("start-season-year");
+      focusBeforeDialog = null;
+      root.querySelector('[data-action="open-start-season"]')?.focus();
+      return;
+    }
+    root.querySelector("#start-season-year")?.focus();
+  }
+
   // Post an update (change add-posted-updates). The form as typed is held
   // by the controller, which does not redraw for it: only the preview is
   // drawn again, and the link field and the role boxes shown or hidden, so
@@ -2066,6 +2103,12 @@ if (!config) {
         controller.dismissError();
         formDrafts.delete("sidn-input");
         openDialog("change-sidn", null, describeFocus(target));
+        break;
+      case "open-start-season":
+        // A fresh dialog: no earlier refusal, and no year typed before.
+        controller.dismissError();
+        formDrafts.delete("start-season-year");
+        openDialog("start-season", null, describeFocus(target));
         break;
       case "add-site-coordinator": {
         const text = await controller.addSiteCoordinator(root.querySelector("#sc-pick")?.value ?? "");
@@ -2791,6 +2834,7 @@ if (!config) {
       else if (!field.matches("[data-action], #field-confirmed"))
         for (const [id, draft] of checkDrafts(field)) keepDraft(id, draft);
       if (field.closest("#volunteer-form")) syncCreateAccount();
+      if (field.closest("#start-season-form")) syncStartSeason();
     } else if (field.name === "volunteerSearch") {
       // The Roster filters as it is typed; the redraw replaces the box, so
       // the keyboard and the caret go back into it. Mid-composition the
@@ -2921,6 +2965,8 @@ if (!config) {
         await submitSeasonSettings(form, by);
       } else if (form.id === "sidn-form") {
         await submitSidn(form, by);
+      } else if (form.id === "start-season-form") {
+        await submitStartSeason(form, by);
       } else if (caseControl) {
         await runCaseAction(caseControl, form, by);
       } else if (assistControl) {

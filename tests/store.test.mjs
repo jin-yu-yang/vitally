@@ -2319,6 +2319,15 @@ test("setSiteNumber sends the action id and the SIDN", async () => {
   });
 });
 
+test("startNextSeason sends the action id, the season read and the typed year", async () => {
+  const client = fakeClient({ access: "staff" });
+  await createStore(client).startNextSeason({ actionId: "a-1", expectedSeason: 2026, typedYear: 2027 });
+  assert.deepEqual(client.rpcCalls[0], {
+    name: "vitally_start_next_season",
+    args: { p_action_id: "a-1", p_expected_season: 2026, p_typed_year: 2027 },
+  });
+});
+
 test("setSiteCoordinator sends the volunteer, the account revision and granted", async () => {
   const client = fakeClient({ access: "staff" });
   const store = createStore(client);
