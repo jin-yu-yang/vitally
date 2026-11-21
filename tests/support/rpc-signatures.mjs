@@ -290,6 +290,28 @@ export const RPC_SIGNATURES = Object.freeze([
     receiptKeys: Object.freeze(["set", "updatedAt"]),
     args: () => ({ p_action_id: crypto.randomUUID(), p_sidn: TEST_SITE_NUMBER }),
   }),
+  // Start next season (change add-start-next-season). A start is one-way, and
+  // the suite's own cases are open, so the member call is the domain refusal
+  // (`memberRefusal`), which still proves the member reaches the function; the
+  // starts themselves are in tests/database-start-next-season.mjs.
+  Object.freeze({
+    name: "vitally_start_next_season",
+    signature: "vitally_start_next_season(uuid,smallint,smallint)",
+    authorized: (f) => f.siteCoordinator,
+    memberRefusal: "SEASON_NOT_FINISHED",
+    receiptKeys: Object.freeze(["actionId", "deactivated", "defaultFollowupMoved", "season"]),
+    context: async (f) => {
+      const { rows } = await f.sql("select current_season::int as season from public.workspaces where id=$1", [
+        f.workspaceId,
+      ]);
+      return { season: rows[0].season };
+    },
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_expected_season: context.season,
+      p_typed_year: context.season + 1,
+    }),
+  }),
   // A volunteer marking their own document sent (change add-clearance-uploads,
   // design D2). The Site Coordinator has a current-season entry of their own.
   Object.freeze({
