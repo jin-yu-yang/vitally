@@ -4,7 +4,7 @@ import { createController } from "./controller.mjs";
 import { CASE_ACTIONS, ASSISTANCE_ACTIONS, SHADED_EDITOR, SHADED_UPLOAD, isStaffWindow } from "./contracts.mjs";
 import { payloadFor } from "./case-actions.mjs";
 import { demoToolsFromConfig, demoToolsOn, fillForm } from "./demo-fill.mjs";
-import { checkDrafts, forgetDrafts, formValuesWithLists, isCheckable, groupsToOpen, restoreDraft, textDraft } from "./form-values.mjs";
+import { checkDrafts, clearableFields, forgetDrafts, formValuesWithLists, isCheckable, groupsToOpen, restoreDraft, textDraft } from "./form-values.mjs";
 import { sampleAnswersFor, fictionalAnswers } from "./sample-data.mjs";
 import { checkValue, findQuestion, findSubstep, isAnswered, spouseShown, visibleAnswers } from "./intake-catalogue.mjs";
 import {
@@ -2258,7 +2258,7 @@ if (!config) {
         // blank, and no draft left to put them back (design D7).
         const group = target.closest("details.q-exit-group");
         if (!group) break;
-        const fields = [...group.querySelectorAll("input")];
+        const fields = clearableFields(group.querySelectorAll("input"));
         for (const field of fields) {
           if (isCheckable(field)) field.checked = false;
           else field.value = "";

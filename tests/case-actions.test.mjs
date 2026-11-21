@@ -671,3 +671,38 @@ test("VERIFY_INTAKE needs every shown check", () => {
     (error) => error.code === "VALIDATION" && error.message === "Tick every check before recording them.",
   );
 });
+
+test("RETURN_TO_SIGNING: the corrected Exit Form values", async () => {
+  const { exitFormFrom } = await import("../src/questionnaires.mjs");
+  const sure = { confirmed: "on" };
+  // A fixed method alone sends no group.
+  assert.deepEqual(payloadFor("RETURN_TO_SIGNING", {}, { ...sure, "state.fixedMethod": "efile" }).payload, { confirmed: true });
+  // A method the admin chose, alone, is refused like on the reviewer form.
+  refused("RETURN_TO_SIGNING", { ...sure, "federal.method": "paper" }, "Federal: choose Refund, Owe or None.");
+  refused("RETURN_TO_SIGNING", { ...sure, "local.SIT.method": "efile" }, "Local SIT: choose Refund, Owe or None.");
+  const values = {
+    ...sure,
+    "federal.method": "paper",
+    "federal.result": "refund",
+    "federal.amount": "1250.00",
+    "federal.refundBy": "direct_deposit",
+    "state.fixedMethod": "efile",
+    "state.result": "refund",
+    "state.amount": "85.00",
+    "state.refundBy": "check",
+    remarks: "  Corrected dependent SSN ",
+  };
+  const { payload } = payloadFor("RETURN_TO_SIGNING", {}, values);
+  assert.deepEqual(payload.exitForm, exitFormFrom({ ...values, "state.method": "efile" }));
+  assert.equal(payload.exitForm.federal.method, "paper");
+  assert.equal(payload.exitForm.state.refundBy, "check");
+  assert.equal(payload.remarks, "Corrected dependent SSN");
+  // A bad amount is refused before sending.
+  assert.throws(
+    () => payloadFor("RETURN_TO_SIGNING", {}, { ...sure, "federal.method": "efile", "federal.result": "owe", "federal.amount": "12.345" }),
+    (error) => error.code === "VALIDATION" && /Federal/.test(error.message),
+  );
+  refused("RETURN_TO_SIGNING", { ...sure, remarks: "x".repeat(2001) }, "Keep the remarks to 2000 characters or fewer.");
+  assert.deepEqual(payloadFor("RETURN_TO_SIGNING", {}, { ...sure, remarks: "  " }).payload, { confirmed: true });
+});
+

@@ -1650,6 +1650,29 @@ test("the office's Exit Form panel after Return to signing carries the note", ()
   assert.doesNotMatch(html, /filled from the reviewer's answers/);
 });
 
+test("the office's Exit Form panel after Return to signing with stored values says so", () => {
+  const exitForm = { federal: { method: "efile", result: "refund", amount: "10.00", refundBy: "check" }, state: null, local: [] };
+  const returned = officeCase({
+    stage: "review_approved",
+    preparationVersion: 1,
+    reviewerId: "morgan",
+    reviews: [{ id: "review-1", preparationVersion: 1, status: "approved", reviewerId: "morgan", decidedAt: "2026-10-17T15:00:00.000Z" }],
+    reviewerQuestionnaires: [{ id: "rq-1", reviewId: "review-1", exitForm: { federal: null, state: null, local: [] } }],
+    federalMethod: "efile",
+    stateMethod: null,
+    federalResult: "rejected",
+    stateResult: null,
+    returnToSigningExitForms: [{ id: "x1", exitForm, remarks: "Fixed" }],
+    internalHistory: [{ id: "e1", action: "RETURN_TO_SIGNING", actorPersonId: "sam", createdAt: "2026-11-02T15:00:00.000Z", detail: { exitFormId: "x1" } }],
+  });
+  const html = renderAdminCase(returned, { person: SAM });
+  const note = /data-role="exit-form-corrected">([^<]*)</.exec(html);
+  assert.ok(note, "the note renders");
+  assert.ok(note[1].includes("filled from the corrected values recorded on November 2, 2026."), note[1]);
+  assert.doesNotMatch(note[1], /Fill in by hand/);
+  assert.doesNotMatch(html, /filled from the reviewer's answers/);
+});
+
 test("a close dialog for someone who lost admin keeps the reason and drops the submit (#190)", () => {
   const state = {
     dialog: "close-case",
@@ -1734,3 +1757,72 @@ for (const [key, needed] of Object.entries(DIALOG_CAPABILITY)) {
     assert.doesNotMatch(dialog(dialogState(key, [needed])), LINE);
   });
 }
+
+test("Return to signing dialog: groups for the case's returns, settled method fixed", () => {
+  const html = returnToSigningDialogBody({
+    savedCase: { reference: "VT-AAAA-BBBB", federalMethod: "efile", federalResult: "rejected", stateMethod: "efile", stateResult: "accepted" },
+  });
+  assert.match(html, /Optional: the corrected Exit Form values\. Leave a part empty to fill it in by hand\./);
+  assert.match(html, /data-exit-group="federal"/);
+  assert.match(html, /name="federal\.method" value="paper"/);
+  assert.match(html, /data-exit-group="state"/);
+  assert.match(html, /<input type="hidden" name="state\.fixedMethod" value="efile">/);
+  assert.doesNotMatch(html, /type="radio"[^>]*name="state\.method"/);
+  assert.match(html, /How it was filed: E-file/);
+  for (const type of ["NPT", "BIRT", "EET", "SIT", "PAIBWTR"]) assert.match(html, new RegExp(`data-exit-group="local\\.${type}"`));
+  assert.match(html, /<textarea[^>]*name="remarks"/);
+  assert.doesNotMatch(html, /<details[^>]*\bopen\b/);
+  assert.match(html, /<span>The fix is done\.<\/span>/);
+});
+
+test("Return to signing dialog: no State group without a state method", () => {
+  const html = returnToSigningDialogBody({ savedCase: { federalMethod: "efile", federalResult: "rejected", stateMethod: null } });
+  assert.doesNotMatch(html, /data-exit-group="state"/);
+  assert.match(html, /data-exit-group="federal"/);
+});
+
+
+// Mark e-filed starts on the method planned at Return to signing (#203).
+const plannedCase = (over = {}, groups = {}) =>
+  officeCase({
+    stage: "review_approved",
+    ...BOTH_EFILED,
+    federalResult: "accepted",
+    stateResult: "rejected",
+    returnToSigningExitForms: [{ id: "x1", exitForm: { federal: null, state: null, local: [], ...groups }, remarks: "Fixed", createdAt: "2026-11-02T15:00:00.000Z" }],
+    internalHistory: [{ id: "e1", action: "RETURN_TO_SIGNING", actorPersonId: "sam", createdAt: "2026-11-02T15:00:00.000Z", detail: { exitFormId: "x1" } }],
+    ...over,
+  });
+const checkedRadios = (html) => [...html.matchAll(/<input[^>]*type="radio"[^>]*>/g)].map((m) => m[0]).filter((t) => /\schecked/.test(t));
+
+test("the planned paper method is preselected", () => {
+  const html = markEfiledDialogBody({ savedCase: plannedCase({}, { state: { method: "paper" } }) });
+  const checked = checkedRadios(html);
+  assert.equal(checked.length, 1);
+  assert.match(checked[0], /name="method-state"[^>]*value="paper"/);
+});
+
+test("nothing is preselected without a row", () => {
+  const html = markEfiledDialogBody({ savedCase: plannedCase({ returnToSigningExitForms: [] }) });
+  assert.deepEqual(checkedRadios(html), []);
+});
+
+test("each rejected return preselects its own planned method", () => {
+  const html = markEfiledDialogBody({
+    savedCase: plannedCase({ federalResult: "rejected" }, { federal: { method: "efile" }, state: { method: "paper" } }),
+  });
+  const checked = checkedRadios(html);
+  assert.equal(checked.length, 2);
+  assert.ok(checked.some((t) => /name="method-federal"[^>]*value="efile"/.test(t)));
+  assert.ok(checked.some((t) => /name="method-state"[^>]*value="paper"/.test(t)));
+});
+
+test("one planned, one not: only the planned return is preselected", () => {
+  const html = markEfiledDialogBody({
+    savedCase: plannedCase({ federalResult: "rejected" }, { state: { method: "paper" } }),
+  });
+  const checked = checkedRadios(html);
+  assert.equal(checked.length, 1);
+  assert.match(checked[0], /name="method-state"[^>]*value="paper"/);
+  assert.ok(!checked.some((t) => /name="method-federal"/.test(t)));
+});

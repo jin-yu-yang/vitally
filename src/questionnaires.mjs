@@ -146,7 +146,7 @@ export function changedAnswers(previous, current) {
 // Exit Form (design D3)
 // ---------------------------------------------------------------------------
 
-const GROUP_FIELDS = Object.freeze(["method", "result", "amount", "refundBy", "oweBy", "debitOn"]);
+export const GROUP_FIELDS = Object.freeze(["method", "result", "amount", "refundBy", "oweBy", "debitOn"]);
 
 // One group from "<prefix>.<field>" values; null when every field is blank.
 function group(values, prefix, name) {
