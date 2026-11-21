@@ -376,6 +376,25 @@ async function chooseSeg(root, scope, name, key) {
 const radioId = (scope, name, value) => `[id="field-${scope}-${name}-${value}"]`;
 const fieldIdOf = (scope, name) => `[id="field-${scope}-${name}"]`;
 
+/**
+ * Fill one group of the Return to signing dialog's corrected Exit Form
+ * values: open it, then choose the method (a rejected return only), the
+ * result, the amount and how the refund is paid. Safe to repeat.
+ */
+async function fillReturnGroup(page, prefix, { method, result, amount, refundBy }) {
+  const scope = "return-to-signing";
+  const group = page.locator(`details[data-exit-group="${prefix}"]`);
+  if (!(await group.evaluate((node) => node.open))) await group.locator("summary").click({ timeout: CLICK_MS });
+  const choose = async (name, value) => {
+    if (!(await page.locator(radioId(scope, `${prefix}.${name}`, value)).isChecked()))
+      await page.locator(`label[for="field-${scope}-${prefix}.${name}-${value}"]`).click({ timeout: CLICK_MS });
+  };
+  if (method) await choose("method", method);
+  await choose("result", result);
+  await page.locator(fieldIdOf(scope, `${prefix}.amount`)).fill(amount, { timeout: CLICK_MS });
+  if (refundBy) await choose("refundBy", refundBy);
+}
+
 /** Answer the preparer questionnaire. Leave a key out to leave the field as the page shows it. */
 async function fillPreparer(page, answers) {
   await waitForQuiet(page);
@@ -3831,6 +3850,8 @@ async function runPermutation(t, roles) {
         badgeIs,
         "Ready to exit",
         "the case page's Ready to exit badge",
+        // The corrected Pennsylvania values, with the method planned for it.
+        () => fillReturnGroup(staff, "state", { method: "paper", result: "refund", amount: "88.00", refundBy: "check" }),
       );
       assert.equal((await caseById(fixture, classCase.id)).stage, "review_approved");
       await poolTabShows("signing", classReference);
@@ -3883,6 +3904,13 @@ async function runPermutation(t, roles) {
       assert.equal(await staff.locator('.modal input[name="filing-combination"]').count(), 0);
       assert.equal(await staff.locator('.modal input[name="method-federal"]').count(), 0);
       assert.equal(await staff.locator('.modal input[name="method-state"]').count(), 2);
+      // The method planned at Return to signing starts chosen.
+      assert.equal(
+        await staff.locator("#field-efiled-method-state-paper").isChecked(),
+        true,
+        "Mark e-filed did not preselect the planned paper method",
+      );
+      assert.equal(await staff.locator("#field-efiled-method-state-efile").isChecked(), false);
       assert.ok(
         (await dialogText()).includes("Federal return: accepted. Nothing to file again."),
         "the dialog does not list the accepted federal return as done",
@@ -7781,12 +7809,45 @@ async function runPermutation(t, roles) {
       await openBoard(staff, OFFICE_BOARD_HEADING);
       await openFromRow("rejected", returned.reference, "open-return-to-signing", "#field-return-to-signing-confirmed");
       assert.ok((await staff.locator(".modal").innerText()).includes("The fix is done."));
+      // An amount with three decimals is refused in the browser: the dialog
+      // stays open, the case stays rejected and the typed group stays open.
+      await fillReturnGroup(staff, "state", { method: "efile", result: "refund", amount: "12.345", refundBy: "check" });
+      await tickBox(staff, "field-return-to-signing-confirmed");
+      await waitForQuiet(staff);
+      await staff
+        .locator('.modal button[type="submit"][data-case-action="RETURN_TO_SIGNING"]')
+        .click({ timeout: CLICK_MS });
+      await waitFor(
+        staff,
+        "the dialog to refuse the amount",
+        () => (document.querySelector(".modal")?.textContent ?? "").includes("enter the amount from 0 to 999999.99"),
+        undefined,
+        RENDER_MS,
+      );
+      assert.equal(await stageOf(returned.id), "rejected", "a refused amount moved the case");
+      assert.equal(
+        await staff.locator('details[data-exit-group="state"]').evaluate((node) => node.open),
+        true,
+        "the typed group closed",
+      );
+      assert.equal(await staff.locator(fieldIdOf("return-to-signing", "state.amount")).inputValue(), "12.345");
+      // Correct it: 120.00, refund by check.
       await confirmDialog("RETURN_TO_SIGNING", returned.id, {
+        fill: () =>
+          fillReturnGroup(staff, "state", { method: "efile", result: "refund", amount: "120.00", refundBy: "check" }),
         box: "field-return-to-signing-confirmed",
         ready: modalGone,
         what: "the Return to signing dialog to close",
       });
       assert.equal(await stageOf(returned.id), "review_approved");
+      // The office's Exit Form panel says it was filled from the corrected values.
+      await openCaseByReference(staff, returned.reference);
+      await revealCaseControl(staff, '[data-action="view-exit-form"]');
+      const exitNote = (await staff.locator('[data-role="exit-form-corrected"]').first().innerText()).replace(/\s+/g, " ");
+      assert.ok(
+        exitNote.includes("This form was filled from the corrected values recorded on"),
+        `the Exit Form note does not say it was filled from the corrected values: ${exitNote}`,
+      );
 
       // Close unsigned cases…: both samples are listed, ticked, with their stage and days.
       await openBoard(staff, OFFICE_BOARD_HEADING);
