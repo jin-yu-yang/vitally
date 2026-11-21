@@ -56,7 +56,7 @@ PCDC staffs 700+ requests with about 20 volunteers of uneven availability, and t
 
 ## Impact
 
-- **Database:** new migration `supabase/migrations/055_volunteer_schedule.sql`.
+- **Database:** new migration `supabase/migrations/056_volunteer_schedule.sql`.
   - New: `volunteer_profiles.usual_days`, tables `schedule_settings` and `shifts` (published to realtime, read through RPCs), and RLS that follows the 044 (c) no-sign-in rule.
   - New RPCs: the schedule day, saving and removing a shift, schedule settings, my profile, saving my usual days.
   - Replaced: `vitally_save_volunteer`, `vitally_my_clearance` and `vitally_season_settings`.

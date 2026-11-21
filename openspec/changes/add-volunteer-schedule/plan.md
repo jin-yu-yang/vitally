@@ -5,7 +5,7 @@
 **Goal:** Add the hourly volunteer Schedule (issue #140): shifts with one role each, site hours and coverage targets in Season settings, a coverage-gap row, private usual days, a My profile page, and the Workload's Hours this week column.
 
 **Architecture:**
-- Migration 055 adds `shifts`, `schedule_settings` and `volunteer_profiles.usual_days`. The browser reads them through RPCs. SELECT policies exist only so realtime can deliver changes, and they hide no-sign-in volunteers' shifts from non-admins.
+- Migration 056 adds `shifts`, `schedule_settings` and `volunteer_profiles.usual_days`. The browser reads them through RPCs. SELECT policies exist only so realtime can deliver changes, and they hide no-sign-in volunteers' shifts from non-admins.
 - The database decides what each shift counts toward. A pure browser module sums coverage, formats New York dates and orders the picker.
 - Two new view modules render the Schedule and My profile. `app.mjs` adds pointer drag on top of the same save action the drawer uses.
 
@@ -25,7 +25,7 @@
 - **Errors:** `VT001` FORBIDDEN, `VT003` CONFLICT, `VT007` VALIDATION. A VALIDATION reason or field name goes in the error `detail`, as 052's `season_link` does.
 - **RPC order:** FORBIDDEN (nothing written, no receipt) → shape VALIDATION → `pg_advisory_xact_lock(hashtextextended(workspace_id::text,0))` → `reserve_receipt` (a replay returns the stored answer) → CONFLICT → domain VALIDATION.
 - **Grants:** every new function revokes all from `public,anon,authenticated,service_role`, and public RPCs grant execute to `authenticated` only. Every new public RPC is added to `tests/support/rpc-signatures.mjs` and `tests/database-catalog.mjs`.
-- **Replaced functions:** each copies its latest body verbatim (053 for `vitally_save_volunteer` and `vitally_my_clearance`, 052 for `vitally_season_settings`) and marks every added or changed line `-- 055`.
+- **Replaced functions:** each copies its latest body verbatim (053 for `vitally_save_volunteer` and `vitally_my_clearance`, 052 for `vitally_season_settings`) and marks every added or changed line `-- 056`.
 - **Migrations:** final once applied. Don't edit 001–054.
 - **Copy:** staff screens are English only, and there is no client text, so `src/client-text.mjs` and `src/zh-hant.mjs` are untouched. Use fictional data only. Never touch `src/pcdc-logo.png`.
 - **Exact copy from the specs:**
@@ -49,10 +49,10 @@
 
 ---
 
-### Task 1: Migration 055 storage, visibility and realtime
+### Task 1: Migration 056 storage, visibility and realtime
 
 **Files:**
-- Create: `supabase/migrations/055_volunteer_schedule.sql` (sections §1–§3)
+- Create: `supabase/migrations/056_volunteer_schedule.sql` (sections §1–§3)
 - Create: `tests/database-schedule.mjs`
 - Modify: `docs/developer/database.md` (table list: `volunteer_profiles.usual_days`, `schedule_settings`, `shifts`)
 
@@ -85,7 +85,7 @@
   - **"no direct writes"**: `insert`, `update` and `delete` on both tables from `f.siteCoordinator` return an error.
   - **"published"**: `pg_publication_tables` for `supabase_realtime` lists `shifts` and `schedule_settings`.
 - [ ] **Step 2: Run it to see it fail.** Run `npm run db:migrate:test` and then `node --env-file=.env.test --test tests/database-schedule.mjs`. Expected: FAIL (`relation "public.shifts" does not exist`).
-- [ ] **Step 3: Write 055 §1–§3.**
+- [ ] **Step 3: Write 056 §1–§3.**
   - The checks in D1, with sorted usual days checked as `usual_days = (select array_agg(d order by d) from unnest(usual_days) d)` or empty.
   - RLS on both tables, with `grant select … to authenticated` and no write grant.
   - The policy on `shifts`: `vitally_policy.is_schedule_viewer(workspace_id) and (exists(select 1 from people p where p.workspace_id=shifts.workspace_id and p.id=shifts.person_id and p.user_id is not null) or vitally_policy.is_workspace_admin(workspace_id))`.
@@ -93,12 +93,12 @@
   - `schedule_viewer` is `is_workspace_admin`-equivalent for that person, or `audience_member(ws, person, 'everyone', '{}')`. `is_schedule_viewer` applies it to the caller's own person.
   - 049's DO block over `array['shifts','schedule_settings']`.
 - [ ] **Step 4: Run it to see it pass.** Run the same two commands. Expected: PASS.
-- [ ] **Step 5: Commit** `055: shifts, schedule settings and usual days storage (#140)` with the migration, the test and the doc.
+- [ ] **Step 5: Commit** `056: shifts, schedule settings and usual days storage (#140)` with the migration, the test and the doc.
 
 ### Task 2: Schedule settings RPCs and the Season settings read
 
 **Files:**
-- Modify: `supabase/migrations/055_volunteer_schedule.sql` (§4)
+- Modify: `supabase/migrations/056_volunteer_schedule.sql` (§4)
 - Modify: `tests/database-schedule.mjs`, `tests/database-season-settings.mjs`, `tests/support/rpc-signatures.mjs`, `tests/database-catalog.mjs`
 
 **Interfaces:**
@@ -121,12 +121,12 @@
 - [ ] **Step 2: Run it to see it fail.** Run `node --env-file=.env.test --test tests/database-schedule.mjs`. Expected: FAIL (function does not exist).
 - [ ] **Step 3: Implement §4** in the Global Constraints order. Use the operation `'SAVE_SCHEDULE_SETTINGS'` in the digest, and insert at revision 0 or update otherwise. Add both RPC registry entries, with `receiptKeys` `["revision","siteHours","targets"]`.
 - [ ] **Step 4: Run it to see it pass.** Run `npm run db:migrate:test` and then `node --env-file=.env.test --test tests/database-schedule.mjs tests/database-season-settings.mjs tests/database-catalog.mjs tests/database.mjs`. Expected: PASS.
-- [ ] **Step 5: Commit** `055: site hours and coverage targets on Season settings (#140)`.
+- [ ] **Step 5: Commit** `056: site hours and coverage targets on Season settings (#140)`.
 
 ### Task 3: Saving and removing shifts
 
 **Files:**
-- Modify: `supabase/migrations/055_volunteer_schedule.sql` (§5)
+- Modify: `supabase/migrations/056_volunteer_schedule.sql` (§5)
 - Modify: `tests/database-schedule.mjs`, `tests/support/rpc-signatures.mjs`, `tests/database-catalog.mjs`
 
 **Interfaces:**
@@ -159,12 +159,12 @@
   - Overlap: `start_hour < new_end and end_hour > new_start and removed_at is null and id <> p_shift_id`.
   - Add both registry entries.
 - [ ] **Step 4: Run it to see it pass.** Expected: PASS.
-- [ ] **Step 5: Commit** `055: save and remove shifts (#140)`.
+- [ ] **Step 5: Commit** `056: save and remove shifts (#140)`.
 
 ### Task 4: The schedule day read, flags and counts
 
 **Files:**
-- Modify: `supabase/migrations/055_volunteer_schedule.sql` (§6)
+- Modify: `supabase/migrations/056_volunteer_schedule.sql` (§6)
 - Modify: `tests/database-schedule.mjs`, `tests/support/rpc-signatures.mjs`, `tests/database-catalog.mjs`
 
 **Interfaces:**
@@ -189,12 +189,12 @@
 - [ ] **Step 2: Run it to see it fail.** Expected: FAIL.
 - [ ] **Step 3: Implement §6** with `vitally_private.cleared`, the D6 rule in a private `shift_counts(ws, shift) returns text` helper, and the registry entries.
 - [ ] **Step 4: Run it to see it pass.** Expected: PASS.
-- [ ] **Step 5: Commit** `055: schedule day read with coverage counts for admins (#140)`.
+- [ ] **Step 5: Commit** `056: schedule day read with coverage counts for admins (#140)`.
 
 ### Task 5: Usual days, My profile and the replaced roster and clearance functions
 
 **Files:**
-- Modify: `supabase/migrations/055_volunteer_schedule.sql` (§7–§9)
+- Modify: `supabase/migrations/056_volunteer_schedule.sql` (§7–§9)
 - Modify: `tests/database-schedule.mjs`, `tests/database-volunteer-roster.mjs`, `tests/database-clearance.mjs`, `tests/support/rpc-signatures.mjs`, `tests/database-catalog.mjs`
 
 **Interfaces:**
@@ -220,10 +220,10 @@
 - [ ] **Step 2: Run it to see it fail.** Expected: FAIL.
 - [ ] **Step 3: Implement §7–§9.**
   - `ny_week` uses `(p_at at time zone 'America/New_York')::date` and `isodow`.
-  - Copy 053's `vitally_save_volunteer` and `vitally_my_clearance` verbatim, adding the `-- 055` lines.
+  - Copy 053's `vitally_save_volunteer` and `vitally_my_clearance` verbatim, adding the `-- 056` lines.
   - Add the registry entries.
 - [ ] **Step 4: Run it to see it pass.** Run `npm run db:migrate:test`, then the full `npm run test:database`. Expected: PASS, with no regressions in the roster, clearance-uploads or season settings suites.
-- [ ] **Step 5: Commit** `055: usual days, My profile, and scheduleViewer in the clearance (#140)`.
+- [ ] **Step 5: Commit** `056: usual days, My profile, and scheduleViewer in the clearance (#140)`.
 
 ### Task 6: Store calls and the pure schedule module
 

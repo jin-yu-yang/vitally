@@ -27,7 +27,7 @@ Issue #140 asks for an hourly volunteer schedule: one day at a time, a role per 
 
 **Constraints:**
 - Fictional data only.
-- Migrations are final once applied. This is 055.
+- Migrations are final once applied. This is 056.
 - No client text.
 - The browser story runs at about 550–600 s per leg against a 900 s limit, so the Schedule walk must stay short.
 - Times are America/New_York throughout. The contact log already shows NY time whatever the viewer's zone.
@@ -232,17 +232,17 @@ Issue #140 asks for an hourly volunteer schedule: one day at a time, a role per 
 ## Risks / Trade-offs
 
 - [Risk] **Scope against the Dec 6 target.** This is a large change: three screens, three replaced RPCs and drag. → Mitigation: the plan orders tasks so the Workload column and the seeded shifts come last and can be cut (OQ3).
-- [Risk] **Replacing `vitally_save_volunteer` a fourth time** risks dropping a 053 rule. → Mitigation: copy 053's body as is, add only the `usualDays` lines marked `-- 055`, and re-run the existing roster and clearance-upload database suites.
+- [Risk] **Replacing `vitally_save_volunteer` a fourth time** risks dropping a 053 rule. → Mitigation: copy 053's body as is, add only the `usualDays` lines marked `-- 056`, and re-run the existing roster and clearance-upload database suites.
 - [Risk] **A volunteer's own usual-days save makes an admin's open drawer hit CONFLICT.** → Mitigation: the existing re-read-on-conflict path. This is rare.
 - [Risk] **Drag on touch screens and in Playwright.** → Mitigation: pointer events with `setPointerCapture`. The story drives the button path, and one drag runs with Playwright's mouse API.
-- [Risk] **Migration number collision** with another open change taking 055. → Mitigation: check `main` before merging, and renumber if needed. 055 is not applied anywhere until merge.
+- [Risk] **Migration number collision.** `main` took 055 (`055_start_next_season.sql`, #255) after this change was proposed, so this change is 056. Open PR #245 (`055_onedrive_client_documents.sql`) must also renumber and may claim 056. → Mitigation: re-check `main` and open PRs right before the PR. Whoever merges second renumbers; 056 is applied nowhere until merge.
 - [Trade-off] Non-admins don't see the coverage row. → Accepted: coverage encodes others' clearance and Works.
 - [Trade-off] Overlap is checked in the RPC, not by a constraint. → Accepted: every write goes through the RPC under the workspace lock, and RLS refuses direct writes.
 - [Trade-off] Site hours repeat weekly with no closed dates. → Accepted (Q3): a holiday is handled by not scheduling anyone.
 
 ## Migration Plan
 
-1. 055 is additive. It adds a column with a default, new tables, new functions and policies, replaces three functions, and adds two tables to the publication.
+1. 056 is additive. It adds a column with a default, new tables, new functions and policies, replaces three functions, and adds two tables to the publication.
    - Existing profiles get `usual_days = '{}'`. Nothing else changes in existing rows.
    - Even so, run the local `db:migrate:test` on a stack that already has main's migrations, as for 052 and 053.
 2. The 049 DO block refuses if the `supabase_realtime` publication is missing. Hosted already has it.
