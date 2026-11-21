@@ -15,16 +15,7 @@ on:
   push:
     branches: [main]
   # Run on any pushed branch: gh workflow run ci.yml --ref <branch>
-  # For a quick database iteration, name the files to run; every other job is
-  # skipped: gh workflow run ci.yml --ref <branch> -f database_files="tests/database-x.mjs"
-  # Such a run is for iterating only. It never stands in for the full checks
-  # (CLAUDE.md, Verification): skipped jobs don't count.
   workflow_dispatch:
-    inputs:
-      database_files:
-        description: "Only these database test files (space-separated, tests/database*.mjs); empty runs everything"
-        required: false
-        default: ""
 
 permissions:
   contents: read
@@ -36,7 +27,6 @@ concurrency:
 
 jobs:
   checks:
-    if: ${{ inputs.database_files == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -103,27 +93,9 @@ jobs:
       - uses: ./.github/actions/test-stack
 
       - name: Database suite
-        if: ${{ inputs.database_files == '' }}
         run: npm run test:database
 
-      # Passed through the environment, never interpolated into the script,
-      # and accepted only as a list of existing tests/database*.mjs files.
-      - name: Chosen database files
-        if: ${{ inputs.database_files != '' }}
-        env:
-          FILES: ${{ inputs.database_files }}
-        run: |
-          read -r -a files <<< "$FILES"
-          for file in "${files[@]}"; do
-            if [[ ! "$file" =~ ^tests/database[a-z0-9-]*\.mjs$ ]] || [ ! -f "$file" ]; then
-              echo "::error::Not a database test file: $file"
-              exit 1
-            fi
-          done
-          node --env-file=.env.test --test "${files[@]}"
-
   sign-in:
-    if: ${{ inputs.database_files == '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -155,7 +127,6 @@ jobs:
 
   story:
     name: story (${{ matrix.leg }})
-    if: ${{ inputs.database_files == '' }}
     runs-on: ubuntu-24.04
     # Each browser order has a 20-minute limit of its own in tests/browser.mjs.
     timeout-minutes: 45
