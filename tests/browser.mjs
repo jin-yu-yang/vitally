@@ -9934,7 +9934,7 @@ test(
       await waitForText(preparer, `Waiting for review · sent ${today}`);
       assert.deepEqual(
         await sendSection(preparer),
-        { reason: null, upload: `Ask your site coordinator how to send it. Waiting for review · sent ${today}` },
+        { reason: null, upload: `Waiting for review · sent ${today}` },
         "the send section after I've uploaded it",
       );
       step("3 sent");

@@ -94,7 +94,7 @@ function sendSection(p, busy) {
   const day = sentAt ? new Date(sentAt) : null;
   const upload = p.uploadUrl
     ? `<a class="btn secondary" href="${esc(p.uploadUrl)}" target="_blank" rel="noopener">Upload</a>`
-    : "<span>Ask your site coordinator how to send it.</span>";
+    : "";
   const sent = sentAt
     ? `<span>Waiting for review${Number.isNaN(day.getTime()) ? "" : ` · sent ${esc(SENT_DAY.format(day))}`}</span>`
     : button(
