@@ -1,13 +1,13 @@
 ## 1. Migration 057: columns and the clearance answer
 
-- [ ] 1.1 Write `supabase/migrations/057_my_profile.sql` §1 (design D3, D5):
+- [x] 1.1 Write `supabase/migrations/057_my_profile.sql` §1 (design D3, D5):
   - the four reviewed-time and reason columns on `roster_entries`, with checks keeping each pair both set or both null and each reason 1–120 characters;
   - `volunteer_profiles.usual_days text[] not null default '{}'`, with a check for the seven values, no repeats.
-- [ ] 1.2 §2 `vitally_my_clearance()`, copied from 053 (design D4):
+- [x] 1.2 §2 `vitally_my_clearance()`, copied from 053 (design D4):
   - add `reviewedAt` and `reviewReason` to the `form13615` and `photoId` items;
   - make `uploadUrl` null while `siteCheck` is true.
-- [ ] 1.3 §3 `vitally_mark_upload_sent`, copied from 053: clear the sent document's reviewed time and reason (design D3).
-- [ ] 1.4 Database tests (new `tests/database-my-profile.mjs`, or extending `tests/database-clearance-uploads.mjs`) for the volunteer-clearance deltas:
+- [x] 1.3 §3 `vitally_mark_upload_sent`, copied from 053: clear the sent document's reviewed time and reason (design D3).
+- [x] 1.4 Database tests (new `tests/database-my-profile.mjs`, or extending `tests/database-clearance-uploads.mjs`) for the volunteer-clearance deltas:
   - the review fields in the answer;
   - no `uploadUrl` before the site check, and the link after it;
   - sending again clears the reason.
