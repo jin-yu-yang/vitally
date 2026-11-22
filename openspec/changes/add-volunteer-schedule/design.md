@@ -230,6 +230,7 @@ By the user's decision, this change adopts all of that. It drops its own usual-d
   - `seed:local` writes site hours (Tue and Thu 5 pm – 8 pm, Sat 10 am – 4 pm), the default targets, and usual days for several fictional volunteers, as main's `mon`…`sun` values through main's `vitally_save_volunteer`.
   - It also writes about six shifts in the current NY week across the four role accounts and two roster volunteers. One Saturday hour is left with a gap, and one shift goes to a volunteer with no sign-in.
   - Site hours are written only when the workspace never saved them.
+  - A re-run keeps any fictional person, current or previous-season (main's #267), who holds a live shift the seed did not add. Deleting them would cascade-delete that shift. The seed spec's MODIFIED requirements record this (user decision 2026-11-22).
   - The seeded shift ids go into the run file, and a re-run removes exactly those through `vitally_remove_shift`.
   - The browser story's use of the seed module adds none of this. The story sets its own site hours and creates its own shifts through the UI. That covers the button path, one drag, the gap row, and a read-only check from the preparer window.
   - All values are fictional.

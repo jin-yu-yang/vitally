@@ -47,7 +47,7 @@ PCDC staffs 700+ requests with about 20 volunteers of uneven availability, and t
 - `volunteer-clearance`: the setup screen's sidebar offers Schedule to rostered staff, and `vitally_my_clearance` says whether the caller may view the schedule (re-based on main's text after #262).
 
 Usual days and the My profile page are main's (`volunteer-roster` and `my-profile`, from #262), not this change's.
-- `local-seed-data`: site hours, usual days and shifts in the local seed.
+- `local-seed-data`: site hours, usual days and shifts in the local seed. A re-run keeps a fictional person (current or previous-season) who holds an admin's shift (MODIFIED from main's text).
 
 ## Impact
 

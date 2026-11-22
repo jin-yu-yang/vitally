@@ -504,3 +504,20 @@ Main merged `add-my-profile` (#262/#264/#265, `057_my_profile.sql`) while this c
   - `npm run build:hant -- --check`;
   - `npx openspec validate --all`.
 - [ ] **Step 5: Commit** as `Schedule walk on main's My profile; docs and counts (#140)`.
+
+### Task 18: The seed keeps fictional people who hold an admin's shift (added 2026-11-22)
+
+Main's #267 added previous-season fictional people that a seed re-run deletes and re-creates. The pre-archive merge (e86d6a5) made both seed steps keep a fictional person who holds a live shift the seed did not add. By the user's decision, the delta spec now records that exception: the MODIFIED "The local seed command adds fictional volunteers" and "A seed re-run replaces the previous season's people". This task implements tasks.md group 9.
+
+**Files:** `tools/admin/seed-cases.mjs`, `tests/database-seed.mjs`
+
+- [ ] **Step 1: Write the failing test.** It mirrors the existing `seedVolunteers` admin-shift test:
+  1. seed;
+  2. an admin adds one of the three previous-season people to the current season, with a role that holds its certificates;
+  3. the admin gives them a shift through `vitally_save_shift`;
+  4. seed again.
+
+  Assert that the person is the same id, the shift is live with the same id, both roster entries remain, and the other two previous-season people are re-seeded. If the test passes before any change because e86d6a5 already keeps the person, record that it passed first, rather than inventing a failure.
+- [ ] **Step 2:** Narrow the guard so the live-shift skip covers only the delete and re-insert of the three. The `SEED_PAST_ALSO_CURRENT_EMAIL` previous-season entry (`on conflict do nothing`) keeps its own logic. Merge the comment at `seedPastSeason` into one explanation.
+- [ ] **Step 3:** Run `node --env-file=.env.test --test tests/database-seed.mjs` and `npm test`.
+- [ ] **Step 4: Commit** as `seed: keep a previous-season person who holds an admin's shift; test (#140)`.

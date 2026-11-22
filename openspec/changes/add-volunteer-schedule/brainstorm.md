@@ -206,5 +206,8 @@ This change had built overlapping versions of all of these.
 
 **Unchanged:** the Schedule, coverage, site hours and targets, drag, the Workload column, and live updates on the Schedule.
 
+**Q14. What does a seed re-run do with a fictional person who holds an admin's shift?** This came up at the pre-archive merge of main's #267, which added three previous-season fictional people that a re-run deletes and re-creates. Main's seed spec says the re-run deletes them; this change's seed spec says a re-run leaves every admin-added shift alone. Deleting the person would cascade-delete the shift. Options: record the exception; follow main's spec and narrow ours.
+→ **Record the exception** (user, 2026-11-22). Such a person, current or previous-season, is kept with their shift and roster entries. The delta spec MODIFIES main's two seed requirements to say so, and tasks.md group 9 adds the test and tidies the guard.
+
 **Q13. What re-reads on a site-hours change?** The final review found the spec saying a change to shifts or schedule settings re-reads My profile's shifts and the Workload hours, while the code re-reads those two only on shift changes (and a new season). Options: narrow the spec; change the code to match.
 → **Narrow the spec** (user, 2026-11-22). Site hours and targets can't change the caller's shifts or anyone's hours, so the extra reads would be wasted. A change to shifts or schedule settings re-reads the open Schedule. A change to shifts re-reads My profile's shifts and the Workload hours. No code change.
