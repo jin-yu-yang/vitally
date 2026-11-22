@@ -3,7 +3,21 @@
 - [Review, DESIGN.md proposal and implementation plan](redesign-review.md)
 - [Design system (DESIGN.md)](DESIGN.md)
 
+## Current screens (Nov 21, 2026)
+
+What the app looks like on `main` today: 1280 px wide unless the table says otherwise, the local test stack with `seed:local`'s fictional data. The demo tools (the "Fill fictional details" buttons, which only a local server with `VITALLY_DEMO_TOOLS=1` shows) are hidden, as on govitally.org. Also used on the landing page (#218).
+
+| Screen | Image |
+|---|---|
+| Volunteer work board: a preparer's Waiting for preparation, and a reviewer's Available tab (1440) | [preparer](screens/current/work-board-preparer.png) · [reviewer](screens/current/work-board-reviewer.png) |
+| Office case pool: every case this season, by stage, with labels | [case-pool.png](screens/current/case-pool.png) |
+| Office Follow-ups queue (1440) | [follow-ups.png](screens/current/follow-ups.png) |
+| Client progress: just sent (1280), and ready to sign (720, from the browser story) | [sent](screens/current/client-progress.png) · [ready to sign](screens/current/client-progress-ready-to-sign-720.png) |
+| Client intake: Before you start, desktop and phone (390) | [desktop](screens/current/client-intake.png) · [phone](screens/current/client-intake-390.png) |
+
 ## Final screens
+
+The design-stage screens and the screenshots taken as each part was built. Some show things that have changed since (for example Presenter controls, removed in #128).
 
 | Screen | Image |
 |---|---|
