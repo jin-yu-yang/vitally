@@ -4,7 +4,8 @@ import {
   ROLES, CERTIFICATES, WORKS, LANGUAGES,
   combineVolunteers, filterVolunteers, SHOW_VIEWS, volunteerFromForm, volunteerProblem,
   ROLE_NEEDS, missingFor, withoutLostRoles, roleNeedsMessage, openWorkMessage, rolesToUntick, untickedRolesMessage,
-  accountMessage, volunteerFormChanged, roleBoxesToUntick, rosterCsv, rosterCsvFilename
+  accountMessage, volunteerFormChanged, roleBoxesToUntick, rosterCsv, rosterCsvFilename,
+  returningCandidates, returningFill
 } from "../src/volunteer-roster.mjs";
 
 const people = [
@@ -519,4 +520,46 @@ test("rosterCsv leaves roles and certificates empty, labels accounts and guards 
   assert.equal(lines[1], "Ana Lopez,ana@x.org,'+1 555 0100,,,,Invited,No");
   assert.equal(lines[2], "Zed Tran,ana@x.org,,,,,Deactivated,No");
   assert.match(csvLines([csvVolunteer()])[1], /,Not created,No$/);
+});
+
+// Returning volunteers (change add-returning-volunteers-and-roster-csv)
+const earlier = (id, name, email, lastSeason, extra = {}) => ({
+  id, name, email, phone: null, works: "remote", languages: ["english", "other"],
+  otherLanguage: "Tagalog", usualDays: ["tue", "thu"], revision: 4, hasSignIn: false, lastSeason, ...extra
+});
+const EARLIER = [
+  earlier("e1", "Nadia Kerr", "nadia@example.org", true),
+  earlier("e2", "Omar Haddad", "omar@example.org", true),
+  earlier("e3", "Kerry Older", "kerry@example.org", false)
+];
+
+test("returningCandidates keeps last season's people whose name or email has the query", () => {
+  assert.deepEqual(returningCandidates(EARLIER, " KER ").map((e) => e.id), ["e1"]);
+  assert.deepEqual(returningCandidates(EARLIER, "omar@").map((e) => e.id), ["e2"]);
+  assert.deepEqual(returningCandidates(EARLIER, "").map((e) => e.id), ["e1", "e2"]);
+});
+
+test("returningCandidates adds an older volunteer found by their full email, flagged earlier", () => {
+  const found = returningCandidates(EARLIER, "KERRY@example.org");
+  assert.deepEqual(found.map((e) => [e.id, e.earlier]), [["e3", true]]);
+  assert.equal(returningCandidates(EARLIER, "nadia@example.org")[0].earlier, undefined);
+});
+
+test("returningFill makes a drawer volunteer with the stored details and nothing for this season", () => {
+  const fill = returningFill(EARLIER[0]);
+  assert.deepEqual(fill.usualDays, ["tue", "thu"]);
+  assert.equal(fill.otherLanguage, "Tagalog");
+  assert.equal(fill.email, "nadia@example.org");
+  assert.deepEqual(fill.roles, []);
+  assert.deepEqual(fill.certificates, []);
+  assert.equal(fill.isNew, false);
+  assert.equal(fill.photoIdChecked, false);
+  assert.equal(fill.hasSignIn, false);
+});
+
+test("volunteerProblem refuses an earlier volunteer's email on an add, not for the picked person", () => {
+  const payload = { name: "Nadia Kerr", email: "Nadia@example.org", works: "remote", languages: ["english"], roles: [], certificates: [] };
+  assert.equal(volunteerProblem(payload, [], null, EARLIER), "That email belongs to an earlier volunteer. Pick them above.");
+  assert.equal(volunteerProblem(payload, [], "e1", EARLIER), null);
+  assert.equal(volunteerProblem(payload, [], null), null);
 });

@@ -234,14 +234,52 @@ const otherLanguageProblem = (payload) => {
 export const profileProblem = (payload) =>
   nameProblem(payload) ?? phoneProblem(payload) ?? otherLanguageProblem(payload);
 
+// The Add drawer's returning-volunteer picker (change
+// add-returning-volunteers-and-roster-csv). Last season's people whose name or
+// email holds the query; a full email that matches an older volunteer finds
+// them too, flagged `earlier`.
+export function returningCandidates(earlier, query) {
+  const text = String(query ?? "").trim().toLowerCase();
+  const found = earlier.filter(
+    (v) => v.lastSeason && (!text || `${v.name} ${v.email}`.toLowerCase().includes(text)),
+  );
+  const older = text
+    ? earlier
+        .filter((v) => !v.lastSeason && String(v.email ?? "").toLowerCase() === text)
+        .map((v) => ({ ...v, earlier: true }))
+    : [];
+  return [...found, ...older];
+}
+
+// The drawer's volunteer for a picked person: their stored details, and
+// nothing for this season yet.
+export const returningFill = (person) => ({
+  id: person.id,
+  name: person.name,
+  email: person.email,
+  phone: person.phone ?? null,
+  works: person.works,
+  languages: [...(person.languages ?? [])],
+  otherLanguage: person.otherLanguage ?? null,
+  usualDays: [...(person.usualDays ?? [])],
+  hasSignIn: Boolean(person.hasSignIn),
+  roles: [],
+  certificates: [],
+  isNew: false,
+  photoIdChecked: false,
+});
+
 // Returns the first problem as a sentence, or null when the payload may be saved.
-export function volunteerProblem(payload, list, volunteerId) {
+export function volunteerProblem(payload, list, volunteerId, earlier = []) {
   const name = nameProblem(payload);
   if (name) return name;
   const email = String(payload.email ?? "").trim().toLowerCase();
   if (!email || email.length > EMAIL_MAX || !EMAIL_PATTERN.test(email)) return "Enter a valid email.";
   if (list.some((v) => v.id !== volunteerId && String(v.email ?? "").toLowerCase() === email)) {
     return "That email is already on the Roster.";
+  }
+  if (earlier.some((v) => v.id !== volunteerId && String(v.email ?? "").toLowerCase() === email)) {
+    return "That email belongs to an earlier volunteer. Pick them above.";
   }
   const phone = phoneProblem(payload);
   if (phone) return phone;
