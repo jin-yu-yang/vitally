@@ -1,5 +1,6 @@
 // Drag on the Schedule (change add-volunteer-schedule, design D7): what a
 // pointer gesture on the grid means. Pure; app.mjs does the pointer wiring.
+import { dragRole } from "./volunteer-schedule.mjs";
 
 const overlaps = (shifts, volunteerId, start, end) =>
   shifts.some((s) => s.volunteerId === volunteerId && s.startHour < end && s.endHour > start);
@@ -20,9 +21,7 @@ export function dragResult({ kind, volunteerId, shift = null, fromHour, toHour, 
   if (kind === "create") {
     start = Math.min(fromHour, toHour);
     end = Math.max(fromHour, toHour) + 1;
-    const mine = shifts.filter((s) => s.volunteerId === volunteerId);
-    if (!mine.length) return null;
-    role = mine.reduce((a, b) => (b.startHour < a.startHour ? b : a)).role;
+    role = dragRole(shifts, volunteerId);
     if (overlaps(shifts, volunteerId, start, end)) return null;
   } else if (kind === "start" || kind === "end") {
     if (!shift) return null;
@@ -41,6 +40,13 @@ export function dragResult({ kind, volunteerId, shift = null, fromHour, toHour, 
     role,
   };
 }
+
+/**
+ * Whether a gesture's row is still on the page. A redraw that replaced it
+ * mid-drag leaves a detached row whose rects are all zero, so the gesture is
+ * cancelled (nothing saved) rather than read at the wrong hour.
+ */
+export const gestureLive = (row) => row?.isConnected === true;
 
 /**
  * One gesture, made at pointerdown with its own `actionId`. `finish` answers

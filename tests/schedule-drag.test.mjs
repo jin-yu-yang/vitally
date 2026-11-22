@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dragResult, createGesture } from "../src/schedule-drag.mjs";
+import { dragResult, createGesture, gestureLive } from "../src/schedule-drag.mjs";
 
 const hours = { open: 9, close: 17 };
 const rowan = (extra = {}) => ({ shiftId: "s1", revision: 3, volunteerId: "v1", role: "preparer", startHour: 10, endHour: 13, ...extra });
@@ -94,4 +94,10 @@ test("two gestures carry their own actionIds", () => {
   const a = createGesture({ kind: "create", volunteerId: "v1", fromHour: 14, actionId: "a" }).finish({ toHour: 14, hours, shifts });
   const b = createGesture({ kind: "create", volunteerId: "v1", fromHour: 14, actionId: "b" }).finish({ toHour: 14, hours, shifts });
   assert.notEqual(a.actionId, b.actionId);
+});
+
+test("a gesture is live only while its row is still on the page", () => {
+  assert.equal(gestureLive({ isConnected: true }), true);
+  assert.equal(gestureLive({ isConnected: false }), false);
+  assert.equal(gestureLive(null), false);
 });

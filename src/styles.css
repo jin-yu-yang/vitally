@@ -7019,7 +7019,7 @@ button.schedule-shift:focus-visible {
 /* Drag (design D7): empty cells and a shift's edge handles take the pointer
    and stop the page scrolling under it; the page still scrolls everywhere
    else. The edges are small zones; keyboard users change hours in the drawer. */
-.schedule-cell,
+.schedule-grid.can-drag .schedule-cell,
 .schedule-edge {
   touch-action: none;
 }

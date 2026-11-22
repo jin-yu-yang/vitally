@@ -139,6 +139,8 @@ test("schedule: an admin's shift carries edge handles for drag; a viewer's carri
   assert.doesNotMatch(button("s-lia"), /data-edge="end"/);
   assert.match(html, /class="schedule-cell" data-hour="10"/);
   assert.doesNotMatch(scheduleScreen(state(viewerDay())), /data-edge/);
+  assert.match(html, /class="schedule-grid can-drag"/);
+  assert.doesNotMatch(scheduleScreen(state(viewerDay())), /can-drag/);
 });
 
 test("schedule: a closed day says so with no grid", () => {

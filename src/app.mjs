@@ -60,7 +60,7 @@ import * as client from "./client-views.mjs";
 import { POOL_FILTER_KEYS } from "./pool-views.mjs";
 import { createSidebarPeek, peekZone, toggleLabel } from "./sidebar-peek.mjs";
 import { createRedrawHold } from "./redraw-hold.mjs";
-import { createGesture, dragResult } from "./schedule-drag.mjs";
+import { createGesture, dragResult, gestureLive } from "./schedule-drag.mjs";
 import { STORAGE_KEY, createLanguageRequests, isLang, loadHantWithin, viewLang } from "./language.mjs";
 import { createHantLoader, hantReady } from "./hant.mjs";
 import { t, SENTENCES } from "./client-text.mjs";
@@ -2889,6 +2889,7 @@ if (!config) {
   root.addEventListener("pointermove", (event) => {
     const drag = scheduleDrag;
     if (!drag || event.pointerId !== drag.pointerId) return;
+    if (!gestureLive(drag.row)) return endScheduleDrag(drag);
     const hour = dragHourAt(drag.row, event.clientX);
     if (!Number.isInteger(hour) || hour === drag.toHour) return;
     drag.toHour = hour;
@@ -2904,6 +2905,8 @@ if (!config) {
     const drag = scheduleDrag;
     if (!drag || event.pointerId !== drag.pointerId) return;
     endScheduleDrag(drag);
+    // The row was replaced by a redraw mid-drag: cancel, save nothing.
+    if (!gestureLive(drag.row)) return;
     // A drag on a shift's edge is not a press on the shift: the click that
     // follows must not open the drawer.
     if (drag.moved) {
