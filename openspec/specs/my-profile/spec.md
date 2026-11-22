@@ -35,7 +35,7 @@ It SHALL NOT be gated by clearance. It SHALL return nothing about any other pers
 
 ### Requirement: A staff member saves their own details
 `vitally_save_my_profile(p_action_id, p_expected_revision, p_profile)` SHALL replace the signed-in `staff` caller's own name, phone, works, languages, other language and usual days. The payload SHALL have exactly the keys `name`, `phone`, `works`, `languages`, `otherLanguage` and `usualDays`, under the volunteer form's rules (capability `volunteer-roster`):
-- a name of 1 to 80 characters;
+- a name of 1 to 80 characters, after trimming spaces, tabs and line breaks;
 - a phone of at most 30 characters, or none;
 - works of On site, Remote, or On site and remote;
 - languages from English, Mandarin, Cantonese and Other, with Other named in at most 40 characters and a named language refused without Other;
@@ -106,7 +106,7 @@ The screen SHALL offer no way to change these. The text SHALL be English only.
 - **THEN** the email is shown and cannot be edited
 
 ### Requirement: My profile edits the volunteer's own details
-My profile SHALL offer name, phone, works, languages (with the other language's name) and usual days (Monday to Sunday checkboxes), filled in from the profile read, and a Save button that sends them with the read's revision. After a save lands, the screen SHALL read the profile again, and the window SHALL show the new name wherever it shows the signed-in person. A refused save SHALL keep the typed values and say why. A `CONFLICT` SHALL say someone else changed these details and re-read them. A save whose answer never came SHALL be sent again with the same action id when Save is pressed again with the same values.
+My profile SHALL offer name, phone, works, languages (with the other language's name) and usual days (Monday to Sunday checkboxes), filled in from the profile read, and a Save button that sends them with the revision the form was drawn from: the read when the screen opened, the answer of the last landed save, or the re-read after a `CONFLICT`. A refresh on focus, or the re-read after I've uploaded it, SHALL NOT change the revision Save sends. After a save lands, the screen SHALL read the profile again, and the window SHALL show the new name wherever it shows the signed-in person. A refused save SHALL keep the typed values and say why. A `CONFLICT` SHALL say someone else changed these details and re-read them. A save whose answer never came SHALL be sent again with the same action id when Save is pressed again with the same values.
 
 #### Scenario: Changing the name
 - **WHEN** a cleared Preparer changes their name on My profile and saves
@@ -115,6 +115,10 @@ My profile SHALL offer name, phone, works, languages (with the other language's 
 #### Scenario: A conflict
 - **WHEN** an admin saves an edit of a volunteer while the volunteer has My profile open, and the volunteer then saves
 - **THEN** My profile says someone else changed these details, and shows the admin's values
+
+#### Scenario: A conflict after a refresh
+- **WHEN** My profile is drawn at revision 6, an admin saves an edit of the volunteer (7), the page refreshes on focus, and the volunteer then saves
+- **THEN** the save is sent with revision 6 and refused with `CONFLICT`, the admin's edit stands, and My profile says someone else changed these details
 
 ### Requirement: My profile sends a new Form 13615
 My profile SHALL have a section "Passed a higher certification? Send your new Form 13615" that offers:

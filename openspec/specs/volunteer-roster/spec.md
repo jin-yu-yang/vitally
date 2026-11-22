@@ -205,7 +205,7 @@ Edit SHALL open the same drawer filled in with the volunteer's values, and savin
 
 ### Requirement: The volunteer form is validated
 A save SHALL require:
-- a name of 1 to 80 characters;
+- a name of 1 to 80 characters, after trimming spaces, tabs and line breaks;
 - a valid email of at most 254 characters, stored in lower case and unique in the workspace ignoring case;
 - one of On site, Remote or On site and remote. Works SHALL default to On site.
 
@@ -413,7 +413,7 @@ A person with no linked account and no capabilities SHALL be readable only by an
 - **THEN** that volunteer is not offered in the "Prepared by" or "Reviewed by" filter
 
 ### Requirement: An admin marks a sent document reviewed
-`vitally_mark_upload_reviewed(p_action_id, p_volunteer_id, p_expected_revision, p_document, p_reason)` SHALL clear the Form 13615 (`form13615`) or photo ID (`photoId`) sent date on the volunteer's current-season roster entry, and SHALL record on that entry the time of the call and the reason, trimmed, as that document's reviewed time and review reason. It SHALL be allowed for a workspace admin, cleared or not. Clearing a set date SHALL raise the volunteer's revision. When nothing is waiting, the call SHALL succeed and change nothing, the reason included. A repeated action id SHALL return the stored result. There SHALL be no form of the function without a reason.
+`vitally_mark_upload_reviewed(p_action_id, p_volunteer_id, p_expected_revision, p_document, p_reason)` SHALL clear the Form 13615 (`form13615`) or photo ID (`photoId`) sent date on the volunteer's current-season roster entry, and SHALL record on that entry the time of the call and the reason, trimmed of spaces, tabs and line breaks, as that document's reviewed time and review reason. It SHALL be allowed for a workspace admin, cleared or not. Clearing a set date SHALL raise the volunteer's revision. When nothing is waiting, the call SHALL succeed and change nothing, the reason included. A repeated action id SHALL return the stored result. There SHALL be no form of the function without a reason.
 
 #### Scenario: Mark reviewed on a Form 13615
 - **WHEN** a volunteer has marked their Form 13615 as sent, and an admin marks it reviewed with the reason "Not signed"
