@@ -386,6 +386,26 @@ export const RPC_SIGNATURES = Object.freeze([
       p_expected_revision: 1,
     }),
   }),
+  // One day of the schedule (design D3, D5, D6): a read that writes nothing,
+  // for an admin, so the answer carries the candidates.
+  Object.freeze({
+    name: "vitally_schedule_day",
+    signature: "vitally_schedule_day(date)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze([
+      "anyOpen",
+      "canEdit",
+      "canEditSettings",
+      "candidates",
+      "date",
+      "hours",
+      "settingsRevision",
+      "shifts",
+      "targets",
+      "weekday",
+    ]),
+    args: () => ({ p_date: "2027-02-06" }),
+  }),
   // Setting the site's SIDN (design D5): the answer says only that it is set.
   // The fixture's own number (TEST_SITE_NUMBER), so the site check elsewhere
   // keeps passing.

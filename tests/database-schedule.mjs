@@ -422,6 +422,240 @@ test("Volunteer schedule against real Supabase", async (t) => {
       }
     });
 
+    await t.test("the schedule day read, flags and counts", async () => {
+      const sc = f.siteCoordinator;
+      const { saturday } = await one(
+        f,
+        `select to_char(d,'YYYY-MM-DD') as saturday from (
+           select (now() at time zone 'America/New_York')::date + ((6 - extract(isodow from (now() at time zone 'America/New_York')::date)::int + 7) % 7 + 7) as d) x`,
+      );
+      const monday = (await one(f, "select to_char($1::date + 2,'YYYY-MM-DD') as d", [saturday])).d;
+      const personKey = async (key) =>
+        (await one(f, "select id from public.people where workspace_id=$1 and person_key=$2", [f.workspaceId, key])).id;
+      const day = (client, date = saturday) => rpc(client, "vitally_schedule_day", { p_date: date });
+      const refusedDay = async (client, label) => {
+        const { error } = await client.rpc("vitally_schedule_day", { p_date: saturday });
+        assert.equal(error?.code, "VT001", `${label}: ${error?.code} ${error?.message}`);
+      };
+      const settingsAt = async (siteHours) => {
+        const { revision } = await one(
+          f,
+          "select coalesce(max(revision),0)::int as revision from public.schedule_settings where workspace_id=$1",
+          [f.workspaceId],
+        );
+        return rpc(sc, "vitally_save_schedule_settings", {
+          p_action_id: randomUUID(),
+          p_expected_revision: revision,
+          p_settings: { siteHours, targets: { preparersNeeded: 2, reviewersNeeded: 1, onSiteNeeded: 1 } },
+        });
+      };
+      const addShift = (volunteerId, startHour, endHour, role) =>
+        rpc(sc, "vitally_save_shift", {
+          p_action_id: randomUUID(),
+          p_shift_id: null,
+          p_expected_revision: null,
+          p_shift: { volunteerId, date: saturday, startHour, endHour, role },
+        });
+      const byName = (answer, name) => answer.shifts.find((shift) => shift.name === name);
+      const setWorks = (personId, works) =>
+        f.sql(
+          `insert into public.volunteer_profiles(workspace_id,person_id,email,works)
+            values($1,$2,$3,$4)
+            on conflict (workspace_id,person_id) do update set works=excluded.works`,
+          [f.workspaceId, personId, `v-${randomUUID()}@example.org`, works],
+        );
+
+      const ada = await f.staff({ key: "ada_day_admin", name: "Ada Hartley", capabilities: ["admin"] });
+      const iris = await f.staff({ key: "iris_intaker", name: "Iris Calloway", capabilities: ["assist"] });
+      const ulla = await f.staff({ key: "ulla_uncleared", name: "Ulla Prewitt", capabilities: ["prepare"] });
+      const dana = await f.staff({ key: "dana_deactivated", name: "Dana Whitlock", capabilities: ["prepare"] });
+      const ned = await f.staff({ key: "ned_no_roles", name: "Ned Larkin", capabilities: ["prepare"] });
+      await f.sql("update public.roster_entries set roles='{}' where person_id=$1", [ned.personId]);
+      // Ulla is on the roster with an active account and a preparer's certificates, but is a new
+      // volunteer whose photo ID is unchecked, so she is not cleared.
+      await f.sql("update public.roster_entries set is_new=true,photo_id_checked_at=null where person_id=$1", [ulla.personId]);
+      await setWorks(iris.personId, "remote");
+      await setUsualDays(noSignInId, "{2,6}");
+      const averyId = await personKey("site_coordinator");
+      const shifts = {};
+      try {
+        await settingsAt({ 6: { open: 10, close: 17 } });
+        shifts.casey = await addShift(noSignInId, 10, 13, "greeter");
+        shifts.taylor = await addShift(f.preparerId, 10, 13, "preparer");
+        shifts.ulla = await addShift(ulla.personId, 11, 14, "preparer");
+        shifts.iris = await addShift(iris.personId, 10, 12, "intaker");
+        shifts.avery = await addShift(averyId, 12, 15, "admin");
+        shifts.late = await addShift(f.preparerId, 14, 17, "preparer");
+        await rpc(sc, "vitally_deactivate_account", {
+          p_action_id: randomUUID(),
+          p_volunteer_id: dana.personId,
+          p_expected_revision: (
+            await one(f, "select revision from public.accounts where workspace_id=$1 and person_id=$2", [
+              f.workspaceId,
+              dana.personId,
+            ])
+          ).revision,
+        });
+
+        // The admin answer.
+        const admin = await day(sc);
+        assert.equal(admin.date, saturday);
+        assert.equal(admin.weekday, 6);
+        assert.deepEqual(admin.hours, { open: 10, close: 17 });
+        assert.equal(admin.anyOpen, true);
+        assert.deepEqual(admin.targets, { preparersNeeded: 2, reviewersNeeded: 1, onSiteNeeded: 1 });
+        assert.equal(typeof admin.settingsRevision, "number");
+        assert.equal(admin.canEdit, true);
+        assert.equal(admin.canEditSettings, true);
+        assert.deepEqual(Object.keys(byName(admin, "Casey Morrow")).sort(), [
+          "counts", "endHour", "flags", "name", "revision", "role", "shiftId", "startHour", "volunteerId",
+        ]);
+        const names = admin.shifts.map((shift) => [shift.name, shift.startHour]);
+        assert.deepEqual(
+          names,
+          [...names].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] - b[1])),
+          "ordered by name, then start",
+        );
+        assert.equal(admin.shifts.length, 6);
+        assert.deepEqual(byName(admin, "Casey Morrow").flags, ["notCleared", "noSignIn"]);
+        assert.equal(byName(admin, "Casey Morrow").counts, null);
+        assert.deepEqual(byName(admin, "Taylor Brooks").flags, []);
+        assert.equal(byName(admin, "Taylor Brooks").counts, "preparer");
+        assert.deepEqual(byName(admin, "Ulla Prewitt").flags, ["notCleared"]);
+        assert.equal(byName(admin, "Ulla Prewitt").counts, null, "an uncleared preparer counts nowhere");
+        assert.equal(byName(admin, "Avery Lin").counts, null, "an Admin shift counts nowhere");
+        assert.deepEqual(byName(admin, "Avery Lin").flags, []);
+        assert.equal(byName(admin, "Iris Calloway").counts, null, "a remote Intaker counts nowhere");
+        await setWorks(iris.personId, "on_site_and_remote");
+        assert.equal(byName(await day(sc), "Iris Calloway").counts, "onSite");
+        await setWorks(iris.personId, "on_site");
+        assert.equal(byName(await day(sc), "Iris Calloway").counts, "onSite");
+
+        // A reviewer counts as reviewer.
+        const reviewerShift = await addShift(await personKey("reviewer"), 15, 16, "reviewer");
+        assert.equal(byName(await day(sc), "Jamie Ellis").counts, "reviewer");
+        await rpc(sc, "vitally_remove_shift", {
+          p_action_id: randomUUID(),
+          p_shift_id: reviewerShift.shiftId,
+          p_expected_revision: reviewerShift.revision,
+        });
+        assert.equal(byName(await day(sc), "Jamie Ellis"), undefined, "a removed shift is not listed");
+
+        // Candidates.
+        const candidateNames = admin.candidates.map((candidate) => candidate.name);
+        assert.ok(candidateNames.includes("Casey Morrow"), "a no-sign-in volunteer is a candidate");
+        assert.ok(!candidateNames.includes("Ned Larkin"), "no roles");
+        assert.ok(!candidateNames.includes("Dana Whitlock"), "deactivated");
+        assert.ok(!candidateNames.includes("Nora Quill"), "not on the roster");
+        assert.deepEqual(admin.candidates.find((candidate) => candidate.name === "Casey Morrow"), {
+          volunteerId: noSignInId,
+          name: "Casey Morrow",
+          roles: ["greeter"],
+          usualDays: [2, 6],
+          cleared: false,
+          works: "on_site",
+          signedIn: false,
+        });
+        const taylor = admin.candidates.find((candidate) => candidate.name === "Taylor Brooks");
+        assert.deepEqual([taylor.roles, taylor.usualDays, taylor.cleared, taylor.signedIn], [["preparer"], [], true, true]);
+        assert.equal(admin.candidates.find((candidate) => candidate.name === "Ulla Prewitt").cleared, false);
+
+        // Non-admins: names, roles and hours only, and no no-sign-in shifts.
+        const plain = await day(f.preparer);
+        assert.equal(plain.canEdit, false);
+        assert.equal(plain.canEditSettings, false);
+        assert.equal("candidates" in plain, false);
+        assert.equal(byName(plain, "Casey Morrow"), undefined, "no-sign-in shift hidden");
+        assert.equal(plain.shifts.length, 5);
+        for (const shift of plain.shifts)
+          assert.deepEqual(Object.keys(shift).sort(), ["endHour", "name", "revision", "role", "shiftId", "startHour", "volunteerId"]);
+        assert.deepEqual(plain.hours, admin.hours);
+
+        // M1.5: an uncleared rostered volunteer with an active account is a viewer.
+        const fromUlla = await day(ulla.client);
+        assert.equal(fromUlla.shifts.length, 5);
+        const own = byName(fromUlla, "Ulla Prewitt");
+        assert.deepEqual([own.role, own.startHour, own.endHour], ["preparer", 11, 14]);
+
+        // M1.4: an Admin who is not a site coordinator reads the no-sign-in shift, by RPC and directly.
+        const fromAda = await day(ada.client);
+        assert.equal(fromAda.canEdit, true);
+        assert.equal(fromAda.canEditSettings, false);
+        assert.deepEqual(byName(fromAda, "Casey Morrow").flags, ["notCleared", "noSignIn"]);
+        const { data: direct, error: directError } = await ada.client
+          .from("shifts")
+          .select("id")
+          .eq("id", shifts.casey.shiftId);
+        assert.equal(directError, null);
+        assert.equal(direct.length, 1);
+
+        // Refusals.
+        await refusedDay(f.applicantA, "a client");
+        await refusedDay(nora.client, "no roster entry");
+        await refusedDay(dana.client, "a deactivated account");
+
+        // Hours shrink: 14-17 falls outside 10-15, and so no longer counts.
+        await settingsAt({ 6: { open: 10, close: 15 } });
+        const shrunk = await day(sc);
+        const taylorShifts = shrunk.shifts.filter((shift) => shift.name === "Taylor Brooks");
+        assert.deepEqual(
+          taylorShifts.map((shift) => [shift.startHour, shift.flags, shift.counts]),
+          [
+            [10, [], "preparer"],
+            [14, ["outsideSiteHours"], null],
+          ],
+        );
+        // A closed weekday: the shift stays, flagged.
+        await settingsAt({ 2: { open: 10, close: 15 } });
+        const closed = await day(sc);
+        assert.equal(closed.hours, null);
+        assert.equal(closed.anyOpen, true);
+        assert.deepEqual(byName(closed, "Avery Lin").flags, ["outsideSiteHours"]);
+        assert.equal(byName(closed, "Avery Lin").counts, null);
+
+        // Role removed: through the Roster save, the shift is flagged and counts nowhere.
+        await settingsAt({ 6: { open: 10, close: 17 } });
+        const profile = await one(
+          f,
+          "select email,revision::int as revision from public.volunteer_profiles where person_id=$1",
+          [iris.personId],
+        );
+        await rpc(sc, "vitally_save_volunteer", {
+          p_action_id: randomUUID(),
+          p_volunteer_id: iris.personId,
+          p_expected_revision: profile.revision,
+          p_volunteer: {
+            name: "Iris Calloway",
+            email: profile.email,
+            phone: null,
+            works: "on_site",
+            languages: ["english"],
+            otherLanguage: null,
+            roles: ["greeter"],
+            certificates: ["vsc", "itqr"],
+            isNew: false,
+            photoIdChecked: false,
+          },
+        });
+        const removedRole = byName(await day(sc), "Iris Calloway");
+        assert.deepEqual(removedRole.flags, ["roleRemoved"]);
+        assert.equal(removedRole.counts, null);
+
+        // No site hours saved: hours null, anyOpen false.
+        await f.sql("delete from public.shifts where workspace_id=$1", [f.workspaceId]);
+        await f.sql("delete from public.schedule_settings where workspace_id=$1", [f.workspaceId]);
+        const empty = await day(sc, monday);
+        assert.equal(empty.hours, null);
+        assert.equal(empty.anyOpen, false);
+        assert.deepEqual(empty.shifts, []);
+        assert.equal(empty.settingsRevision, 0);
+      } finally {
+        await f.sql("delete from public.shifts where workspace_id=$1", [f.workspaceId]);
+        await f.sql("delete from public.schedule_settings where workspace_id=$1", [f.workspaceId]);
+        await setUsualDays(noSignInId, "{}");
+      }
+    });
+
     await t.test("published", async () => {
       const { rows } = await f.sql(
         "select tablename from pg_publication_tables where pubname='supabase_realtime' and schemaname='public'",

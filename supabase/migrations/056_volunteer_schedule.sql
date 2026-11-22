@@ -11,7 +11,9 @@
 --      later sections are the only writers;
 --   §3 realtime (design D10): both tables join the publication;
 --   §4 the site hours and targets save, and the Season settings read;
---   §5 saving and removing shifts (design D2, D4).
+--   §5 saving and removing shifts (design D2, D4);
+--   §6 the schedule day read, with the flags and coverage counts for admins
+--      (design D3, D5, D6).
 -- Later sections add the other RPCs, the seed and the Workload read.
 -- Nothing existing changes except volunteer_profiles gaining one column and
 -- the publication.
@@ -529,3 +531,114 @@ end;
 $$;
 revoke all on function public.vitally_remove_shift(uuid,uuid,bigint) from public,anon,authenticated,service_role;
 grant execute on function public.vitally_remove_shift(uuid,uuid,bigint) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- §6. The schedule day read (design D3, D5, D6).
+
+-- Why a shift may not count, for admins: notCleared (the volunteer is not
+-- cleared), noSignIn (the person has no sign-in), roleRemoved (the role is no
+-- longer on the current-season roster entry) and outsideSiteHours (the weekday
+-- is closed, or the shift starts before opening or ends after closing), in that
+-- order.
+create function vitally_private.shift_flags(p_workspace_id uuid,p_shift public.shifts)
+returns text[] language sql stable security definer set search_path='' as $$
+ select array_remove(array[
+  case when not vitally_private.cleared(p_workspace_id,p_shift.person_id) then 'notCleared' end,
+  case when exists(select 1 from public.people p
+    where p.workspace_id=p_workspace_id and p.id=p_shift.person_id and p.user_id is null) then 'noSignIn' end,
+  case when not exists(select 1 from public.workspaces w
+    join public.roster_entries r on r.workspace_id=w.id and r.season=w.current_season
+    where w.id=p_workspace_id and r.person_id=p_shift.person_id and p_shift.role=any(r.roles)) then 'roleRemoved' end,
+  case when not coalesce((select (h.hours->>'open')::int<=p_shift.start_hour and p_shift.end_hour<=(h.hours->>'close')::int
+    from (select s.site_hours->(extract(isodow from p_shift.shift_date)::int)::text as hours
+     from public.schedule_settings s where s.workspace_id=p_workspace_id) h
+    where h.hours is not null),false) then 'outsideSiteHours' end
+ ],null);
+$$;
+revoke all on function vitally_private.shift_flags(uuid,public.shifts) from public,anon,authenticated,service_role;
+
+-- What a shift counts toward (design D6): null unless the volunteer is cleared
+-- and the shift is neither roleRemoved nor outsideSiteHours; then preparer for
+-- a preparer, reviewer for a reviewer, and onSite for a greeter or intaker who
+-- works on site (on_site or on_site_and_remote). An admin shift counts nowhere.
+create function vitally_private.shift_counts(p_workspace_id uuid,p_shift public.shifts)
+returns text language sql stable security definer set search_path='' as $$
+ select case
+  when 'notCleared'=any(f.flags) or 'roleRemoved'=any(f.flags) or 'outsideSiteHours'=any(f.flags) then null
+  when p_shift.role='preparer' then 'preparer'
+  when p_shift.role='reviewer' then 'reviewer'
+  when p_shift.role in ('greeter','intaker') and exists(select 1 from public.volunteer_profiles v
+    where v.workspace_id=p_workspace_id and v.person_id=p_shift.person_id
+     and v.works in ('on_site','on_site_and_remote')) then 'onSite'
+ end
+ from (select vitally_private.shift_flags(p_workspace_id,p_shift) as flags) f;
+$$;
+revoke all on function vitally_private.shift_counts(uuid,public.shifts) from public,anon,authenticated,service_role;
+
+-- One day of the schedule for a schedule viewer (a workspace admin or anyone on
+-- the current roster with an active staff account); FORBIDDEN otherwise,
+-- clients included. Answers {date, weekday, hours (null when closed),
+-- anyOpen (some weekday has hours), targets, settingsRevision, canEdit (a
+-- workspace admin), canEditSettings (a site coordinator), shifts}, the live
+-- current-season shifts of the day by name then start. A non-admin gets names,
+-- roles and hours only, and not the shifts of people with no sign-in. A
+-- workspace admin also gets, on each shift, flags and counts, and the
+-- candidates for Add shift: current-season roster people with a role and an
+-- account that is not deactivated.
+create function public.vitally_schedule_day(p_date date)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_workspace public.workspaces;
+ v_admin boolean;
+ v_settings jsonb;
+ v_result jsonb;
+begin
+ v_member=vitally_private.require_membership();
+ v_person=vitally_private.acting_person(v_member);
+ if v_member.access<>'staff' or v_person.id is null
+  or not vitally_policy.is_schedule_viewer(v_member.workspace_id) then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ if p_date is null then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ select * into v_workspace from public.workspaces where id=v_member.workspace_id;
+ v_admin=vitally_policy.is_workspace_admin(v_member.workspace_id);
+ v_settings=vitally_private.schedule_settings_answer(v_member.workspace_id);
+ v_result=jsonb_build_object('date',to_char(p_date,'YYYY-MM-DD'),'weekday',extract(isodow from p_date)::int,
+  'hours',v_settings->'siteHours'->(extract(isodow from p_date)::int)::text,
+  'anyOpen',v_settings->'siteHours'<>'{}'::jsonb,'targets',v_settings->'targets',
+  'settingsRevision',v_settings->'revision','canEdit',v_admin,
+  'canEditSettings',vitally_private.is_site_coordinator(v_member.workspace_id,v_person.id),
+  'shifts',coalesce((select jsonb_agg(
+    jsonb_build_object('shiftId',s.id,'revision',s.revision,'volunteerId',s.person_id,'name',p.name,
+     'role',s.role,'startHour',s.start_hour,'endHour',s.end_hour)
+    || case when v_admin then jsonb_build_object(
+     'flags',to_jsonb(vitally_private.shift_flags(v_member.workspace_id,s)),
+     'counts',to_jsonb(vitally_private.shift_counts(v_member.workspace_id,s))) else '{}'::jsonb end
+    order by p.name,s.start_hour,s.id)
+   from public.shifts s
+   join public.people p on p.workspace_id=s.workspace_id and p.id=s.person_id
+   where s.workspace_id=v_member.workspace_id and s.season=v_workspace.current_season
+    and s.shift_date=p_date and s.removed_at is null
+    and (v_admin or p.user_id is not null)),'[]'::jsonb));
+ if v_admin then
+  v_result=v_result||jsonb_build_object('candidates',coalesce((select jsonb_agg(jsonb_build_object(
+    'volunteerId',p.id,'name',p.name,'roles',to_jsonb(r.roles),
+    'usualDays',to_jsonb(coalesce(v.usual_days,'{}'::smallint[])),
+    'cleared',vitally_private.cleared(v_member.workspace_id,p.id),'works',v.works,
+    'signedIn',p.user_id is not null) order by p.name,p.id)
+   from public.roster_entries r
+   join public.people p on p.workspace_id=r.workspace_id and p.id=r.person_id
+   left join public.volunteer_profiles v on v.workspace_id=p.workspace_id and v.person_id=p.id
+   where r.workspace_id=v_member.workspace_id and r.season=v_workspace.current_season
+    and cardinality(r.roles)>0
+    and not exists(select 1 from public.accounts a
+     where a.workspace_id=p.workspace_id and a.person_id=p.id and a.status='deactivated')),'[]'::jsonb));
+ end if;
+ return v_result;
+end;
+$$;
+revoke all on function public.vitally_schedule_day(date) from public,anon,authenticated,service_role;
+grant execute on function public.vitally_schedule_day(date) to authenticated;
