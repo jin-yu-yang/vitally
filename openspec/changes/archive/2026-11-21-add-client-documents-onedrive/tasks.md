@@ -1,13 +1,13 @@
 ## 1. Database migration
 
 - [x] 1.1 Create the OneDrive client document migration.
-- [x] 1.2 Rename the migration to `055_onedrive_client_documents.sql` to avoid conflicts with migrations 053 and 054.
+- [x] 1.2 Rename the migration to `056_onedrive_client_documents.sql` to avoid conflicts with migrations 053 to 055.
 - [x] 1.3 Preserve migration 054's `RETURN_TO_SIGNING` payload validation.
 - [x] 1.4 Add the applicant-safe `vitally_client_documents_link()` RPC.
 - [x] 1.5 Remove the RPC's STABLE declaration to avoid read-only transaction errors.
 - [x] 1.6 Extend document-card statuses to support sent, received, and verified.
 - [x] 1.7 Restrict client actions so they cannot confirm or undo staff-verified documents.
-- [ ] 1.8 Run migration 055 against a fresh database containing migrations 053 and 054.
+- [ ] 1.8 Run migration 056 against a fresh database containing migrations 053 to 055.
 
 ## 2. Client document workflow
 

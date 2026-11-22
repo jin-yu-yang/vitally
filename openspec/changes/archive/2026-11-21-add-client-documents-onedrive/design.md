@@ -4,7 +4,7 @@ PCDC clients must send their tax documents through PCDC's OneDrive file request 
 
 Migration 052 introduced Season settings, including the client documents upload URL. The existing intake workflow already contains document cards and document requests, but it needs a way to direct clients to OneDrive and distinguish a client's upload report from staff-confirmed receipt.
 
-Migration 053 adds volunteer clearance uploads, while migration 054 changes Return to signing behavior. This change therefore uses migration 055 and must preserve both earlier migrations.
+Migration 053 adds volunteer clearance uploads, while migration 054 changes Return to signing behavior. This change therefore uses migration 056 and must preserve both earlier migrations.
 
 ## Goals / Non-Goals
 
@@ -92,17 +92,17 @@ A client cannot report a document-card OneDrive upload unless a valid client doc
 
 ### D7: Preserve existing database behavior
 
-Migration 055 extends the document workflow without removing unrelated functionality.
+Migration 056 extends the document workflow without removing unrelated functionality.
 
 The `check_payload` definition must preserve migration 054's separate `RETURN_TO_SIGNING` validation, including corrected Exit Form values and optional remarks.
 
-Migration 055 must not replace that validation with an older shared confirmation-only branch.
+Migration 056 must not replace that validation with an older shared confirmation-only branch.
 
 Migration execution order is:
 
 1. 053_clearance_uploads.sql
 2. 054_return_to_signing_exit_forms.sql
-3. 055_onedrive_client_documents.sql
+3. 056_onedrive_client_documents.sql
 
 ### D8: Keep the interface and translations consistent
 
@@ -145,13 +145,13 @@ Mitigation: Use the configured external file request and provide PCDC contact in
 
 Overwriting shared SQL functions may accidentally remove behavior introduced by earlier migrations.
 
-Mitigation: Build migration 055 on top of migration 054, preserve unrelated action validation, and run database regression tests.
+Mitigation: Build migration 056 on top of migration 054, preserve unrelated action validation, and run database regression tests.
 
 ## Migration Plan
 
-1. Apply migrations 053 and 054 before 055.
-2. Apply migration 055 to the test database.
+1. Apply migrations 053 to 055 before 056.
+2. Apply migration 056 to the test database.
 3. Run database and RPC authorization tests.
 4. Run browser and sign-in integration tests.
 5. Confirm that the new workflow does not store taxpayer document binaries.
-6. Deploy migration 055 through the project's existing migration process after review and merge.
+6. Deploy migration 056 through the project's existing migration process after review and merge.

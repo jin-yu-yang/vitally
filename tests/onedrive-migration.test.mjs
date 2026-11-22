@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-const sql = readFileSync(new URL("../supabase/migrations/055_onedrive_client_documents.sql", import.meta.url), "utf8");
+const sql = readFileSync(new URL("../supabase/migrations/056_onedrive_client_documents.sql", import.meta.url), "utf8");
 test("OneDrive link is applicant scoped and does not return the certificate link", () => {
   const fn = sql.slice(sql.indexOf("create or replace function public.vitally_client_documents_link()"),sql.indexOf("revoke all on function public.vitally_client_documents_link()"));
   assert.match(fn, /require_membership\(\)/);

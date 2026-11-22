@@ -122,7 +122,7 @@ sign-in (`sendCode`, `verifyCode`, `editAuthEmail`, `editAuthCode`, `restartSign
 **`staffWindow()`** is everything a staff screen does (its reads, its eligibility rules and its
 actions), true only for a `staff` account (`isStaffWindow` in [`src/contracts.mjs`](../../src/contracts.mjs)
 says the same for the views). The person acting is always the account's own `principal.personId`; a
-client sends none. None of the thirty-one RPCs takes the acting person, so the browser never claims an identity (`vitally_save_volunteer` takes a volunteer's person id, but as the record to change, not as who is acting); the
+client sends none. None of the thirty-two RPCs takes the acting person, so the browser never claims an identity (`vitally_save_volunteer` takes a volunteer's person id, but as the record to change, not as who is acting); the
 database resolves it ([Database: who is acting](database.md#who-is-acting)). An account with any
 other access (a former presenter) gets the "This account has no access" screen and nothing is
 loaded for it.
@@ -1159,5 +1159,5 @@ its existing `VERIFY_DOCUMENT` action. If there is no configured URL, the
 client is told to bring documents to PCDC and no upload control appears. The
 application never reads OneDrive or checks whether a file arrived.
 
-Migration `055_onedrive_client_documents.sql` adds an applicant-safe URL read
+Migration `056_onedrive_client_documents.sql` adds an applicant-safe URL read
 RPC and expands card statuses; *clients cannot set* `received` or `verified`.

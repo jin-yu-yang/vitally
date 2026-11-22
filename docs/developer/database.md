@@ -25,7 +25,7 @@ it. Run everything described here against the local stack from [`docs/setup.md`]
 
 ## Migrations
 
-The schema is fifty-five plain SQL files (001 to 055) in [`supabase/migrations/`](../../supabase/migrations/), applied
+The schema is fifty-six plain SQL files (001 to 056) in [`supabase/migrations/`](../../supabase/migrations/), applied
 in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 
 | File | Adds |
@@ -85,6 +85,7 @@ in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 | `053_clearance_uploads.sql` | Hand-written: clearance uploads (change `add-clearance-uploads`; [below](#clearance-uploads)). `roster_entries.form_13615_sent_at` and `photo_id_sent_at`; the RPCs `vitally_mark_upload_sent` and `vitally_mark_upload_reviewed` (receipts `MARK_UPLOAD_SENT` and `MARK_UPLOAD_REVIEWED`); `vitally_save_volunteer` re-created from 052 to clear the sent dates when it acts on them; `vitally_my_clearance` re-created from 052 with `sentAt`, `uploadUrl` and empty `capabilities` when not cleared. No backfill: existing rows start null |
 | `054_return_to_signing_exit_forms.sql` | Hand-written: the staff-only `return_to_signing_exit_forms` table (the corrected Exit Form values entered at Return to signing; select for cleared staff only, no write grant for a browser role, no grant at all for `service_role`, as on 049's and 051's tables); `check_payload` accepts optional `exitForm` and `remarks` on `RETURN_TO_SIGNING`; `act_return_to_signing` stores them and puts `exitFormId` in the event's detail. `apply_fixture_scenario` is not touched: 040 dropped it |
 | `055_start_next_season.sql` | Hand-written: Start next season (change `add-start-next-season`; [below](#start-next-season)). `lock_case` and `vitally_assistance_action` refuse a write to a past-season case (`VT004` `INVALID_TRANSITION`, detail `PAST_SEASON`); `open_work` counts only current-season cases; drops `vitally_private.capabilities_before_052`; the table `season_starts`; the RPC `vitally_start_next_season` |
+| `056_onedrive_client_documents.sql` | Hand-written: client documents through the OneDrive link (change `add-client-documents-onedrive`, #157). The RPC `vitally_client_documents_link` returns only the workspace's client documents upload link to a signed-in member (never the certificate / photo ID link); a client may report a document as sent only when that link is set, and only staff can mark it received or verified; `check_payload`, `receive_document`, `act_respond_document`, `act_set_document_card` and `act_record_document_response` re-created from their latest definitions |
 **Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
 never edit an applied one.** The build writes a file only when the hash differs from the newest
 catalogue migration's. The hash covers the catalogue and `LOADER_VERSION` in
@@ -130,7 +131,8 @@ do not copy them from older files:
 | Function | Current definition |
 | --- | --- |
 | `vitally_private.return_outcome`, `closed_line`, `act_close_case`, `public.vitally_close_unsigned` | `048_closed_lines_after_filing.sql` |
-| `vitally_private.check_payload`, `check_operation_authority`, `act_assign_case`, and the RPC `public.vitally_apply_action` | `046_volunteer_workload.sql` |
+| `vitally_private.check_operation_authority`, `act_assign_case`, and the RPC `public.vitally_apply_action` | `046_volunteer_workload.sql` |
+| `vitally_private.check_payload`, `receive_document`, `act_respond_document`, `act_set_document_card`, `act_record_document_response`, and the RPC `public.vitally_client_documents_link` | `056_onedrive_client_documents.sql` |
 | `vitally_private.household_rows`, `act_save_preparer_fields` | `050_hidden_household_rows.sql` |
 | `vitally_private.check_preparer_fields` | `039_preparer_shaded_fields.sql` |
 | `vitally_private.lock_case`, `open_work`, and the RPCs `public.vitally_assistance_action`, `vitally_start_next_season` | `055_start_next_season.sql` |
@@ -142,7 +144,7 @@ do not copy them from older files:
 | `vitally_private.lock_assistance_item`, `initialize_workspace` | `043_remove_presenter_access.sql` |
 | `vitally_private.check_staff_links`, `set_default_followup` | `038_staff_identity.sql` |
 | `vitally_private.filing_notes_append_only`, `reserve_receipt` | `040_remove_sample_case_tools.sql` |
-| `vitally_private.check_authority`, `receive_document`, `act_verify_document` | `036_hold_and_closing.sql` |
+| `vitally_private.check_authority`, `act_verify_document` | `036_hold_and_closing.sql` |
 | `vitally_private.act_verify_intake` | `034_screening_checks.sql` |
 | `vitally_private.act_submit_review`, `act_resubmit_review`, `act_approve_review` | `033_review_questionnaires.sql` |
 | `vitally_private.act_resolve_followup` | `041_resolve_go_over_during_hold.sql` |
@@ -170,7 +172,7 @@ grep -n -E "^create (or replace )?function" supabase/migrations/*.sql
 
 Two schemas:
 
-- **`public`**: the application tables and the thirty-one browser-callable functions.
+- **`public`**: the application tables and the thirty-two browser-callable functions.
 - **`vitally_private`**: helper functions, the migration ledger, and tables browsers must never
   reach. Every function here is `SECURITY DEFINER` with `search_path=''`, and `EXECUTE` is revoked
   from every role, including `service_role`.
@@ -302,7 +304,7 @@ policy and `vitally_private.lock_case` (which applies the same rule to writes) i
 
 ## The action API
 
-Browsers can call exactly thirty-one functions. Each runs as its owner (`SECURITY DEFINER`), checks the
+Browsers can call exactly thirty-two functions. Each runs as its owner (`SECURITY DEFINER`), checks the
 caller itself, and returns a JSON receipt. The table below lists the case, Roster, clearance, update and label
 functions. The account functions (047, [migrations](#migrations)) and Season settings' four
 (`vitally_season_settings`, `vitally_save_season_settings`, `vitally_set_site_coordinator`,

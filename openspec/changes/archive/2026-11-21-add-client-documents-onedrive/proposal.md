@@ -33,7 +33,7 @@ ViTally should help clients find the correct upload link and track the progress 
 
 ## Impact
 
-- **Database:** Migration `055_onedrive_client_documents.sql` adds the client-link RPC and adjusts document status and action handling. It builds on migrations 053 and 054 without removing their functionality.
+- **Database:** Migration `056_onedrive_client_documents.sql` adds the client-link RPC and adjusts document status and action handling. It builds on migrations 053 and 054 without removing their functionality.
 
 - **Frontend:** Client document cards and document requests use the OneDrive link and show the appropriate confirmation and verification states.
 
@@ -43,6 +43,6 @@ ViTally should help clients find the correct upload link and track the progress 
 
 - **Documentation:** Developer documentation explains the OneDrive workflow, RPC permissions, document statuses, and deployment requirements.
 
-- **Deployment:** Migration 055 must be applied after migrations 053 and 054.
+- **Deployment:** Migration 056 must be applied after migrations 053 to 055.
 
 - **Issue:** Closes #157.
