@@ -22,7 +22,7 @@ export async function initializeWorkspace(
     siteNumber = null,
     target = { kind: "test" },
   },
-  { afterInitialize } = {},
+  { afterInitialize, beforeDefaultFollowup } = {},
 ) {
   const client = await openDatabase(target);
   try {
@@ -42,11 +42,27 @@ export async function initializeWorkspace(
           member.userId,
         );
         if (link) linked.push({ personKey: member.personKey, nameDiffers: link.name !== member.name });
-        await connection.query(
-          "select vitally_private.add_staff_member($1,$2,$3,$4,$5::text[])",
-          [workspaceId, member.userId, member.personKey, member.name, member.capabilities],
-        );
+        // No capabilities: they are the mirror of the person's roles (migration
+        // 052), so a `capabilities` field on an entry is ignored.
+        await connection.query("select vitally_private.add_staff_member($1,$2,$3,$4)", [
+          workspaceId,
+          member.userId,
+          member.personKey,
+          member.name,
+        ]);
+        // A site coordinator (design D4, D9): granted in the same transaction,
+        // before the default follow-up person is set.
+        if (member.siteCoordinator === true)
+          await connection.query("select vitally_private.grant_site_coordinator($1,$2)", [
+            workspaceId,
+            member.userId,
+          ]);
       }
+      // Trusted tooling hook, like afterInitialize below: SQL-only, in the same
+      // transaction, after the staff are added and before the default
+      // follow-up person is checked (which reads their capabilities, now the
+      // mirror of their roles, migration 052).
+      if (beforeDefaultFollowup) await beforeDefaultFollowup(connection, result);
       if (defaultFollowup)
         await connection.query("select vitally_private.set_default_followup($1,$2)", [
           workspaceId,

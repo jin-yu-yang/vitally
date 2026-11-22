@@ -16,6 +16,7 @@ import { decorateStaffCase, renderStaffCase } from "../src/staff-views.mjs";
 import { makeSampleAnswers } from "../src/sample-data.mjs";
 import { CONTACT_FIELDS } from "../src/intake-catalogue.mjs";
 import { staffScreen, dialog } from "../src/views.mjs";
+import { DIALOG_CAPABILITY } from "../src/role-gates.mjs";
 import { payloadFor } from "../src/case-actions.mjs";
 import { describeStage } from "../src/domain.mjs";
 import { nowInput } from "../src/contact-log.mjs";
@@ -463,11 +464,12 @@ test("the office records a document only for a client with no account", () => {
     html,
     /data-case-action="RECORD_DOCUMENT_RESPONSE" data-request-id="req-1"/,
   );
-  assert.match(html, /Record sample document received/);
+  assert.match(html, /Record document received/);
   assert.match(html, /staff-recorded/);
   assert.match(html, /awaiting preparer verification/);
   assert.match(html, /taking delivery is not verifying, and it never changes the preparer/);
-  assert.match(html, /demo-mileage-record-2025\.pdf/);
+  assert.doesNotMatch(html, /demo-mileage-record-2025\.pdf/);
+  assert.match(html, /No document bytes are stored in ViTally/);
 
   // A client who has their own account sends it themselves.
   const owned = renderAdminCase(
@@ -1647,4 +1649,181 @@ test("the office's Exit Form panel after Return to signing carries the note", ()
     note[1],
   );
   assert.doesNotMatch(html, /filled from the reviewer's answers/);
+});
+
+test("the office's Exit Form panel after Return to signing with stored values says so", () => {
+  const exitForm = { federal: { method: "efile", result: "refund", amount: "10.00", refundBy: "check" }, state: null, local: [] };
+  const returned = officeCase({
+    stage: "review_approved",
+    preparationVersion: 1,
+    reviewerId: "morgan",
+    reviews: [{ id: "review-1", preparationVersion: 1, status: "approved", reviewerId: "morgan", decidedAt: "2026-10-17T15:00:00.000Z" }],
+    reviewerQuestionnaires: [{ id: "rq-1", reviewId: "review-1", exitForm: { federal: null, state: null, local: [] } }],
+    federalMethod: "efile",
+    stateMethod: null,
+    federalResult: "rejected",
+    stateResult: null,
+    returnToSigningExitForms: [{ id: "x1", exitForm, remarks: "Fixed" }],
+    internalHistory: [{ id: "e1", action: "RETURN_TO_SIGNING", actorPersonId: "sam", createdAt: "2026-11-02T15:00:00.000Z", detail: { exitFormId: "x1" } }],
+  });
+  const html = renderAdminCase(returned, { person: SAM });
+  const note = /data-role="exit-form-corrected">([^<]*)</.exec(html);
+  assert.ok(note, "the note renders");
+  assert.ok(note[1].includes("filled from the corrected values recorded on November 2, 2026."), note[1]);
+  assert.doesNotMatch(note[1], /Fill in by hand/);
+  assert.doesNotMatch(html, /filled from the reviewer's answers/);
+});
+
+test("a close dialog for someone who lost admin keeps the reason and drops the submit (#190)", () => {
+  const state = {
+    dialog: "close-case",
+    savedCase: officeCase(),
+    principal: { access: "staff", personId: "p-lee" },
+    people: [{ id: "p-lee", name: "Lee", capabilities: ["prepare"] }],
+  };
+  const html = closeCaseDialogBody(state);
+  assert.doesNotMatch(html, /CLOSE_CASE/);
+  assert.match(html, /Your roles changed, so you can&#39;t send this any more\./);
+  assert.match(html, /Why the office is closing this case/);
+  assert.match(html, /Keep it open/);
+  assert.match(closeCaseDialogBody({ ...state, people: [{ id: "p-lee", name: "Lee", capabilities: ["admin"] }] }), /CLOSE_CASE/);
+});
+
+test("a volunteer with no capabilities still sees the drawer's Save (#190)", () => {
+  const html = dialog({
+    dialog: "volunteer",
+    principal: { access: "staff", personId: "p-lee" },
+    people: [{ id: "p-lee", name: "Lee", capabilities: [] }],
+    volunteers: [],
+    dialogContext: {},
+  });
+  assert.match(html, /Add a volunteer/);
+  assert.match(html, /type="submit"/);
+  assert.doesNotMatch(html, /roles changed/);
+});
+
+test("Add a case stays for a staff person who lost admin, with its writes dropped (#190)", () => {
+  const html = staffScreen({
+    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "alex", clearance: cleared({ isAdmin: false }) },
+    people: PEOPLE,
+    cases: [],
+    assistance: [],
+    savedCase: null,
+    screen: "office-add-case",
+    officeDraft: {},
+    draftAnswers: { tp_first_name: "Lena" },
+    openPanels: [],
+    busy: false,
+    error: null,
+    retryable: false,
+  });
+  assert.match(html, /add-case-v2/);
+  assert.match(html, /id="add-case-cancel"/);
+  assert.doesNotMatch(html, /save-office-draft|send-office-draft/);
+  // They no longer have Follow-ups: the way back is the work board, and nothing is left to confirm.
+  assert.match(html, /Back to the work board/);
+  assert.doesNotMatch(html, /Back to Follow-ups|OFFICE · ADD A CASE/);
+  assert.doesNotMatch(html, /field-confirmed|I have checked these answers/);
+  assert.match(html, /Your roles changed, so you can&#39;t send this any more\./);
+});
+
+// Every capability dialog, through dialog(): the locked flag reaches each body (#190).
+const LINE = /Your roles changed, so you can&#39;t send this any more\./;
+const dialogState = (key, capabilities) => {
+  const record = officeCase({
+    id: "c1",
+    followups: [{ id: "f1", status: "open", reason: "Ask for the missing W-2", assigneeId: "p-lee", assigneeName: "Lee" }],
+  });
+  return {
+    dialog: key,
+    principal: { access: "staff", personId: "p-lee" },
+    people: [{ id: "p-lee", name: "Lee", capabilities }],
+    savedCase: record,
+    cases: [record],
+    volunteers: [],
+    assistance: [
+      { id: "h1", title: "Help reading a letter", status: "assigned", assigneeId: "p-lee", language: "English", contactPreference: "Phone" },
+    ],
+    dialogContext: { caseId: "c1", itemId: "h1", slot: "preparer" },
+    busy: false,
+    error: null,
+    retryable: false,
+  };
+};
+
+for (const [key, needed] of Object.entries(DIALOG_CAPABILITY)) {
+  test(`the ${key} dialog drops its submit without ${needed}, and keeps it with ${needed} (#190)`, () => {
+    const other = ["admin", "followup", "assist", "review"].find((cap) => cap !== needed);
+    assert.match(dialog(dialogState(key, [other])), LINE);
+    assert.doesNotMatch(dialog(dialogState(key, [needed])), LINE);
+  });
+}
+
+test("Return to signing dialog: groups for the case's returns, settled method fixed", () => {
+  const html = returnToSigningDialogBody({
+    savedCase: { reference: "VT-AAAA-BBBB", federalMethod: "efile", federalResult: "rejected", stateMethod: "efile", stateResult: "accepted" },
+  });
+  assert.match(html, /Optional: the corrected Exit Form values\. Leave a part empty to fill it in by hand\./);
+  assert.match(html, /data-exit-group="federal"/);
+  assert.match(html, /name="federal\.method" value="paper"/);
+  assert.match(html, /data-exit-group="state"/);
+  assert.match(html, /<input type="hidden" name="state\.fixedMethod" value="efile">/);
+  assert.doesNotMatch(html, /type="radio"[^>]*name="state\.method"/);
+  assert.match(html, /How it was filed: E-file/);
+  for (const type of ["NPT", "BIRT", "EET", "SIT", "PAIBWTR"]) assert.match(html, new RegExp(`data-exit-group="local\\.${type}"`));
+  assert.match(html, /<textarea[^>]*name="remarks"/);
+  assert.doesNotMatch(html, /<details[^>]*\bopen\b/);
+  assert.match(html, /<span>The fix is done\.<\/span>/);
+});
+
+test("Return to signing dialog: no State group without a state method", () => {
+  const html = returnToSigningDialogBody({ savedCase: { federalMethod: "efile", federalResult: "rejected", stateMethod: null } });
+  assert.doesNotMatch(html, /data-exit-group="state"/);
+  assert.match(html, /data-exit-group="federal"/);
+});
+
+
+// Mark e-filed starts on the method planned at Return to signing (#203).
+const plannedCase = (over = {}, groups = {}) =>
+  officeCase({
+    stage: "review_approved",
+    ...BOTH_EFILED,
+    federalResult: "accepted",
+    stateResult: "rejected",
+    returnToSigningExitForms: [{ id: "x1", exitForm: { federal: null, state: null, local: [], ...groups }, remarks: "Fixed", createdAt: "2026-11-02T15:00:00.000Z" }],
+    internalHistory: [{ id: "e1", action: "RETURN_TO_SIGNING", actorPersonId: "sam", createdAt: "2026-11-02T15:00:00.000Z", detail: { exitFormId: "x1" } }],
+    ...over,
+  });
+const checkedRadios = (html) => [...html.matchAll(/<input[^>]*type="radio"[^>]*>/g)].map((m) => m[0]).filter((t) => /\schecked/.test(t));
+
+test("the planned paper method is preselected", () => {
+  const html = markEfiledDialogBody({ savedCase: plannedCase({}, { state: { method: "paper" } }) });
+  const checked = checkedRadios(html);
+  assert.equal(checked.length, 1);
+  assert.match(checked[0], /name="method-state"[^>]*value="paper"/);
+});
+
+test("nothing is preselected without a row", () => {
+  const html = markEfiledDialogBody({ savedCase: plannedCase({ returnToSigningExitForms: [] }) });
+  assert.deepEqual(checkedRadios(html), []);
+});
+
+test("each rejected return preselects its own planned method", () => {
+  const html = markEfiledDialogBody({
+    savedCase: plannedCase({ federalResult: "rejected" }, { federal: { method: "efile" }, state: { method: "paper" } }),
+  });
+  const checked = checkedRadios(html);
+  assert.equal(checked.length, 2);
+  assert.ok(checked.some((t) => /name="method-federal"[^>]*value="efile"/.test(t)));
+  assert.ok(checked.some((t) => /name="method-state"[^>]*value="paper"/.test(t)));
+});
+
+test("one planned, one not: only the planned return is preselected", () => {
+  const html = markEfiledDialogBody({
+    savedCase: plannedCase({ federalResult: "rejected" }, { state: { method: "paper" } }),
+  });
+  const checked = checkedRadios(html);
+  assert.equal(checked.length, 1);
+  assert.match(checked[0], /name="method-state"[^>]*value="paper"/);
+  assert.ok(!checked.some((t) => /name="method-federal"/.test(t)));
 });

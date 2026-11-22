@@ -102,9 +102,10 @@ export const CASE_LABEL_ASSIGNMENTS = Object.freeze([
 
 // The four role accounts' clearance, which `npm run seed:local` saves before
 // anything acts as one of them: the current-season role, its confirmed
-// certificates, and not new. The roles match each account's ceiling.
+// certificates, and not new. The Site Coordinator is a site coordinator
+// (add-season-settings), so it needs SC as well to be cleared (design D6).
 export const ROLE_ACCOUNT_CLEARANCE = Object.freeze({
-  site_coordinator: Object.freeze({ roles: ["admin"], certificates: ["vsc", "itqr"], isNew: false }),
+  site_coordinator: Object.freeze({ roles: ["admin"], certificates: ["vsc", "itqr", "sc"], isNew: false }),
   preparer: Object.freeze({ roles: ["preparer"], certificates: ["vsc", "itqr", "basic"], isNew: false }),
   reviewer: Object.freeze({ roles: ["reviewer"], certificates: ["vsc", "itqr", "advanced"], isNew: false }),
   intaker: Object.freeze({ roles: ["intaker"], certificates: ["vsc", "itqr"], isNew: false }),
@@ -213,3 +214,46 @@ export const SEED_VOLUNTEERS = Object.freeze([
     photoIdChecked: false,
   }),
 ]);
+
+// The previous season's roster (spec local-seed-data, "The local seed adds a
+// previous season's roster"): three fictional people with no current-season
+// entry, so an admin has returning volunteers to pick in Add a volunteer. Every
+// role is backed by the certificates, as ROLE_NEEDS asks.
+export const SEED_PAST_VOLUNTEERS = Object.freeze([
+  Object.freeze({
+    name: "Nadia Kerr",
+    email: "past-volunteer-01@example.org",
+    phone: "(215) 555-0161",
+    works: "on_site",
+    languages: ["english"],
+    otherLanguage: null,
+    usualDays: ["tue", "thu"],
+    roles: ["preparer"],
+    certificates: ["vsc", "itqr", "basic"],
+  }),
+  Object.freeze({
+    name: "Elliot Brandt",
+    email: "past-volunteer-02@example.org",
+    phone: "(215) 555-0162",
+    works: "remote",
+    languages: ["english", "other"],
+    otherLanguage: "Portuguese",
+    usualDays: [],
+    roles: ["reviewer"],
+    certificates: ["vsc", "itqr", "advanced"],
+  }),
+  Object.freeze({
+    name: "Mei Sato",
+    email: "past-volunteer-03@example.org",
+    phone: "(215) 555-0163",
+    works: "on_site_and_remote",
+    languages: ["mandarin", "english"],
+    otherLanguage: null,
+    usualDays: ["sat"],
+    roles: ["intaker"],
+    certificates: ["vsc", "itqr"],
+  }),
+]);
+
+// One of the 8 volunteers above who also has an entry for the previous season.
+export const SEED_PAST_ALSO_CURRENT_EMAIL = "volunteer-01@example.org";

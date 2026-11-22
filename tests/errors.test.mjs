@@ -99,3 +99,13 @@ test("VT009 becomes NOT_CLEARED with its safe message", () => {
   assert.equal(mapped.code, "NOT_CLEARED");
   assert.equal(mapped.message, "Finish your setup for this season first.");
 });
+
+test("a PAST_SEASON refusal shows the not-available text", () => {
+  // Migration 055 refuses a write to a past-season case: VT004, message
+  // INVALID_TRANSITION, details PAST_SEASON. No text of its own.
+  const mapped = safe(
+    createAppError({ code: "VT004", message: "INVALID_TRANSITION", details: "PAST_SEASON" }),
+  );
+  assert.equal(mapped.code, "INVALID_TRANSITION");
+  assert.equal(mapped.message, "This step is not available right now.");
+});

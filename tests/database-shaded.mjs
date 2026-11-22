@@ -253,22 +253,13 @@ test("a stale version conflicts and other actions do not block a save", async ()
   }
 });
 
-test("the season bound and the household rows are the case's", async () => {
+test("the season bound and the household rows are the case's, and a past-season case refuses the save", async () => {
   const f = await createDatabaseFixture();
   try {
     const caseId = await preparingCase(f);
-    // A submitted case keeps the season it was numbered in (010), so the bound
-    // is that season, and a different workspace season must not move it.
+    // A submitted case keeps the season it was numbered in (010), and the bound
+    // is that season. Once the workspace moves on, the case is read-only (055).
     const season = Number((await f.sql("select season from public.cases where id=$1", [caseId])).rows[0].season);
-    await f.sql("update public.workspaces set current_season=$2 where id=$1", [f.workspaceId, season + 1]);
-    // Clearance is for the current season (045), so the staff are cleared for
-    // the new one too.
-    for (const { personId } of Object.values(f.roleAccounts)) {
-      const { capabilities } = (
-        await f.sql("select capabilities from public.people where workspace_id=$1 and id=$2", [f.workspaceId, personId])
-      ).rows[0];
-      await f.clearStaff(personId, capabilities);
-    }
     await f.sql(
       `update public.cases set answers=jsonb_set(answers,'{hh}','[{"first_name":"Lin"},{"first_name":"Kai"}]'::jsonb) where id=$1`,
       [caseId],
@@ -284,6 +275,32 @@ test("the season bound and the household rows are the case's", async () => {
     await f.sql("update public.cases set answers=answers-'hh' where id=$1", [caseId]);
     await assert.rejects(() => save(f, caseId, { household1QualifyingChild: "yes" }, 1), rejected("VALIDATION"));
     await save(f, caseId, { incomeW2s: true }, 1);
+    // The workspace moves on. Clearance is for the current season (045), so
+    // the staff are cleared for the new one too; the same save is then refused
+    // as a past-season case, and nothing is stored.
+    const before = await stored(f, caseId);
+    await f.sql("update public.workspaces set current_season=$2 where id=$1", [f.workspaceId, season + 1]);
+    for (const { personId } of Object.values(f.roleAccounts)) {
+      const { capabilities } = (
+        await f.sql("select capabilities from public.people where workspace_id=$1 and id=$2", [f.workspaceId, personId])
+      ).rows[0];
+      await f.clearStaff(personId, capabilities);
+    }
+    const { revision } = (await f.sql("select revision from public.cases where id=$1", [caseId])).rows[0];
+    const { error } = await f.preparer.rpc(
+      "vitally_apply_action",
+      applyArgs({
+        caseId,
+        revision: Number(revision),
+        type: "SAVE_PREPARER_FIELDS",
+        payload: { basedOnVersion: Number(before.version), fields: { incomeW2s: true } },
+      }),
+    );
+    assert.deepEqual(
+      error && { code: error.code, message: error.message, details: error.details },
+      { code: "VT004", message: "INVALID_TRANSITION", details: "PAST_SEASON" },
+    );
+    assert.deepEqual(await stored(f, caseId), before);
   } finally {
     await f.close();
   }

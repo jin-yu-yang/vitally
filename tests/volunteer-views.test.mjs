@@ -90,7 +90,11 @@ test("the Roster page says volunteers work on cases once cleared, and shows no s
   assert.match(html, /Volunteers work on cases only once they are cleared\./);
   assert.doesNotMatch(html, /recorded here|change what anyone can do/);
   assert.match(html, /class="btn primary" data-action="open-add-volunteer"[^>]*>(?:<svg[\s\S]*?<\/svg>)? Add a volunteer<\/button>/);
-  assert.doesNotMatch(html, /season|2025|2026/i);
+  // The page itself; the sidebar's Season settings link (change
+  // add-season-settings) is not the Roster's.
+  const main = html.slice(html.indexOf('<main id="main"'));
+  assert.ok(main.length < html.length, "the page is drawn");
+  assert.doesNotMatch(main, /season|2025|2026/i);
 });
 
 test("the table has the spec's columns and a count", () => {
@@ -99,7 +103,7 @@ test("the table has the spec's columns and a count", () => {
     filters: { search: "", role: "all" },
   });
   assert.match(html, /class="board-table people-table"/);
-  const headers = [...html.matchAll(/<th scope="col">([^<]*)<\/th>/g)].map((m) => m[1]);
+  const headers = [...html.matchAll(/<th scope="col">([^<]*)<\/th>/g)].map((m) => m[1].replace(/&#39;|&#x27;/g, "'"));
   assert.deepEqual(headers, ["Volunteer", "Roles", "Certificates", "Languages", "Account", "Cleared", "Edit"]);
   assert.match(html, /2 of 2 volunteers/);
   assert.match(html, /data-action="open-edit-volunteer" data-volunteer-id="v-1"/);
@@ -378,6 +382,27 @@ test("drawer account section offers Deactivate when active", () => {
   assert.doesNotMatch(section, /account-create|account-resend|account-reactivate/);
 });
 
+// Change add-season-settings, review fix: deactivating a site coordinator's
+// account needs a site coordinator.
+test("Deactivate on a site coordinator is offered only to site coordinators", () => {
+  const coordinator = withStatus("active", { isSiteCoordinator: true });
+  const byAdmin = accountPart(volunteerDrawerBody({ volunteer: coordinator, isNew: false, ui: {}, canChangeAdmin: false }));
+  assert.doesNotMatch(byAdmin, /account-deactivate/);
+  assert.match(
+    byAdmin,
+    /<p class="field-note" id="volunteer-deactivate-note">Only site coordinators deactivate a site coordinator&#39;s account\.<\/p>/,
+  );
+  const bySiteCoordinator = accountPart(
+    volunteerDrawerBody({ volunteer: coordinator, isNew: false, ui: {}, canChangeAdmin: true }),
+  );
+  assert.match(bySiteCoordinator, /data-action="account-deactivate"/);
+  assert.doesNotMatch(bySiteCoordinator, /volunteer-deactivate-note/);
+  // Someone who isn't a site coordinator keeps Deactivate for any admin.
+  const plain = accountPart(volunteerDrawerBody({ volunteer: withStatus("active"), isNew: false, ui: {}, canChangeAdmin: false }));
+  assert.match(plain, /data-action="account-deactivate"/);
+  assert.doesNotMatch(plain, /volunteer-deactivate-note/);
+});
+
 test("the cancel-invitation dialog says access ends, not the sign-in code", () => {
   const html = cancelInvitationDialogBody({ volunteer: volunteer(), });
   assert.match(html, /will be cancelled and it will no longer give them access./);
@@ -623,4 +648,324 @@ test("the drawer has an empty polite status line for unticked roles (#192)", () 
     );
     assert.equal(html.match(/id="volunteer-role-notice"/g).length, 1);
   }
+});
+
+test("a site coordinator's row without SC says SC certificate missing", () => {
+  const [row] = rowsOf(
+    renderRoster([volunteer({ roles: ["admin"], cleared: false, missing: ["scCertificate"] })], { list: "ready", filters: {} }),
+  );
+  assert.match(row, /Not cleared/);
+  assert.match(row, /SC certificate missing/);
+});
+
+const adminTick = (html) => html.match(/<input type="checkbox" name="role" value="admin"[^>]*>/)[0];
+
+test("for someone who is not a site coordinator the Admin tick is disabled, keeps its state and says why", () => {
+  const held = volunteerDrawerBody({ volunteer: volunteer({ roles: ["admin"] }), isNew: false, ui: {}, canChangeAdmin: false });
+  assert.match(adminTick(held), / disabled/);
+  assert.match(adminTick(held), / checked/);
+  assert.match(adminTick(held), /aria-describedby="volunteer-admin-note"/);
+  assert.match(held, /<p class="field-note" id="volunteer-admin-note">Only site coordinators change the Admin role\.<\/p>/);
+  // A disabled box is not sent, so the saved Admin role goes with the form as it was.
+  assert.match(held, /<input type="hidden" name="role" value="admin">/);
+  const without = volunteerDrawerBody({ volunteer: volunteer({ roles: ["preparer"] }), isNew: false, ui: {}, canChangeAdmin: false });
+  assert.match(adminTick(without), / disabled/);
+  assert.doesNotMatch(adminTick(without), / checked/);
+  assert.doesNotMatch(without, /type="hidden" name="role"/);
+  // The other roles stay free.
+  assert.doesNotMatch(without.match(/<input type="checkbox" name="role" value="preparer"[^>]*>/)[0], /disabled/);
+});
+
+test("for a site coordinator the Admin tick is a normal tick", () => {
+  const html = volunteerDrawerBody({ volunteer: volunteer({ roles: ["admin"] }), isNew: false, ui: {}, canChangeAdmin: true });
+  assert.doesNotMatch(adminTick(html), /disabled/);
+  assert.doesNotMatch(html, /Only site coordinators change the Admin role|type="hidden" name="role"/);
+});
+
+test("the drawer's Admin tick follows whether the signed-in person is a site coordinator", () => {
+  const open = (isSiteCoordinator) =>
+    dialog(
+      baseState({
+        principal: { userId: "u1", workspaceId: "w1", access: "staff", personId: "p-sam", clearance: cleared({ isAdmin: true, isSiteCoordinator }) },
+        volunteers: [volunteer({ roles: ["admin"] })],
+        dialog: "volunteer",
+        dialogContext: { volunteerId: "v-1" },
+      }),
+    );
+  assert.match(adminTick(open(false)), / disabled/);
+  assert.match(open(false), /Only site coordinators change the Admin role\./);
+  assert.doesNotMatch(adminTick(open(true)), /disabled/);
+});
+
+// ---- uploads to review (change add-clearance-uploads) ----
+
+test("the toolbar has a Show select", () => {
+  const html = renderRoster([volunteer()], { list: "ready", filters: { show: "uploads" } });
+  assert.match(html, /<select id="volunteer-show-filter" data-volunteer-filter="show">/);
+  const options = [...html.match(/id="volunteer-show-filter"[^]*?<\/select>/)[0].matchAll(/<option value="([^"]*)"( selected)?>([^<]*)</g)];
+  assert.deepEqual(options.map((m) => [m[1], Boolean(m[2]), m[3]]), [
+    ["all", false, "Everyone"],
+    ["uploads", true, "Uploads to review"],
+  ]);
+  const plain = renderRoster([volunteer()], { list: "ready", filters: {} });
+  assert.match(plain, /<option value="all" selected>Everyone/);
+});
+
+test("the Show filter narrows the rows", () => {
+  const html = renderRoster(
+    [volunteer({ id: "a", name: "A One", form13615SentAt: "2026-11-20T15:00:00Z" }), volunteer({ id: "b", name: "B Two" })],
+    { list: "ready", filters: { show: "uploads" } },
+  );
+  assert.match(html, /A One/);
+  assert.doesNotMatch(html, /B Two/);
+  assert.match(html, /1 of 2 volunteers/);
+});
+
+test("a row says Form 13615 to review and Photo ID to review", () => {
+  const sentAt = "2026-11-20T15:00:00Z";
+  const rows = (v) => renderRoster([v], { list: "ready", filters: {} });
+  const uncleared = rows(volunteer({ cleared: false, missing: ["form13615"], form13615SentAt: sentAt }));
+  assert.match(uncleared, /Not cleared<\/span> <span class="muted">Form 13615 missing<\/span> <span class="volunteer-to-review">Form 13615 to review<\/span>/);
+  const clearedRow = rows(volunteer({ cleared: true, photoIdSentAt: sentAt }));
+  assert.match(clearedRow, /Cleared<\/span> <span class="volunteer-to-review">Photo ID to review<\/span>/);
+  assert.match(rows(volunteer({ form13615SentAt: sentAt, photoIdSentAt: sentAt })), /Form 13615 to review, Photo ID to review/);
+  assert.doesNotMatch(rows(volunteer()), /volunteer-to-review/);
+});
+
+test("the drawer shows Form 13615 sent Nov 20 with Mark reviewed", () => {
+  const html = volunteerDrawerBody({
+    volunteer: volunteer({ form13615SentAt: "2026-11-20T15:00:00Z", photoIdSentAt: "2026-11-19T15:00:00Z" }),
+    isNew: false,
+    ui: {},
+  });
+  assert.match(html, /Form 13615 sent Nov 20/);
+  assert.match(html, /Photo ID sent Nov 19/);
+  assert.match(html, /<button type="button" class="btn secondary" data-action="mark-upload-reviewed" data-document="form13615">Mark reviewed<\/button>/);
+  assert.match(html, /data-action="mark-upload-reviewed" data-document="photoId"/);
+  assert.ok(html.indexOf("Form 13615 sent") < html.indexOf("<legend>Certificates</legend>"));
+  assert.ok(html.indexOf("Photo ID sent") > html.indexOf('id="volunteer-photoIdChecked"'));
+});
+
+test("drawer date is the New York day", () => {
+  // 02:30 UTC on Nov 21 is 9:30 pm on Nov 20 in New York.
+  const html = volunteerDrawerBody({ volunteer: volunteer({ form13615SentAt: "2026-11-21T02:30:00Z" }), isNew: false, ui: {} });
+  assert.match(html, /Form 13615 sent Nov 20/);
+});
+
+test("no sent line when nothing is waiting", () => {
+  const html = volunteerDrawerBody({ volunteer: volunteer(), isNew: false, ui: {} });
+  assert.doesNotMatch(html, /sent|mark-upload-reviewed/);
+});
+
+test("no sent line in Add a volunteer", () => {
+  const html = volunteerDrawerBody({ volunteer: null, isNew: true, ui: {} });
+  assert.doesNotMatch(html, /mark-upload-reviewed/);
+  const withData = volunteerDrawerBody({ volunteer: volunteer({ form13615SentAt: "2026-11-20T15:00:00Z" }), isNew: true, ui: {} });
+  assert.doesNotMatch(withData, /mark-upload-reviewed/);
+});
+
+test("Mark reviewed is off while the drawer is busy", () => {
+  const v = volunteer({ form13615SentAt: "2026-11-20T15:00:00Z", photoIdSentAt: "2026-11-20T15:00:00Z" });
+  const busy = volunteerDrawerBody({ volunteer: v, isNew: false, ui: { busy: true } });
+  assert.equal([...busy.matchAll(/data-action="mark-upload-reviewed" data-document="[A-Za-z0-9]+" disabled/g)].length, 2);
+  const idle = volunteerDrawerBody({ volunteer: v, isNew: false, ui: {} });
+  assert.doesNotMatch(idle, /mark-upload-reviewed"[^>]*disabled/);
+});
+
+// The reason row, Last returned and Usual days (change add-my-profile, D7, D8).
+const drawer = (overrides = {}, ui = {}) =>
+  volunteerDrawerBody({ volunteer: volunteer(overrides), isNew: false, ui });
+const picks = (html) =>
+  [...html.matchAll(/<input[^>]*name="review-reason"[^>]*value="([^"]*)"/g)].map((m) => m[1].replace(/&#39;/g, "'"));
+
+test("Mark reviewed opens the reason row", () => {
+  const closed = drawer({ form13615SentAt: "2026-11-20T15:00:00Z" });
+  assert.doesNotMatch(closed, /review-reason/);
+  const open = drawer({ form13615SentAt: "2026-11-20T15:00:00Z" }, { reviewReasonFor: "form13615" });
+  assert.match(open, /name="review-reason"/);
+  assert.match(open, /<input[^>]*name="review-note"[^>]*maxlength="120"/);
+  assert.match(open, /data-action="send-back"/);
+  assert.match(open, /data-action="cancel-review"/);
+  assert.match(open, />Send back</);
+  assert.match(open, />Cancel</);
+});
+
+test("photo ID picks are Can't read it, Expired and Not a photo ID", () => {
+  const html = drawer({ photoIdSentAt: "2026-11-20T15:00:00Z" }, { reviewReasonFor: "photoId" });
+  assert.deepEqual(picks(html), ["Can't read it", "Expired", "Not a photo ID"]);
+  assert.doesNotMatch(html, /Not signed|Wrong form|Missing a certification|Already on file/);
+});
+
+test("13615 picks are the four, plus Already on file with a role", () => {
+  const html = drawer({ form13615SentAt: "2026-11-20T15:00:00Z", roles: ["preparer"] }, { reviewReasonFor: "form13615" });
+  assert.deepEqual(picks(html), ["Not signed", "Can't read it", "Wrong form", "Missing a certification", "Already on file"]);
+});
+
+test("Already on file only with a role this season", () => {
+  const html = drawer({ form13615SentAt: "2026-11-20T15:00:00Z", roles: [] }, { reviewReasonFor: "form13615" });
+  assert.deepEqual(picks(html), ["Not signed", "Can't read it", "Wrong form", "Missing a certification"]);
+});
+
+test("Send back is disabled until a pick or a note", () => {
+  const html = drawer({ form13615SentAt: "2026-11-20T15:00:00Z" }, { reviewReasonFor: "form13615" });
+  assert.match(html, /data-action="send-back"[^>]* disabled/);
+});
+
+test("a stored reason shows Last returned in the document's place", () => {
+  const stored = drawer({
+    form13615ReviewedAt: "2026-11-21T03:30:00Z",
+    form13615ReviewReason: "Not signed",
+    photoIdReviewedAt: "2026-11-21T03:30:00Z",
+    photoIdReviewReason: "Expired",
+  });
+  assert.match(stored, /Last returned: Not signed · Nov 20/);
+  assert.match(stored, /Last returned: Expired · Nov 20/);
+  assert.ok(stored.indexOf("Last returned: Not signed") > stored.indexOf("<legend>Roles</legend>"));
+  assert.ok(stored.indexOf("Last returned: Not signed") < stored.indexOf("<legend>Certificates</legend>"));
+  assert.ok(stored.indexOf("Last returned: Expired") > stored.indexOf('id="volunteer-photoIdChecked"'));
+  const sent = drawer({
+    form13615SentAt: "2026-11-20T15:00:00Z",
+    form13615ReviewedAt: "2026-11-21T03:30:00Z",
+    form13615ReviewReason: "Not signed",
+  });
+  assert.match(sent, /Form 13615 sent Nov 20/);
+  assert.doesNotMatch(sent, /Last returned/);
+});
+
+test("escapes the last reason in the drawer", () => {
+  const html = drawer({ photoIdReviewedAt: "2026-11-21T03:30:00Z", photoIdReviewReason: '<b>&"' });
+  assert.match(html, /Last returned: &lt;b&gt;&amp;&quot; · Nov 20/);
+  assert.doesNotMatch(html, /<b>/);
+});
+
+test("usual days are ticked from the record", () => {
+  const html = drawer({ usualDays: ["mon", "wed"] });
+  assert.match(html, /<legend>Usual days<\/legend>/);
+  for (const [value, label] of [["mon", "Monday"], ["tue", "Tuesday"], ["wed", "Wednesday"], ["thu", "Thursday"], ["fri", "Friday"], ["sat", "Saturday"], ["sun", "Sunday"]]) {
+    assert.match(html, new RegExp(`<input type="checkbox" name="usualDays" value="${value}"[^>]*>`));
+    assert.match(html, new RegExp(`<span>${label}</span>`));
+  }
+  assert.equal([...html.matchAll(/name="usualDays" value="\w+" checked/g)].length, 2);
+  assert.match(html, /name="usualDays" value="mon" checked/);
+});
+
+// Returning volunteers (change add-returning-volunteers-and-roster-csv).
+const earlierPerson = (overrides = {}) => ({
+  id: "v-old",
+  name: "Dana Okafor",
+  email: "dana@example.test",
+  phone: "215-555-0199",
+  works: "on_site",
+  languages: ["english"],
+  otherLanguage: null,
+  usualDays: ["tue", "thu"],
+  hasSignIn: false,
+  lastSeason: true,
+  revision: 2,
+  ...overrides,
+});
+
+test("the Add drawer offers last season's roster to search, with an Earlier volunteer tag", () => {
+  const candidates = [
+    earlierPerson(),
+    earlierPerson({ id: "v-older", name: "Lee Wong", email: "lee@example.test", lastSeason: false, earlier: true }),
+  ];
+  const html = volunteerDrawerBody({
+    volunteer: null,
+    isNew: true,
+    ui: {},
+    returning: { query: "e", candidates, picked: null },
+  });
+  assert.match(html, /<label[^>]*for="returning-search"[^>]*>[\s\S]*Returning volunteer\? Search last season&#39;s roster|Returning volunteer\? Search last season's roster/);
+  assert.match(html, /<input[^>]*id="returning-search"[^>]*>/);
+  assert.match(html.match(/<input[^>]*id="returning-search"[^>]*>/)[0], /value="e"/);
+  const picks = html.match(/<button[^>]*data-action="pick-returning-volunteer"[\s\S]*?<\/button>/g);
+  assert.equal(picks.length, 2);
+  assert.match(picks[0], /data-id="v-old"/);
+  assert.match(picks[0], /Dana Okafor/);
+  assert.match(picks[0], /dana@example\.test/);
+  assert.doesNotMatch(picks[0], /Earlier volunteer/);
+  assert.match(picks[1], /data-id="v-older"/);
+  assert.match(picks[1], /Earlier volunteer/);
+  assert.doesNotMatch(html, /Not this person/);
+  // The search sits before the form, so the form's own fields still come first in it.
+  assert.ok(html.indexOf('id="returning-search"') < html.indexOf('id="volunteer-form"'));
+});
+
+test("a picked earlier volunteer fills Add, email read-only, nothing for this season ticked", () => {
+  const picked = earlierPerson();
+  const html = volunteerDrawerBody({
+    volunteer: null,
+    isNew: true,
+    ui: {},
+    returning: { query: "dana", candidates: [picked], picked },
+  });
+  const email = html.match(/<input[^>]*id="volunteer-email"[^>]*>/)[0];
+  assert.match(email, /readonly/);
+  assert.match(email, /value="dana@example\.test"/);
+  assert.match(html.match(/<input[^>]*id="volunteer-name"[^>]*>/)[0], /value="Dana Okafor"/);
+  assert.doesNotMatch(html.match(/<input type="checkbox" name="isNew"[^>]*>/)[0], /checked/);
+  assert.doesNotMatch(html.match(/<input type="checkbox" name="photoIdChecked"[^>]*>/)[0], /checked/);
+  for (const box of html.match(/<input type="checkbox" name="(role|certificate)"[^>]*>/g)) assert.doesNotMatch(box, /checked/);
+  assert.match(html.match(/<input[^>]*id="volunteer-usualDays-tue"[^>]*>/)[0], /checked/);
+  assert.match(html.match(/<input[^>]*id="volunteer-usualDays-thu"[^>]*>/)[0], /checked/);
+  assert.doesNotMatch(html.match(/<input[^>]*id="volunteer-usualDays-mon"[^>]*>/)[0], /checked/);
+  assert.match(html, /<button[^>]*data-action="unpick-returning-volunteer"[^>]*>Not this person<\/button>/);
+  assert.doesNotMatch(html, /id="returning-search"/);
+  assert.doesNotMatch(html, /data-action="pick-returning-volunteer"/);
+  // Still an add: no account section, no document lines.
+  assert.doesNotMatch(html, /Mark reviewed|volunteer-account/);
+  assert.match(html, /<button type="submit"[^>]*>Add a volunteer<\/button>/);
+});
+
+test("a picked earlier volunteer with a sign-in keeps the email read-only", () => {
+  const picked = earlierPerson({ hasSignIn: true });
+  const html = volunteerDrawerBody({ volunteer: null, isNew: true, ui: {}, returning: { query: "", candidates: [], picked } });
+  assert.match(html.match(/<input[^>]*id="volunteer-email"[^>]*>/)[0], /readonly/);
+  assert.match(html, /This is their sign-in email\./);
+});
+
+test("the volunteer dialog for a pick is the Add drawer filled from the earlier person", () => {
+  const html = dialog(
+    baseState({
+      dialog: "volunteer",
+      dialogContext: { volunteerId: "v-old", returning: true },
+      earlierVolunteers: [earlierPerson()],
+      returningSearch: "dana",
+    }),
+  );
+  assert.match(html, /<h2 id="modal-title">Add a volunteer<\/h2>/);
+  assert.doesNotMatch(html, /could not be opened/);
+  assert.match(html.match(/<input[^>]*id="volunteer-email"[^>]*>/)[0], /readonly/);
+  assert.match(html, /Not this person/);
+  const plain = dialog(
+    baseState({ dialog: "volunteer", dialogContext: null, earlierVolunteers: [earlierPerson()], returningSearch: "" }),
+  );
+  assert.match(plain, /id="returning-search"/);
+  assert.match(plain, /data-action="pick-returning-volunteer" data-id="v-old"/);
+});
+
+test("the Roster's Export CSV is on with rows and off when nothing passes the filters", () => {
+  const on = renderRoster([volunteer()], { list: "ready", filters: {}, exportable: true });
+  const onButton = on.match(/<button[^>]*data-action="export-roster-csv"[^>]*>[\s\S]*?<\/button>/)[0];
+  assert.match(onButton, /Export CSV/);
+  assert.doesNotMatch(onButton, /disabled/);
+  const off = renderRoster([volunteer()], { list: "ready", filters: { search: "zzz" }, exportable: true });
+  assert.match(off.match(/<button[^>]*data-action="export-roster-csv"[^>]*>/)[0], /disabled/);
+  const page = staffScreen(baseState());
+  assert.match(page, /data-action="export-roster-csv"/);
+});
+
+test("a pick whose earlier person is gone says it could not be opened, with no search box", () => {
+  const html = dialog(
+    baseState({
+      dialog: "volunteer",
+      dialogContext: { volunteerId: "gone", returning: true },
+      earlierVolunteers: [earlierPerson()],
+      returningSearch: "",
+    }),
+  );
+  assert.match(html, /This volunteer could not be opened\. Close this and try again\./);
+  assert.doesNotMatch(html, /id="returning-search"/);
+  assert.doesNotMatch(html, /id="volunteer-form"/);
 });

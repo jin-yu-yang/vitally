@@ -2,9 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   ROLES, CERTIFICATES, WORKS, LANGUAGES,
-  combineVolunteers, filterVolunteers, volunteerFromForm, volunteerProblem,
+  combineVolunteers, filterVolunteers, SHOW_VIEWS, volunteerFromForm, volunteerProblem,
   ROLE_NEEDS, missingFor, withoutLostRoles, roleNeedsMessage, openWorkMessage, rolesToUntick, untickedRolesMessage,
-  accountMessage, volunteerFormChanged
+  accountMessage, volunteerFormChanged, roleBoxesToUntick, rosterCsv, rosterCsvFilename,
+  returningCandidates, returningFill
 } from "../src/volunteer-roster.mjs";
 
 const people = [
@@ -50,10 +51,11 @@ test("combine keeps only people with a roster entry", () => {
   assert.equal(list[1].hasSignIn, false);
   assert.deepEqual(list[0], {
     id: "p1", name: "ana Lopez", email: "ana@x.org", phone: null, works: "remote",
-    languages: ["english", "other"], otherLanguage: "Tagalog", roles: ["preparer"],
-    certificates: ["vsc", "basic"], revision: 3, hasSignIn: true, signedInName: null,
-    isNew: false, photoIdChecked: false,
-    account: { status: "active", revision: 2, activatedAt: null, expiresAt: null },
+    languages: ["english", "other"], otherLanguage: "Tagalog", usualDays: [], roles: ["preparer"],
+    certificates: ["vsc", "basic"], certificateDates: {}, revision: 3, hasSignIn: true, signedInName: null,
+    isNew: false, photoIdChecked: false, form13615SentAt: null, photoIdSentAt: null,
+    form13615ReviewedAt: null, form13615ReviewReason: null, photoIdReviewedAt: null, photoIdReviewReason: null,
+    account: { status: "active", revision: 2, activatedAt: null, expiresAt: null }, isSiteCoordinator: false,
     cleared: true, missing: []
   });
   assert.deepEqual(list[1].account, { status: "invited", revision: 1, activatedAt: null, expiresAt: null });
@@ -87,7 +89,7 @@ test("form reading trims, lower-cases and collects ticks", () => {
   assert.deepEqual(volunteerFromForm(fd), {
     name: "Ana", email: "a@b.org", phone: null, works: "on_site", languages: [],
     otherLanguage: null, roles: ["greeter", "admin"], certificates: ["vsc"],
-    isNew: false, photoIdChecked: false
+    isNew: false, photoIdChecked: false, usualDays: []
   });
   fd.set("isNew", "on");
   fd.set("photoIdChecked", "on");
@@ -112,6 +114,18 @@ test("cleared follows roles and the photo ID check of the current season", () =>
   assert.deepEqual([returning.cleared, returning.missing], [true, []]);
   // No roles wins over an unchecked photo ID: one thing is shown.
   assert.deepEqual(one({ roles: [], is_new: true }).missing, ["form13615"]);
+});
+
+test("combine carries the sent dates", () => {
+  const one = (entry) => combineVolunteers({
+    profiles: [profile("p1")], people: [people[1]], certificates: [], accounts: [],
+    entries: [{ person_id: "p1", season: 2026, roles: [], ...entry }]
+  })[0];
+  const sent = one({ form_13615_sent_at: "2026-11-20T15:00:00Z" });
+  assert.equal(sent.form13615SentAt, "2026-11-20T15:00:00Z");
+  assert.equal(sent.photoIdSentAt, null);
+  const photo = one({ photo_id_sent_at: "2026-11-19T15:00:00Z" });
+  assert.deepEqual([photo.form13615SentAt, photo.photoIdSentAt], [null, "2026-11-19T15:00:00Z"]);
 });
 
 test("an uploaded certificate is not a certificate", () => {
@@ -373,4 +387,179 @@ test("three or more missing certificates are listed with commas", () => {
 test("nothing unticked, nothing announced", () => {
   assert.equal(untickedRolesMessage([], ["vsc"]), "");
   assert.equal(untickedRolesMessage(undefined, []), "");
+});
+
+// A site coordinator (accounts.is_site_coordinator) is cleared only with SC
+// confirmed this season (design D6).
+const coordinator = (certificates, extra = {}) => combineVolunteers({
+  profiles: [profile("p1")], people: [people[1]],
+  certificates: certificates.map((certificate) => ({ person_id: "p1", season: 2026, certificate, status: "confirmed" })),
+  entries: [{ person_id: "p1", season: 2026, roles: ["admin"], ...extra }],
+  accounts: [{ person_id: "p1", status: "active", revision: 1, is_site_coordinator: true }]
+})[0];
+
+test("combineVolunteers: a site coordinator without SC is not cleared, with scCertificate", () => {
+  const v = coordinator(["vsc", "itqr"]);
+  assert.equal(v.isSiteCoordinator, true);
+  assert.deepEqual([v.cleared, v.missing], [false, ["scCertificate"]]);
+});
+
+test("combineVolunteers: a site coordinator with SC confirmed is cleared", () => {
+  const v = coordinator(["vsc", "itqr", "sc"]);
+  assert.deepEqual([v.cleared, v.missing], [true, []]);
+});
+
+test("combineVolunteers: an uploaded SC does not clear a site coordinator", () => {
+  const v = combineVolunteers({
+    profiles: [profile("p1")], people: [people[1]],
+    certificates: [{ person_id: "p1", season: 2026, certificate: "sc", status: "uploaded" }],
+    entries: [{ person_id: "p1", season: 2026, roles: ["greeter"] }],
+    accounts: [{ person_id: "p1", status: "active", revision: 1, is_site_coordinator: true }]
+  })[0];
+  assert.deepEqual([v.cleared, v.missing], [false, ["scCertificate"]]);
+});
+
+test("the SC item follows the photo ID and comes before the account reason", () => {
+  const v = combineVolunteers({
+    profiles: [profile("p1")], people: [people[1]], certificates: [],
+    entries: [{ person_id: "p1", season: 2026, roles: ["admin"], is_new: true }],
+    accounts: [{ person_id: "p1", status: "invited", revision: 1, is_site_coordinator: true }]
+  })[0];
+  assert.deepEqual(v.missing, ["photoId", "scCertificate", "notSignedIn"]);
+  assert.deepEqual(coordinator([], { roles: [] }).missing, ["form13615", "scCertificate"]);
+});
+
+test("combineVolunteers: someone who is not a site coordinator needs no SC", () => {
+  const v = withAccount({ status: "active", revision: 1 });
+  assert.equal(v.isSiteCoordinator, false);
+  assert.deepEqual([v.cleared, v.missing], [true, []]);
+});
+
+// The drawer's role boxes as the page sees them: {value, checked, disabled}.
+const box = (value, extra = {}) => ({ value, checked: true, disabled: false, ...extra });
+
+test("a disabled Admin tick keeps its saved state when IT&QR is unticked", () => {
+  const admin = box("admin", { disabled: true });
+  const intaker = box("intaker");
+  const drop = roleBoxesToUntick([admin, intaker], ["vsc"], "itqr");
+  assert.deepEqual(drop, [intaker]);
+  // Only what is unticked is announced: no "Admin was unticked".
+  assert.equal(untickedRolesMessage(drop.map((b) => b.value), ["vsc"]), "Intaker was unticked: it needs IT&QR.");
+  assert.deepEqual(roleBoxesToUntick([admin], [], "vsc"), []);
+});
+
+test("an enabled Admin tick is still unticked when it loses a certificate", () => {
+  const admin = box("admin");
+  assert.deepEqual(roleBoxesToUntick([admin, box("greeter", { checked: false })], ["vsc"], "itqr"), [admin]);
+});
+
+const sent = (id, form13615SentAt, photoIdSentAt, roles = ["preparer"]) => ({
+  id, name: id, email: `${id}@x.test`, phone: null, roles, form13615SentAt, photoIdSentAt,
+});
+const uploadList = [
+  sent("a", "2026-11-20T15:00:00Z", null),
+  sent("b", null, "2026-11-20T15:00:00Z", ["reviewer"]),
+  sent("c", null, null),
+];
+
+test("filterVolunteers keeps uploads to review", () => {
+  assert.deepEqual(filterVolunteers(uploadList, { show: "uploads" }).map((v) => v.id), ["a", "b"]);
+  assert.deepEqual(filterVolunteers(uploadList, { show: "all" }).map((v) => v.id), ["a", "b", "c"]);
+});
+
+test("show combines with role and search", () => {
+  assert.deepEqual(filterVolunteers(uploadList, { show: "uploads", role: "reviewer" }).map((v) => v.id), ["b"]);
+  assert.deepEqual(filterVolunteers(uploadList, { show: "uploads", search: "a@x" }).map((v) => v.id), ["a"]);
+});
+
+test("an unknown show value keeps everyone", () => {
+  assert.equal(filterVolunteers(uploadList, { show: "nonsense" }).length, 3);
+});
+
+test("SHOW_VIEWS lists Everyone then Uploads to review", () => {
+  assert.deepEqual(SHOW_VIEWS.map((v) => [v.value, v.label]), [["all", "Everyone"], ["uploads", "Uploads to review"]]);
+});
+
+test("combine keeps the confirmed date of each confirmed certificate only", () => {
+  const list = combineVolunteers({
+    profiles, entries, people, accounts,
+    certificates: [
+      { person_id: "p1", season: 2026, certificate: "itqr", status: "confirmed", confirmed_at: "2026-11-04T03:30:00Z" },
+      { person_id: "p1", season: 2026, certificate: "vsc", status: "uploaded", confirmed_at: null }
+    ]
+  });
+  assert.deepEqual(list[0].certificates, ["itqr"]);
+  assert.deepEqual(list[0].certificateDates, { itqr: "2026-11-04T03:30:00Z" });
+});
+
+test("rosterCsvFilename uses the New York date", () => {
+  assert.equal(rosterCsvFilename(2026, new Date("2026-11-24T04:30:00Z")), "roster-2026-2026-11-23.csv");
+});
+
+const csvVolunteer = (extra = {}) => ({
+  name: "Ana Lopez", email: "ana@x.org", phone: null, roles: [], certificates: [], certificateDates: {},
+  languages: [], otherLanguage: null, account: { status: "none" }, cleared: false, ...extra
+});
+const csvLines = (volunteers) => rosterCsv(volunteers).replace(/^\uFEFF/, "").split("\r\n");
+
+test("rosterCsv writes the header and a Preparer row with dated certificates", () => {
+  const lines = csvLines([csvVolunteer({
+    roles: ["preparer"], certificates: ["itqr", "basic"],
+    certificateDates: { itqr: "2026-11-04T03:30:00Z", basic: "2026-11-04T03:30:00Z" },
+    languages: ["english", "other"], otherLanguage: "Tagalog", account: { status: "active" }, cleared: true
+  })]);
+  assert.equal(lines[0], "Name,Email,Phone,Roles,Certificates,Languages,Account,Cleared");
+  assert.equal(lines[1], 'Ana Lopez,ana@x.org,,Preparer,IT&QR (2026-11-03); Basic (2026-11-03),"English, Tagalog",Active,Yes');
+});
+
+test("rosterCsv leaves roles and certificates empty, labels accounts and guards phones", () => {
+  const lines = csvLines([
+    csvVolunteer({ phone: "+1 555 0100", account: { status: "invited" } }),
+    csvVolunteer({ name: "Zed Tran", account: { status: "deactivated" } })
+  ]);
+  assert.equal(lines[1], "Ana Lopez,ana@x.org,'+1 555 0100,,,,Invited,No");
+  assert.equal(lines[2], "Zed Tran,ana@x.org,,,,,Deactivated,No");
+  assert.match(csvLines([csvVolunteer()])[1], /,Not created,No$/);
+});
+
+// Returning volunteers (change add-returning-volunteers-and-roster-csv)
+const earlier = (id, name, email, lastSeason, extra = {}) => ({
+  id, name, email, phone: null, works: "remote", languages: ["english", "other"],
+  otherLanguage: "Tagalog", usualDays: ["tue", "thu"], revision: 4, hasSignIn: false, lastSeason, ...extra
+});
+const EARLIER = [
+  earlier("e1", "Nadia Kerr", "nadia@example.org", true),
+  earlier("e2", "Omar Haddad", "omar@example.org", true),
+  earlier("e3", "Kerry Older", "kerry@example.org", false)
+];
+
+test("returningCandidates keeps last season's people whose name or email has the query", () => {
+  assert.deepEqual(returningCandidates(EARLIER, " KER ").map((e) => e.id), ["e1"]);
+  assert.deepEqual(returningCandidates(EARLIER, "omar@").map((e) => e.id), ["e2"]);
+  assert.deepEqual(returningCandidates(EARLIER, "").map((e) => e.id), ["e1", "e2"]);
+});
+
+test("returningCandidates adds an older volunteer found by their full email, flagged earlier", () => {
+  const found = returningCandidates(EARLIER, "KERRY@example.org");
+  assert.deepEqual(found.map((e) => [e.id, e.earlier]), [["e3", true]]);
+  assert.equal(returningCandidates(EARLIER, "nadia@example.org")[0].earlier, undefined);
+});
+
+test("returningFill makes a drawer volunteer with the stored details and nothing for this season", () => {
+  const fill = returningFill(EARLIER[0]);
+  assert.deepEqual(fill.usualDays, ["tue", "thu"]);
+  assert.equal(fill.otherLanguage, "Tagalog");
+  assert.equal(fill.email, "nadia@example.org");
+  assert.deepEqual(fill.roles, []);
+  assert.deepEqual(fill.certificates, []);
+  assert.equal(fill.isNew, false);
+  assert.equal(fill.photoIdChecked, false);
+  assert.equal(fill.hasSignIn, false);
+});
+
+test("volunteerProblem refuses an earlier volunteer's email on an add, not for the picked person", () => {
+  const payload = { name: "Nadia Kerr", email: "Nadia@example.org", works: "remote", languages: ["english"], roles: [], certificates: [] };
+  assert.equal(volunteerProblem(payload, [], null, EARLIER), "That email belongs to an earlier volunteer. Pick them above.");
+  assert.equal(volunteerProblem(payload, [], "e1", EARLIER), null);
+  assert.equal(volunteerProblem(payload, [], null), null);
 });

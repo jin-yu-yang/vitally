@@ -129,6 +129,18 @@ export async function resolveSeedTargets(client, { workspaceId, clientAEmail }) 
       "The roster's first applicant has no client account in this workspace.",
     );
   targets.clientA = { userId: clients[0].id };
+  // The Site Coordinator acts as a site coordinator (change add-season-settings,
+  // design D9): it sets the SIDN below, and only a site coordinator may set
+  // the Admin role that clearing the role accounts gives.
+  const { rows: coordinators } = await client.query(
+    "select vitally_private.is_site_coordinator($1,$2) as yes",
+    [workspaceId, targets.siteCoordinator.personId],
+  );
+  if (!coordinators[0]?.yes)
+    throw failure(
+      "SEED_SETUP",
+      'The "site_coordinator" account must be a site coordinator. Give it "siteCoordinator: true" in the roster file and re-run the roster command.',
+    );
   const { rows: workspaces } = await client.query(
     "select default_followup_person_id from public.workspaces where id = $1",
     [workspaceId],
@@ -425,12 +437,13 @@ const union = (a, b) => [...new Set([...a, ...b])];
 // the case RPCs refuse staff who are not cleared.
 export async function clearRoleAccounts(client, { workspaceId, actorUserId }) {
   let saved = 0;
-  for (const [key, want] of Object.entries(SEED_VALUES.ROLE_ACCOUNT_CLEARANCE)) {
+  for (const [key, wanted] of Object.entries(SEED_VALUES.ROLE_ACCOUNT_CLEARANCE)) {
     const { rows: people } = await client.query(
       `select p.id, p.name, v.email, v.phone, v.works, v.languages,
               v.other_language, v.revision,
               e.roles as entry_roles, e.is_new,
               e.photo_id_checked_at is not null as photo_id_checked,
+              vitally_private.is_site_coordinator(p.workspace_id, p.id) as site_coordinator,
               array(select c.certificate from public.certificates c
                      where c.workspace_id = p.workspace_id and c.person_id = p.id
                        and c.season = w.current_season and c.status = 'confirmed') as confirmed
@@ -446,6 +459,11 @@ export async function clearRoleAccounts(client, { workspaceId, actorUserId }) {
     );
     const person = people[0];
     if (!person) continue;
+    // Any role account that is a site coordinator is cleared only with SC
+    // confirmed (add-season-settings, D6). Added to what it has, as above.
+    const want = person.site_coordinator
+      ? { ...wanted, certificates: union(wanted.certificates, ["sc"]) }
+      : wanted;
     if (
       person.entry_roles &&
       person.is_new === false &&
@@ -473,6 +491,26 @@ export async function clearRoleAccounts(client, { workspaceId, actorUserId }) {
     saved += 1;
   }
   return saved;
+}
+
+// The fictional SIDN the seed sets when the workspace has none, so a local
+// invitation's site check can pass (change add-season-settings, D9).
+export const SEED_SITE_NUMBER = "S00000000";
+
+// Sets SEED_SITE_NUMBER through Season settings' own RPC, acting as the Site
+// Coordinator, only when no SIDN is set: one set in the app, or by an earlier
+// run, is never changed. Answers whether it set one. Local only.
+export async function ensureSiteNumber(client, { workspaceId, actorUserId }) {
+  const { rows } = await client.query(
+    "select 1 from vitally_private.site_numbers where workspace_id=$1",
+    [workspaceId],
+  );
+  if (rows.length) return false;
+  await callRpc(client, actorUserId, "vitally_set_site_number", {
+    p_action_id: randomUUID(),
+    p_sidn: SEED_SITE_NUMBER,
+  });
+  return true;
 }
 
 // Adds the rehearsal volunteers to the Roster. A re-run first removes the
@@ -514,6 +552,102 @@ export async function seedVolunteers(client, { workspaceId, actorUserId }) {
   return SEED_VALUES.SEED_VOLUNTEERS.length;
 }
 
+// Adds the previous season's roster after the volunteers (spec
+// local-seed-data, "The local seed adds a previous season's roster"): three
+// people with no current-season entry, and a previous-season entry for one of
+// the 8 volunteers (kept if already there, so a repeat call is safe). This is the spec's one exception to going through
+// `vitally_save_volunteer`, which writes only the current season: these rows
+// are written directly with SQL, in one transaction. A re-run first deletes
+// the earlier three (no sign-in only; the foreign keys remove their rows), so
+// a person an admin has since added to the current season is replaced too. A
+// person with a sign-in is left alone. Only `seedWorkspace` calls this, like
+// `seedVolunteers`. Local only. Returns the number of people added.
+export async function seedPastSeason(client, { workspaceId, actorPersonId }) {
+  const { rows } = await client.query(
+    "select current_season from public.workspaces where id=$1",
+    [workspaceId],
+  );
+  // No current season: nothing to be "previous" to, so write nothing.
+  if (rows[0]?.current_season == null) return 0;
+  const season = rows[0].current_season - 1;
+  const past = SEED_VALUES.SEED_PAST_VOLUNTEERS;
+  await client.query("begin");
+  try {
+    await client.query(
+      `delete from public.people p
+        where p.workspace_id = $1 and p.user_id is null
+          and exists (select 1 from public.volunteer_profiles v
+                       where v.person_id = p.id and v.workspace_id = p.workspace_id
+                         and v.email = any($2::text[]))`,
+      [workspaceId, past.map((v) => v.email)],
+    );
+    const withSignIn = new Set(
+      (
+        await client.query(
+          `select lower(v.email) as email
+             from public.people p join public.volunteer_profiles v
+               on v.person_id = p.id and v.workspace_id = p.workspace_id
+            where p.workspace_id = $1 and p.user_id is not null`,
+          [workspaceId],
+        )
+      ).rows.map((row) => row.email),
+    );
+    const entry = async (personId, roles, certificates) => {
+      await client.query(
+        `insert into public.roster_entries
+           (workspace_id, person_id, season, roles, added_by_person_id, is_new)
+         values ($1, $2, $3, $4, $5, false)
+         on conflict (workspace_id, person_id, season) do nothing`,
+        [workspaceId, personId, season, roles, actorPersonId],
+      );
+      for (const certificate of certificates)
+        await client.query(
+          `insert into public.certificates
+             (workspace_id, person_id, season, certificate, status,
+              confirmed_at, confirmed_by_person_id)
+           values ($1, $2, $3, $4, 'confirmed', now(), $5)
+           on conflict do nothing`,
+          [workspaceId, personId, season, certificate, actorPersonId],
+        );
+    };
+    let added = 0;
+    for (const v of past) {
+      if (withSignIn.has(v.email.toLowerCase())) continue;
+      const { rows: created } = await client.query(
+        `insert into public.people (workspace_id, person_key, name, capabilities)
+         values ($1, 'v_' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 12), $2, '{}')
+         returning id`,
+        [workspaceId, v.name],
+      );
+      await client.query(
+        `insert into public.volunteer_profiles
+           (workspace_id, person_id, email, phone, works, languages, other_language, usual_days)
+         values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [workspaceId, created[0].id, v.email, v.phone, v.works, v.languages, v.otherLanguage, v.usualDays],
+      );
+      await entry(created[0].id, v.roles, v.certificates);
+      added += 1;
+    }
+    // The one of the 8 who also has a previous-season entry (no sign-in only).
+    const also = SEED_VALUES.SEED_VOLUNTEERS.find(
+      (v) => v.email === SEED_VALUES.SEED_PAST_ALSO_CURRENT_EMAIL,
+    );
+    if (also && !withSignIn.has(also.email.toLowerCase())) {
+      const { rows: found } = await client.query(
+        `select person_id from public.volunteer_profiles
+          where workspace_id = $1 and email = $2`,
+        [workspaceId, also.email],
+      );
+      if (found[0]) await entry(found[0].person_id, also.roles, also.certificates);
+    }
+    await client.query("commit");
+    return added;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  }
+}
+
 // What `seed.mjs` runs: the local-only guard, then one seed on its own
 // connection.
 export async function seedWorkspace({
@@ -529,6 +663,10 @@ export async function seedWorkspace({
       workspaceId,
       clientAEmail,
     });
+    await ensureSiteNumber(client, {
+      workspaceId,
+      actorUserId: targets.siteCoordinator.userId,
+    });
     // First, so the case seed's role accounts are cleared when they act.
     await clearRoleAccounts(client, {
       workspaceId,
@@ -540,6 +678,10 @@ export async function seedWorkspace({
     const volunteersCreated = await seedVolunteers(client, {
       workspaceId,
       actorUserId: targets.siteCoordinator.userId,
+    });
+    await seedPastSeason(client, {
+      workspaceId,
+      actorPersonId: targets.siteCoordinator.personId,
     });
     return { casesRemoved, casesCreated, volunteersCreated };
   } finally {

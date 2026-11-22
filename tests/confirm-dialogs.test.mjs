@@ -41,3 +41,20 @@ test("every confirmation renders exactly as it did before confirmBody", () => {
   for (const [name, [fn, state]] of Object.entries(STATES))
     assert.equal(undated(render[fn](state)), GOLDEN[name], name);
 });
+
+test("a refused Return to signing keeps a typed group open", async () => {
+  const { groupsToOpen } = await import("../src/form-values.mjs");
+  const html = returnToSigningDialogBody({
+    savedCase: { federalMethod: "efile", federalResult: "rejected", stateMethod: "efile", stateResult: "accepted" },
+  });
+  const groups = [...html.matchAll(/<details class="q-exit-group" data-exit-group="([^"]+)">([^]*?)<\/details>/g)].map((m) => ({
+    name: m[1],
+    ids: [...m[2].matchAll(/ id="([^"]+)"/g)].map((id) => id[1]),
+  }));
+  const federal = groups.findIndex((g) => g.name === "federal");
+  assert.ok(federal >= 0);
+  assert.ok(groups[federal].ids.includes("field-return-to-signing-federal.amount"));
+  const drafts = new Map([["field-return-to-signing-federal.amount", "12.345"]]);
+  assert.deepEqual(groupsToOpen(groups.map((g) => g.ids), drafts), [federal]);
+});
+

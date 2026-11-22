@@ -84,6 +84,7 @@ function assertPlainClientMessage(message) {
 test("independent review corrects, re-reviews and approves a prepared case", async (t) => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     // Test-only staff: Drew prepares and also holds `review`, so self-review
     // is proved to be blocked by participation rather than by a missing
     // qualification; Casey prepares without reviewing, and Riley reviews
@@ -746,6 +747,7 @@ test("independent review corrects, re-reviews and approves a prepared case", asy
 test("review submission waits for documents, not for office contact", async (t) => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     await t.test(
       "an open follow-up never blocks a preparer whose documents are verified",
       async () => {
@@ -760,9 +762,7 @@ test("review submission waits for documents, not for office contact", async (t) 
         await f.act(f.preparer, caseId, "ESCALATE_CONTACT", {
           reason: ESCALATION_REASON,
         });
-        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
-          filename: f.sampleFilename,
-        });
+        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {});
         await f.act(f.preparer, caseId, "VERIFY_DOCUMENT", {});
         const held = await f.readStaffCase(caseId);
         // The office task is deliberately left open.
@@ -821,18 +821,18 @@ test("review submission waits for documents, not for office contact", async (t) 
         // Readiness answers last (contract step 7, Rulings R21 and R31): only
         // this case's preparer is told a document is still open; everybody
         // else is refused for the qualification or the assignment they lack.
+        // Review Focus 4: the Reviewer role gives `prepare` (052), so the
+        // unqualified callers below are the Admin and the Intaker.
         await assert.rejects(
           () => f.act(f.preparer, caseId, "SUBMIT_REVIEW", { questionnaire: PREPARER }),
           rejected("INVALID_TRANSITION"),
         );
-        for (const client of [f.siteCoordinator, f.reviewer])
+        for (const client of [f.siteCoordinator, f.intaker])
           await assert.rejects(
             () => f.act(client, caseId, "SUBMIT_REVIEW", { questionnaire: PREPARER }),
             rejected("INELIGIBLE"),
           );
-        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
-          filename: f.sampleFilename,
-        });
+        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {});
         // A received but unverified document is still a blocker.
         await assert.rejects(
           () => f.act(f.preparer, caseId, "SUBMIT_REVIEW", { questionnaire: PREPARER }),
@@ -841,7 +841,7 @@ test("review submission waits for documents, not for office contact", async (t) 
         await f.act(f.preparer, caseId, "VERIFY_DOCUMENT", {});
         // With nothing blocking, the unqualified callers answer the same way
         // as before: the blocker never changed what they are told.
-        for (const client of [f.siteCoordinator, f.reviewer])
+        for (const client of [f.siteCoordinator, f.intaker])
           await assert.rejects(
             () => f.act(client, caseId, "SUBMIT_REVIEW", { questionnaire: PREPARER }),
             rejected("INELIGIBLE"),
@@ -856,7 +856,7 @@ test("review submission waits for documents, not for office contact", async (t) 
             () => f.act(f.preparer, caseId, "SUBMIT_REVIEW", { questionnaire: PREPARER }),
             rejected("INVALID_TRANSITION"),
           );
-          for (const client of [f.siteCoordinator, f.reviewer])
+          for (const client of [f.siteCoordinator, f.intaker])
             await assert.rejects(
               () => f.act(client, caseId, "SUBMIT_REVIEW", { questionnaire: PREPARER }),
               rejected("INELIGIBLE"),
@@ -902,7 +902,9 @@ test("review submission waits for documents, not for office contact", async (t) 
         );
         // The second hand-off orders its checks the same way: the blocker is
         // the preparer's to see, and nobody else's.
-        for (const client of [f.reviewer, f.siteCoordinator])
+        // The Admin and the Intaker hold no role with `prepare` (the Reviewer
+        // role gives it since 052).
+        for (const client of [f.intaker, f.siteCoordinator])
           await assert.rejects(
             () =>
               f.act(client, caseId, "RESUBMIT_REVIEW", {
@@ -911,9 +913,7 @@ test("review submission waits for documents, not for office contact", async (t) 
               }),
             rejected("INELIGIBLE"),
           );
-        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
-          filename: f.sampleFilename,
-        });
+        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {});
         await f.act(f.preparer, caseId, "VERIFY_DOCUMENT", {});
         for (const payload of [
           {},
@@ -930,7 +930,7 @@ test("review submission waits for documents, not for office contact", async (t) 
             JSON.stringify(payload),
           );
         // Only the case's own preparer answers a correction request.
-        for (const client of [f.reviewer, f.siteCoordinator])
+        for (const client of [f.intaker, f.siteCoordinator])
           await assert.rejects(
             () =>
               f.act(client, caseId, "RESUBMIT_REVIEW", {
@@ -1053,6 +1053,7 @@ test("review submission waits for documents, not for office contact", async (t) 
 test("a reassigned case excludes its former preparer from review", async (t) => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     // Test-only staff: Drew prepares and also holds `review`; Casey prepares only.
     const drew = await f.staff({ key: "drew", name: "Drew Hayes", capabilities: ["prepare", "review"] });
     const casey = await f.staff({ key: "casey", name: "Casey", capabilities: ["prepare"] });
@@ -1129,17 +1130,13 @@ test("a reassigned case excludes its former preparer from review", async (t) => 
             }),
           rejected("FORBIDDEN"),
         );
-        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
-          filename: f.sampleFilename,
-        });
+        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {});
         await assert.rejects(
           () =>
             f.act(drew.client, caseId, "VERIFY_DOCUMENT", { requestId }),
           rejected("FORBIDDEN"),
         );
-        await f.act(casey.client, caseId, "VERIFY_DOCUMENT", {
-          requestId,
-        });
+        await f.act(casey.client, caseId, "VERIFY_DOCUMENT", { requestId });
         assert.equal(
           (await f.readStaffCase(caseId)).requests[0].status,
           "verified",
@@ -1242,6 +1239,7 @@ const claimedReview = async (f) => {
 test("questionnaire tables are staff-only", async () => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     const { caseId, reviewId } = await claimedReview(f);
     await insertReviewer(f, caseId, reviewId);
     for (const table of ["preparer_questionnaires", "reviewer_questionnaires"]) {
@@ -1265,6 +1263,7 @@ test("questionnaire tables are staff-only", async () => {
 test("questionnaire table checks", async () => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     const { caseId, reviewId } = await claimedReview(f);
     await assert.rejects(() => insertPreparer(f, caseId, { confirmed_by: "other", confirmed_by_name: null }));
     await assert.rejects(() => insertPreparer(f, caseId, { confirmed_by: "client", confirmed_by_name: "Pat" }));
@@ -1297,6 +1296,7 @@ test("questionnaire table checks", async () => {
 test("follow-ups have a purpose", async () => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     const caseId = await f.readyCase();
     await f.act(f.preparer, caseId, "CLAIM_PREPARATION", {});
     await f.act(f.preparer, caseId, "REQUEST_DOCUMENT", f.sampleRequest);
@@ -1323,6 +1323,7 @@ test("follow-ups have a purpose", async () => {
 test("the signing plan is the client's to read", async () => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     const caseId = await f.preparedCase();
     const set = (plan, at) =>
       f.sql("update public.cases set signing_plan=$2, signing_appointment_at=$3 where id=$1", [caseId, plan, at]);
@@ -1452,6 +1453,7 @@ const GOOD_REVIEWER = {
 test("questionnaire payloads are validated by the database", async (t) => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     const unchanged = async (caseId, run) => {
       const before = await f.readStaffCase(caseId);
       await run();
@@ -1572,6 +1574,7 @@ const defaultFollowup = async (f) =>
 test("the three handlers store the answers", async (t) => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     const season = async (caseId) =>
       Number(
         (

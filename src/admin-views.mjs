@@ -16,7 +16,6 @@ import {
   FOLLOWUP_RESOLUTION_OUTCOMES,
   SCREENING_CHECK_LABELS,
   screeningCheckKeys,
-  SAMPLE_DOCUMENT_FILENAME,
 } from "./case-actions.mjs";
 import {
   when,
@@ -43,7 +42,11 @@ import {
   logContactForm,
   taskContacts,
   filingPanel,
+  exitGroup,
 } from "./staff-views.mjs";
+import { LOCAL_TYPES } from "./questionnaires.mjs";
+import { plannedMethod } from "./exit-form-source.mjs";
+import { dialogLocked, rolesChangedLine } from "./role-gates.mjs";
 import {
   waitingReturns,
   returnedToSigning,
@@ -513,7 +516,7 @@ function receiptPanel(record, person, ui) {
           )}</span></div><p>${esc(request?.message)}</p>${
             each.recordDocumentResponse.allowed
               ? caseButton(
-                  `${icon("file")} Record sample document received`,
+                  `${icon("file")} Record document received`,
                   "RECORD_DOCUMENT_RESPONSE",
                   "primary",
                   `data-request-id="${esc(request.id)}" ${busy}`,
@@ -526,9 +529,7 @@ function receiptPanel(record, person, ui) {
         !rights.recordDocumentResponse.allowed && requests.length,
         explain(rights.recordDocumentResponse),
       )}`;
-  return `<section class="panel" aria-labelledby="receipt-title"><div class="section-head"><h2 id="receipt-title">Documents the office took in</h2></div><p class="field-note">Requesting a document and verifying one are the preparer's work, shown above; this is the office's own step. The office records a document it received in person for a client with no account. It is marked <strong>staff-recorded</strong> and stays <strong>awaiting preparer verification</strong>: taking delivery is not verifying, and it never changes the preparer. The one fictional file this demo accepts is <code>${esc(
-    SAMPLE_DOCUMENT_FILENAME,
-  )}</code>.</p>${when(
+  return `<section class="panel" aria-labelledby="receipt-title"><div class="section-head"><h2 id="receipt-title">Documents the office took in</h2></div><p class="field-note">Requesting a document and verifying one are the preparer's work, shown above; this is the office's own step. The office records a document it received in person for a client with no account. It is marked <strong>staff-recorded</strong> and stays <strong>awaiting preparer verification</strong>: taking delivery is not verifying, and it never changes the preparer. No document bytes are stored in ViTally; the office records receipt and the preparer verifies it.</p>${when(
     recorded.length,
     `<ul class="document-list">${recorded
       .map(
@@ -551,7 +552,13 @@ function receiptPanel(record, person, ui) {
 // different things; the Contacts tab draws the same form, unlinked.
 export function followupForms(record, task, person, ui = {}) {
   const busy = ui.busy ? "disabled" : "";
-  const rights = adminEligibility({ caseRecord: record, followup: task }, person);
+  // A form whose capability is gone keeps its text (change recheck-clearance-while-cleared),
+  // but any other refusal (resolved, cancelled) still says its own reason: judge the
+  // task as if the person still held the capability.
+  const judged = ui.locked
+    ? { ...person, capabilities: [...(person?.capabilities ?? []), "followup"] }
+    : person;
+  const rights = adminEligibility({ caseRecord: record, followup: task }, judged);
   if (!rights.recordContact.allowed) return explain(rights.recordContact);
   const resolveScope = `resolve-${task?.id ?? "task"}`;
   const hidden = `<input type="hidden" name="followupId" value="${esc(task?.id ?? "")}">`;
@@ -571,12 +578,16 @@ export function followupForms(record, task, person, ui = {}) {
         "",
         'required maxlength="1000" rows="2"',
         resolveScope,
-      )}${caseSubmit(
-        `${icon("check")} Resolve this task`,
-        "RESOLVE_FOLLOWUP",
-        "primary",
-        `data-followup-id="${esc(task?.id ?? "")}" ${busy}`,
-      )}<p class="field-note">Resolving closes the office's contact task only. It does not verify a document, change the preparer, or close the case.</p></form>`;
+      )}${
+        ui.locked
+          ? rolesChangedLine()
+          : caseSubmit(
+              `${icon("check")} Resolve this task`,
+              "RESOLVE_FOLLOWUP",
+              "primary",
+              `data-followup-id="${esc(task?.id ?? "")}" ${busy}`,
+            )
+      }<p class="field-note">Resolving closes the office's contact task only. It does not verify a document, change the preparer, or close the case.</p></form>`;
 }
 
 const GO_OVER_TITLE = "Go over the return with the client";
@@ -756,7 +767,7 @@ export function closeCaseDialogBody(state = {}) {
         "close",
       )}" name="confirmed" value="true" required><span>I understand this closes the case for everyone.</span></label>`,
     },
-    confirm: caseSubmit(
+    confirm: dialogLocked(state) ? rolesChangedLine() : caseSubmit(
       `${icon("close")} Close this case`,
       "CLOSE_CASE",
       "primary full",
@@ -797,7 +808,7 @@ export function markReadyToEfileDialogBody(state = {}) {
         "ready-efile",
       )}" name="confirmed" value="true" required><span>The client signed Form 8879, or the return will be given to the client on paper.</span></label>`,
     },
-    confirm: caseSubmit(
+    confirm: dialogLocked(state) ? rolesChangedLine() : caseSubmit(
       `${icon("check")} Mark ready to e-file`,
       "MARK_READY_TO_EFILE",
       "primary full",
@@ -834,11 +845,11 @@ const RESULT_WORDS = Object.freeze({ accepted: "accepted", given_to_client: "on 
 const ON_PAPER = "On paper (given to the client to mail)";
 
 // One radio with the line the client will be told under it.
-const choice = (name, value, label, line, scope) =>
+const choice = (name, value, label, line, scope, checked = false) =>
   `<label class="checkbox-row" for="${fieldId(`${name}-${value}`, scope)}"><input type="radio" id="${fieldId(
     `${name}-${value}`,
     scope,
-  )}" name="${name}" value="${value}" required><span>${esc(label)}${
+  )}" name="${name}" value="${value}"${checked ? " checked" : ""} required><span>${esc(label)}${
     line ? `<br><small class="muted">The client will be told: ${esc(line)}</small>` : ""
   }</span></label>`;
 
@@ -881,17 +892,21 @@ function efiledChoices(record) {
       )}: ${word}. Nothing to file again.</p>`;
     })
     .join("");
+  // Each rejected return starts on the method planned for it at Return to signing, if any.
+  const plannedBy = Object.fromEntries(rejected.map((kind) => [kind, plannedMethod(record, kind)]));
   const groups = rejected
     .map((kind) => {
       const title = kind === "federal" ? "Federal return" : "Pennsylvania return";
       const lines = rejected.length === 1;
+      const planned = plannedBy[kind];
       return `<fieldset class="filing-choice"><legend>${title} (rejected): how was it filed this time?</legend>${choice(
         `method-${kind}`,
         "efile",
         "E-filed",
         lines ? FILED_LINES[kind].efile : "",
         "efiled",
-      )}${choice(`method-${kind}`, "paper", ON_PAPER, lines ? FILED_LINES[kind].paper : "", "efiled")}</fieldset>`;
+        planned === "efile",
+      )}${choice(`method-${kind}`, "paper", ON_PAPER, lines ? FILED_LINES[kind].paper : "", "efiled", planned === "paper")}</fieldset>`;
     })
     .join("");
   const both =
@@ -926,7 +941,7 @@ export function markEfiledDialogBody(state = {}) {
         "efiled",
       )}" name="confirmed" value="true" required><span>Each return was e-filed, or given to the client on paper, as chosen above.</span></label>`,
     },
-    confirm: caseSubmit(
+    confirm: dialogLocked(state) ? rolesChangedLine() : caseSubmit(
       `${icon("check")} Mark e-filed`,
       "MARK_EFILED",
       "primary full",
@@ -986,7 +1001,7 @@ export function recordFilingResultDialogBody(state = {}) {
         "filing-result",
       )}" name="confirmed" value="true" required><span>These results are correct.</span></label>`,
     },
-    confirm: caseSubmit(
+    confirm: dialogLocked(state) ? rolesChangedLine() : caseSubmit(
       `${icon("check")} Record the result`,
       "RECORD_FILING_RESULT",
       "primary full",
@@ -994,6 +1009,26 @@ export function recordFilingResultDialogBody(state = {}) {
     ),
     keep: "Keep it as it is",
   });
+}
+
+// The optional corrected Exit Form values: a group for each return the case
+// has a method for (a settled one has its method fixed), the five Local groups
+// and Remarks. Every group starts closed and empty; nothing is prefilled.
+function returnExitFields(record) {
+  const scope = "return-to-signing";
+  const returns = [
+    ["Federal", "federal", record.federalMethod, record.federalResult],
+    ["State", "state", record.stateMethod, record.stateResult],
+  ]
+    .filter(([, , method]) => method)
+    .map(([title, prefix, method, result]) =>
+      exitGroup(title, prefix, { scope, fixedMethod: result !== "rejected" ? method : null }),
+    );
+  return `<p class="hint">Optional: the corrected Exit Form values. Leave a part empty to fill it in by hand.</p>${returns.join(
+    "",
+  )}${LOCAL_TYPES.map(([type, label]) => exitGroup(`Local: ${label}`, `local.${type}`, { scope })).join(
+    "",
+  )}${textarea("Remarks (optional)", "remarks", "", 'maxlength="2000" rows="3"', scope)}`;
 }
 
 /** The return-to-signing confirmation: the client is told to sign again. */
@@ -1009,7 +1044,7 @@ export function returnToSigningDialogBody(state = {}) {
       html: "The client will be told: PCDC corrected your return. You need to sign it again. This can't be undone.",
     },
     form: {
-      fields: `<label class="checkbox-row" for="${fieldId(
+      fields: `${returnExitFields(record)}<label class="checkbox-row" for="${fieldId(
         "confirmed",
         "return-to-signing",
       )}"><input type="checkbox" id="${fieldId(
@@ -1017,7 +1052,7 @@ export function returnToSigningDialogBody(state = {}) {
         "return-to-signing",
       )}" name="confirmed" value="true" required><span>The fix is done.</span></label>`,
     },
-    confirm: caseSubmit(
+    confirm: dialogLocked(state) ? rolesChangedLine() : caseSubmit(
       `${icon("check")} Return to signing`,
       "RETURN_TO_SIGNING",
       "primary full",
@@ -1064,7 +1099,7 @@ export function requestDocumentsDialogBody(state = {}) {
       html: "The client sees each title and message and sends the documents themselves. The case waits at Waiting for documents until you verify every one. The client is told which documents PCDC asked for.",
     },
     form: { fields: rows },
-    confirm: caseSubmit(
+    confirm: dialogLocked(state) ? rolesChangedLine() : caseSubmit(
       `${icon("file")} Ask for these documents`,
       "REQUEST_DOCUMENTS_AT_INTAKE",
       "primary full",
@@ -1094,7 +1129,7 @@ export function putOnHoldDialogBody(state = {}) {
         "hold",
       )}${confirmRow("confirmed", "hold", "I understand the case goes on hold.")}`,
     },
-    confirm: caseSubmit(
+    confirm: dialogLocked(state) ? rolesChangedLine() : caseSubmit(
       `${icon("clock")} Put on hold`,
       "PUT_ON_HOLD",
       "primary full",
@@ -1118,7 +1153,7 @@ export function resumeFromHoldDialogBody(state = {}) {
     form: {
       fields: confirmRow("confirmed", "resume", "The office got in touch with the client."),
     },
-    confirm: caseSubmit(
+    confirm: dialogLocked(state) ? rolesChangedLine() : caseSubmit(
       `${icon("phone")} Got in touch`,
       "RESUME_FROM_HOLD",
       "primary full",

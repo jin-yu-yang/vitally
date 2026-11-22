@@ -25,7 +25,7 @@ foundation for production too; see [key decisions](#key-decisions-and-trade-offs
 | --- | --- | --- |
 | Browser app | `index.html`, `src/` | Screens, navigation, forms, live updates. Predicts permissions to hide buttons; decides nothing. |
 | Supabase Auth (GoTrue) | Supabase | Email one-time-code sign-in. Accounts exist only for approved addresses. |
-| PostgREST | Supabase | Exposes tables (read-only for browsers) and the twenty-four RPC functions over HTTP. |
+| PostgREST | Supabase | Exposes tables (read-only for browsers) and the thirty-four RPC functions over HTTP. |
 | PostgreSQL | Supabase | Schema, row-level security, and all workflow logic in `SECURITY DEFINER` functions. |
 | Realtime | Supabase | Pushes INSERT/UPDATE events on twenty-two tables, filtered by the same row-level security. |
 | `server.mjs` | Local machine | Serves the static files and `/public-config.json` locally. Any static host can replace it. |
@@ -57,7 +57,8 @@ erDiagram
 - **Membership** (`public.memberships`): which workspace the account belongs to, and whether it
   is an `applicant` (a client) or `staff` (a staff member's own account).
 - **Person** (`public.people`): a staff member with capabilities. Every staff action is done as
-  the account's own person, and the database checks that person's capabilities.
+  the account's own person, and the database checks that person's capabilities, which mirror
+  their roles this season (052).
 
 There is no presenter access and there are no demonstration people (Alex, Morgan, Sam): #136
 removed them. A former presenter address cannot sign in, and a window that was open shows "This

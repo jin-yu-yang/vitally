@@ -30,6 +30,7 @@ async function requestedCase(f) {
 test("document requests, receipts and verification keep the preparer in charge", async (t) => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     await t.test(
       "the assigned preparer requests, the client responds, the preparer verifies",
       async () => {
@@ -69,7 +70,7 @@ test("document requests, receipts and verification keep the preparer in charge",
           f.applicantA,
           caseId,
           "RESPOND_DOCUMENT",
-          { filename: f.sampleFilename },
+          {  },
         );
         assert.equal(responded.revision, requested.revision + 1);
         staff = await f.readStaffCase(caseId);
@@ -77,7 +78,7 @@ test("document requests, receipts and verification keep the preparer in charge",
         assert.equal(staff.requests[0].status, "awaiting_verification");
         assert.equal(staff.documents.length, 1);
         assert.equal(staff.documents[0].requestId, staff.requests[0].id);
-        assert.equal(staff.documents[0].filename, f.sampleFilename);
+        assert.equal(staff.documents[0].filename, "OneDrive upload reported");
         assert.equal(staff.documents[0].source, "client");
         assert.equal(staff.documents[0].submittedByUserId, f.applicantAUserId);
         assert.equal(staff.documents[0].submittedByPersonId, null);
@@ -163,8 +164,8 @@ test("document requests, receipts and verification keep the preparer in charge",
           }),
         );
         assert.equal(foreign.error?.code, "VT002");
-        // Step 7: an admin title and a reviewer qualification are not `prepare`.
-        for (const client of [f.siteCoordinator, f.reviewer])
+        // Step 7: the Admin and Intaker roles do not give `prepare`.
+        for (const client of [f.siteCoordinator, f.intaker])
           await assert.rejects(
             () =>
               f.act(
@@ -177,27 +178,17 @@ test("document requests, receipts and verification keep the preparer in charge",
           );
         // A qualified person who is not this case's preparer is forbidden, even
         // with the capability: assignment and participation are both required.
-        await f.sql("update public.people set capabilities=$1 where id=$2", [
-          ["prepare", "review"],
-          f.reviewerId,
-        ]);
-        try {
-          await assert.rejects(
-            () =>
-              f.act(
-                f.reviewer,
-                caseId,
-                "REQUEST_DOCUMENT",
-                f.sampleRequest,
-              ),
-            rejected("FORBIDDEN"),
-          );
-        } finally {
-          await f.sql("update public.people set capabilities=$1 where id=$2", [
-            ["review"],
-            f.reviewerId,
-          ]);
-        }
+        // The Reviewer role gives `prepare` (052: no ceiling narrows it).
+        await assert.rejects(
+          () =>
+            f.act(
+              f.reviewer,
+              caseId,
+              "REQUEST_DOCUMENT",
+              f.sampleRequest,
+            ),
+          rejected("FORBIDDEN"),
+        );
         assert.deepEqual((await f.readStaffCase(caseId)).requests, []);
         // Positive control: the assigned preparer may.
         await f.act(
@@ -217,10 +208,10 @@ test("document requests, receipts and verification keep the preparer in charge",
           () => f.act(f.siteCoordinator, caseId, "VERIFY_DOCUMENT", {}),
           rejected("INELIGIBLE"),
         );
-        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
-          filename: f.sampleFilename,
-        });
-        for (const client of [f.siteCoordinator, f.reviewer])
+        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {});
+        // The Reviewer role gives `prepare` (052), so the second unqualified
+        // caller is the Intaker.
+        for (const client of [f.siteCoordinator, f.intaker])
           await assert.rejects(
             () =>
               f.act(client, caseId, "VERIFY_DOCUMENT", {}),
@@ -246,9 +237,7 @@ test("document requests, receipts and verification keep the preparer in charge",
         );
         await assert.rejects(
           () =>
-            f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
-              filename: f.sampleFilename,
-            }),
+            f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {}),
           rejected("INVALID_TRANSITION"),
         );
       },
@@ -264,7 +253,6 @@ test("document requests, receipts and verification keep the preparer in charge",
           type: "RESPOND_DOCUMENT",
           payload: {
             requestId: before.requests[0].id,
-            filename: f.sampleFilename,
           },
         });
         const accepted = await f.applicantA.rpc("vitally_apply_action", respond);
@@ -298,7 +286,6 @@ test("document requests, receipts and verification keep the preparer in charge",
             type: "RESPOND_DOCUMENT",
             payload: {
               requestId: before.requests[0].id,
-              filename: f.sampleFilename,
             },
           }),
         );
@@ -318,7 +305,6 @@ test("document requests, receipts and verification keep the preparer in charge",
           type: "RECORD_DOCUMENT_RESPONSE",
           payload: {
             requestId: before.requests[0].id,
-            filename: f.sampleFilename,
           },
         });
         const accepted = await f.siteCoordinator.rpc("vitally_apply_action", record);
@@ -345,12 +331,114 @@ test("document requests, receipts and verification keep the preparer in charge",
         // The client-facing note is neutral: nobody claims a client uploaded.
         const message = staff.history.at(-1).message;
         assert.equal(staff.history.at(-1).action, "RECORD_DOCUMENT_RESPONSE");
-        assert.ok(message.includes("staff"), message);
+        assert.ok(message.includes("office"), message);
         // The preparer still has to verify it.
         await f.act(f.preparer, caseId, "VERIFY_DOCUMENT", {});
         staff = await f.readStaffCase(caseId);
         assert.equal(staff.requests[0].status, "verified");
         assert.equal(staff.documents.length, 1);
+      },
+    );
+    await t.test(
+      "a client reports an upload only while the client documents link is set; the office records one without it",
+      async () => {
+        const owned = await requestedCase(f);
+        const office = await f.assistedCase();
+        await f.setClientDocumentsLink(null);
+        try {
+          await assert.rejects(
+            () => f.act(f.applicantA, owned, "RESPOND_DOCUMENT", {}),
+            rejected("INVALID_TRANSITION"),
+          );
+          await assert.rejects(
+            () => f.act(f.applicantA, owned, "SET_DOCUMENT_CARD", { slotId: "photo_id.tp", status: "sent" }),
+            rejected("INVALID_TRANSITION"),
+          );
+          const staff = await f.readStaffCase(owned);
+          assert.equal(staff.requests[0].status, "open");
+          assert.equal(staff.documents.length, 0);
+          // The office saw the document itself, so no link is needed.
+          await f.act(f.siteCoordinator, office, "RECORD_DOCUMENT_RESPONSE", {});
+          assert.equal((await f.readStaffCase(office)).requests[0].status, "awaiting_verification");
+        } finally {
+          await f.setClientDocumentsLink();
+        }
+        await f.act(f.applicantA, owned, "RESPOND_DOCUMENT", {});
+        assert.equal((await f.readStaffCase(owned)).requests[0].status, "awaiting_verification");
+      },
+    );
+    await t.test(
+      "a mis-marked card can be taken back: the client before staff confirm it, staff one step at a time",
+      async () => {
+        const caseId = await preparingCase(f);
+        const slotId = "photo_id.tp";
+        const status = async () =>
+          (
+            await f.sql("select status from public.case_document_cards where case_id=$1 and slot_id=$2", [
+              caseId,
+              slotId,
+            ])
+          ).rows[0]?.status ?? null;
+        const mark = (client, value) => f.act(client, caseId, "SET_DOCUMENT_CARD", { slotId, status: value });
+        // The client reported it by mistake and takes it back.
+        await mark(f.applicantA, "sent");
+        await mark(f.applicantA, "later");
+        assert.equal(await status(), "later");
+        await mark(f.applicantA, "sent");
+        await mark(f.applicantA, "not_done");
+        assert.equal(await status(), null);
+        await mark(f.applicantA, "sent");
+        // The preparer marks it received, then takes that back to "sent".
+        await mark(f.preparer, "received");
+        await mark(f.preparer, "sent");
+        assert.equal(await status(), "sent");
+        // Verified goes back to received.
+        await mark(f.preparer, "verified");
+        await mark(f.preparer, "received");
+        assert.equal(await status(), "received");
+        // Once staff confirmed it, the client can no longer change it.
+        await assert.rejects(() => mark(f.applicantA, "later"), rejected("INVALID_TRANSITION"));
+        assert.equal(await status(), "received");
+      },
+    );
+    await t.test(
+      "the client's report time survives staff marks and undos, and staff undo needs no link",
+      async () => {
+        const caseId = await preparingCase(f);
+        const slotId = "photo_id.tp";
+        const row = async () =>
+          (
+            await f.sql(
+              "select status,reported_at,changed_at from public.case_document_cards where case_id=$1 and slot_id=$2",
+              [caseId, slotId],
+            )
+          ).rows[0];
+        const mark = (client, value) => f.act(client, caseId, "SET_DOCUMENT_CARD", { slotId, status: value });
+        await mark(f.applicantA, "sent");
+        const reported = (await row()).reported_at;
+        assert.ok(reported, "a client's sent records the report time");
+        await mark(f.preparer, "received");
+        await f.setClientDocumentsLink(null);
+        try {
+          // Undo received is staff's "sent": allowed without the link.
+          await mark(f.preparer, "sent");
+          assert.equal((await row()).status, "sent");
+          // A client's own "sent" still needs it.
+          await assert.rejects(() => mark(f.applicantA, "sent"), rejected("INVALID_TRANSITION"));
+        } finally {
+          await f.setClientDocumentsLink();
+        }
+        await mark(f.preparer, "verified");
+        await mark(f.preparer, "received");
+        const after = await row();
+        assert.equal(after.reported_at.getTime(), reported.getTime(), "staff marks keep the client's time");
+        assert.ok(after.changed_at.getTime() >= reported.getTime());
+        // Leaving sent / received / verified ends the report.
+        await mark(f.preparer, "later");
+        assert.equal((await row()).reported_at, null);
+        // Staff marking a card received that the client never reported: no report time.
+        await mark(f.preparer, "received");
+        assert.equal((await row()).reported_at, null);
       },
     );
     await t.test(
@@ -361,18 +449,14 @@ test("document requests, receipts and verification keep the preparer in charge",
         // The staff receipt exists only where there is no client to answer.
         await assert.rejects(
           () =>
-            f.act(f.siteCoordinator, owned, "RECORD_DOCUMENT_RESPONSE", {
-              filename: f.sampleFilename,
-            }),
+            f.act(f.siteCoordinator, owned, "RECORD_DOCUMENT_RESPONSE", {}),
           rejected("FORBIDDEN"),
         );
         // Recording a response is staff work: the client answers with their own action.
         const beforeClientAttempt = await f.stateSnapshot();
         await assert.rejects(
           () =>
-            f.act(f.applicantA, owned, "RECORD_DOCUMENT_RESPONSE", {
-              filename: f.sampleFilename,
-            }),
+            f.act(f.applicantA, owned, "RECORD_DOCUMENT_RESPONSE", {}),
           rejected("FORBIDDEN"),
         );
         assert.deepEqual(await f.stateSnapshot(), beforeClientAttempt);
@@ -385,7 +469,6 @@ test("document requests, receipts and verification keep the preparer in charge",
             type: "RESPOND_DOCUMENT",
             payload: {
               requestId: ownedStaff.requests[0].id,
-              filename: f.sampleFilename,
             },
           }),
         );
@@ -394,9 +477,7 @@ test("document requests, receipts and verification keep the preparer in charge",
         for (const staff of [f.siteCoordinator, f.preparer])
           await assert.rejects(
             () =>
-              f.act(staff, owned, "RESPOND_DOCUMENT", {
-                filename: f.sampleFilename,
-              }),
+              f.act(staff, owned, "RESPOND_DOCUMENT", {}),
             rejected("FORBIDDEN"),
           );
         const assisted = await f.assistedCase();
@@ -408,7 +489,7 @@ test("document requests, receipts and verification keep the preparer in charge",
                 client,
                 assisted,
                 "RECORD_DOCUMENT_RESPONSE",
-                { filename: f.sampleFilename },
+                {  },
               ),
             rejected("FORBIDDEN"),
           );
@@ -422,16 +503,13 @@ test("document requests, receipts and verification keep the preparer in charge",
             type: "RESPOND_DOCUMENT",
             payload: {
               requestId: assistedStaff.requests[0].id,
-              filename: f.sampleFilename,
             },
           }),
         );
         assert.equal(client.error.code, "VT002");
         assert.deepEqual((await f.readStaffCase(assisted)).documents, []);
         // Positive control.
-        await f.act(f.siteCoordinator, assisted, "RECORD_DOCUMENT_RESPONSE", {
-          filename: f.sampleFilename,
-        });
+        await f.act(f.siteCoordinator, assisted, "RECORD_DOCUMENT_RESPONSE", {});
         assert.equal((await f.readStaffCase(assisted)).documents.length, 1);
         assert.deepEqual((await f.readStaffCase(owned)).documents, []);
       },
@@ -464,15 +542,14 @@ test("document requests, receipts and verification keep the preparer in charge",
           f.sampleRequest,
         );
         const requestId = (await f.readStaffCase(caseId)).requests[0].id;
-        // Only the one simulated file the demo describes is accepted.
+        // A client may report the upload by request ID only, never a file name.
         for (const payload of [
-          { requestId },
           { requestId, filename: "mileage.pdf" },
           { requestId, filename: "" },
           { requestId, filename: 7 },
-          { requestId, filename: f.sampleFilename, extra: 1 },
-          { requestId: "not-a-uuid", filename: f.sampleFilename },
-          { filename: f.sampleFilename },
+          { requestId, extra: 1 },
+          { requestId: "not-a-uuid",  },
+          {  },
         ]) {
           const response = await f.applicantA.rpc(
             "vitally_apply_action",
@@ -509,7 +586,6 @@ test("document requests, receipts and verification keep the preparer in charge",
           () =>
             f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
               requestId: foreignRequest,
-              filename: f.sampleFilename,
             }),
           rejected("VALIDATION"),
         );
@@ -532,7 +608,6 @@ test("document requests, receipts and verification keep the preparer in charge",
         // Positive controls for the shapes the payload table does define.
         await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
           requestId,
-          filename: f.sampleFilename,
         });
         await f.act(f.preparer, caseId, "VERIFY_DOCUMENT", {
           requestId,
@@ -565,7 +640,7 @@ test("document requests, receipts and verification keep the preparer in charge",
               f.applicantA,
               "client",
               "RESPOND_DOCUMENT",
-              { requestId, filename: f.sampleFilename },
+              { requestId },
             ],
           ])
             await assert.rejects(
@@ -596,7 +671,6 @@ test("document requests, receipts and verification keep the preparer in charge",
           });
           await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
             requestId,
-            filename: f.sampleFilename,
           });
         } finally {
           await f.sql("update public.cases set stage='preparing' where id=$1", [
@@ -621,6 +695,7 @@ test("document requests, receipts and verification keep the preparer in charge",
 test("admin follow-up is assigned, recorded and resolved by the office", async (t) => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     await t.test(
       "escalation assigns the default person and resolution leaves preparation untouched",
       async () => {
@@ -726,9 +801,7 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
           { ...SAMPLE_CONTACT(), outcome: "no_answer", note: "Left a message" },
           task.id,
         );
-        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {
-          filename: f.sampleFilename,
-        });
+        await f.act(f.applicantA, caseId, "RESPOND_DOCUMENT", {});
         let staff = await f.readStaffCase(caseId);
         // Both histories survive: the receipt does not close the contact task.
         assert.equal(staff.requests[0].status, "awaiting_verification");
@@ -816,9 +889,7 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
         }
         assert.deepEqual((await f.readStaffCase(fresh)).followups, []);
         // An answered request is no longer escalatable.
-        await f.act(f.applicantA, fresh, "RESPOND_DOCUMENT", {
-          filename: f.sampleFilename,
-        });
+        await f.act(f.applicantA, fresh, "RESPOND_DOCUMENT", {});
         await assert.rejects(
           () =>
             f.act(f.preparer, fresh, "ESCALATE_CONTACT", {
@@ -838,9 +909,10 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
           rejected("INELIGIBLE"),
         );
         assert.deepEqual((await f.readStaffCase(fresh)).followups, []);
-        // Only the assigned preparer escalates.
+        // Only the assigned preparer escalates. The Admin and the Intaker hold
+        // no role with `prepare` (the Reviewer role gives it since 052).
         const third = await requestedCase(f);
-        for (const client of [f.siteCoordinator, f.reviewer])
+        for (const client of [f.siteCoordinator, f.intaker])
           await assert.rejects(
             () =>
               f.act(client, third, "ESCALATE_CONTACT", {
@@ -881,11 +953,23 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
           );
         }
         assert.deepEqual((await f.readStaffCase(caseId)).followups, []);
-        // A configured person without the capability is the same setup error.
-        await f.sql("update public.people set capabilities=$1 where id=$2", [
-          ["admin", "assist", "receive_documents"],
-          f.siteCoordinatorId,
-        ]);
+        // A configured person without the capability is the same setup error:
+        // a default who is neither a site coordinator nor holds `followup`
+        // (spec sign-in, "The roster can choose the default follow-up
+        // person"). The fixture's Intaker is neither.
+        assert.deepEqual(
+          (
+            await f.sql(
+              "select vitally_private.is_site_coordinator($1,$2) as sc, 'followup'=any(capabilities) as followup from public.people where id=$2",
+              [f.workspaceId, f.intakerId],
+            )
+          ).rows[0],
+          { sc: false, followup: false },
+        );
+        await f.sql(
+          "update public.workspaces set default_followup_person_id=$2 where id=$1",
+          [f.workspaceId, f.intakerId],
+        );
         try {
           await assert.rejects(
             () =>
@@ -895,10 +979,10 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
             rejected("VALIDATION"),
           );
         } finally {
-          await f.sql("update public.people set capabilities=$1 where id=$2", [
-            ["admin", "assist", "followup", "receive_documents"],
-            f.siteCoordinatorId,
-          ]);
+          await f.sql(
+            "update public.workspaces set default_followup_person_id=$2 where id=$1",
+            [f.workspaceId, f.siteCoordinatorId],
+          );
         }
         assert.deepEqual((await f.readStaffCase(caseId)).followups, []);
         // Positive control with the workspace restored.
@@ -1032,11 +1116,8 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
         );
         // Readiness answers anyone who may act (042): a capable non-assignee
         // is told the resolved task is not available. The roster roles follow
-        // (045: a staff member acts with their roles' capabilities).
-        await f.sql("update public.people set capabilities=$1 where id=$2", [
-          ["admin", "followup", "review"],
-          f.reviewerId,
-        ]);
+        // (045: a staff member acts with their roles' capabilities; 052: and
+        // people.capabilities is their mirror).
         try {
           await f.clearStaff(f.reviewerId, ["admin", "followup", "review"]);
           await assert.rejects(
@@ -1054,10 +1135,6 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
             rejected("INVALID_TRANSITION"),
           );
         } finally {
-          await f.sql("update public.people set capabilities=$1 where id=$2", [
-            ["review"],
-            f.reviewerId,
-          ]);
           await f.clearStaff(f.reviewerId, ["review"]);
         }
         assert.equal((await taskContacts(f, followupId)).length, 4);
@@ -1157,23 +1234,23 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
       assert.equal((await taskContacts(f, task.id)).length, 0);
     });
     await t.test("follow-up work needs the capability, not the assignment (042)", async () => {
-      const dee = await f.staff({ key: "dee", name: "Dee Navarro", capabilities: ["admin", "receive_documents"] });
+      // Follow-up access comes only with the Admin role since 052, so the
+      // person without it is an Intaker.
+      const dee = await f.staff({ key: "dee", name: "Dee Navarro", capabilities: ["assist", "receive_documents"] });
       const caseId = await requestedCase(f);
       await f.act(f.preparer, caseId, "ESCALATE_CONTACT", { reason: "Office contact needed" });
       const [task] = (await f.readStaffCase(caseId)).followups;
       const payload = { followupId: task.id, outcome: "reached", note: "Spoke with the client" };
-      // Admin without follow-up access is refused.
+      // A staff member without follow-up access is refused.
       await assert.rejects(
         () => f.logContact(dee.client, caseId, SAMPLE_CONTACT(), task.id),
         rejected("FORBIDDEN"),
       );
       await assert.rejects(() => f.act(dee.client, caseId, "RESOLVE_FOLLOWUP", payload), rejected("FORBIDDEN"));
-      // So is the assignee once they no longer hold follow-up access.
+      // So is the assignee once they no longer hold follow-up access: no
+      // longer the Admin role, though still a site coordinator.
       assert.equal(task.assigneeId, f.siteCoordinatorId);
-      await f.sql("update public.people set capabilities=$1 where id=$2", [
-        ["admin", "assist", "receive_documents"],
-        f.siteCoordinatorId,
-      ]);
+      await f.clearStaff(f.siteCoordinatorId, ["assist", "receive_documents"]);
       try {
         await assert.rejects(
           () => f.logContact(f.siteCoordinator, caseId, SAMPLE_CONTACT(), task.id),
@@ -1184,10 +1261,7 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
           rejected("FORBIDDEN"),
         );
       } finally {
-        await f.sql("update public.people set capabilities=$1 where id=$2", [
-          ["admin", "followup", "assist", "receive_documents"],
-          f.siteCoordinatorId,
-        ]);
+        await f.clearStaff(f.siteCoordinatorId, ["admin", "followup", "assist", "receive_documents"]);
       }
       assert.equal((await taskContacts(f, task.id)).length, 0);
       assert.equal((await f.readStaffCase(caseId)).followups[0].status, "open");
@@ -1221,7 +1295,7 @@ test("admin follow-up is assigned, recorded and resolved by the office", async (
               caseId,
               revision,
               type: "RESPOND_DOCUMENT",
-              payload: { requestId, filename: f.sampleFilename },
+              payload: { requestId },
             },
             "VT002",
           ],

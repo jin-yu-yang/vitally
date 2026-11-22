@@ -28,6 +28,7 @@ import {
   resolveHelpDrawerBody,
   closeUnsignedDialogBody,
 } from "./office-views.mjs";
+import { addCaseLocked, dialogLocked } from "./role-gates.mjs";
 import { renderCasePool } from "./pool-views.mjs";
 import {
   renderRoster,
@@ -39,8 +40,10 @@ import {
 } from "./volunteer-views.mjs";
 import { volunteerTabs, renderWorkload, assignDrawerBody, assignDrawerTitle, DEFAULT_WORKLOAD_SORT } from "./workload-views.mjs";
 import { workloadRows, unassignedCases, candidates } from "./volunteer-workload.mjs";
-import { awaitingClearance, ceilingAdmin } from "./clearance.mjs";
+import { returningCandidates } from "./volunteer-roster.mjs";
+import { awaitingClearance, ceilingAdmin, siteCoordinator } from "./clearance.mjs";
 import { setupScreen, siteCheckScreen } from "./setup-views.mjs";
+import { myProfilePage } from "./profile-views.mjs";
 import {
   renderNotificationsPanel,
   renderPostUpdatePage,
@@ -49,6 +52,7 @@ import {
   deleteDraftConfirm,
   updateGoneBody,
 } from "./update-views.mjs";
+import { renderSeasonSettings, changeSidnDialogBody, startSeasonDialogBody } from "./season-settings-views.mjs";
 
 // The shared shell: the frame every screen sits in, the dialogs, the two
 // screens that belong to nobody in particular (setup needed, no access), and
@@ -210,15 +214,27 @@ const isAdmin = (person) =>
 // What the staff sidebar holds: the brand, the screens this account can go to,
 // and who is signed in. Screens that do not exist yet (Dashboard, Schedule,
 // Documents, Messages) are not shown. `office` is the effective admin (All
-// cases, Follow-ups); `volunteers` is the ceiling admin (the Roster), and
+// cases, Follow-ups); `volunteers` is the workspace admin (the Roster), and
 // `board` is false on the setup screen, which has no work board.
 export function staffSidebar(state, person, office, { volunteers = office, board = true } = {}) {
-  // A staff account is its own person: "Signed in as".
-  const accountRow = `<small>Signed in as</small> <strong>${esc(person?.name ?? state.principal?.personName ?? "")}</strong>`;
+  // A staff account is its own person. A cleared window's row is the link to
+  // My profile (change add-my-profile, D9); on the setup screen it stays the
+  // plain "Signed in as".
+  const accountName = person?.name ?? state.principal?.personName ?? "";
+  const onProfile = state?.screen === "my-profile";
+  const accountRow = board
+    ? button(
+        `<span>My profile</span><small class="account-name">${esc(accountName)}</small>`,
+        "open-my-profile",
+        `nav-link account-link${onProfile ? " current" : ""}`,
+        onProfile ? 'aria-current="page"' : "",
+      )
+    : `<small>Signed in as</small> <strong>${esc(accountName)}</strong>`;
   const onBoard = state?.screen === "staff";
   const onPool = state?.screen === "office-cases";
   const onRoster = state?.screen === "office-volunteers";
   const onUpdates = state?.screen === "office-updates";
+  const onSettings = state?.screen === "office-settings";
   const label = office ? "Follow-ups" : "Work board";
   // All cases, then the Roster (admin only, change add-volunteer-roster-records).
   const pool = office && board
@@ -229,21 +245,43 @@ export function staffSidebar(state, person, office, { volunteers = office, board
         onPool ? 'aria-current="page"' : "",
       )
     : "";
+  // The uploads waiting for review (change add-clearance-uploads): the count
+  // is drawn for the eye, and the name says it.
+  const toReview = Math.max(0, Number(state?.uploadsToReview) || 0);
   const roster = volunteers
     ? button(
-        `${icon("user")} Volunteers`,
+        `${icon("user")} Volunteers${when(
+          toReview > 0,
+          `<span class="nav-count" aria-hidden="true"> · ${toReview}</span>`,
+        )}`,
         "open-volunteers",
         `nav-link${onRoster ? " current" : ""}`,
-        onRoster ? 'aria-current="page"' : "",
+        [
+          onRoster ? 'aria-current="page"' : "",
+          toReview > 0
+            ? `aria-label="Volunteers, ${toReview} upload${toReview === 1 ? "" : "s"} to review"`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
       )
     : "";
-  // Post an update follows the Roster: the ceiling admin's, cleared or not.
+  // Post an update follows the Roster: the workspace admin's, cleared or not.
   const postUpdate = volunteers
     ? button(
         `${icon("megaphone")} Post an update`,
         "open-post-update",
         `nav-link${onUpdates ? " current" : ""}`,
         onUpdates ? 'aria-current="page"' : "",
+      )
+    : "";
+  // Season settings follows Post an update (change add-season-settings).
+  const settings = volunteers
+    ? button(
+        `${icon("settings")} Season settings`,
+        "open-season-settings",
+        `nav-link${onSettings ? " current" : ""}`,
+        onSettings ? 'aria-current="page"' : "",
       )
     : "";
   // Every staff window has Notifications, cleared or not (change
@@ -258,7 +296,7 @@ export function staffSidebar(state, person, office, { volunteers = office, board
     "nav-link nav-notifications",
     `aria-haspopup="dialog"${unread > 0 ? ` aria-label="Notifications, ${unread} unread"` : ""}`,
   );
-  // On the setup screen there is no board: a ceiling admin's way back from
+  // On the setup screen there is no board: a workspace admin's way back from
   // the Roster is the setup screen itself.
   const home = board || volunteers
     ? button(
@@ -268,7 +306,7 @@ export function staffSidebar(state, person, office, { volunteers = office, board
         onBoard ? 'aria-current="page"' : "",
       )
     : "";
-  const links = `${home}${pool}${roster}${postUpdate}${notifications}`;
+  const links = `${home}${pool}${roster}${postUpdate}${settings}${notifications}`;
   return `<div class="sidebar-brand"><img src="src/pcdc-logo.png" alt="PCDC" width="36" height="36"><span class="sidebar-wordmark">ViTally<span class="brand-dot">.</span></span></div>${when(links, `<nav class="sidebar-nav" aria-label="Main navigation">${links}</nav>`)}<div class="sidebar-account"><div class="account-row">${icon("user")}<span>${accountRow}</span></div>${button(
     `${icon("help")} Need help?`,
     "open-help",
@@ -278,9 +316,10 @@ export function staffSidebar(state, person, office, { volunteers = office, board
 
 // The records are decorated here — once, with the roster this screen already
 // holds — so the renderers never see a bare id.
-const OFFICE_SCREENS = ["office-cases", "office-add-case", "office-volunteers", "office-updates"];
-// The ceiling admin's screens, cleared or not: the Roster and Post an update.
-const CEILING_SCREENS = ["office-volunteers", "office-updates"];
+const OFFICE_SCREENS = ["office-cases", "office-add-case", "office-volunteers", "office-updates", "office-settings"];
+// The workspace admin's screens, cleared or not: the Roster, Post an update and
+// Season settings.
+const CEILING_SCREENS = ["office-volunteers", "office-updates", "office-settings"];
 
 // The Follow-ups queue reads the cases and the help requests; it is ready only
 // when both are (a list that was never given counts as loaded).
@@ -292,7 +331,7 @@ const combineLists = (...states) => {
 // A staff page: its overline, title and intro, an optional way back to the
 // board, the page's actions and its body.
 const frame = (overline, title, intro, backLabel, body, actions = "") =>
-  `<main id="main" class="narrow" tabindex="-1"><div class="page-intro"><span class="overline">${esc(overline)}</span><h1>${esc(title)}</h1><p>${esc(intro)}</p>${when(
+  `<main id="main" class="narrow" tabindex="-1"><div class="page-intro"><span class="overline">${esc(overline)}</span><h1>${esc(title)}</h1>${when(intro, `<p>${esc(intro)}</p>`)}${when(
     backLabel,
     button(`${icon("back")} ${backLabel}`, "open-board", "text"),
   )}${when(actions, `<div class="page-actions">${actions}</div>`)}</div>${body}</main>`;
@@ -314,7 +353,7 @@ const workloadPanel = (state) => {
 };
 
 // The Volunteers page (change add-volunteer-roster-records): the Roster, for a
-// ceiling admin, cleared or not; and the Workload tab beside it, only when
+// workspace admin, cleared or not; and the Workload tab beside it, only when
 // `workload` — a cleared, effective admin (change add-volunteer-workload, D1).
 const rosterPage = (state, { workload = false } = {}) => {
   const tab = workload && state.volunteerTab === "workload" ? "workload" : "roster";
@@ -324,6 +363,7 @@ const rosterPage = (state, { workload = false } = {}) => {
       : renderRoster(state.volunteers ?? [], {
           list: state.lists?.volunteers ?? "ready",
           filters: state.volunteerFilters ?? {},
+          exportable: true,
         });
   return frame(
     "OFFICE · VOLUNTEERS",
@@ -335,7 +375,7 @@ const rosterPage = (state, { workload = false } = {}) => {
   );
 };
 
-// Post an update (change add-posted-updates): for a ceiling admin, cleared or not.
+// Post an update (change add-posted-updates): for a workspace admin, cleared or not.
 const postUpdatePage = (state) =>
   frame(
     "OFFICE · ADMIN",
@@ -344,7 +384,27 @@ const postUpdatePage = (state) =>
     "",
     renderPostUpdatePage(state),
   );
-const ceilingPage = (state) => (state.screen === "office-updates" ? postUpdatePage(state) : rosterPage(state));
+// Season settings (change add-season-settings): for a workspace admin, cleared
+// or not; only a site coordinator (the read's own `canEdit`) gets controls.
+const seasonSettingsPage = (state) =>
+  frame(
+    "OFFICE · ADMIN",
+    "Season settings",
+    "",
+    "",
+    renderSeasonSettings(state.seasonSettings ?? null, {
+      canEdit: state.seasonSettings?.canEdit === true,
+      selfId: state.principal?.personId ?? null,
+      list: state.lists?.seasonSettings ?? "loading",
+      ui: { ...(state.seasonSettingsUi ?? {}), busy: state.busy === true },
+    }),
+  );
+const ceilingPage = (state) =>
+  state.screen === "office-updates"
+    ? postUpdatePage(state)
+    : state.screen === "office-settings"
+      ? seasonSettingsPage(state)
+      : rosterPage(state);
 
 export function staffScreen(state) {
   const people = state.people ?? [];
@@ -355,7 +415,7 @@ export function staffScreen(state) {
   const office = isAdmin(person);
   const volunteers = ceilingAdmin(state.principal);
   const open = state.sidebarOpen !== false;
-  // Not cleared: the setup screen, and for a ceiling admin the Roster and
+  // Not cleared: the setup screen, and for a workspace admin the Roster and
   // Post an update. No work.
   if (awaitingClearance(state)) {
     const onCeiling = volunteers && CEILING_SCREENS.includes(state.screen);
@@ -378,9 +438,15 @@ export function staffScreen(state) {
     });
   }
   // A volunteer whose window was left on an office screen gets the work board.
-  // Post an update follows the ceiling only, as the controller does.
+  // Post an update and Season settings follow the ceiling only, as the
+  // controller does.
   const allowed = (name) =>
-    name === "office-updates" ? volunteers : office || (name === "office-volunteers" && volunteers);
+    name === "office-updates" || name === "office-settings"
+      ? volunteers
+      : // Add a case stays for a staff person who lost admin: its submits drop instead.
+        office ||
+        (name === "office-volunteers" && volunteers) ||
+        (name === "office-add-case" && state.principal?.access === "staff");
   const screen =
     OFFICE_SCREENS.includes(state.screen) && !allowed(state.screen) ? "staff" : state.screen;
   const main = (() => {
@@ -432,15 +498,17 @@ export function staffScreen(state) {
     }
     if (screen === "office-add-case")
       return frame(
-        "OFFICE · ADD A CASE",
+        office ? "OFFICE · ADD A CASE" : "ADD A CASE",
         "Add a case",
         "Enter a walk-in client's answers yourself. The case has no client account: the office owns it.",
-        "Back to Follow-ups",
+        office ? "Back to Follow-ups" : "Back to the work board",
         addCasePage(state, person, people),
       );
     // Past the setup screen above, so cleared: the Workload follows the effective admin.
+    if (screen === "my-profile") return myProfilePage(state);
     if (screen === "office-volunteers") return rosterPage(state, { workload: office });
     if (screen === "office-updates") return postUpdatePage(state);
+    if (screen === "office-settings") return seasonSettingsPage(state);
     const cases = (state.cases ?? []).map((record) =>
       decorateStaffCase(record, people),
     );
@@ -527,6 +595,7 @@ function addCasePage(state, person, people) {
     retryable: state.retryable,
     people,
     demoTools: state.demoTools === true,
+    locked: addCaseLocked(state),
   });
 }
 
@@ -655,7 +724,7 @@ export function dialog(state) {
   }
   if (state.dialog === "close-unsigned") {
     title = "Close unsigned cases?";
-    body = closeUnsignedDialogBody({ cases: state.cases ?? [], now: Date.now() });
+    body = closeUnsignedDialogBody({ ...state, cases: state.cases ?? [], now: Date.now() });
   }
   if (state.dialog === "request-corrections") {
     title = "Ask the preparer for corrections";
@@ -676,6 +745,23 @@ export function dialog(state) {
     title = "Delete this draft?";
     body = update ? deleteDraftConfirm(update, { busy: state.busy }) : updateGoneBody();
   }
+  if (state.dialog === "change-sidn") {
+    title = "Change the SIDN";
+    body = changeSidnDialogBody({ error: state.seasonSettingsUi?.sidnError ?? null, busy: state.busy === true });
+  }
+  // Start next season (change add-start-next-season, design D8). The typed
+  // year is the wiring's draft, put back after a redraw (app.mjs).
+  if (state.dialog === "start-season") {
+    // The season it was opened at (the controller closes it if that moves).
+    const season =
+      state.dialogContext?.expectedSeason ?? state.seasonSettings?.season ?? state.workspace?.currentSeason ?? null;
+    title = season == null ? "Start the next season" : `Start the ${Number(season) + 1} season`;
+    body = startSeasonDialogBody({
+      season,
+      refusal: state.seasonSettingsUi?.startRefusal ?? null,
+      busy: state.busy === true,
+    });
+  }
   if (state.dialog === "notifications") {
     title = "Notifications";
     // A drawer says its own failure (a confirm that did not go through).
@@ -683,7 +769,13 @@ export function dialog(state) {
   } else if (DRAWERS.includes(state.dialog)) {
     const people = state.people ?? [];
     const person = people.find((entry) => entry.id === state.principal?.personId) ?? null;
-    const ui = { busy: state.busy, error: state.error, retryable: state.retryable, now: Date.now() };
+    const ui = {
+      busy: state.busy,
+      error: state.error,
+      retryable: state.retryable,
+      now: Date.now(),
+      locked: dialogLocked(state),
+    };
     // Before log-call: the last branch below assumes resolve-help.
     if (state.dialog === "assign") {
       const context = state.dialogContext ?? {};
@@ -701,18 +793,34 @@ export function dialog(state) {
         ui,
       });
     } else if (state.dialog === "volunteer") {
-      const volunteerId = state.dialogContext?.volunteerId ?? null;
+      // A picked returning volunteer (change add-returning-volunteers-and-roster-csv)
+      // is not on this season's list: the drawer stays Add, filled from them.
+      const earlier = state.earlierVolunteers ?? [];
+      const returningPick = state.dialogContext?.returning === true;
+      const picked = returningPick
+        ? (earlier.find((entry) => entry?.id === state.dialogContext?.volunteerId) ?? null)
+        : null;
+      const volunteerId = returningPick ? null : (state.dialogContext?.volunteerId ?? null);
       const volunteer = volunteerId
         ? ((state.volunteers ?? []).find((entry) => entry?.id === volunteerId) ?? null)
         : null;
+      // A pick whose person is gone can't be added: it says so, like a gone Edit.
+      const stalePick = returningPick && !picked;
+      const query = state.returningSearch ?? "";
       title = volunteerId ? (volunteer?.name ?? "Edit a volunteer") : "Add a volunteer";
       body = volunteerDrawerBody({
         volunteer,
-        isNew: !volunteerId,
+        isNew: !volunteerId && !stalePick,
+        returning:
+          !volunteerId && !stalePick && (picked || earlier.length)
+            ? { query, candidates: picked ? [] : returningCandidates(earlier, query), picked }
+            : null,
+        canChangeAdmin: siteCoordinator(state.principal),
         ui: {
           ...ui,
           formError: state.volunteerFormError ?? null,
           accountNotice: state.volunteerAccountNotice ?? null,
+          reviewReasonFor: state.reviewReasonFor ?? null,
         },
       });
     } else if (state.dialog === "log-call") {
@@ -743,7 +851,7 @@ export function dialog(state) {
         ? "OFFICE · WORKLOAD"
         : state.dialog === "notifications"
           ? "FROM THE OFFICE"
-          : ["update-people", "unpublish-update", "delete-update"].includes(state.dialog)
+          : ["update-people", "unpublish-update", "delete-update", "change-sidn", "start-season"].includes(state.dialog)
             ? "OFFICE · ADMIN"
             : drawer
               ? "OFFICE FOLLOW-UP"

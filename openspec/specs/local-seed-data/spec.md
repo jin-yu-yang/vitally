@@ -25,10 +25,12 @@ The local seed SHALL do nothing unless the target passes the test-target guard *
 - **THEN** the module seeds that workspace, because the flag gates only the command
 
 ### Requirement: The seed acts as role-named accounts found from the roster file
-The command SHALL read the workspace id from the roster file (`--roster`, default `.vitally-roster.local.json`). In that workspace it SHALL find the people with person keys `site_coordinator`, `preparer` and `reviewer`, each linked to an active staff membership. Client A SHALL be the roster file's first applicant. The workspace's default follow-up person SHALL be the `site_coordinator` person. If any of these is missing or different, the seed SHALL refuse before creating or deleting anything, with a message that names the missing role key or setting and never an email address.
+The command SHALL read the workspace id from the roster file (`--roster`, default `.vitally-roster.local.json`). In that workspace it SHALL find the people with person keys `site_coordinator`, `preparer` and `reviewer`, each linked to an active staff membership. The `site_coordinator` person SHALL be a site coordinator (capability `site-coordinators`). Client A SHALL be the roster file's first applicant. The workspace's default follow-up person SHALL be the `site_coordinator` person. If any of these is missing or different, the seed SHALL refuse before creating or deleting anything, with a message that names the missing role key or setting and never an email address.
+
+When the workspace has no SIDN, the seed SHALL set the fictional SIDN `S00000000`, so a local invitation's site check can pass; it SHALL NOT change a SIDN that is already set (capability `season-settings`).
 
 #### Scenario: All accounts are present
-- **WHEN** the rehearsal workspace has the Site Coordinator, Preparer and Reviewer staff accounts, client A, and the Site Coordinator as the default follow-up person
+- **WHEN** the rehearsal workspace has the Site Coordinator, Preparer and Reviewer staff accounts, client A, and the Site Coordinator as a site coordinator and the default follow-up person
 - **THEN** the seed proceeds
 
 #### Scenario: A role account is missing
@@ -38,6 +40,14 @@ The command SHALL read the workspace id from the roster file (`--roster`, defaul
 #### Scenario: The default follow-up person is still a persona
 - **WHEN** the workspace's default follow-up person is Sam, as on a stack set up from the old example roster
 - **THEN** the seed refuses, saying the default follow-up person must be the `site_coordinator` account and that the roster command should be re-run, and nothing is created or deleted
+
+#### Scenario: The Site Coordinator is not a site coordinator
+- **WHEN** the `site_coordinator` person is not a site coordinator, as on a stack set up from a roster file before this change
+- **THEN** the seed refuses, saying `site_coordinator` must have `siteCoordinator: true` and that the roster command should be re-run, and nothing is created or deleted
+
+#### Scenario: No SIDN yet
+- **WHEN** the workspace has no SIDN and the seed runs
+- **THEN** the workspace's SIDN is `S00000000`; and when a SIDN is already set, it is unchanged
 
 ### Requirement: Every seeded case is built through the public RPCs
 The seed SHALL create and advance every case only by calling the public RPCs as the acting account: client A for the client's case, and the Site Coordinator, Preparer or Reviewer for staff steps. It SHALL NOT write a case's stage, holder or history directly. The one help request SHALL be inserted directly, because no action creates help requests. Every seeded value SHALL be fictional.
@@ -116,7 +126,7 @@ When a seed run deletes its previous set, the deletion SHALL NOT be published to
 - **THEN** the new set's client numbers are all higher than any number the previous set used
 
 ### Requirement: The local seed command adds fictional volunteers
-The `seed:local` command SHALL first clear the workspace's role accounts, then add 8 fictional volunteers with no sign-in to the Roster. Both steps SHALL go through `vitally_save_volunteer`, acting as the Site Coordinator account.
+The `seed:local` command SHALL first clear the workspace's role accounts, then add 8 fictional volunteers with no sign-in to the Roster. Both steps SHALL go through `vitally_save_volunteer`, acting as the Site Coordinator account. The one exception SHALL be the previous-season rows the seed adds afterwards, which are written directly (requirement "The local seed adds a previous season's roster"), because `vitally_save_volunteer` writes only the current season.
 
 Clearing gives each role account present in the workspace a current-season role and its confirmed certificates, and marks it not new. The role accounts are:
 - `site_coordinator`: Admin, with VSC and IT&QR;
@@ -151,3 +161,33 @@ A re-run SHALL first delete the people with no sign-in whose email is on the see
 #### Scenario: The browser story
 - **WHEN** the browser story seeds its workspace
 - **THEN** no fictional volunteers are added to it
+
+### Requirement: The local seed adds a previous season's roster
+After its 8 fictional volunteers, `seed:local` SHALL add roster entries for the season before the current one:
+- three fictional people with no sign-in and no current-season entry, each with a profile (at least one with usual days), roles, and confirmed certificates that back them;
+- an entry for one of the 8 fictional volunteers.
+
+These rows SHALL be written directly with SQL in the seed's connection. This SHALL be the one exception to going through `vitally_save_volunteer`, which writes only the current season. Every name, email and phone SHALL be fictional.
+
+#### Scenario: Returning volunteers to pick
+- **WHEN** an operator runs `npm run seed:local` in season 2026, and an admin opens Add a volunteer
+- **THEN** the search list offers the three previous-season people, and not the one of the 8 who is also on the 2026 roster
+
+#### Scenario: The current Roster is unchanged
+- **WHEN** the seed has run
+- **THEN** the Roster lists the same 8 fictional volunteers and staff accounts as before, and none of the three previous-season people
+
+### Requirement: A seed re-run replaces the previous season's people
+A re-run SHALL first delete the people with no sign-in whose email is on the previous-season list, so the same three exist afterwards. It SHALL NOT change a person with a sign-in. The browser story's use of the seed module SHALL NOT add them.
+
+#### Scenario: The seed runs again
+- **WHEN** the operator runs it a second time
+- **THEN** exactly three previous-season-only fictional people exist, each with one previous-season roster entry
+
+#### Scenario: A picked person is re-seeded
+- **WHEN** an admin has added one of the three to the current season, with no sign-in, and the seed runs again
+- **THEN** that person is replaced by the seeded previous-season-only version, and the current Roster again lists only the 8 and the staff accounts
+
+#### Scenario: The browser story
+- **WHEN** the browser story seeds its workspace
+- **THEN** no previous-season people are added to it

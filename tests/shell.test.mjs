@@ -1398,7 +1398,8 @@ test("a staff account's screens name it and act as no one", () => {
   const sam = { id: "p-sam", name: "Sam", capabilities: ["admin"] };
   const base = { principal: { access: "staff", personId: "p-sam", personName: "Sam", clearance: cleared({ isAdmin: true }) }, connection: "online", people: [sam], cases: [], assistance: [] };
   const board = staffScreen({ ...base, screen: "staff" });
-  assert.match(board.match(/<div class="account-row">[\s\S]*?<\/span><\/div>/)[0].replace(/<[^>]+>/g, " ").replace(/\s+/g, " "), /Signed in as Sam/);
+  // A cleared window's account row is the My profile link (change add-my-profile).
+  assert.match(board.match(/<div class="account-row">[\s\S]*?<\/span><\/div>/)[0].replace(/<[^>]+>/g, " ").replace(/\s+/g, " "), /My profile Sam/);
   assert.doesNotMatch(board, /No persona chosen|Acting as/);
   const onCase = staffScreen({
     ...base,
@@ -1526,4 +1527,55 @@ test("the Workload's styles: tabs, table, bar and drawer list, on tokens only", 
   assert.deepEqual(hexes, [], "colours come from the tokens, so dark mode follows");
   assert.doesNotMatch(block, /border-(left|right)\s*:/, "no vertical lines in the table");
   assert.doesNotMatch(block, /(?<![-\w])width:\s*\d+px/, "no fixed widths");
+});
+
+// ---- The Volunteers link's uploads count (change add-clearance-uploads, D8) ----
+
+const sidebarWith = (overrides = {}, isAdmin = true) =>
+  staffScreen({
+    principal: { access: "staff", personName: "Sam", clearance: cleared({ isAdmin }) },
+    connection: "online",
+    screen: "staff",
+    people: [],
+    cases: [],
+    assistance: [],
+    ...overrides,
+  });
+const volunteersLink = (html) =>
+  html.match(/<button[^>]*data-action="open-volunteers"[^>]*>[\s\S]*?<\/button>/)?.[0] ?? "";
+
+test("the Volunteers link shows the count", () => {
+  const link = volunteersLink(sidebarWith({ uploadsToReview: 3 }));
+  assert.match(link, /aria-label="Volunteers, 3 uploads to review"/);
+  assert.match(link, /<span class="nav-count" aria-hidden="true"> · 3<\/span>/);
+  assert.equal(link.replace(/<svg[\s\S]*?<\/svg>/, "").replace(/<[^>]+>/g, "").trim(), "Volunteers · 3");
+});
+
+test("the Volunteers link is singular at one", () => {
+  assert.match(volunteersLink(sidebarWith({ uploadsToReview: 1 })), /aria-label="Volunteers, 1 upload to review"/);
+});
+
+test("the Volunteers link is plain at zero", () => {
+  const link = volunteersLink(sidebarWith({ uploadsToReview: 0 }));
+  assert.ok(link, "the link is there");
+  assert.doesNotMatch(link, /aria-label/);
+  assert.doesNotMatch(link, /nav-count/);
+});
+
+test("the Volunteers link keeps the current page marker beside the count", () => {
+  const link = volunteersLink(sidebarWith({ uploadsToReview: 2, screen: "office-volunteers" }));
+  assert.match(link, /aria-current="page"/);
+  assert.match(link, /aria-label="Volunteers, 2 uploads to review"/);
+});
+
+test("a non-admin has no Volunteers link, whatever the count", () => {
+  assert.doesNotMatch(sidebarWith({ uploadsToReview: 3 }, false), /open-volunteers/);
+});
+
+test("app.mjs: Enter in the Mark reviewed note is Send back, never the drawer's Save", () => {
+  const app = readFileSync(fileURLToPath(new URL("../src/app.mjs", import.meta.url)), "utf8");
+  assert.match(
+    app,
+    /event\.key !== "Enter" \|\| !event\.target\.matches\?\.\('\[name="review-note"\]'\)\) return;\s*if \(event\.isComposing \|\| event\.keyCode === 229\) return;\s*event\.preventDefault\(\);[^]*?send && !send\.disabled\) send\.click\(\)/,
+  );
 });

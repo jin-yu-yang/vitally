@@ -79,13 +79,14 @@ export async function extendTestWorkspace(input) {
             [workspaceId, person.key],
           )
         ).rows[0];
+        // The stored capabilities are the mirror of the person's roles
+        // (migration 052), not what was asked for, so only the name is compared.
         if (existing) {
-          validate(
-            existing.name === person.name &&
-              JSON.stringify(existing.capabilities) === JSON.stringify(caps),
-          );
+          validate(existing.name === person.name);
           people[person.key] = existing.id;
         } else {
+          // The capabilities written are replaced by the mirror (migration 052);
+          // f.enrich gives the person roles for them.
           const inserted = await connection.query(
             "insert into public.people(workspace_id,person_key,name,capabilities) values($1,$2,$3,$4) returning id",
             [workspaceId, person.key, person.name, caps],

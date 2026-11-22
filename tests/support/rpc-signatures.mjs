@@ -1,3 +1,5 @@
+import { TEST_SITE_NUMBER } from "./database-fixture.mjs";
+
 // Every public application entry point installed so far, with a valid argument
 // shape, the exact receipt it answers with, and the member allowed to call it.
 // The database suite asserts this list matches exactly what the database
@@ -136,7 +138,16 @@ export const RPC_SIGNATURES = Object.freeze([
     name: "vitally_my_clearance",
     signature: "vitally_my_clearance()",
     authorized: (f) => f.siteCoordinator,
-    receiptKeys: Object.freeze(["capabilities", "cleared", "isAdmin", "missing", "siteCheck", "siteCoordinatorName"]),
+    receiptKeys: Object.freeze([
+      "capabilities",
+      "cleared",
+      "isAdmin",
+      "isSiteCoordinator",
+      "missing",
+      "siteCheck",
+      "siteCoordinatorName",
+      "uploadUrl",
+    ]),
     args: () => ({}),
   }),
   // Sign-in accounts (OpenSpec change add-account-invitations). An entry's
@@ -210,6 +221,178 @@ export const RPC_SIGNATURES = Object.freeze([
       p_action_id: crypto.randomUUID(),
       p_volunteer_id: context.accountVolunteerId,
       p_expected_revision: context.accountRevision,
+    }),
+  }),
+  // Making a staff member with an active account a site coordinator (change
+  // add-season-settings, design D4), at their account revision.
+  Object.freeze({
+    name: "vitally_set_site_coordinator",
+    signature: "vitally_set_site_coordinator(uuid,uuid,bigint,boolean)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["accountRevision", "actionId", "isSiteCoordinator", "volunteerId"]),
+    context: async (f) => {
+      const key = `sig_sc_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+      const { personId } = await f.staff({ key, name: "Rory Vance", capabilities: ["prepare"], cleared: false });
+      return { siteCoordinatorVolunteerId: personId, siteCoordinatorRevision: 1 };
+    },
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_volunteer_id: context.siteCoordinatorVolunteerId,
+      p_expected_revision: context.siteCoordinatorRevision,
+      p_granted: true,
+    }),
+  }),
+  // Applicant-safe OneDrive read: returns only the client upload URL and never
+  // the certificate / photo-ID link reserved for site coordinators.
+  Object.freeze({
+    name: "vitally_client_documents_link",
+    signature: "vitally_client_documents_link()",
+    authorized: (f) => f.applicantA,
+    receiptKeys: Object.freeze(["clientDocumentsUrl"]),
+    args: () => ({}),
+  }),
+  // The Season settings page in one read, for a workspace admin (change
+  // add-season-settings, design D5). It never carries the SIDN.
+  Object.freeze({
+    name: "vitally_season_settings",
+    signature: "vitally_season_settings()",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze([
+      "canEdit",
+      "candidates",
+      "certificateUploadUrl",
+      "clientDocumentsUrl",
+      "history",
+      "revision",
+      "season",
+      "siteCoordinators",
+      "siteNumber",
+    ]),
+    args: () => ({}),
+  }),
+  // Saving the two upload links at the settings revision (design D5): 0 while
+  // the workspace has no row.
+  Object.freeze({
+    name: "vitally_save_season_settings",
+    signature: "vitally_save_season_settings(uuid,bigint,jsonb)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["certificateUploadUrl", "clientDocumentsUrl", "revision", "season"]),
+    context: async (f) => {
+      const { rows } = await f.sql("select revision::int as revision from public.season_settings where workspace_id=$1", [
+        f.workspaceId,
+      ]);
+      return { seasonSettingsRevision: rows[0]?.revision ?? 0 };
+    },
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_expected_revision: context.seasonSettingsRevision,
+      p_settings: { certificateUploadUrl: "https://example.org/certificates", clientDocumentsUrl: null },
+    }),
+  }),
+  // Setting the site's SIDN (design D5): the answer says only that it is set.
+  // The fixture's own number (TEST_SITE_NUMBER), so the site check elsewhere
+  // keeps passing.
+  Object.freeze({
+    name: "vitally_set_site_number",
+    signature: "vitally_set_site_number(uuid,text)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["set", "updatedAt"]),
+    args: () => ({ p_action_id: crypto.randomUUID(), p_sidn: TEST_SITE_NUMBER }),
+  }),
+  // Start next season (change add-start-next-season). A start is one-way, and
+  // the suite's own cases are open, so the member call is the domain refusal
+  // (`memberRefusal`), which still proves the member reaches the function; the
+  // starts themselves are in tests/database-start-next-season.mjs.
+  Object.freeze({
+    name: "vitally_start_next_season",
+    signature: "vitally_start_next_season(uuid,smallint,smallint)",
+    authorized: (f) => f.siteCoordinator,
+    memberRefusal: "SEASON_NOT_FINISHED",
+    receiptKeys: Object.freeze(["actionId", "deactivated", "defaultFollowupMoved", "season"]),
+    context: async (f) => {
+      const { rows } = await f.sql("select current_season::int as season from public.workspaces where id=$1", [
+        f.workspaceId,
+      ]);
+      return { season: rows[0].season };
+    },
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_expected_season: context.season,
+      p_typed_year: context.season + 1,
+    }),
+  }),
+  // A volunteer marking their own document sent (change add-clearance-uploads,
+  // design D2). The Site Coordinator has a current-season entry of their own.
+  Object.freeze({
+    name: "vitally_mark_upload_sent",
+    signature: "vitally_mark_upload_sent(uuid,text)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["actionId", "document", "sentAt"]),
+    args: () => ({ p_action_id: crypto.randomUUID(), p_document: "form13615" }),
+  }),
+  // An admin marking a sent document reviewed, at the volunteer revision
+  // (design D3).
+  Object.freeze({
+    name: "vitally_mark_upload_reviewed",
+    signature: "vitally_mark_upload_reviewed(uuid,uuid,bigint,text,text)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["actionId", "personId", "revision"]),
+    context: async (f) => {
+      const key = `sig_rv_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+      const { personId } = await f.staff({ key, name: "Quinn Harlow", capabilities: ["prepare"], cleared: false });
+      const { rows } = await f.sql("select revision::int as revision from public.volunteer_profiles where person_id=$1", [personId]);
+      return { reviewVolunteerId: personId, reviewRevision: rows[0].revision };
+    },
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_volunteer_id: context.reviewVolunteerId,
+      p_expected_revision: context.reviewRevision,
+      p_document: "form13615",
+      p_reason: "Not signed",
+    }),
+  }),
+  // A staff member's own profile (OpenSpec change add-my-profile, design D1, D2).
+  Object.freeze({
+    name: "vitally_my_profile",
+    signature: "vitally_my_profile()",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze([
+      "accountStatus",
+      "certificates",
+      "email",
+      "form13615",
+      "languages",
+      "name",
+      "otherLanguage",
+      "personId",
+      "phone",
+      "revision",
+      "roles",
+      "siteCoordinatorName",
+      "uploadUrl",
+      "usualDays",
+      "works",
+    ]),
+    args: () => ({}),
+  }),
+  Object.freeze({
+    name: "vitally_save_my_profile",
+    signature: "vitally_save_my_profile(uuid,bigint,jsonb)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["actionId", "personId", "revision"]),
+    context: async (f) => {
+      const { rows } = await f.sql(
+        "select vp.revision::int as revision from public.volunteer_profiles vp join public.people p on p.id=vp.person_id where p.workspace_id=$1 and p.person_key='site_coordinator'",
+        [f.workspaceId],
+      );
+      return { profileRevision: rows[0].revision };
+    },
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_expected_revision: context.profileRevision,
+      p_profile: {
+        name: "Avery Lin", phone: null, works: "on_site", languages: ["english"], otherLanguage: null, usualDays: [],
+      },
     }),
   }),
   // The office panel's client list: an array, each element of this shape.
@@ -358,14 +541,13 @@ export const PRIVATE_SETUP_DENIALS = Object.freeze(["42501", "PGRST202", "PGRST1
 export const PRIVATE_SETUP_FUNCTIONS = Object.freeze([
   Object.freeze({
     name: "add_staff_member",
-    signature: "add_staff_member(uuid,uuid,text,text,text[])",
+    signature: "add_staff_member(uuid,uuid,text,text)",
     // A legitimate request for an account with no membership yet.
     args: (context) => ({
       p_workspace_id: context.workspaceId,
       p_user_id: context.userId,
       p_person_key: "mallory",
       p_name: "Mallory Stone",
-      p_capabilities: ["admin", "followup"],
     }),
   }),
   Object.freeze({

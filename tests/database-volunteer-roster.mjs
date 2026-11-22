@@ -18,7 +18,6 @@ const FORBIDDEN = "VT001";
 const NOT_FOUND = "VT002";
 const CONFLICT = "VT003";
 const INVALID_TRANSITION = "VT004";
-const INELIGIBLE = "VT006";
 const VALIDATION = "VT007";
 const RPC = "vitally_save_volunteer";
 const TABLES = ["volunteer_profiles", "roster_entries", "certificates"];
@@ -80,14 +79,13 @@ const certificatesOf = async (f, personId) =>
       [personId],
     )
   ).rows;
-const addStaffMember = (f, userId, key, name, capabilities) =>
+const addStaffMember = (f, userId, key, name) =>
   f.withSetupLock(() =>
-    f.sql("select vitally_private.add_staff_member($1,$2,$3,$4,$5::text[]) as person_id", [
+    f.sql("select vitally_private.add_staff_member($1,$2,$3,$4) as person_id", [
       f.workspaceId,
       userId,
       key,
       name,
-      capabilities,
     ]),
   );
 // The helper's answer for one signed-in caller, in the role and with the JWT
@@ -204,12 +202,15 @@ test("volunteer roster records against real Supabase", async (t) => {
       assert.equal(await adminAnswer(f, f.siteCoordinatorUserId, f.foreignWorkspaceId), false);
     });
 
+    // 052: a site coordinator with no roles (spec "An uncleared admin is still
+    // an admin").
     await t.test("an uncleared admin is still an admin", async () => {
       const lead = await f.staff({
         key: "una_uncleared_admin",
         name: "Una Ferris",
-        capabilities: ["admin", "followup"],
+        capabilities: [],
         cleared: false,
+        siteCoordinator: true,
       });
       assert.equal(await adminAnswer(f, lead.userId, f.workspaceId), true);
       assert.equal(await clearedAnswer(f, lead.userId), null);
@@ -259,13 +260,29 @@ test("volunteer roster records against real Supabase", async (t) => {
       for (const row of rows) assert.ok(seen.includes(row.id), "everyone with a sign-in");
     });
 
-    await t.test("people: an unlinked person with capabilities stays visible", async () => {
-      const { id } = await one(
+    // 052: a person with no sign-in has no capabilities, whatever was written
+    // or whatever roles they hold, so only admins read them (spec "A volunteer
+    // with no sign-in is visible only to admins, whatever their roles").
+    await t.test("people: a kept persona stays hidden", async () => {
+      const { id, capabilities } = await one(
         f,
-        "insert into public.people(workspace_id,person_key,name,capabilities) values($1,'kept_persona','Sam Okafor',array['assist']) returning id",
+        "insert into public.people(workspace_id,person_key,name,capabilities) values($1,'kept_persona','Sam Okafor',array['assist']) returning id,capabilities",
         [f.workspaceId],
       );
-      assert.equal((await peopleIds(prep.client)).includes(id), true);
+      assert.deepEqual(capabilities, []);
+      assert.equal((await peopleIds(prep.client)).includes(id), false, "non-admin");
+      assert.equal((await peopleIds(admin)).includes(id), true, "admin");
+    });
+
+    await t.test("people: a volunteer with roles and no sign-in stays hidden", async () => {
+      const { personId } = await save(
+        admin,
+        addArgs(volunteer({ roles: ["preparer"], certificates: ["vsc", "itqr", "basic"] })),
+      );
+      assert.deepEqual((await entryOf(f, personId)).roles, ["preparer"]);
+      assert.deepEqual((await personOf(f, personId)).capabilities, []);
+      assert.equal((await peopleIds(prep.client)).includes(personId), false, "non-admin");
+      assert.equal((await peopleIds(admin)).includes(personId), true, "admin");
     });
 
     await t.test("add creates a person with no account or capabilities", async () => {
@@ -509,10 +526,11 @@ test("volunteer roster records against real Supabase", async (t) => {
     });
 
     // 045: was "roles grant nothing" (044's "Roles and certificates grant
-    // nothing"). The save still never changes people.capabilities, and a role
-    // grants nothing beyond that ceiling: Reviewer within a `prepare` ceiling
-    // gives only `prepare`.
-    await t.test("a recorded role grants nothing beyond the ceiling", async () => {
+    // nothing"), then "a recorded role grants nothing beyond the ceiling".
+    // 052 removes the ceiling: people.capabilities is the mirror of the
+    // roles, so a recorded Reviewer role gives `prepare` and `review`
+    // (spec volunteer-clearance, "The mirror follows a role change").
+    await t.test("a recorded role grants its capabilities", async () => {
       const member = await f.staff({ key: "gale_record", name: "Gale Ito", capabilities: ["prepare"] });
       const { email } = member;
       await save(
@@ -523,15 +541,17 @@ test("volunteer roster records against real Supabase", async (t) => {
           volunteer({ email, roles: ["reviewer"], certificates: ALL_CERTIFICATES }),
         ),
       );
-      assert.deepEqual((await personOf(f, member.personId)).capabilities, ["prepare"]);
+      assert.deepEqual((await personOf(f, member.personId)).capabilities, ["prepare", "review"]);
       const caseId = await f.preparedCase();
       const { revision } = await one(f, "select revision from public.cases where id=$1", [caseId]);
-      // Without `review` the claim is INELIGIBLE (006's claim check).
       const args = applyArgs({ caseId, revision: Number(revision), type: "CLAIM_REVIEW" });
       const { error } = await member.client.rpc("vitally_apply_action", args);
-      assert.equal(error?.code, INELIGIBLE);
-      assert.equal(await f.receiptsFor(args.p_action_id), 0);
-      assert.equal((await one(f, "select reviewer_id from public.cases where id=$1", [caseId])).reviewer_id, null);
+      assert.equal(error, null, `CLAIM_REVIEW: ${error?.code}`);
+      assert.equal(await f.receiptsFor(args.p_action_id), 1);
+      assert.equal(
+        (await one(f, "select reviewer_id from public.cases where id=$1", [caseId])).reviewer_id,
+        member.personId,
+      );
     });
 
     // 045: a staff member acts with their roles' capabilities, so the
@@ -649,21 +669,132 @@ test("volunteer roster records against real Supabase", async (t) => {
       assert.equal(await clearedOf(f, member.personId), true, "not new");
     });
 
+    // 052: the uncleared admin is a site coordinator with no roles, who also
+    // ticks SC, which their clearance needs (design D6).
     await t.test("an uncleared admin saves their own Admin role", async () => {
       const lead = await f.staff({
         key: "abe_own_admin",
         name: "Abe Coulter",
-        capabilities: ["admin", "followup"],
+        capabilities: [],
         cleared: false,
+        siteCoordinator: true,
       });
       await save(
         lead.client,
-        await editOf(f, lead.personId, { name: "Abe Coulter", roles: ["admin"], certificates: ["vsc", "itqr"] }),
+        await editOf(f, lead.personId, { name: "Abe Coulter", roles: ["admin"], certificates: ["vsc", "itqr", "sc"] }),
       );
       assert.deepEqual(await rolesOf(f, lead.personId), ["admin"]);
       const { data, error } = await lead.client.rpc("vitally_my_clearance");
       assert.equal(error, null);
       assert.equal(data.cleared, true);
+    });
+
+    // 052: spec "Only an admin can save a volunteer", "An uncleared site
+    // coordinator ticks their own certificates".
+    await t.test("an uncleared site coordinator ticks their own certificates", async () => {
+      const lead = await f.staff({
+        key: "ivo_own_certificates",
+        name: "Ivo Lindqvist",
+        capabilities: [],
+        cleared: false,
+        siteCoordinator: true,
+      });
+      await save(
+        lead.client,
+        await editOf(f, lead.personId, { name: "Ivo Lindqvist", roles: [], certificates: ["vsc", "itqr", "sc"] }),
+      );
+      assert.deepEqual(
+        (await certificatesOf(f, lead.personId)).map((row) => row.certificate),
+        ["itqr", "sc", "vsc"],
+      );
+      assert.deepEqual(await rolesOf(f, lead.personId), []);
+    });
+
+    // 052: spec "Only a site coordinator changes the Admin role" (design D3).
+    // The refusal is FORBIDDEN with the message ADMIN_ROLE, nothing changes and
+    // no receipt is stored.
+    await t.test("admin role: only a site coordinator changes it", async () => {
+      const nonCoordinator = await f.staff({
+        key: "noa_plain_admin",
+        name: "Noa Castellan",
+        capabilities: ["admin", "followup"],
+        siteCoordinator: false,
+      });
+      const adminCertificates = ["vsc", "itqr"];
+      const refusedAdminRole = async (args, label) => {
+        const { error } = await nonCoordinator.client.rpc(RPC, args);
+        assert.equal(error?.code, FORBIDDEN, `${label}: ${error?.code} ${error?.message}`);
+        assert.equal(error.message, "ADMIN_ROLE", label);
+        assert.equal(await f.receiptsFor(args.p_action_id), 0, `${label}: receipt`);
+      };
+
+      // A site coordinator gives the Admin role, to an existing volunteer and
+      // with a new one.
+      const given = await f.staff({ key: "gil_given_admin", name: "Gil Navarro", capabilities: [] });
+      await save(
+        admin,
+        await editOf(f, given.personId, { name: "Gil Navarro", roles: ["admin"], certificates: adminCertificates }),
+      );
+      assert.deepEqual(await rolesOf(f, given.personId), ["admin"]);
+      const addedAdmin = await save(admin, addArgs(volunteer({ roles: ["admin"], certificates: adminCertificates })));
+      assert.deepEqual(await rolesOf(f, addedAdmin.personId), ["admin"]);
+
+      // An admin who is not a site coordinator adds it: to an existing
+      // volunteer, and with a new one.
+      const target = await f.staff({ key: "tao_target_greeter", name: "Tao Lindgren", capabilities: [] });
+      const revision = await revisionOf(f, target.personId);
+      await refusedAdminRole(
+        await editOf(f, target.personId, {
+          name: "Tao Lindgren",
+          roles: ["greeter", "admin"],
+          certificates: adminCertificates,
+        }),
+        "add to existing",
+      );
+      assert.deepEqual(await rolesOf(f, target.personId), ["greeter"]);
+      assert.equal(await revisionOf(f, target.personId), revision);
+      const fresh = volunteer({ roles: ["admin"], certificates: adminCertificates });
+      await refusedAdminRole(addArgs(fresh), "add new");
+      assert.equal(
+        await count(f, "select count(*) n from public.volunteer_profiles where workspace_id=$1 and email=$2", [
+          f.workspaceId,
+          fresh.email,
+        ]),
+        0,
+      );
+
+      // ... and removes it, by unticking it or a certificate it needs.
+      const givenRevision = await revisionOf(f, given.personId);
+      await refusedAdminRole(
+        await editOf(f, given.personId, { name: "Gil Navarro", roles: ["greeter"], certificates: adminCertificates }),
+        "remove",
+      );
+      await refusedAdminRole(
+        await editOf(f, given.personId, { name: "Gil Navarro", roles: ["admin"], certificates: ["vsc"] }),
+        "remove by unticking IT&QR",
+      );
+      assert.deepEqual(await rolesOf(f, given.personId), ["admin"]);
+      assert.equal(await revisionOf(f, given.personId), givenRevision);
+      assert.deepEqual(
+        (await certificatesOf(f, given.personId)).map((row) => row.certificate),
+        ["itqr", "vsc"],
+      );
+
+      // Other roles stay with any admin, the Admin role kept or absent.
+      await save(
+        nonCoordinator.client,
+        await editOf(f, given.personId, {
+          name: "Gil Navarro",
+          roles: ["admin", "reviewer"],
+          certificates: ["vsc", "itqr", "advanced"],
+        }),
+      );
+      assert.deepEqual(await rolesOf(f, given.personId), ["admin", "reviewer"]);
+      await save(
+        nonCoordinator.client,
+        await editOf(f, target.personId, { name: "Tao Lindgren", roles: ["intaker"], certificates: adminCertificates }),
+      );
+      assert.deepEqual(await rolesOf(f, target.personId), ["intaker"]);
     });
 
     // The open-work rule (spec "A save cannot take away what a person's open
@@ -683,27 +814,111 @@ test("volunteer roster records against real Supabase", async (t) => {
       assert.equal(await revisionOf(f, prep.personId), revision);
     });
 
+    // 052: the default follow-up person here is not a site coordinator (spec
+    // "Unticking a certificate the work needs"); the fixture's default, a site
+    // coordinator, now meets that need whatever their roles (next test).
+    const defaultFollowupOf = async () =>
+      (await one(f, "select default_followup_person_id from public.workspaces where id=$1", [f.workspaceId]))
+        .default_followup_person_id;
+    const setDefaultFollowup = (personId) =>
+      f.sql("update public.workspaces set default_followup_person_id=$2 where id=$1", [f.workspaceId, personId]);
+
     await t.test("open work: unticking IT&QR for the default follow-up person is refused", async () => {
-      const coordinatorId = f.siteCoordinatorId;
-      const { default_followup_person_id } = await one(
-        f,
-        "select default_followup_person_id from public.workspaces where id=$1",
-        [f.workspaceId],
+      const member = await f.staff({
+        key: "dov_default_admin",
+        name: "Dov Achterberg",
+        capabilities: ["admin", "followup"],
+        siteCoordinator: false,
+      });
+      assert.equal(await defaultFollowupOf(), f.siteCoordinatorId);
+      await setDefaultFollowup(member.personId);
+      try {
+        const before = await certificatesOf(f, member.personId);
+        const work = await refusedForOpenWork(
+          f,
+          admin,
+          await editOf(f, member.personId, { name: "Dov Achterberg", roles: ["admin"], certificates: ["vsc"] }),
+        );
+        assert.deepEqual(work, ["default follow-up person"]);
+        assert.deepEqual(await rolesOf(f, member.personId), ["admin"]);
+        assert.deepEqual(await certificatesOf(f, member.personId), before);
+      } finally {
+        await setDefaultFollowup(f.siteCoordinatorId);
+      }
+    });
+
+    // 052: spec "A site coordinator who is the default" (design D7). Every
+    // role removed, so both the capability and the clearance part are met.
+    await t.test("open work: a site coordinator who is the default loses the Admin role", async () => {
+      const member = await f.staff({
+        key: "cora_default_coordinator",
+        name: "Cora Vandermeer",
+        capabilities: ["admin", "followup"],
+        siteCoordinator: true,
+      });
+      await setDefaultFollowup(member.personId);
+      try {
+        assert.equal(await clearedOf(f, member.personId), true);
+        assert.deepEqual(
+          (await f.sql("select needs,label from vitally_private.open_work($1,$2)", [f.workspaceId, member.personId])).rows,
+          [{ needs: "followup", label: "default follow-up person" }],
+        );
+        await save(
+          admin,
+          await editOf(f, member.personId, { name: "Cora Vandermeer", roles: [], certificates: ["vsc", "itqr", "sc"] }),
+        );
+        assert.deepEqual(await rolesOf(f, member.personId), []);
+        assert.equal(await clearedOf(f, member.personId), false);
+        assert.equal(await defaultFollowupOf(), member.personId);
+      } finally {
+        await setDefaultFollowup(f.siteCoordinatorId);
+      }
+    });
+
+    // 052: a site coordinator without SC is not cleared (design D6), so
+    // unticking SC while holding work is refused; being the default exempts
+    // only the default row, not their other work.
+    await t.test("open work: a site coordinator who prepares keeps SC, default or not", async () => {
+      const member = await f.staff({
+        key: "sol_coordinator_preparer",
+        name: "Sol Abernathy",
+        capabilities: ["prepare"],
+        siteCoordinator: true,
+      });
+      const caseId = await f.readyCase();
+      await f.act(member.client, caseId, "CLAIM_PREPARATION", {});
+      const preparing = `preparing client ${await clientOf(f, caseId)}`;
+      const certificates = ["vsc", "itqr", "basic"];
+      const before = await certificatesOf(f, member.personId);
+      const revision = await revisionOf(f, member.personId);
+      assert.deepEqual(
+        await refusedForOpenWork(f, admin, await editOf(f, member.personId, { name: "Sol Abernathy", roles: ["preparer"], certificates })),
+        [preparing],
+        "SC unticked",
       );
-      assert.equal(default_followup_person_id, coordinatorId);
-      const before = await certificatesOf(f, coordinatorId);
-      const work = await refusedForOpenWork(
-        f,
+      assert.deepEqual(await certificatesOf(f, member.personId), before);
+      assert.equal(await revisionOf(f, member.personId), revision);
+      assert.equal(await clearedOf(f, member.personId), true);
+      // The positive control: the same save with SC ticked goes through.
+      await save(
         admin,
-        await editOf(f, coordinatorId, {
-          name: (await personOf(f, coordinatorId)).name,
-          roles: ["admin"],
-          certificates: ["vsc"],
-        }),
+        await editOf(f, member.personId, { name: "Sol Abernathy", roles: ["preparer"], certificates: [...certificates, "sc"] }),
       );
-      assert.ok(work.includes("default follow-up person"), JSON.stringify(work));
-      assert.deepEqual(await rolesOf(f, coordinatorId), ["admin"]);
-      assert.deepEqual(await certificatesOf(f, coordinatorId), before);
+      await setDefaultFollowup(member.personId);
+      try {
+        assert.deepEqual(
+          await refusedForOpenWork(
+            f,
+            admin,
+            await editOf(f, member.personId, { name: "Sol Abernathy", roles: [], certificates: [...certificates, "sc"] }),
+          ),
+          [preparing],
+          "default and preparing",
+        );
+        assert.deepEqual(await rolesOf(f, member.personId), ["preparer"]);
+      } finally {
+        await setDefaultFollowup(f.siteCoordinatorId);
+      }
     });
 
     await t.test("open work: removing Greeter while preparing is allowed", async () => {
@@ -879,7 +1094,7 @@ test("volunteer roster records against real Supabase", async (t) => {
         admin,
         addArgs(volunteer({ name: "Riley Park", email: account.email.toUpperCase(), roles: ["preparer"], certificates: ["vsc", "itqr", "basic"] })),
       );
-      await addStaffMember(f, account.userId, "riley_link", "R. Park", ["prepare"]);
+      await addStaffMember(f, account.userId, "riley_link", "R. Park");
       const { rows } = await f.sql("select * from public.people where workspace_id=$1 and user_id=$2", [
         f.workspaceId,
         account.userId,
@@ -908,17 +1123,18 @@ test("volunteer roster records against real Supabase", async (t) => {
 
     await t.test("a re-run ignores a changed name", async () => {
       const member = await f.staff({ key: "oren_rerun", name: "Oren Shah", capabilities: ["prepare"] });
-      const { rows } = await addStaffMember(f, member.userId, "oren_rerun", "Someone Else", ["prepare"]);
+      const { rows } = await addStaffMember(f, member.userId, "oren_rerun", "Someone Else");
       assert.equal(rows[0].person_id, member.personId);
       assert.equal((await personOf(f, member.personId)).name, "Oren Shah");
     });
 
-    await t.test("a re-run with changed capabilities is still refused", async () => {
+    // Migration 052: add_staff_member takes no capabilities, so a re-run has
+    // none to compare. The person keeps the mirror of their roles.
+    await t.test("a re-run keeps the capabilities of the person's roles", async () => {
       const member = await f.staff({ key: "tess_rerun", name: "Tess Boyd", capabilities: ["prepare"] });
-      await assert.rejects(
-        () => addStaffMember(f, member.userId, "tess_rerun", "Tess Boyd", ["prepare", "review"]),
-        rejected("VALIDATION"),
-      );
+      const { rows } = await addStaffMember(f, member.userId, "tess_rerun", "Tess Boyd");
+      assert.equal(rows[0].person_id, member.personId);
+      assert.deepEqual((await entryOf(f, member.personId)).roles, ["preparer"]);
       assert.deepEqual((await personOf(f, member.personId)).capabilities, ["prepare"]);
     });
 
@@ -926,7 +1142,7 @@ test("volunteer roster records against real Supabase", async (t) => {
       const account = await f.provision();
       await save(admin, addArgs(volunteer({ name: "Uma Reid", email: account.email })));
       assert.deepEqual(await findRosterLink(f.sql, f.workspaceId, account.userId), { name: "Uma Reid" });
-      await addStaffMember(f, account.userId, "uma_link", "Uma Reid", ["assist"]);
+      await addStaffMember(f, account.userId, "uma_link", "Uma Reid");
       assert.equal(await findRosterLink(f.sql, f.workspaceId, account.userId), null);
       const stranger = await f.provision();
       assert.equal(await findRosterLink(f.sql, f.workspaceId, stranger.userId), null);
@@ -955,6 +1171,155 @@ test("volunteer roster records against real Supabase", async (t) => {
       );
       const staffAfter = await f.sql(staffQuery, [f.workspaceId]);
       assert.deepEqual(staffAfter.rows, staffBefore.rows);
+    });
+
+    // A past volunteer has a profile and certificates in an earlier season and
+    // no current entry. Edit saves them into the current season.
+    await t.test("Edit adds a past-season volunteer to the current season", async () => {
+      const { current_season: season } = await one(
+        f,
+        "select current_season from public.workspaces where id=$1",
+        [f.workspaceId],
+      );
+      const past = season - 1;
+      // Moves the person's entry and certificates to the previous season. The
+      // certificates reference the entry, and roles need their certificates,
+      // so the roles are cleared on the way and put back on the past entry. The past
+      // entry is added by Pat, not the caller, so a current entry that records the
+      // caller did not copy it.
+      const makePast = async (personId) => {
+        const ids = [f.workspaceId, personId];
+        const { roles } = await one(f, "select roles from public.roster_entries where workspace_id=$1 and person_id=$2 and season=$3", [...ids, season]);
+        await f.sql("update public.roster_entries set roles='{}' where workspace_id=$1 and person_id=$2 and season=$3", [...ids, season]);
+        await f.sql(
+          `insert into public.roster_entries(workspace_id,person_id,season,roles,added_by_person_id,is_new,photo_id_checked_at)
+           select workspace_id,person_id,$3,roles,$5,is_new,photo_id_checked_at
+             from public.roster_entries where workspace_id=$1 and person_id=$2 and season=$4`,
+          [...ids, past, season, prep.personId],
+        );
+        await f.sql("update public.certificates set season=$3 where workspace_id=$1 and person_id=$2 and season=$4", [...ids, past, season]);
+        await f.sql("delete from public.roster_entries where workspace_id=$1 and person_id=$2 and season=$3", [...ids, season]);
+        await f.sql("update public.roster_entries set roles=$4 where workspace_id=$1 and person_id=$2 and season=$3", [...ids, past, roles]);
+      };
+      const entriesIn = (personId, inSeason) =>
+        count(f, "select count(*) n from public.roster_entries where person_id=$1 and season=$2", [personId, inSeason]);
+      const entryIn = (personId, inSeason) =>
+        one(f, "select * from public.roster_entries where person_id=$1 and season=$2", [personId, inSeason]);
+
+      const entry = volunteer({ usualDays: ["tue", "thu"], roles: ["greeter"], certificates: ["vsc"] });
+      const { personId } = await save(admin, addArgs(entry));
+      await makePast(personId);
+      assert.equal(await entriesIn(personId, season), 0, "no current entry to start");
+      const pastBefore = await entryIn(personId, past);
+      const certificatesBefore = await certificatesOf(f, personId);
+      assert.equal(certificatesBefore.length, 1);
+      const revision = await revisionOf(f, personId);
+
+      const edit = editArgs(
+        personId,
+        revision,
+        volunteer({
+          email: entry.email,
+          roles: [],
+          certificates: [],
+          isNew: false,
+          photoIdChecked: false,
+          usualDays: ["tue", "thu"],
+        }),
+      );
+      const first = await save(admin, edit);
+      const current = await entryIn(personId, season);
+      assert.deepEqual(current.roles, []);
+      assert.equal(current.is_new, false);
+      assert.equal(pastBefore.added_by_person_id, prep.personId);
+      assert.equal(current.added_by_person_id, f.siteCoordinatorId);
+      assert.equal(await revisionOf(f, personId), revision + 1);
+      assert.deepEqual((await profileOf(f, personId)).usual_days, ["tue", "thu"]);
+      assert.deepEqual(await entryIn(personId, past), pastBefore, "the past entry is unchanged");
+      assert.deepEqual(
+        (
+          await f.sql(
+            "select certificate,status,confirmed_at::text as confirmed_at,confirmed_by_person_id from public.certificates where person_id=$1 and season=$2 order by certificate",
+            [personId, past],
+          )
+        ).rows,
+        certificatesBefore,
+        "the past certificates are unchanged",
+      );
+      assert.equal(await count(f, "select count(*) n from public.certificates where person_id=$1 and season=$2", [personId, season]), 0);
+
+      // A replay of the same action returns the stored result and adds nothing.
+      assert.deepEqual(await save(admin, edit), first);
+      assert.equal(await entriesIn(personId, season), 1);
+      // A second save at the old revision is a conflict and adds nothing.
+      await refusedWith(
+        admin,
+        editArgs(personId, revision, volunteer({ email: entry.email, roles: [], certificates: [] })),
+        CONFLICT,
+      );
+      assert.equal(await entriesIn(personId, season), 1);
+
+      // Preparer needs VSC, IT&QR and Basic; the ticked ones are confirmed.
+      const ready = volunteer({ roles: ["greeter"], certificates: ["vsc"] });
+      const readyId = (await save(admin, addArgs(ready))).personId;
+      await makePast(readyId);
+      await save(
+        admin,
+        editArgs(
+          readyId,
+          await revisionOf(f, readyId),
+          volunteer({ email: ready.email, roles: ["preparer"], certificates: ["vsc", "itqr", "basic"] }),
+        ),
+      );
+      assert.deepEqual((await entryIn(readyId, season)).roles, ["preparer"]);
+      const confirmed = (
+        await f.sql(
+          "select certificate,status,confirmed_by_person_id from public.certificates where person_id=$1 and season=$2 order by certificate",
+          [readyId, season],
+        )
+      ).rows;
+      assert.deepEqual(
+        confirmed.map((row) => row.certificate),
+        ["basic", "itqr", "vsc"],
+      );
+      for (const row of confirmed) {
+        assert.equal(row.status, "confirmed");
+        assert.equal(row.confirmed_by_person_id, f.siteCoordinatorId);
+      }
+
+      // Preparer with only VSC is refused, and nothing is written.
+      const short = volunteer({ roles: ["greeter"], certificates: ["vsc"] });
+      const shortId = (await save(admin, addArgs(short))).personId;
+      await makePast(shortId);
+      const shortRevision = await revisionOf(f, shortId);
+      const { error } = await admin.rpc(
+        RPC,
+        editArgs(shortId, shortRevision, volunteer({ email: short.email, roles: ["preparer"], certificates: ["vsc"] })),
+      );
+      assert.equal(error?.code, VALIDATION);
+      assert.equal(error.message, "ROLE_NEEDS");
+      assert.equal(await entriesIn(shortId, season), 0);
+      assert.equal(await revisionOf(f, shortId), shortRevision);
+
+      // A past volunteer who has a sign-in keeps their address and is saved.
+      const account = await f.provision();
+      const linked = volunteer({ name: "Sam Rowe", email: account.email, roles: ["greeter"], certificates: ["vsc"] });
+      const linkedId = (await save(admin, addArgs(linked))).personId;
+      await addStaffMember(f, account.userId, "sam_past_link", "Sam Rowe");
+      assert.equal((await personOf(f, linkedId)).user_id, account.userId, "linked to the sign-in");
+      await makePast(linkedId);
+      assert.equal(await entriesIn(linkedId, season), 0);
+      await save(
+        admin,
+        editArgs(
+          linkedId,
+          await revisionOf(f, linkedId),
+          volunteer({ email: account.email, roles: [], certificates: [] }),
+        ),
+      );
+      assert.equal(await entriesIn(linkedId, season), 1);
+      assert.equal((await profileOf(f, linkedId)).email, account.email.toLowerCase());
+      assert.equal((await personOf(f, linkedId)).user_id, account.userId);
     });
   } finally {
     await f.close();
