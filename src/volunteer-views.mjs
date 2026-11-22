@@ -3,7 +3,9 @@
 // row says whether the volunteer is cleared (change add-volunteer-clearance).
 import { esc, button, icon, SENT_DAY, loadingLine, unloadedLine, emptyLine, confirmBody } from "./ui.mjs";
 import { drawerError } from "./office-views.mjs";
-import { ROLES, CERTIFICATES, WORKS, LANGUAGES, SHOW_VIEWS, filterVolunteers } from "./volunteer-roster.mjs";
+import { ROLES, CERTIFICATES, WORKS, LANGUAGES, SHOW_VIEWS, filterVolunteers, languagesText, accountLabel } from "./volunteer-roster.mjs";
+
+export { languagesText, accountLabel };
 
 const when = (condition, html) => (condition ? html : "");
 const labelOf = (list, value) => list.find((entry) => entry.value === value)?.label ?? value;
@@ -17,14 +19,6 @@ const chips = (values, list, none) =>
         .map((value) => `<span class="volunteer-chip">${esc(labelOf(list, value))}</span>`)
         .join("")}</span>`
     : `<span class="muted">${esc(none)}</span>`;
-
-// The languages, with Other replaced by the language it names.
-export const languagesText = (volunteer) => {
-  const names = (volunteer.languages ?? []).map((value) =>
-    value === "other" && volunteer.otherLanguage ? volunteer.otherLanguage : labelOf(LANGUAGES, value),
-  );
-  return names.length ? names.join(", ") : "—";
-};
 
 const MISSING_TEXT = Object.freeze({
   form13615: "Form 13615 missing",
@@ -41,7 +35,6 @@ const ACCOUNT_LABELS = Object.freeze({
   active: "Active",
   deactivated: "Deactivated",
 });
-export const accountLabel = (volunteer) => ACCOUNT_LABELS[volunteer?.account?.status ?? "none"] ?? "Not created";
 
 // The name the volunteer gave at their site check, under the account status.
 const signedInAs = (volunteer, className) =>

@@ -1,5 +1,6 @@
 // Pure logic for the admin-only volunteer Roster: lists, combining, search, form reading, validation.
 import { EMAIL_PATTERN } from "./auth.mjs";
+import { toCsv } from "./csv.mjs";
 
 export const ROLES = [
   { value: "greeter", label: "Greeter" },
@@ -41,6 +42,24 @@ export const ROLE_NEEDS = Object.freeze({
   reviewer: { all: ["vsc", "itqr"], oneOf: ["basic", "advanced"] }
 });
 
+const labelOf = (list, value) => list.find((entry) => entry.value === value)?.label ?? value;
+
+// The languages, with Other replaced by the language it names.
+export const languagesText = (volunteer) => {
+  const names = (volunteer.languages ?? []).map((value) =>
+    value === "other" && volunteer.otherLanguage ? volunteer.otherLanguage : labelOf(LANGUAGES, value),
+  );
+  return names.length ? names.join(", ") : "—";
+};
+
+const ACCOUNT_LABELS = Object.freeze({
+  none: "Not created",
+  invited: "Invited",
+  active: "Active",
+  deactivated: "Deactivated",
+});
+export const accountLabel = (volunteer) => ACCOUNT_LABELS[volunteer?.account?.status ?? "none"] ?? "Not created";
+
 const certificateLabel = (value) => CERTIFICATES.find((c) => c.value === value)?.label ?? value;
 const roleLabel = (value) => ROLES.find((r) => r.value === value)?.label ?? value;
 
@@ -69,10 +88,17 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
   const profileById = new Map(profiles.map((p) => [p.person_id, p]));
   const entryById = new Map(entries.map((e) => [e.person_id, e]));
   const certsById = new Map();
+  const datesById = new Map();
   for (const c of certificates) {
     if (!certsById.has(c.person_id)) certsById.set(c.person_id, []);
     // An uploaded certificate has not been confirmed: it is not shown and counts for nothing.
-    if (c.status === "confirmed") certsById.get(c.person_id).push(c.certificate);
+    if (c.status === "confirmed") {
+      certsById.get(c.person_id).push(c.certificate);
+      if (c.confirmed_at != null) {
+        if (!datesById.has(c.person_id)) datesById.set(c.person_id, {});
+        datesById.get(c.person_id)[c.certificate] = c.confirmed_at;
+      }
+    }
   }
   const list = [];
   for (const person of people) {
@@ -109,6 +135,8 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
       usualDays: [...(profile.usual_days ?? [])],
       roles,
       certificates: certsById.get(person.id) ?? [],
+      // ISO confirmed_at of each confirmed certificate, for the CSV export.
+      certificateDates: datesById.get(person.id) ?? {},
       revision: profile.revision,
       hasSignIn: Boolean(person.user_id),
       // The name the volunteer gave at their site check (migration 047).
@@ -324,5 +352,35 @@ export function rolesToUntick(checkedRoles, checkedCertificates, changedCertific
   const before = [...after, changedCertificate];
   return (checkedRoles ?? []).filter(
     (role) => missingFor(role, before).length === 0 && missingFor(role, after).length > 0
+  );
+}
+
+// The Roster's CSV export (change add-returning-volunteers-and-roster-csv).
+const CSV_HEADER = ["Name", "Email", "Phone", "Roles", "Certificates", "Languages", "Account", "Cleared"];
+const NEW_YORK_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" });
+
+export const rosterCsvFilename = (season, now) => `roster-${season}-${NEW_YORK_DAY.format(now)}.csv`;
+
+const certificateText = (volunteer) =>
+  (volunteer.certificates ?? [])
+    .map((value) => {
+      const iso = volunteer.certificateDates?.[value];
+      return iso ? `${certificateLabel(value)} (${NEW_YORK_DAY.format(new Date(iso))})` : certificateLabel(value);
+    })
+    .join("; ");
+
+export function rosterCsv(volunteers) {
+  return toCsv(
+    CSV_HEADER,
+    volunteers.map((v) => [
+      v.name,
+      v.email,
+      v.phone,
+      (v.roles ?? []).map(roleLabel).join("; "),
+      certificateText(v),
+      languagesText(v),
+      accountLabel(v),
+      v.cleared ? "Yes" : "No"
+    ])
   );
 }

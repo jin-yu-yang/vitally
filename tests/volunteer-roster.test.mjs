@@ -4,7 +4,7 @@ import {
   ROLES, CERTIFICATES, WORKS, LANGUAGES,
   combineVolunteers, filterVolunteers, SHOW_VIEWS, volunteerFromForm, volunteerProblem,
   ROLE_NEEDS, missingFor, withoutLostRoles, roleNeedsMessage, openWorkMessage, rolesToUntick, untickedRolesMessage,
-  accountMessage, volunteerFormChanged, roleBoxesToUntick
+  accountMessage, volunteerFormChanged, roleBoxesToUntick, rosterCsv, rosterCsvFilename
 } from "../src/volunteer-roster.mjs";
 
 const people = [
@@ -51,7 +51,7 @@ test("combine keeps only people with a roster entry", () => {
   assert.deepEqual(list[0], {
     id: "p1", name: "ana Lopez", email: "ana@x.org", phone: null, works: "remote",
     languages: ["english", "other"], otherLanguage: "Tagalog", usualDays: [], roles: ["preparer"],
-    certificates: ["vsc", "basic"], revision: 3, hasSignIn: true, signedInName: null,
+    certificates: ["vsc", "basic"], certificateDates: {}, revision: 3, hasSignIn: true, signedInName: null,
     isNew: false, photoIdChecked: false, form13615SentAt: null, photoIdSentAt: null,
     form13615ReviewedAt: null, form13615ReviewReason: null, photoIdReviewedAt: null, photoIdReviewReason: null,
     account: { status: "active", revision: 2, activatedAt: null, expiresAt: null }, isSiteCoordinator: false,
@@ -477,4 +477,46 @@ test("an unknown show value keeps everyone", () => {
 
 test("SHOW_VIEWS lists Everyone then Uploads to review", () => {
   assert.deepEqual(SHOW_VIEWS.map((v) => [v.value, v.label]), [["all", "Everyone"], ["uploads", "Uploads to review"]]);
+});
+
+test("combine keeps the confirmed date of each confirmed certificate only", () => {
+  const list = combineVolunteers({
+    profiles, entries, people, accounts,
+    certificates: [
+      { person_id: "p1", season: 2026, certificate: "itqr", status: "confirmed", confirmed_at: "2026-11-04T03:30:00Z" },
+      { person_id: "p1", season: 2026, certificate: "vsc", status: "uploaded", confirmed_at: null }
+    ]
+  });
+  assert.deepEqual(list[0].certificates, ["itqr"]);
+  assert.deepEqual(list[0].certificateDates, { itqr: "2026-11-04T03:30:00Z" });
+});
+
+test("rosterCsvFilename uses the New York date", () => {
+  assert.equal(rosterCsvFilename(2026, new Date("2026-11-24T04:30:00Z")), "roster-2026-2026-11-23.csv");
+});
+
+const csvVolunteer = (extra = {}) => ({
+  name: "Ana Lopez", email: "ana@x.org", phone: null, roles: [], certificates: [], certificateDates: {},
+  languages: [], otherLanguage: null, account: { status: "none" }, cleared: false, ...extra
+});
+const csvLines = (volunteers) => rosterCsv(volunteers).replace(/^\uFEFF/, "").split("\r\n");
+
+test("rosterCsv writes the header and a Preparer row with dated certificates", () => {
+  const lines = csvLines([csvVolunteer({
+    roles: ["preparer"], certificates: ["itqr", "basic"],
+    certificateDates: { itqr: "2026-11-04T03:30:00Z", basic: "2026-11-04T03:30:00Z" },
+    languages: ["english", "other"], otherLanguage: "Tagalog", account: { status: "active" }, cleared: true
+  })]);
+  assert.equal(lines[0], "Name,Email,Phone,Roles,Certificates,Languages,Account,Cleared");
+  assert.equal(lines[1], 'Ana Lopez,ana@x.org,,Preparer,IT&QR (2026-11-03); Basic (2026-11-03),"English, Tagalog",Active,Yes');
+});
+
+test("rosterCsv leaves roles and certificates empty, labels accounts and guards phones", () => {
+  const lines = csvLines([
+    csvVolunteer({ phone: "+1 555 0100", account: { status: "invited" } }),
+    csvVolunteer({ name: "Zed Tran", account: { status: "deactivated" } })
+  ]);
+  assert.equal(lines[1], "Ana Lopez,ana@x.org,'+1 555 0100,,,—,Invited,No");
+  assert.equal(lines[2], "Zed Tran,ana@x.org,,,,—,Deactivated,No");
+  assert.match(csvLines([csvVolunteer()])[1], /,Not created,No$/);
 });
