@@ -441,7 +441,7 @@ function fakeClient({
       client.rpcCalls.push({ name, args });
       return rpc
         ? rpc(name, args)
-        : { data: { actionId: args.p_action_id }, error: null };
+        : { data: { actionId: args?.p_action_id }, error: null };
     },
     channel(name) {
       const record = { name, bindings: [], status: null, handlers: {} };
@@ -1395,6 +1395,8 @@ test("every other RPC uses its documented signature", async () => {
     type: "CLAIM",
     note: null,
   });
+  await store.getMyProfile();
+  await store.saveMyProfile({ actionId: "action-3", expectedRevision: 2, profile: { name: "Ana Example" } });
   assert.deepEqual(client.rpcCalls, [
     {
       name: "vitally_create_case",
@@ -1413,6 +1415,11 @@ test("every other RPC uses its documented signature", async () => {
         p_type: "CLAIM",
         p_note: null,
       },
+    },
+    { name: "vitally_my_profile", args: undefined },
+    {
+      name: "vitally_save_my_profile",
+      args: { p_action_id: "action-3", p_expected_revision: 2, p_profile: { name: "Ana Example" } },
     },
   ]);
 });
@@ -1909,17 +1916,80 @@ test("markUploadSent calls vitally_mark_upload_sent", async () => {
   assert.deepEqual(client.rpcCalls[1].args, { p_action_id: "a-2", p_document: "photoId" });
 });
 
-test("markUploadReviewed sends the four arguments", async () => {
+test("markUploadReviewed sends the five arguments", async () => {
   const client = fakeClient({ access: "staff" });
   const store = createStore(client);
-  await store.markUploadReviewed({ actionId: "a-3", volunteerId: "person-ana", expectedRevision: 4, document: "photoId" });
+  await store.markUploadReviewed({
+    actionId: "a-3",
+    volunteerId: "person-ana",
+    expectedRevision: 4,
+    document: "photoId",
+    reason: "Expired",
+  });
   assert.deepEqual(client.rpcCalls[0], {
     name: "vitally_mark_upload_reviewed",
-    args: { p_action_id: "a-3", p_volunteer_id: "person-ana", p_expected_revision: 4, p_document: "photoId" },
+    args: {
+      p_action_id: "a-3",
+      p_volunteer_id: "person-ana",
+      p_expected_revision: 4,
+      p_document: "photoId",
+      p_reason: "Expired",
+    },
   });
-  const request = { volunteerId: "person-ana", expectedRevision: 4, document: "form13615" };
+  const request = { volunteerId: "person-ana", expectedRevision: 4, document: "form13615", reason: "Not signed" };
   await store.markUploadReviewed(request);
   assert.ok(request.actionId);
+});
+
+test("getMyProfile calls vitally_my_profile", async () => {
+  const answer = { personId: "person-ana", name: "Ana Example", revision: 3 };
+  const client = fakeClient({ access: "staff", rpc: () => ({ data: answer, error: null }) });
+  assert.deepEqual(await createStore(client).getMyProfile(), answer);
+  assert.equal(client.rpcCalls[0].name, "vitally_my_profile");
+  assert.equal(client.rpcCalls[0].args, undefined);
+});
+
+test("saveMyProfile sends its three parameters", async () => {
+  const client = fakeClient({ access: "staff" });
+  const store = createStore(client);
+  const profile = { name: "Ana Example", phone: null, works: "remote", languages: ["english"], otherLanguage: null, usualDays: ["mon", "wed"] };
+  await store.saveMyProfile({ actionId: "a-4", expectedRevision: 3, profile });
+  assert.deepEqual(client.rpcCalls[0], {
+    name: "vitally_save_my_profile",
+    args: { p_action_id: "a-4", p_expected_revision: 3, p_profile: profile },
+  });
+  const request = { expectedRevision: 3, profile };
+  await store.saveMyProfile(request);
+  assert.ok(request.actionId);
+});
+
+test("listVolunteers carries the review fields and usual days", async () => {
+  const rows = {
+    ...ROSTER_ROWS,
+    volunteer_profiles: [{ ...ROSTER_ROWS.volunteer_profiles[0], usual_days: ["mon", "fri"] }],
+    roster_entries: [
+      {
+        workspace_id: "workspace-1",
+        person_id: "person-ana",
+        season: 2026,
+        roles: ["greeter"],
+        form_13615_reviewed_at: "2026-11-20T15:00:00Z",
+        form_13615_review_reason: "Not signed",
+        photo_id_reviewed_at: "2026-11-21T15:00:00Z",
+        photo_id_review_reason: "Expired",
+      },
+    ],
+  };
+  const [ana] = await createStore(fakeClient({ access: "staff", rows })).listVolunteers();
+  assert.deepEqual(ana.usualDays, ["mon", "fri"]);
+  assert.equal(ana.form13615ReviewedAt, "2026-11-20T15:00:00Z");
+  assert.equal(ana.form13615ReviewReason, "Not signed");
+  assert.equal(ana.photoIdReviewedAt, "2026-11-21T15:00:00Z");
+  assert.equal(ana.photoIdReviewReason, "Expired");
+  const [plain] = await createStore(fakeClient({ access: "staff", rows: ROSTER_ROWS })).listVolunteers();
+  assert.deepEqual(plain.usualDays, []);
+  for (const key of ["form13615ReviewedAt", "form13615ReviewReason", "photoIdReviewedAt", "photoIdReviewReason"])
+    assert.equal(plain[key], null, key);
 });
 
 test("countUploadsToReview counts the current season's rows with a sent date", async () => {

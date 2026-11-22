@@ -41,7 +41,7 @@ const ACCOUNT_LABELS = Object.freeze({
   active: "Active",
   deactivated: "Deactivated",
 });
-const accountLabel = (volunteer) => ACCOUNT_LABELS[volunteer?.account?.status ?? "none"] ?? "Not created";
+export const accountLabel = (volunteer) => ACCOUNT_LABELS[volunteer?.account?.status ?? "none"] ?? "Not created";
 
 // The name the volunteer gave at their site check, under the account status.
 const signedInAs = (volunteer, className) =>
@@ -156,6 +156,62 @@ function sentLine(sentAt, name, document, busy = false) {
     "secondary",
     `data-document="${document}"${busy ? " disabled" : ""}`,
   )}</p>`;
+}
+
+// The reasons an admin can pick when sending a document back (change
+// add-my-profile, D7). "Already on file" is for a Form 13615 of a volunteer
+// with a role this season.
+const REVIEW_PICKS = {
+  form13615: ["Not signed", "Can't read it", "Wrong form", "Missing a certification"],
+  photoId: ["Can't read it", "Expired", "Not a photo ID"],
+};
+const DAYS = [
+  ["mon", "Monday"],
+  ["tue", "Tuesday"],
+  ["wed", "Wednesday"],
+  ["thu", "Thursday"],
+  ["fri", "Friday"],
+  ["sat", "Saturday"],
+  ["sun", "Sunday"],
+];
+
+// The reason row Mark reviewed opens: quick picks, a note, Send back and
+// Cancel. Send back stays off until a pick or a note; the page turns it on.
+export function reasonRow(document, { hasRole = false, busy = false } = {}) {
+  const picks = [...(REVIEW_PICKS[document] ?? []), ...(document === "form13615" && hasRole ? ["Already on file"] : [])];
+  const radios = picks
+    .map((text, index) => {
+      const id = `volunteer-review-${document}-${index}`;
+      return `<label class="checkbox-row small" for="${id}"><input type="radio" name="review-reason" value="${esc(text)}" id="${id}"><span>${esc(text)}</span></label>`;
+    })
+    .join("");
+  const note = `volunteer-review-note-${document}`;
+  return `<fieldset class="check-group volunteer-review" data-document="${document}"><legend>Why send it back?</legend>${radios}<label class="field" for="${note}"><span>Or write a note</span><input id="${note}" name="review-note" type="text" maxlength="120" autocomplete="off"></label><div class="drawer-actions">${button(
+    "Send back",
+    "send-back",
+    "primary",
+    `data-document="${document}" disabled`,
+  )}${button("Cancel", "cancel-review", "text", `data-document="${document}"${busy ? " disabled" : ""}`)}</div></fieldset>`;
+}
+
+// The document's place in the drawer: its sent line (with the reason row when
+// Mark reviewed was pressed), else what the office last said about it.
+function documentLine(v, document, ui) {
+  const sentAt = v[`${document}SentAt`];
+  const name = document === "form13615" ? "Form 13615" : "Photo ID";
+  if (sentAt != null)
+    return (
+      sentLine(sentAt, name, document, ui?.busy === true) +
+      when(
+        ui?.reviewReasonFor === document,
+        reasonRow(document, { hasRole: (v.roles ?? []).length > 0, busy: ui?.busy === true }),
+      )
+    );
+  const reason = v[`${document}ReviewReason`];
+  if (!reason) return "";
+  const day = new Date(v[`${document}ReviewedAt`]);
+  const date = Number.isNaN(day.getTime()) ? "" : ` · ${SENT_DAY.format(day)}`;
+  return `<p class="volunteer-sent" data-document="${document}"><span>Last returned: ${esc(reason)}${esc(date)}</span></p>`;
 }
 
 // The drawer's Account section: the status and the one or two actions it
@@ -293,7 +349,10 @@ export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {}, 
     otherOpen ? "" : " hidden"
   }><span>Other language</span><input id="volunteer-other-language-input" name="otherLanguage" type="text" value="${esc(
     v.otherLanguage ?? "",
-  )}" maxlength="40" autocomplete="off"></label><fieldset class="check-group"><legend>Roles</legend>${ticks(
+  )}" maxlength="40" autocomplete="off"></label><fieldset class="check-group"><legend>Usual days</legend>${DAYS.map(([value, label]) => {
+    const id = `volunteer-usualDays-${value}`;
+    return `<label class="checkbox-row small" for="${id}"><input type="checkbox" name="usualDays" value="${value}"${(v.usualDays ?? []).includes(value) ? " checked" : ""} id="${id}"><span>${label}</span></label>`;
+  }).join("")}</fieldset><fieldset class="check-group"><legend>Roles</legend>${ticks(
     "role",
     ROLES,
     v.roles ?? [],
@@ -301,7 +360,7 @@ export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {}, 
   )}${when(
     !canChangeAdmin,
     `<p class="field-note" id="volunteer-admin-note">Only site coordinators change the Admin role.</p>`,
-  )}</fieldset>${when(!isNew && v.form13615SentAt != null, sentLine(v.form13615SentAt, "Form 13615", "form13615", ui?.busy === true))}<fieldset class="check-group"><legend>Certificates</legend>${ticks(
+  )}</fieldset>${when(!isNew, documentLine(v, "form13615", ui))}<fieldset class="check-group"><legend>Certificates</legend>${ticks(
     "certificate",
     CERTIFICATES,
     v.certificates ?? [],
@@ -310,7 +369,7 @@ export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {}, 
     "isNew",
     "New volunteer",
     isNew ? true : v.isNew === true,
-  )}${tickRow("photoIdChecked", "Photo ID checked", v.photoIdChecked === true)}${when(!isNew && v.photoIdSentAt != null, sentLine(v.photoIdSentAt, "Photo ID", "photoId", ui?.busy === true))}</fieldset>${when(!isNew && volunteer, accountSection(v, ui?.accountNotice, { viewerIsSiteCoordinator: canChangeAdmin }))}`;
+  )}${tickRow("photoIdChecked", "Photo ID checked", v.photoIdChecked === true)}${when(!isNew, documentLine(v, "photoId", ui))}</fieldset>${when(!isNew && volunteer, accountSection(v, ui?.accountNotice, { viewerIsSiteCoordinator: canChangeAdmin }))}`;
   const formError = ui?.formError
     ? `<p class="notice error" role="alert" id="volunteer-form-error">${icon("help")}<span>${esc(ui.formError)}</span></p>`
     : "";
