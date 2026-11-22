@@ -2948,7 +2948,7 @@ export function createController({
     state.principal = { ...state.principal, clearance: answer };
     // No longer a workspace admin: a later regain must not flash an old number.
     if (!ceilingAdmin(state.principal)) state.uploadsToReview = 0;
-    // No longer a schedule viewer: the Schedule, My profile and their data go.
+    // No longer a schedule viewer: the Schedule and its data go.
     const leftSchedule = SCHEDULE_SCREENS.includes(state.screen) && !scheduleViewer(state.principal);
     if (leftSchedule) leaveSchedule();
     // The person's own entry follows what they may do now.

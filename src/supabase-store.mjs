@@ -959,7 +959,7 @@ export function createStore(client) {
       });
     },
 
-    // The volunteer Schedule (migration 057). The RPCs enforce who may call
+    // The volunteer Schedule (migration 058). The RPCs enforce who may call
     // them; the answers are described in the volunteer-schedule spec.
     async scheduleDay(date) {
       return await call("vitally_schedule_day", { p_date: date });
