@@ -189,6 +189,7 @@ export const RPC_SIGNATURES = Object.freeze([
       "isAdmin",
       "isSiteCoordinator",
       "missing",
+      "scheduleViewer",
       "siteCheck",
       "siteCoordinatorName",
       "uploadUrl",
@@ -405,6 +406,45 @@ export const RPC_SIGNATURES = Object.freeze([
       "weekday",
     ]),
     args: () => ({ p_date: "2027-02-06" }),
+  }),
+  // My profile (add-volunteer-schedule, design D5, D8): a read for the caller.
+  Object.freeze({
+    name: "vitally_my_profile",
+    signature: "vitally_my_profile()",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze([
+      "name",
+      "profileRevision",
+      "roles",
+      "shiftsThisWeek",
+      "usualDays",
+      "weekEnd",
+      "weekStart",
+    ]),
+    args: () => ({}),
+  }),
+  // The caller's own usual days. The context reads the caller's profile revision;
+  // cleanup empties the days the call set, so later entries see the profile as found.
+  Object.freeze({
+    name: "vitally_save_my_usual_days",
+    signature: "vitally_save_my_usual_days(uuid,bigint,integer[])",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["profileRevision", "usualDays"]),
+    context: async (f) => {
+      const { rows } = await f.sql(
+        "select revision::int as revision from public.volunteer_profiles where person_id=$1",
+        [f.siteCoordinatorId],
+      );
+      return { usualDaysRevision: rows[0].revision };
+    },
+    cleanup: async (f) => {
+      await f.sql("update public.volunteer_profiles set usual_days='{}' where person_id=$1", [f.siteCoordinatorId]);
+    },
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_expected_revision: context.usualDaysRevision,
+      p_days: [6, 2],
+    }),
   }),
   // Setting the site's SIDN (design D5): the answer says only that it is set.
   // The fixture's own number (TEST_SITE_NUMBER), so the site check elsewhere

@@ -656,6 +656,232 @@ test("Volunteer schedule against real Supabase", async (t) => {
       }
     });
 
+    await t.test("usual days, ny_week and My profile", async () => {
+      const sc = f.siteCoordinator;
+      const refusedWith = async (client, fn, args, code, label) => {
+        const { error } = await client.rpc(fn, args);
+        assert.equal(error?.code, code, `${label}: ${error?.code} ${error?.message}`);
+      };
+      const profileRevision = async (personId) =>
+        Number((await one(f, "select revision from public.volunteer_profiles where person_id=$1", [personId])).revision);
+      const storedDays = async (personId) =>
+        (await one(f, "select usual_days::int[] as d from public.volunteer_profiles where person_id=$1", [personId])).d;
+      const saveDays = (client, revision, days, actionId = randomUUID()) =>
+        client.rpc("vitally_save_my_usual_days", { p_action_id: actionId, p_expected_revision: revision, p_days: days });
+      // The Roster payload for a person as stored, so an admin save changes nothing else.
+      const payloadOf = async (personId, extra = {}) => {
+        const row = await one(
+          f,
+          `select p.name,v.email,v.phone,v.works,v.languages,v.other_language,r.roles,r.is_new,
+             r.photo_id_checked_at is not null as photo,
+             array(select c.certificate from public.certificates c where c.workspace_id=p.workspace_id
+               and c.person_id=p.id and c.season=r.season and c.status='confirmed' order by 1) as certificates
+            from public.people p
+            join public.volunteer_profiles v on v.workspace_id=p.workspace_id and v.person_id=p.id
+            join public.workspaces w on w.id=p.workspace_id
+            join public.roster_entries r on r.workspace_id=p.workspace_id and r.person_id=p.id and r.season=w.current_season
+            where p.id=$1`,
+          [personId],
+        );
+        return {
+          name: row.name,
+          email: row.email,
+          phone: row.phone,
+          works: row.works,
+          languages: row.languages,
+          otherLanguage: row.other_language,
+          roles: row.roles,
+          certificates: row.certificates,
+          isNew: row.is_new,
+          photoIdChecked: row.photo,
+          ...extra,
+        };
+      };
+      const adminSave = (personId, revision, volunteer) =>
+        sc.rpc("vitally_save_volunteer", {
+          p_action_id: randomUUID(),
+          p_volunteer_id: personId,
+          p_expected_revision: revision,
+          p_volunteer: volunteer,
+        });
+
+      // Week bounds: still Sunday in New York, and the spring-forward Sunday.
+      const week = async (at) => {
+        const row = await one(
+          f,
+          "select to_char(monday,'YYYY-MM-DD') as monday,to_char(sunday,'YYYY-MM-DD') as sunday from vitally_private.ny_week($1::timestamptz)",
+          [at],
+        );
+        return [row.monday, row.sunday];
+      };
+      assert.deepEqual(await week("2026-11-02 03:30+00"), ["2026-10-26", "2026-11-01"]);
+      assert.deepEqual(await week("2027-03-14 12:00-04"), ["2027-03-08", "2027-03-14"]);
+      assert.deepEqual(await week("2026-11-02 05:30+00"), ["2026-11-02", "2026-11-08"]);
+
+      const preparer = f.preparer;
+      const reviewer = f.reviewer;
+      try {
+        // Saving: sorted, revision +1.
+        const r0 = await profileRevision(f.preparerId);
+        const saved = await saveDays(preparer, r0, [6, 2]);
+        assert.equal(saved.error, null, `${saved.error?.code} ${saved.error?.message}`);
+        assert.deepEqual(saved.data, { usualDays: [2, 6], profileRevision: r0 + 1 });
+        assert.deepEqual(await storedDays(f.preparerId), [2, 6]);
+        // A replay returns the stored answer and writes nothing more.
+        const replayId = randomUUID();
+        const first = await saveDays(preparer, r0 + 1, [1], replayId);
+        assert.equal(first.error, null);
+        const replay = await saveDays(preparer, r0 + 1, [1], replayId);
+        assert.deepEqual(replay.data, first.data);
+        assert.equal(await profileRevision(f.preparerId), r0 + 2);
+        await saveDays(preparer, r0 + 2, [6, 2]);
+        const r1 = r0 + 3;
+        assert.deepEqual(await storedDays(f.preparerId), [2, 6]);
+        // Bad shapes.
+        for (const [days, label] of [[[8], "day 8"], [[1, 1], "repeated day"], [[0], "day 0"], [null, "null"]]) {
+          const { error } = await saveDays(preparer, r1, days);
+          assert.equal(error?.code, "VT007", label);
+          if (days) assert.equal(error?.details ?? error?.detail, "usualDays", label);
+        }
+        assert.equal(await profileRevision(f.preparerId), r1);
+        // A stale revision.
+        await refusedWith(
+          preparer,
+          "vitally_save_my_usual_days",
+          { p_action_id: randomUUID(), p_expected_revision: r1 - 1, p_days: [3] },
+          "VT003",
+          "stale",
+        );
+        assert.deepEqual(await storedDays(f.preparerId), [2, 6]);
+        // Only a schedule viewer.
+        await refusedWith(
+          f.applicantA,
+          "vitally_save_my_usual_days",
+          { p_action_id: randomUUID(), p_expected_revision: 1, p_days: [3] },
+          "VT001",
+          "client",
+        );
+        await refusedWith(f.applicantA, "vitally_my_profile", undefined, "VT001", "client profile");
+        const { error: noEntry } = await saveDays(nora.client, 1, [3]);
+        assert.equal(noEntry?.code, "VT001", "no roster entry, not a viewer");
+        // Ruling R3: a viewer with no profile row.
+        const pam = await f.staff({ key: "pam_no_profile", name: "Pam Oakley", capabilities: ["prepare"] });
+        await f.sql("delete from public.volunteer_profiles where person_id=$1", [pam.personId]);
+        const pamProfile = await rpc(pam.client, "vitally_my_profile");
+        assert.deepEqual(pamProfile.usualDays, []);
+        assert.equal(pamProfile.profileRevision, null);
+        await refusedWith(
+          pam.client,
+          "vitally_save_my_usual_days",
+          { p_action_id: randomUUID(), p_expected_revision: 1, p_days: [3] },
+          "VT002",
+          "no profile row",
+        );
+
+        // An admin save at the pre-save revision is refused; without usualDays the days are kept.
+        const stale = await adminSave(f.preparerId, r1 - 1, await payloadOf(f.preparerId));
+        assert.equal(stale.error?.code, "VT003");
+        const kept = await adminSave(f.preparerId, r1, await payloadOf(f.preparerId, { phone: "555-0100" }));
+        assert.equal(kept.error, null, `${kept.error?.code} ${kept.error?.message}`);
+        assert.deepEqual(await storedDays(f.preparerId), [2, 6]);
+        assert.equal(await profileRevision(f.preparerId), r1 + 1);
+
+        // Privacy: nothing the reviewer receives carries the preparer's days.
+        await f.sql("update public.volunteer_profiles set usual_days='{}' where person_id=$1", [f.reviewerId]);
+        const reviewerDay = await rpc(reviewer, "vitally_schedule_day", { p_date: "2027-02-06" });
+        assert.ok(!JSON.stringify(reviewerDay).includes("usualDays"));
+        const reviewerProfile = await rpc(reviewer, "vitally_my_profile");
+        assert.deepEqual(reviewerProfile.usualDays, []);
+        assert.ok(!JSON.stringify(reviewerProfile).includes(f.preparerId));
+        // The preparer's own My profile shows theirs.
+        assert.deepEqual((await rpc(preparer, "vitally_my_profile")).usualDays, [2, 6]);
+      } finally {
+        await setUsualDays(f.preparerId, "{}");
+      }
+    });
+
+    await t.test("My profile lists this week's shifts", async () => {
+      const sc = f.siteCoordinator;
+      const preparer = f.preparer;
+      const { monday } = await one(
+        f,
+        "select to_char(monday,'YYYY-MM-DD') as monday from vitally_private.ny_week(now())",
+      );
+      const plus = async (days) => (await one(f, "select to_char($1::date+$2::int,'YYYY-MM-DD') as d", [monday, days])).d;
+      const [tuesday, saturday, nextMonday, lastSunday] = [await plus(1), await plus(5), await plus(7), await plus(-1)];
+      const { revision: settingsRevision } = await one(
+        f,
+        "select coalesce(max(revision),0)::int as revision from public.schedule_settings where workspace_id=$1",
+        [f.workspaceId],
+      );
+      const addShift = (date, startHour, endHour) =>
+        rpc(sc, "vitally_save_shift", {
+          p_action_id: randomUUID(),
+          p_shift_id: null,
+          p_expected_revision: null,
+          p_shift: { volunteerId: f.preparerId, date, startHour, endHour, role: "preparer" },
+        });
+      try {
+        const everyDay = Object.fromEntries([1, 2, 3, 4, 5, 6, 7].map((d) => [d, { open: 8, close: 20 }]));
+        await rpc(sc, "vitally_save_schedule_settings", {
+          p_action_id: randomUUID(),
+          p_expected_revision: settingsRevision,
+          p_settings: { siteHours: everyDay, targets: { preparersNeeded: 2, reviewersNeeded: 1, onSiteNeeded: 1 } },
+        });
+        const empty = await rpc(preparer, "vitally_my_profile");
+        assert.deepEqual(empty.shiftsThisWeek, []);
+        assert.equal(empty.weekStart, monday);
+        assert.equal(empty.weekEnd, await plus(6));
+        assert.equal(empty.name, "Taylor Brooks");
+        assert.deepEqual(empty.roles, ["preparer"]);
+        assert.deepEqual(Object.keys(empty).sort(), [
+          "name",
+          "profileRevision",
+          "roles",
+          "shiftsThisWeek",
+          "usualDays",
+          "weekEnd",
+          "weekStart",
+        ]);
+
+        const sat = await addShift(saturday, 10, 14);
+        await addShift(tuesday, 17, 20);
+        await addShift(nextMonday, 9, 12);
+        await addShift(lastSunday, 9, 12);
+        const gone = await addShift(tuesday, 9, 11);
+        const answer = await rpc(preparer, "vitally_my_profile");
+        assert.deepEqual(
+          answer.shiftsThisWeek.map((s) => [s.date, s.startHour, s.endHour, s.role]),
+          [
+            [tuesday, 9, 11, "preparer"],
+            [tuesday, 17, 20, "preparer"],
+            [saturday, 10, 14, "preparer"],
+          ],
+        );
+        assert.deepEqual(Object.keys(answer.shiftsThisWeek[0]).sort(), [
+          "date",
+          "endHour",
+          "role",
+          "shiftId",
+          "startHour",
+        ]);
+        assert.equal(answer.shiftsThisWeek[2].shiftId, sat.shiftId);
+        await rpc(sc, "vitally_remove_shift", {
+          p_action_id: randomUUID(),
+          p_shift_id: gone.shiftId,
+          p_expected_revision: gone.revision,
+        });
+        const afterRemoval = await rpc(preparer, "vitally_my_profile");
+        assert.deepEqual(
+          afterRemoval.shiftsThisWeek.map((s) => s.startHour),
+          [17, 10],
+        );
+      } finally {
+        await f.sql("delete from public.shifts where workspace_id=$1", [f.workspaceId]);
+        await f.sql("delete from public.schedule_settings where workspace_id=$1", [f.workspaceId]);
+      }
+    });
+
     await t.test("published", async () => {
       const { rows } = await f.sql(
         "select tablename from pg_publication_tables where pubname='supabase_realtime' and schemaname='public'",

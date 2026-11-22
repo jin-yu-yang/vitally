@@ -642,3 +642,443 @@ end;
 $$;
 revoke all on function public.vitally_schedule_day(date) from public,anon,authenticated,service_role;
 grant execute on function public.vitally_schedule_day(date) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- §7. Usual days and My profile (design D5, D8).
+
+-- The Monday and Sunday of the week that holds p_at in America/New_York, as
+-- dates. It reads the New York calendar date first, so a moment that is still
+-- Sunday evening in New York belongs to that week even when it is Monday in
+-- UTC, and the daylight-saving days need no hour arithmetic.
+create function vitally_private.ny_week(p_at timestamptz)
+returns table(monday date, sunday date) language sql stable security definer set search_path='' as $$
+ select d-(extract(isodow from d)::int-1), d+(7-extract(isodow from d)::int)
+ from (select (p_at at time zone 'America/New_York')::date as d) x;
+$$;
+revoke all on function vitally_private.ny_week(timestamptz) from public,anon,authenticated,service_role;
+
+-- The caller's own My profile, for a schedule viewer; FORBIDDEN otherwise,
+-- clients included. Answers {name, roles (current season, [] when none),
+-- usualDays, profileRevision, weekStart, weekEnd, shiftsThisWeek}: the
+-- caller's live current-season shifts from Monday to Sunday of the New York
+-- week that holds now, by date then start. A viewer with no volunteer profile
+-- row gets usualDays [] and a null profileRevision (ruling R3).
+create function public.vitally_my_profile()
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_workspace public.workspaces;
+ v_profile public.volunteer_profiles;
+ v_week record;
+begin
+ v_member=vitally_private.require_membership();
+ v_person=vitally_private.acting_person(v_member);
+ if v_member.access<>'staff' or v_person.id is null
+  or not vitally_policy.is_schedule_viewer(v_member.workspace_id) then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ select * into v_workspace from public.workspaces where id=v_member.workspace_id;
+ select * into v_profile from public.volunteer_profiles
+  where workspace_id=v_member.workspace_id and person_id=v_person.id;
+ select * into v_week from vitally_private.ny_week(now());
+ return jsonb_build_object('name',v_person.name,
+  'roles',coalesce((select to_jsonb(r.roles) from public.roster_entries r
+    where r.workspace_id=v_member.workspace_id and r.person_id=v_person.id and r.season=v_workspace.current_season),'[]'::jsonb),
+  'usualDays',to_jsonb(coalesce(v_profile.usual_days,'{}'::smallint[])),
+  'profileRevision',v_profile.revision,
+  'weekStart',to_char(v_week.monday,'YYYY-MM-DD'),'weekEnd',to_char(v_week.sunday,'YYYY-MM-DD'),
+  'shiftsThisWeek',coalesce((select jsonb_agg(jsonb_build_object('shiftId',s.id,
+     'date',to_char(s.shift_date,'YYYY-MM-DD'),'startHour',s.start_hour,'endHour',s.end_hour,'role',s.role)
+    order by s.shift_date,s.start_hour,s.id)
+   from public.shifts s
+   where s.workspace_id=v_member.workspace_id and s.season=v_workspace.current_season
+    and s.person_id=v_person.id and s.removed_at is null
+    and s.shift_date between v_week.monday and v_week.sunday),'[]'::jsonb));
+end;
+$$;
+revoke all on function public.vitally_my_profile() from public,anon,authenticated,service_role;
+grant execute on function public.vitally_my_profile() to authenticated;
+
+-- Saves the caller's own usual days at the profile revision, for a schedule
+-- viewer; there is no argument that names another person. Order: FORBIDDEN
+-- (nothing written, no receipt), VALIDATION (a missing argument, or a day
+-- outside 1-7 or repeated, with usualDays as detail), then under the workspace
+-- lock the receipt (a replay returns the stored answer), NOT_FOUND (VT002) when
+-- the caller has no profile row (ruling R3), CONFLICT (a stale revision). The
+-- days are stored sorted and the profile revision goes up, which makes an
+-- admin's open Edit stale. Answers {usualDays, profileRevision}.
+create function public.vitally_save_my_usual_days(p_action_id uuid,p_expected_revision bigint,p_days int[])
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_receipt public.action_receipts;
+ v_profile public.volunteer_profiles;
+ v_digest text;
+ v_result jsonb;
+begin
+ v_member=vitally_private.require_membership();
+ v_person=vitally_private.acting_person(v_member);
+ if v_member.access<>'staff' or v_person.id is null
+  or not vitally_policy.is_schedule_viewer(v_member.workspace_id) then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ if p_action_id is null or p_expected_revision is null or p_days is null then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ if coalesce(array_ndims(p_days),1)>1
+  or exists(select 1 from unnest(p_days) d where d is null or d not between 1 and 7)
+  or cardinality(p_days)<>(select count(distinct d) from unnest(p_days) d) then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='usualDays';
+ end if;
+ perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_member.workspace_id::text,0));
+ v_digest=encode(extensions.digest(jsonb_build_object('operation','SAVE_MY_USUAL_DAYS',
+  'expectedRevision',p_expected_revision,'days',to_jsonb(p_days),'personId',v_person.id)::text,'sha256'),'hex');
+ v_receipt=vitally_private.reserve_receipt(v_member,p_action_id,'SAVE_MY_USUAL_DAYS',v_digest,v_person.id);
+ if v_receipt.receipt is not null then
+  return v_receipt.receipt;
+ end if;
+ select * into v_profile from public.volunteer_profiles
+  where workspace_id=v_member.workspace_id and person_id=v_person.id for update;
+ if not found then
+  raise sqlstate 'VT002' using message='NOT_FOUND';
+ end if;
+ if v_profile.revision<>p_expected_revision then
+  raise sqlstate 'VT003' using message='CONFLICT';
+ end if;
+ update public.volunteer_profiles
+  set usual_days=array(select d::smallint from unnest(p_days) d order by d),revision=revision+1,updated_at=now()
+  where workspace_id=v_member.workspace_id and person_id=v_person.id
+  returning * into v_profile;
+ v_result=jsonb_build_object('usualDays',to_jsonb(v_profile.usual_days),'profileRevision',v_profile.revision);
+ update public.action_receipts set target_id=v_person.id,receipt=v_result where id=v_receipt.id;
+ return v_result;
+end;
+$$;
+revoke all on function public.vitally_save_my_usual_days(uuid,bigint,int[]) from public,anon,authenticated,service_role;
+grant execute on function public.vitally_save_my_usual_days(uuid,bigint,int[]) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- §8. The clearance answer gains scheduleViewer (design D3, D11).
+
+-- From 053 §2, with these changes marked `-- 056`: scheduleViewer, true for a
+-- schedule viewer (a workspace admin, or anyone on the current roster with an
+-- active staff account) whether cleared or not. Every 053 key stays.
+create or replace function public.vitally_my_clearance()
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_entry public.roster_entries;
+ v_held text[];
+ v_missing jsonb='[]'::jsonb;
+ v_role text;
+ v_lacks text[];
+ v_coordinator text;
+ v_site_coordinator boolean; -- 052
+ v_cleared boolean; -- 053
+begin
+ v_member=vitally_private.require_membership();
+ if v_member.access<>'staff' then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ select * into v_person from public.people
+  where workspace_id=v_member.workspace_id and user_id=v_member.user_id;
+ if v_person.id is null then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ v_site_coordinator=vitally_private.is_site_coordinator(v_person.workspace_id,v_person.id); -- 052
+ v_cleared=vitally_private.cleared(v_person.workspace_id,v_person.id); -- 053
+ select r.* into v_entry from public.roster_entries r
+  join public.workspaces w on w.id=r.workspace_id and w.current_season=r.season
+  where r.workspace_id=v_person.workspace_id and r.person_id=v_person.id;
+ if v_entry.person_id is null or cardinality(v_entry.roles)=0 then
+  v_missing=v_missing||jsonb_build_array(jsonb_build_object('kind','form13615','sentAt',v_entry.form_13615_sent_at)); -- 053
+ end if;
+ if v_entry.person_id is not null and v_entry.is_new and v_entry.photo_id_checked_at is null then
+  v_missing=v_missing||jsonb_build_array(jsonb_build_object('kind','photoId','sentAt',v_entry.photo_id_sent_at)); -- 053
+ end if;
+ if v_entry.person_id is not null then
+  v_held=vitally_private.confirmed_certificates(v_entry.workspace_id,v_entry.person_id,v_entry.season);
+  foreach v_role in array v_entry.roles loop
+   v_lacks=vitally_private.missing_certificates(v_role,v_held);
+   if cardinality(v_lacks)>0 then
+    v_missing=v_missing||jsonb_build_array(jsonb_build_object('kind','role','role',v_role,'certificates',to_jsonb(v_lacks)));
+   end if;
+  end loop;
+  if v_site_coordinator and not ('sc'=any(v_held)) then -- 052
+   v_missing=v_missing||jsonb_build_array(jsonb_build_object('kind','siteCoordinator','certificates',jsonb_build_array('SC'))); -- 052
+  end if; -- 052
+ end if;
+ select d.name into v_coordinator from public.workspaces w
+  join public.people d on d.workspace_id=w.id and d.id=w.default_followup_person_id
+  where w.id=v_person.workspace_id;
+ return jsonb_build_object(
+  'cleared',v_cleared, -- 053
+  'missing',v_missing,
+  'capabilities',case when v_cleared then to_jsonb(vitally_private.effective_capabilities(v_person.workspace_id,v_person.id)) else '[]'::jsonb end, -- 053
+  'isAdmin',vitally_policy.is_workspace_admin(v_person.workspace_id), -- 052
+  'isSiteCoordinator',v_site_coordinator, -- 052
+  'scheduleViewer',vitally_private.schedule_viewer(v_person.workspace_id,v_person.id) or vitally_policy.is_workspace_admin(v_person.workspace_id), -- 056
+  'siteCoordinatorName',to_jsonb(v_coordinator),
+  'siteCheck',exists(select 1 from public.accounts a where a.workspace_id=v_person.workspace_id and a.user_id=v_member.user_id and a.status='invited'),
+  'uploadUrl',case when v_entry.person_id is not null then (select s.certificate_upload_url from public.season_settings s where s.workspace_id=v_person.workspace_id) end); -- 053
+end;
+$$;
+revoke all on function public.vitally_my_clearance() from public,anon,authenticated,service_role;
+grant execute on function public.vitally_my_clearance() to authenticated;
+
+
+-- ---------------------------------------------------------------------------
+-- §9. Usual days on the Roster save (design D8).
+
+-- From 053 §4, with these changes marked `-- 056`: the payload may carry
+-- `usualDays`, validated and stored sorted on the profile; a missing key keeps
+-- the stored days. The signature, every other key and every other rule stay.
+create or replace function public.vitally_save_volunteer(p_action_id uuid,p_volunteer_id uuid,p_expected_revision bigint,p_volunteer jsonb)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_receipt public.action_receipts;
+ v_profile public.volunteer_profiles;
+ v_entry public.roster_entries;
+ v_digest text;
+ v_key text;
+ v_target_user uuid;
+ v_target_id uuid=p_volunteer_id;
+ v_season smallint;
+ v_revision bigint=1;
+ v_name text;
+ v_email text;
+ v_phone text;
+ v_works text;
+ v_other text;
+ v_languages text[];
+ v_requested text[];
+ v_roles text[]='{}';
+ v_role text;
+ v_missing text[];
+ v_certificates text[];
+ v_is_new boolean;
+ v_photo_checked_at timestamptz;
+ v_stored_roles text[]='{}'; -- 052
+ v_capabilities text[];
+ v_cleared boolean;
+ v_was_capable text[];
+ v_was_cleared boolean;
+ v_default_met boolean; -- 052
+ v_caller_coordinator boolean; -- 052
+ v_open_work jsonb;
+ v_clear_13615 boolean=false; -- 053
+ v_usual_days smallint[]; -- 056
+ v_result jsonb;
+begin
+ v_member=vitally_private.require_membership();
+ v_person=vitally_private.acting_person(v_member);
+ -- The workspace admin check (design D2): a site coordinator, or the Admin -- 052
+ -- role this season, cleared or not. -- 052
+ if v_member.access<>'staff' or v_person.id is null or not vitally_policy.is_workspace_admin(v_member.workspace_id) then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ if p_action_id is null or p_volunteer is null or jsonb_typeof(p_volunteer)<>'object'
+  or (p_volunteer_id is null)<>(p_expected_revision is null) then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ -- The lock add_staff_member takes: an Edit and a roster link cannot deadlock,
+ -- or link on an address that has just changed.
+ perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_member.workspace_id::text,0));
+ -- Only a site coordinator adds or removes the Admin role (design D3), -- 052
+ -- refused before the receipt is reserved. -- 052
+ v_caller_coordinator=vitally_private.is_site_coordinator(v_member.workspace_id,v_person.id); -- 052
+ if p_volunteer_id is not null then -- 052
+  select r.roles into v_stored_roles from public.roster_entries r -- 052
+   join public.workspaces w on w.id=r.workspace_id and w.current_season=r.season -- 052
+   where r.workspace_id=v_member.workspace_id and r.person_id=p_volunteer_id; -- 052
+ end if; -- 052
+ if not v_caller_coordinator -- 052
+  and ('admin'=any(coalesce(v_stored_roles,'{}'::text[])))<>(jsonb_typeof(p_volunteer->'roles')='array' and p_volunteer->'roles' ? 'admin') then -- 052
+  raise sqlstate 'VT001' using message='ADMIN_ROLE'; -- 052
+ end if; -- 052
+ v_digest=encode(extensions.digest(jsonb_build_object('operation','SAVE_VOLUNTEER','volunteerId',p_volunteer_id,
+  'expectedRevision',p_expected_revision,'personId',v_person.id,'volunteer',p_volunteer)::text,'sha256'),'hex');
+ v_receipt=vitally_private.reserve_receipt(v_member,p_action_id,'SAVE_VOLUNTEER',v_digest,v_person.id);
+ if v_receipt.receipt is not null then
+  return v_receipt.receipt;
+ end if;
+ if p_volunteer_id is not null then
+  select * into v_profile from public.volunteer_profiles
+   where workspace_id=v_member.workspace_id and person_id=p_volunteer_id for update;
+  if not found then
+   raise sqlstate 'VT002' using message='NOT_FOUND';
+  end if;
+  if v_profile.revision<>p_expected_revision then
+   raise sqlstate 'VT003' using message='CONFLICT';
+  end if;
+  v_revision=v_profile.revision+1;
+ end if;
+
+ -- The payload: exactly these keys, each of its type.
+ if array(select k from jsonb_object_keys(p_volunteer) k where k<>'usualDays' order by k collate "C") -- 056
+   <>array['certificates','email','isNew','languages','name','otherLanguage','phone','photoIdChecked','roles','works']::text[]
+  or jsonb_typeof(p_volunteer->'name')<>'string' or jsonb_typeof(p_volunteer->'email')<>'string'
+  or jsonb_typeof(p_volunteer->'works')<>'string'
+  or jsonb_typeof(p_volunteer->'phone') not in ('string','null')
+  or jsonb_typeof(p_volunteer->'otherLanguage') not in ('string','null')
+  or jsonb_typeof(p_volunteer->'isNew')<>'boolean'
+  or jsonb_typeof(p_volunteer->'photoIdChecked')<>'boolean' then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ foreach v_key in array array['languages','roles','certificates'] loop
+  if jsonb_typeof(p_volunteer->v_key)<>'array'
+   or exists(select 1 from jsonb_array_elements(p_volunteer->v_key) e where jsonb_typeof(e)<>'string') then
+   raise sqlstate 'VT007' using message='VALIDATION';
+  end if;
+ end loop;
+ -- The optional usual days (design D8): a list of distinct whole weekdays 1-7, -- 056
+ -- stored sorted. A missing key keeps the stored days, so a caller that does -- 056
+ -- not know the field never clears it. -- 056
+ if p_volunteer ? 'usualDays' then -- 056
+  if jsonb_typeof(p_volunteer->'usualDays')<>'array' -- 056
+   or exists(select 1 from jsonb_array_elements(p_volunteer->'usualDays') e -- 056
+    where jsonb_typeof(e)<>'number' or (e #>> '{}') !~ '^[1-7]$') -- 056
+   or jsonb_array_length(p_volunteer->'usualDays') -- 056
+    <>(select count(distinct e) from jsonb_array_elements(p_volunteer->'usualDays') e) then -- 056
+   raise sqlstate 'VT007' using message='VALIDATION',detail='usualDays'; -- 056
+  end if; -- 056
+  v_usual_days=array(select (e #>> '{}')::smallint from jsonb_array_elements(p_volunteer->'usualDays') e order by 1); -- 056
+ end if; -- 056
+ v_name=btrim(p_volunteer->>'name');
+ v_email=lower(btrim(p_volunteer->>'email'));
+ v_phone=nullif(btrim(p_volunteer->>'phone'),'');
+ v_works=p_volunteer->>'works';
+ v_other=nullif(btrim(p_volunteer->>'otherLanguage'),'');
+ v_languages=array(select jsonb_array_elements_text(p_volunteer->'languages'));
+ v_requested=array(select jsonb_array_elements_text(p_volunteer->'roles'));
+ v_certificates=array(select jsonb_array_elements_text(p_volunteer->'certificates'));
+ v_is_new=(p_volunteer->'isNew')::boolean;
+ if length(v_name) not between 1 and 80
+  or length(v_email)>254 or v_email !~ '^[^[:space:]@]+@[^[:space:]@.]+(\.[^[:space:]@.]+)+$'
+  or length(v_phone)>30
+  or v_works not in ('on_site','remote','on_site_and_remote')
+  or not (v_languages <@ array['english','mandarin','cantonese','other']::text[])
+  or cardinality(v_languages)<>(select count(distinct c) from unnest(v_languages) c)
+  or length(v_other)>40
+  or (v_other is not null)<>('other'=any(v_languages))
+  or not (v_requested <@ array['greeter','intaker','preparer','reviewer','admin']::text[])
+  or cardinality(v_requested)<>(select count(distinct c) from unnest(v_requested) c)
+  or not (v_certificates <@ array['vsc','itqr','sc','basic','advanced']::text[])
+  or cardinality(v_certificates)<>(select count(distinct c) from unnest(v_certificates) c) then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ if exists(select 1 from public.volunteer_profiles
+  where workspace_id=v_member.workspace_id and email=v_email and person_id is distinct from p_volunteer_id) then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ select current_season into v_season from public.workspaces where id=v_member.workspace_id;
+ if p_volunteer_id is not null then
+  select user_id into v_target_user from public.people where id=p_volunteer_id; -- 052
+  -- A sign-in's address belongs to its account.
+  if v_target_user is not null and v_email<>v_profile.email then
+   raise sqlstate 'VT007' using message='VALIDATION';
+  end if;
+  select * into v_entry from public.roster_entries
+   where workspace_id=v_member.workspace_id and person_id=p_volunteer_id and season=v_season for update;
+ end if;
+
+ -- Each requested role against the ticked certificates. A role the entry
+ -- already holds had its certificates (role_certificates_check), so one that
+ -- lacks one now lost it in this save, and is dropped with it.
+ foreach v_role in array v_requested loop
+  v_missing=vitally_private.missing_certificates(v_role,v_certificates);
+  if cardinality(v_missing)=0 then
+   v_roles=v_roles||v_role;
+  elsif not (v_role=any(coalesce(v_entry.roles,'{}'::text[]))) then
+   raise sqlstate 'VT007' using message='ROLE_NEEDS',detail=v_role||': '||array_to_string(v_missing,', ');
+  end if;
+ end loop;
+ -- Whether this save acts on a sent Form 13615 (design D4): the roles change as -- 053
+ -- sets, or the confirmed certificates change, which includes an uploaded -- 053
+ -- certificate being confirmed. Computed before the certificate writes. -- 053
+ if v_entry.person_id is not null then -- 053
+  v_clear_13615=array(select r from unnest(v_roles) r order by r collate "C") -- 053
+    is distinct from array(select r from unnest(v_entry.roles) r order by r collate "C") -- 053
+   or vitally_private.confirmed_certificates(v_member.workspace_id,v_target_id,v_season) -- 053
+    is distinct from array(select c from unnest(v_certificates) c order by c collate "C") -- 053
+   or exists(select 1 from public.certificates c where c.workspace_id=v_member.workspace_id -- 053
+    and c.person_id=v_target_id and c.season=v_season and c.status='uploaded' and c.certificate=any(v_certificates)); -- 053
+ end if; -- 053
+ -- A photo ID check that stays ticked keeps its time.
+ if (p_volunteer->'photoIdChecked')::boolean then
+  v_photo_checked_at=coalesce(v_entry.photo_id_checked_at,now());
+ end if;
+ -- A non-site-coordinator cannot remove the Admin role by unticking a -- 052
+ -- certificate it needs either (design D3). -- 052
+ if not v_caller_coordinator and 'admin'=any(coalesce(v_entry.roles,'{}'::text[])) and not ('admin'=any(v_roles)) then -- 052
+  raise sqlstate 'VT001' using message='ADMIN_ROLE'; -- 052
+ end if; -- 052
+
+ -- The open-work rule (design D7): the role capabilities and clearance -- 052
+ -- now, before any write, against those of the would-be roles. -- 052
+ -- Only what this save takes away counts: a capability the work -- 052
+ -- needs that they hold now and would lose, or clearance they hold now and
+ -- would lose while holding any work (then all of it is listed). A person
+ -- who already lacks either can still be saved. A site coordinator meets -- 052
+ -- the default follow-up person's need whatever their roles or clearance. -- 052
+ if p_volunteer_id is not null then
+  v_was_capable=vitally_private.role_capabilities(coalesce(v_entry.roles,'{}'::text[])); -- 052
+  v_was_cleared=vitally_private.cleared(v_member.workspace_id,p_volunteer_id);
+  v_capabilities=vitally_private.role_capabilities(v_roles); -- 052
+  -- A site coordinator also needs SC ticked to stay cleared (design D6); an -- 052
+  -- uploaded SC left unticked doesn't count. -- 052
+  v_default_met=vitally_private.is_site_coordinator(v_member.workspace_id,p_volunteer_id); -- 052
+  v_cleared=cardinality(v_roles)>0 and (not v_is_new or v_photo_checked_at is not null)
+   and (not v_default_met or 'sc'=any(v_certificates)); -- 052
+  select jsonb_agg(w.label) into v_open_work from vitally_private.open_work(v_member.workspace_id,p_volunteer_id) w
+   where not (v_default_met and w.label='default follow-up person') and ( -- 052
+    (v_was_cleared and not v_cleared) -- 052
+    or (w.needs=any(v_was_capable) and not (w.needs=any(v_capabilities)))); -- 052
+  if v_open_work is not null then
+   raise sqlstate 'VT004' using message='OPEN_WORK',detail=v_open_work::text;
+  end if;
+ end if;
+
+ begin
+  if p_volunteer_id is null then
+   insert into public.people(workspace_id,person_key,name,capabilities)
+    values(v_member.workspace_id,'v_'||substr(replace(gen_random_uuid()::text,'-',''),1,12),v_name,'{}')
+    returning id into v_target_id;
+   insert into public.volunteer_profiles(workspace_id,person_id,email,phone,works,languages,other_language,usual_days) -- 056
+    values(v_member.workspace_id,v_target_id,v_email,v_phone,v_works,v_languages,v_other,coalesce(v_usual_days,'{}'::smallint[])); -- 056
+  else
+   update public.people set name=v_name where id=p_volunteer_id;
+   update public.volunteer_profiles set email=v_email,phone=v_phone,works=v_works,languages=v_languages,
+     other_language=v_other,usual_days=coalesce(v_usual_days,usual_days),revision=v_revision,updated_at=now() -- 056
+    where workspace_id=v_member.workspace_id and person_id=p_volunteer_id;
+  end if;
+  insert into public.roster_entries(workspace_id,person_id,season,roles,added_by_person_id,is_new,photo_id_checked_at)
+   values(v_member.workspace_id,v_target_id,v_season,v_roles,v_person.id,v_is_new,v_photo_checked_at)
+   on conflict(workspace_id,person_id,season) do update
+    set roles=excluded.roles,is_new=excluded.is_new,photo_id_checked_at=excluded.photo_id_checked_at, -- 053
+     form_13615_sent_at=case when v_clear_13615 then null else public.roster_entries.form_13615_sent_at end, -- 053
+     photo_id_sent_at=case when (v_entry.photo_id_checked_at is null and v_photo_checked_at is not null) -- 053
+       or (coalesce(v_entry.is_new,false) and not v_is_new) then null else public.roster_entries.photo_id_sent_at end; -- 053
+  -- Only a confirmed certificate an admin has unticked is deleted: an uploaded
+  -- one is the volunteer's own and stays (design D14). A sent certificate is
+  -- inserted confirmed, or confirms an uploaded row; a confirmed row that stays
+  -- ticked keeps its time and confirmer.
+  delete from public.certificates where workspace_id=v_member.workspace_id and person_id=v_target_id
+   and season=v_season and status='confirmed' and certificate<>all(v_certificates);
+  insert into public.certificates(workspace_id,person_id,season,certificate,status,confirmed_at,confirmed_by_person_id)
+   select v_member.workspace_id,v_target_id,v_season,c,'confirmed',now(),v_person.id from unnest(v_certificates) c
+   on conflict(workspace_id,person_id,season,certificate) do update
+    set status='confirmed',confirmed_at=excluded.confirmed_at,confirmed_by_person_id=excluded.confirmed_by_person_id
+    where public.certificates.status='uploaded';
+ exception when unique_violation then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end;
+ v_result=jsonb_build_object('actionId',p_action_id,'personId',v_target_id,'revision',v_revision);
+ update public.action_receipts set target_id=v_target_id,receipt=v_result where id=v_receipt.id;
+ return v_result;
+end;
+$$;
+revoke all on function public.vitally_save_volunteer(uuid,uuid,bigint,jsonb) from public,anon,authenticated,service_role;
+grant execute on function public.vitally_save_volunteer(uuid,uuid,bigint,jsonb) to authenticated;
+
