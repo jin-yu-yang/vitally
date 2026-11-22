@@ -114,7 +114,7 @@ Decided by the user on 2026-11-22: adopt main's merged My profile (`add-my-profi
   - add a "Your shifts this week" section to main's `myProfilePage`, read on open, on focus and on `shifts` changes;
   - make the uncleared-viewer channel Schedule-only;
   - update the sidebar-order and gate tests.
-- [ ] 8.5 Seed: write usual days as `mon`…`sun` through main's `vitally_save_volunteer`. `tests/database-seed.mjs`.
+- [x] 8.5 Seed: write usual days as `mon`…`sun` through main's `vitally_save_volunteer`. `tests/database-seed.mjs`.
 - [ ] 8.6 Browser walk: replace step 6, where the preparer saved usual days on My profile, with the preparer opening main's My profile and seeing the shift under "Your shifts this week". Run the schedule, Season settings and My profile browser tests.
 - [ ] 8.7 Docs and counts (`docs/developer/*.md`, README): migrations, RPCs and Realtime tables, re-derived from the migrated database.
 - [ ] 8.8 Final checks:
