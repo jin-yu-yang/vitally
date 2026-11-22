@@ -33,7 +33,7 @@
 
 ## 7. Browser test
 
-- [ ] 7.1 A new `tests/browser.mjs` block (not the story) that sets up last season's roster with SQL: an admin picks a returning volunteer with usual days, saves, and sees them on the Roster with their usual days kept; typing an earlier volunteer's email without picking shows the message; Export CSV with a role filter downloads the expected rows and filename
+- [x] 7.1 A new `tests/browser.mjs` block (not the story) that sets up last season's roster with SQL: an admin picks a returning volunteer with usual days, saves, and sees them on the Roster with their usual days kept; typing an earlier volunteer's email without picking shows the message; Export CSV with a role filter downloads the expected rows and filename
 
 ## 8. Docs and checks
 
