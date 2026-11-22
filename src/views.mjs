@@ -804,13 +804,15 @@ export function dialog(state) {
       const volunteer = volunteerId
         ? ((state.volunteers ?? []).find((entry) => entry?.id === volunteerId) ?? null)
         : null;
+      // A pick whose person is gone can't be added: it says so, like a gone Edit.
+      const stalePick = returningPick && !picked;
       const query = state.returningSearch ?? "";
       title = volunteerId ? (volunteer?.name ?? "Edit a volunteer") : "Add a volunteer";
       body = volunteerDrawerBody({
         volunteer,
-        isNew: !volunteerId,
+        isNew: !volunteerId && !stalePick,
         returning:
-          !volunteerId && (picked || earlier.length)
+          !volunteerId && !stalePick && (picked || earlier.length)
             ? { query, candidates: picked ? [] : returningCandidates(earlier, query), picked }
             : null,
         canChangeAdmin: siteCoordinator(state.principal),

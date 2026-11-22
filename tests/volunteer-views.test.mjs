@@ -955,3 +955,17 @@ test("the Roster's Export CSV is on with rows and off when nothing passes the fi
   const page = staffScreen(baseState());
   assert.match(page, /data-action="export-roster-csv"/);
 });
+
+test("a pick whose earlier person is gone says it could not be opened, with no search box", () => {
+  const html = dialog(
+    baseState({
+      dialog: "volunteer",
+      dialogContext: { volunteerId: "gone", returning: true },
+      earlierVolunteers: [earlierPerson()],
+      returningSearch: "",
+    }),
+  );
+  assert.match(html, /This volunteer could not be opened\. Close this and try again\./);
+  assert.doesNotMatch(html, /id="returning-search"/);
+  assert.doesNotMatch(html, /id="volunteer-form"/);
+});
