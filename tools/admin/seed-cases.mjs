@@ -555,7 +555,7 @@ export async function seedVolunteers(client, { workspaceId, actorUserId }) {
 // Adds the previous season's roster after the volunteers (spec
 // local-seed-data, "The local seed adds a previous season's roster"): three
 // people with no current-season entry, and a previous-season entry for one of
-// the 8 volunteers. This is the spec's one exception to going through
+// the 8 volunteers (kept if already there, so a repeat call is safe). This is the spec's one exception to going through
 // `vitally_save_volunteer`, which writes only the current season: these rows
 // are written directly with SQL, in one transaction. A re-run first deletes
 // the earlier three (no sign-in only; the foreign keys remove their rows), so
@@ -594,7 +594,8 @@ export async function seedPastSeason(client, { workspaceId, actorPersonId }) {
       await client.query(
         `insert into public.roster_entries
            (workspace_id, person_id, season, roles, added_by_person_id, is_new)
-         values ($1, $2, $3, $4, $5, false)`,
+         values ($1, $2, $3, $4, $5, false)
+         on conflict (workspace_id, person_id, season) do nothing`,
         [workspaceId, personId, season, roles, actorPersonId],
       );
       for (const certificate of certificates)
@@ -602,7 +603,8 @@ export async function seedPastSeason(client, { workspaceId, actorPersonId }) {
           `insert into public.certificates
              (workspace_id, person_id, season, certificate, status,
               confirmed_at, confirmed_by_person_id)
-           values ($1, $2, $3, $4, 'confirmed', now(), $5)`,
+           values ($1, $2, $3, $4, 'confirmed', now(), $5)
+           on conflict do nothing`,
           [workspaceId, personId, season, certificate, actorPersonId],
         );
     };
