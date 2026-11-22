@@ -1606,12 +1606,14 @@ export function createController({
   const profileFields = (values) => {
     const text = (value) => String(value ?? "").trim();
     const list = (value) => (Array.isArray(value) ? value.map(String) : []);
+    const languages = list(values?.languages);
     return {
       name: text(values?.name),
       phone: text(values?.phone) || null,
       works: text(values?.works),
-      languages: list(values?.languages),
-      otherLanguage: text(values?.otherLanguage) || null,
+      languages,
+      // A hidden box still holds its stored name: only Other names a language.
+      otherLanguage: languages.includes("other") ? text(values?.otherLanguage) || null : null,
       usualDays: list(values?.usualDays),
     };
   };

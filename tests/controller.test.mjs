@@ -11345,6 +11345,14 @@ test("saveMyProfile sends the read's revision and re-reads the profile and peopl
   controller.stop();
 });
 
+test("saveMyProfile sends no other-language name unless Other is among the languages", async () => {
+  const { store, controller } = await onMyProfile();
+  await controller.saveMyProfile({ ...PROFILE_VALUES, languages: ["english"], otherLanguage: "Tagalog" });
+  assert.equal(store.writes.at(-1).profile.otherLanguage, null);
+  assert.deepEqual(store.writes.at(-1).profile.languages, ["english"]);
+  controller.stop();
+});
+
 test("saveMyProfile sends an empty phone and other language as null", async () => {
   const { store, controller } = await onMyProfile();
   await controller.saveMyProfile({ ...PROFILE_VALUES, phone: "  ", otherLanguage: "" });
