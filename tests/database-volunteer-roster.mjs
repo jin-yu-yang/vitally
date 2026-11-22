@@ -1183,25 +1183,21 @@ test("volunteer roster records against real Supabase", async (t) => {
       );
       const past = season - 1;
       // Moves the person's entry and certificates to the previous season. The
-      // certificates reference the entry, so the past entry is made first.
+      // certificates reference the entry, and roles need their certificates,
+      // so the roles are cleared on the way and put back on the past entry.
       const makePast = async (personId) => {
+        const ids = [f.workspaceId, personId];
+        const { roles } = await one(f, "select roles from public.roster_entries where workspace_id=$1 and person_id=$2 and season=$3", [...ids, season]);
+        await f.sql("update public.roster_entries set roles='{}' where workspace_id=$1 and person_id=$2 and season=$3", [...ids, season]);
         await f.sql(
           `insert into public.roster_entries(workspace_id,person_id,season,roles,added_by_person_id,is_new,photo_id_checked_at)
            select workspace_id,person_id,$3,roles,added_by_person_id,is_new,photo_id_checked_at
              from public.roster_entries where workspace_id=$1 and person_id=$2 and season=$4`,
-          [f.workspaceId, personId, past, season],
+          [...ids, past, season],
         );
-        await f.sql("update public.certificates set season=$3 where workspace_id=$1 and person_id=$2 and season=$4", [
-          f.workspaceId,
-          personId,
-          past,
-          season,
-        ]);
-        await f.sql("delete from public.roster_entries where workspace_id=$1 and person_id=$2 and season=$3", [
-          f.workspaceId,
-          personId,
-          season,
-        ]);
+        await f.sql("update public.certificates set season=$3 where workspace_id=$1 and person_id=$2 and season=$4", [...ids, past, season]);
+        await f.sql("delete from public.roster_entries where workspace_id=$1 and person_id=$2 and season=$3", [...ids, season]);
+        await f.sql("update public.roster_entries set roles=$4 where workspace_id=$1 and person_id=$2 and season=$3", [...ids, past, roles]);
       };
       const entriesIn = (personId, inSeason) =>
         count(f, "select count(*) n from public.roster_entries where person_id=$1 and season=$2", [personId, inSeason]);
