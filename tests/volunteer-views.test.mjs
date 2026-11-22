@@ -848,3 +848,110 @@ test("usual days are ticked from the record", () => {
   assert.equal([...html.matchAll(/name="usualDays" value="\w+" checked/g)].length, 2);
   assert.match(html, /name="usualDays" value="mon" checked/);
 });
+
+// Returning volunteers (change add-returning-volunteers-and-roster-csv).
+const earlierPerson = (overrides = {}) => ({
+  id: "v-old",
+  name: "Dana Okafor",
+  email: "dana@example.test",
+  phone: "215-555-0199",
+  works: "on_site",
+  languages: ["english"],
+  otherLanguage: null,
+  usualDays: ["tue", "thu"],
+  hasSignIn: false,
+  lastSeason: true,
+  revision: 2,
+  ...overrides,
+});
+
+test("the Add drawer offers last season's roster to search, with an Earlier volunteer tag", () => {
+  const candidates = [
+    earlierPerson(),
+    earlierPerson({ id: "v-older", name: "Lee Wong", email: "lee@example.test", lastSeason: false, earlier: true }),
+  ];
+  const html = volunteerDrawerBody({
+    volunteer: null,
+    isNew: true,
+    ui: {},
+    returning: { query: "e", candidates, picked: null },
+  });
+  assert.match(html, /<label[^>]*for="returning-search"[^>]*>[\s\S]*Returning volunteer\? Search last season&#39;s roster|Returning volunteer\? Search last season's roster/);
+  assert.match(html, /<input[^>]*id="returning-search"[^>]*>/);
+  assert.match(html.match(/<input[^>]*id="returning-search"[^>]*>/)[0], /value="e"/);
+  const picks = html.match(/<button[^>]*data-action="pick-returning-volunteer"[\s\S]*?<\/button>/g);
+  assert.equal(picks.length, 2);
+  assert.match(picks[0], /data-id="v-old"/);
+  assert.match(picks[0], /Dana Okafor/);
+  assert.match(picks[0], /dana@example\.test/);
+  assert.doesNotMatch(picks[0], /Earlier volunteer/);
+  assert.match(picks[1], /data-id="v-older"/);
+  assert.match(picks[1], /Earlier volunteer/);
+  assert.doesNotMatch(html, /Not this person/);
+  // The search sits before the form, so the form's own fields still come first in it.
+  assert.ok(html.indexOf('id="returning-search"') < html.indexOf('id="volunteer-form"'));
+});
+
+test("a picked earlier volunteer fills Add, email read-only, nothing for this season ticked", () => {
+  const picked = earlierPerson();
+  const html = volunteerDrawerBody({
+    volunteer: null,
+    isNew: true,
+    ui: {},
+    returning: { query: "dana", candidates: [picked], picked },
+  });
+  const email = html.match(/<input[^>]*id="volunteer-email"[^>]*>/)[0];
+  assert.match(email, /readonly/);
+  assert.match(email, /value="dana@example\.test"/);
+  assert.match(html.match(/<input[^>]*id="volunteer-name"[^>]*>/)[0], /value="Dana Okafor"/);
+  assert.doesNotMatch(html.match(/<input type="checkbox" name="isNew"[^>]*>/)[0], /checked/);
+  assert.doesNotMatch(html.match(/<input type="checkbox" name="photoIdChecked"[^>]*>/)[0], /checked/);
+  for (const box of html.match(/<input type="checkbox" name="(role|certificate)"[^>]*>/g)) assert.doesNotMatch(box, /checked/);
+  assert.match(html.match(/<input[^>]*id="volunteer-usualDays-tue"[^>]*>/)[0], /checked/);
+  assert.match(html.match(/<input[^>]*id="volunteer-usualDays-thu"[^>]*>/)[0], /checked/);
+  assert.doesNotMatch(html.match(/<input[^>]*id="volunteer-usualDays-mon"[^>]*>/)[0], /checked/);
+  assert.match(html, /<button[^>]*data-action="unpick-returning-volunteer"[^>]*>Not this person<\/button>/);
+  assert.doesNotMatch(html, /id="returning-search"/);
+  assert.doesNotMatch(html, /data-action="pick-returning-volunteer"/);
+  // Still an add: no account section, no document lines.
+  assert.doesNotMatch(html, /Mark reviewed|volunteer-account/);
+  assert.match(html, /<button type="submit"[^>]*>Add a volunteer<\/button>/);
+});
+
+test("a picked earlier volunteer with a sign-in keeps the email read-only", () => {
+  const picked = earlierPerson({ hasSignIn: true });
+  const html = volunteerDrawerBody({ volunteer: null, isNew: true, ui: {}, returning: { query: "", candidates: [], picked } });
+  assert.match(html.match(/<input[^>]*id="volunteer-email"[^>]*>/)[0], /readonly/);
+  assert.match(html, /This is their sign-in email\./);
+});
+
+test("the volunteer dialog for a pick is the Add drawer filled from the earlier person", () => {
+  const html = dialog(
+    baseState({
+      dialog: "volunteer",
+      dialogContext: { volunteerId: "v-old", returning: true },
+      earlierVolunteers: [earlierPerson()],
+      returningSearch: "dana",
+    }),
+  );
+  assert.match(html, /<h2 id="modal-title">Add a volunteer<\/h2>/);
+  assert.doesNotMatch(html, /could not be opened/);
+  assert.match(html.match(/<input[^>]*id="volunteer-email"[^>]*>/)[0], /readonly/);
+  assert.match(html, /Not this person/);
+  const plain = dialog(
+    baseState({ dialog: "volunteer", dialogContext: null, earlierVolunteers: [earlierPerson()], returningSearch: "" }),
+  );
+  assert.match(plain, /id="returning-search"/);
+  assert.match(plain, /data-action="pick-returning-volunteer" data-id="v-old"/);
+});
+
+test("the Roster's Export CSV is on with rows and off when nothing passes the filters", () => {
+  const on = renderRoster([volunteer()], { list: "ready", filters: {}, exportable: true });
+  const onButton = on.match(/<button[^>]*data-action="export-roster-csv"[^>]*>[\s\S]*?<\/button>/)[0];
+  assert.match(onButton, /Export CSV/);
+  assert.doesNotMatch(onButton, /disabled/);
+  const off = renderRoster([volunteer()], { list: "ready", filters: { search: "zzz" }, exportable: true });
+  assert.match(off.match(/<button[^>]*data-action="export-roster-csv"[^>]*>/)[0], /disabled/);
+  const page = staffScreen(baseState());
+  assert.match(page, /data-action="export-roster-csv"/);
+});

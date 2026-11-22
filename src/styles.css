@@ -3477,6 +3477,68 @@ textarea::placeholder {
   flex: 1 1 240px;
   min-width: 0;
 }
+.volunteer-toolbar .volunteer-export {
+  margin-left: auto;
+}
+/* The Add drawer's returning-volunteer picker. */
+.returning-picker,
+.returning-picked {
+  margin: 0 0 16px;
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--vt-line);
+}
+.returning-picker #returning-search {
+  width: 100%;
+}
+.returning-list {
+  display: grid;
+  gap: 8px;
+  max-height: 240px;
+  margin: 10px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.returning-person {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--vt-line);
+  border-radius: var(--vt-radius-sm);
+  background: var(--vt-surface);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.returning-person:hover {
+  background: var(--vt-primary-soft);
+  border-color: var(--vt-primary-line);
+}
+.returning-picked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.returning-person-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.returning-person .volunteer-name {
+  font-weight: 600;
+}
+.returning-person-info .volunteer-contact {
+  font-size: 12px;
+  color: var(--vt-muted);
+}
 .volunteer-roster .volunteer-row th {
   font-weight: 600;
 }

@@ -3,7 +3,7 @@
 // row says whether the volunteer is cleared (change add-volunteer-clearance).
 import { esc, button, icon, SENT_DAY, loadingLine, unloadedLine, emptyLine, confirmBody } from "./ui.mjs";
 import { drawerError } from "./office-views.mjs";
-import { ROLES, CERTIFICATES, WORKS, LANGUAGES, SHOW_VIEWS, filterVolunteers, languagesText, accountLabel, ACCOUNT_LABELS } from "./volunteer-roster.mjs";
+import { ROLES, CERTIFICATES, WORKS, LANGUAGES, SHOW_VIEWS, filterVolunteers, languagesText, accountLabel, ACCOUNT_LABELS, returningFill } from "./volunteer-roster.mjs";
 
 export { languagesText, accountLabel };
 
@@ -70,7 +70,7 @@ function volunteerRow(volunteer) {
   )}</td></tr>`;
 }
 
-function toolbar(filters) {
+function toolbar(filters, { exportable = false, empty = false } = {}) {
   const role = filters.role || "all";
   const show = SHOW_VIEWS.find((entry) => entry.value === filters.show)?.value ?? "all";
   const showOptions = SHOW_VIEWS.map(
@@ -84,16 +84,21 @@ function toolbar(filters) {
     .join("");
   return `<div class="volunteer-toolbar"><label class="field pool-filter" for="volunteer-role-filter"><span>Role</span><select id="volunteer-role-filter" data-volunteer-filter="role">${options}</select></label><label class="field pool-filter" for="volunteer-show-filter"><span>Show</span><select id="volunteer-show-filter" data-volunteer-filter="show">${showOptions}</select></label><input id="volunteer-search" name="volunteerSearch" type="search" value="${esc(
     filters.search ?? "",
-  )}" placeholder="Search name, email or phone" aria-label="Search volunteers" autocomplete="off"></div>`;
+  )}" placeholder="Search name, email or phone" aria-label="Search volunteers" autocomplete="off">${when(
+    exportable,
+    button("Export CSV", "export-roster-csv", "secondary volunteer-export", empty ? "disabled" : ""),
+  )}</div>`;
 }
 
 /**
  * The Roster's panel: the toolbar, the table and its count.
  *
  * @param {object[]} volunteers the combined list (`combineVolunteers`)
- * @param {object} ui `{list, filters}` — `list` is "loading", "failed" or "ready".
+ * @param {object} ui `{list, filters, exportable}` — `list` is "loading",
+ *   "failed" or "ready"; `exportable` adds Export CSV, off while no row passes
+ *   the filters.
  */
-export function renderRoster(volunteers, { list = "ready", filters = {} } = {}) {
+export function renderRoster(volunteers, { list = "ready", filters = {}, exportable = false } = {}) {
   const open = `<section class="panel volunteer-roster" aria-labelledby="roster-title"><h2 id="roster-title">Roster</h2>`;
   if (list === "loading") return `${open}${loadingLine("Loading volunteers…")}</section>`;
   if (list === "failed") return `${open}${unloadedLine("The volunteers couldn't load.")}</section>`;
@@ -105,7 +110,7 @@ export function renderRoster(volunteers, { list = "ready", filters = {} } = {}) 
         .map(volunteerRow)
         .join("")}</tbody></table></div>`
     : emptyLine(all.length ? "Nobody matches." : "No volunteers yet.");
-  return `${open}${toolbar(chosen)}${body}<p class="board-foot" role="status">${shown.length} of ${all.length} volunteers</p></section>`;
+  return `${open}${toolbar(chosen, { exportable, empty: shown.length === 0 })}${body}<p class="board-foot" role="status">${shown.length} of ${all.length} volunteers</p></section>`;
 }
 
 // `locked` maps a value to the id of the note that says why its box is
@@ -290,6 +295,42 @@ export function cancelInvitationDialogBody({ volunteer = null, email = "" } = {}
   });
 }
 
+// The Add drawer's returning-volunteer picker (change
+// add-returning-volunteers-and-roster-csv): a search over the earlier
+// volunteers, each a button that fills the drawer; once one is picked, their
+// name and Not this person. It sits before the form, so its search box is not
+// one of the form's fields.
+function returningPicker(returning, picked) {
+  if (picked)
+    return `<div class="returning-picked"><span class="returning-person-info"><strong>${esc(
+      picked.name,
+    )}</strong><span class="volunteer-contact">${esc(picked.email)}</span></span>${button(
+      "Not this person",
+      "unpick-returning-volunteer",
+      "secondary",
+    )}</div>`;
+  const query = String(returning?.query ?? "");
+  const candidates = returning?.candidates ?? [];
+  const list = candidates.length
+    ? `<ul class="returning-list">${candidates
+        .map(
+          (entry) =>
+            `<li><button type="button" class="returning-person" data-action="pick-returning-volunteer" data-id="${esc(
+              entry.id,
+            )}"><span class="returning-person-info"><span class="volunteer-name">${esc(
+              entry.name,
+            )}</span><span class="volunteer-contact">${esc(entry.email)}</span></span>${when(
+              entry.earlier === true,
+              `<span class="remote-badge">Earlier volunteer</span>`,
+            )}</button></li>`,
+        )
+        .join("")}</ul>`
+    : when(query.trim(), emptyLine("Nobody matches."));
+  return `<div class="returning-picker"><label class="field" for="returning-search"><span>Returning volunteer? Search last season's roster</span><input id="returning-search" name="returningSearch" type="search" value="${esc(
+    query,
+  )}" placeholder="Search name or email" autocomplete="off"></label>${list}</div>`;
+}
+
 /**
  * The Add / Edit drawer's body. Add has no volunteer; an Edit whose volunteer
  * is no longer listed says so and offers Close, never a blank form.
@@ -298,20 +339,26 @@ export function cancelInvitationDialogBody({ volunteer = null, email = "" } = {}
  *   `{busy, error, retryable, formError}`. `canChangeAdmin` is false for a
  *   caller who is not a site coordinator: the Admin tick is then disabled,
  *   showing its saved state, and a site coordinator's account offers no
- *   Deactivate (change add-season-settings).
+ *   Deactivate (change add-season-settings). `returning` (Add only) is
+ *   `{query, candidates, picked}` for the returning-volunteer picker, or null;
+ *   with `picked`, the form is filled from that person and New volunteer is
+ *   left unticked.
  */
-export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {}, canChangeAdmin = true } = {}) {
+export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {}, canChangeAdmin = true, returning = null } = {}) {
   if (!isNew && !volunteer)
     return `${drawerError(ui, VOLUNTEER_CONFLICT_HEADING)}<p>This volunteer could not be opened. Close this and try again.</p>${button(
       "Close",
       "close-dialog",
       "secondary",
     )}`;
-  const v = volunteer ?? {};
+  const picked = isNew ? (returning?.picked ?? null) : null;
+  const v = volunteer ?? (picked ? returningFill(picked) : {});
   const works = v.works || "on_site";
   const languages = v.languages ?? [];
   const otherOpen = languages.includes("other");
-  const locked = !isNew && v.hasSignIn === true;
+  // A picked earlier volunteer keeps their email: it is who they are.
+  const signInEmail = (!isNew || picked) && v.hasSignIn === true;
+  const locked = signInEmail || Boolean(picked);
   const worksRadios = WORKS.map((entry) => {
     const id = `volunteer-works-${entry.value}`;
     return `<label class="checkbox-row small" for="${id}"><input type="radio" name="works" value="${esc(
@@ -322,8 +369,8 @@ export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {}, 
     v.name ?? "",
   )}" maxlength="80" autocomplete="off"></label><label class="field" for="volunteer-email"><span>Email</span><input id="volunteer-email" name="email" type="email" value="${esc(
     v.email ?? "",
-  )}" maxlength="254" autocomplete="off"${locked ? ' readonly aria-describedby="volunteer-email-note"' : ""}></label>${when(
-    locked,
+  )}" maxlength="254" autocomplete="off"${locked ? " readonly" : ""}${signInEmail ? ' aria-describedby="volunteer-email-note"' : ""}></label>${when(
+    signInEmail,
     `<p class="field-note" id="volunteer-email-note">This is their sign-in email.</p>`,
   )}<label class="field" for="volunteer-phone"><span>Phone (optional)</span><input id="volunteer-phone" name="phone" type="tel" value="${esc(
     v.phone ?? "",
@@ -354,7 +401,7 @@ export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {}, 
   )}</fieldset><fieldset class="check-group"><legend>Clearance</legend>${tickRow(
     "isNew",
     "New volunteer",
-    isNew ? true : v.isNew === true,
+    isNew && !picked ? true : v.isNew === true,
   )}${tickRow("photoIdChecked", "Photo ID checked", v.photoIdChecked === true)}${when(!isNew, documentLine(v, "photoId", ui))}</fieldset>${when(!isNew && volunteer, accountSection(v, ui?.accountNotice, { viewerIsSiteCoordinator: canChangeAdmin }))}`;
   const formError = ui?.formError
     ? `<p class="notice error" role="alert" id="volunteer-form-error">${icon("help")}<span>${esc(ui.formError)}</span></p>`
@@ -362,7 +409,7 @@ export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {}, 
   // Filled by the app when a certificate change unticks roles (#192), so a
   // screen reader hears it; empty on every draw.
   const roleNotice = `<p class="sr-only" role="status" aria-live="polite" id="volunteer-role-notice"></p>`;
-  return `<form id="volunteer-form" class="staff-form" novalidate>${fields}${roleNotice}${formError}${drawerError(
+  return `${when(isNew && returning, returningPicker(returning, picked))}<form id="volunteer-form" class="staff-form" novalidate>${fields}${roleNotice}${formError}${drawerError(
     ui,
     VOLUNTEER_CONFLICT_HEADING,
   )}<div class="drawer-actions"><button type="submit" class="btn primary"${ui?.busy ? " disabled" : ""}>${
