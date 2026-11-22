@@ -50,23 +50,23 @@
 
 ## 4. Screens
 
-- [ ] 4.1 Controller:
+- [x] 4.1 Controller:
   - the `schedule` and `my-profile` screens, gated on `scheduleViewer`, with the home screen for anyone else;
   - day navigation;
   - the save, remove and usual-days actions with the refusal and CONFLICT messages;
   - realtime and focus re-reads for the Schedule, My profile and Season settings (D10, D11).
-- [ ] 4.2 Sidebar (`src/views.mjs`) and the setup screen (`src/setup-views.mjs`): the Schedule and My profile links in the D11 order. Drop Schedule from the "does not exist yet" comment.
+- [x] 4.2 Sidebar (`src/views.mjs`) and the setup screen (`src/setup-views.mjs`): the Schedule and My profile links in the D11 order. Drop Schedule from the "does not exist yet" comment.
 - [x] 4.3 New Schedule view module:
   - header, day picker, closed and no-site-hours states;
   - the grid with shift buttons, tags and the coverage row (admin);
   - the read-only variant;
   - the shift drawer with the picker, role, start/end, Save, and Remove shift with the shared confirmation dialog (D7).
 - [x] 4.4 Drag in `src/app.mjs`: pointer events with pointer capture to create across empty cells and to resize by an edge. Save at once, and redraw on a refusal. Admin screens only (D7).
-- [ ] 4.5 New My profile view module: roles, usual-days toggles with Save and the privacy note, and the week list (D8).
-- [ ] 4.6 Season settings: the "Site hours and coverage" card, editable for site coordinators and text for other admins, with its own Save and revision (`src/season-settings-views.mjs`).
-- [ ] 4.7 Roster Edit drawer: the Usual days toggles after Works, sent as `usualDays` (`src/volunteer-views.mjs`, `src/volunteer-roster.mjs`).
-- [ ] 4.8 CSS for the grid (sideways scroll inside its box), shift blocks, tags, the coverage row and the toggles.
-- [ ] 4.9 Unit tests for the views and the controller gates: admin, non-admin and uncleared viewer, non-viewer, a restored window, the read-only Schedule with no tags or coverage, the drawer's limits.
+- [x] 4.5 New My profile view module: roles, usual-days toggles with Save and the privacy note, and the week list (D8).
+- [x] 4.6 Season settings: the "Site hours and coverage" card, editable for site coordinators and text for other admins, with its own Save and revision (`src/season-settings-views.mjs`).
+- [x] 4.7 Roster Edit drawer: the Usual days toggles after Works, sent as `usualDays` (`src/volunteer-views.mjs`, `src/volunteer-roster.mjs`).
+- [x] 4.8 CSS for the grid (sideways scroll inside its box), shift blocks, tags, the coverage row and the toggles.
+- [x] 4.9 Unit tests for the views and the controller gates: admin, non-admin and uncleared viewer, non-viewer, a restored window, the read-only Schedule with no tags or coverage, the drawer's limits.
 
 ## 5. Workload hours
 
