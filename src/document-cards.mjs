@@ -576,7 +576,7 @@ export function cardsFor(answers, cardState = []) {
         ownerLine: ownerLineOf(owner, rule, a, positions.get(owner)),
         group,
         baseGroup,
-        status: state?.status === "later" || state?.status === "none" ? state.status : "not_done",
+        status: ["later", "none", "sent", "received", "verified"].includes(state?.status) ? state.status : "not_done",
         substep: rule.substep,
         label: rule.label,
         why: m.why ?? rule.why ?? null,

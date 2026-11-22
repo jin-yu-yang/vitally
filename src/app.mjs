@@ -314,6 +314,7 @@ if (!config) {
     syncCloseUnsigned();
     syncStartSeason();
     syncVolunteerOther();
+    syncProfileOther();
     syncCreateAccount();
     showDraftLink();
     markPressed(state);
@@ -474,6 +475,14 @@ if (!config) {
     if (box && field) field.hidden = !box.checked;
   }
 
+  // My profile shows its Other language box only while Other is ticked (change
+  // add-my-profile), at once on a tick and after a redraw that put a tick back.
+  function syncProfileOther() {
+    const box = root.querySelector("#my-profile-languages-other");
+    const field = root.querySelector("#my-profile-other-language");
+    if (box && field) field.hidden = !box.checked;
+  }
+
   // Create account sends the saved profile (decision 5), so it waits while
   // the drawer's form holds unsaved changes: off, with its hint shown. On
   // every edit of the form, and after a redraw that put unsent text back.
@@ -570,6 +579,8 @@ if (!config) {
     for (const [id, value] of formDrafts)
       restoreDraft(root.querySelector(`#${CSS.escape(id)}`), value);
     syncSiteCoordinatorAdd();
+    // An open reason row's Send back follows its restored pick or note.
+    for (const row of root.querySelectorAll(".volunteer-review")) syncSendBack(row);
     // A collapsed Exit Form group holding something typed is opened again, so
     // the field a refusal names is in view (design D7).
     const exitGroups = [...root.querySelectorAll("details.q-exit-group:not([open])")];
@@ -1237,14 +1248,6 @@ if (!config) {
       }
       if (controller.getState().dirty && !(await controller.saveAnswers())) return;
     }
-    if (type === "RESPOND_DOCUMENT" && state.openPanels.includes("upload-failure")) {
-      // The simulated failure never reaches the server, so there is nothing to
-      // duplicate: the request stays open and the same button retries.
-      if (!state.openPanels.includes("upload-failed"))
-        controller.togglePanel("upload-failed");
-      else render();
-      return;
-    }
     // A control on the work board names the case it belongs to. Opening it
     // first is what gives the action its case id and its expected revision.
     const boardCaseId = target.dataset.caseId;
@@ -1307,8 +1310,6 @@ if (!config) {
       return;
     }
     if (type === "RESPOND_DOCUMENT") {
-      if (controller.getState().openPanels.includes("upload-failed"))
-        controller.togglePanel("upload-failed");
       notify("success", t("toast.document_sent", {}, screenLang()), by);
       return;
     }
@@ -1442,6 +1443,31 @@ if (!config) {
     } else if (result === "active" || result === "cancelled") {
       formDrafts.delete("site-check-name");
       formDrafts.delete("site-check-sidn");
+    }
+  }
+
+  // My profile's Save (change add-my-profile, D9). A landed save shows the
+  // toast and drops the drafts, which the re-read page now holds; a CONFLICT
+  // drops them too, so the page shows what is stored now. Any other refusal
+  // keeps what was typed.
+  async function submitMyProfile(form, by) {
+    const values = new FormData(form);
+    const text = await controller.saveMyProfile({
+      name: String(values.get("name") ?? ""),
+      phone: String(values.get("phone") ?? ""),
+      works: String(values.get("works") ?? ""),
+      languages: values.getAll("languages").map(String),
+      otherLanguage: String(values.get("otherLanguage") ?? ""),
+      usualDays: values.getAll("usualDays").map(String),
+    });
+    if (text) {
+      clearFormDrafts(form);
+      notify("success", text, by);
+      return;
+    }
+    if (controller.getState().error?.code === "CONFLICT") {
+      clearFormDrafts(form);
+      render();
     }
   }
 
@@ -2019,6 +2045,11 @@ if (!config) {
       controller.navigate("office-updates");
       void controller.loadPostedUpdates();
     },
+    // My profile (change add-my-profile): read when it opens.
+    "open-my-profile": () => {
+      formDrafts.clear();
+      void controller.navigate("my-profile");
+    },
     // And Season settings (change add-season-settings).
     "open-season-settings": () => {
       formDrafts.clear();
@@ -2080,6 +2111,10 @@ if (!config) {
       case "open-cases":
         if (leaveAddCaseFirst("open-cases", target)) break;
         EXITS["open-cases"]();
+        break;
+      case "open-my-profile":
+        if (leaveAddCaseFirst("open-my-profile", target)) break;
+        EXITS["open-my-profile"]();
         break;
       case "open-volunteers":
         if (leaveAddCaseFirst("open-volunteers", target)) break;
@@ -2192,11 +2227,26 @@ if (!config) {
         await controller[{ "account-resend": "resendAccount", "account-reactivate": "reactivateAccount" }[action]]();
         break;
       case "mark-upload-reviewed": {
-        // Stays in the drawer and keeps what was typed (no forgetVolunteerDrafts).
-        const text = await controller.markUploadReviewed(target.dataset.document);
+        // Opens the reason row; stays in the drawer and keeps what was typed
+        // (no forgetVolunteerDrafts).
+        controller.setReviewReasonFor(target.dataset.document);
+        root.querySelector(`.volunteer-review[data-document="${target.dataset.document}"] input`)?.focus();
+        break;
+      }
+      case "send-back": {
+        if (target.disabled) break;
+        const row = target.closest(".volunteer-review");
+        const note = String(row?.querySelector('[name="review-note"]')?.value ?? "").trim();
+        const pick = row?.querySelector('[name="review-reason"]:checked')?.value ?? "";
+        const reason = note || pick;
+        if (!reason) break;
+        const text = await controller.markUploadReviewed(target.dataset.document, reason);
         if (text) notify("success", text, by);
         break;
       }
+      case "cancel-review":
+        controller.setReviewReasonFor(null);
+        break;
       case "account-create":
         // Asks first (decision 5): nothing is sent until the question's Send.
         // The button is off while the form has unsaved changes.
@@ -2657,14 +2707,6 @@ if (!config) {
       case "reconcile-server":
         await reconcile(false, by);
         break;
-      case "toggle-upload-failure": {
-        controller.togglePanel("upload-failure");
-        // The page is rebuilt around the checkbox, so give it back the focus —
-        // the box that was clicked, which is the one scoped to its own request.
-        const box = fieldId("simulate-upload-failure", target.dataset.requestId ?? "");
-        root.querySelector(`#${CSS.escape(box)}`)?.focus();
-        break;
-      }
       case "toggle-contact-edit": {
         const id = target.dataset.contactId ?? "";
         const panel = `contact-edit:${id}`;
@@ -2796,8 +2838,19 @@ if (!config) {
     }
   }
 
+  // Send back is off until a pick or a note is there.
+  function syncSendBack(field) {
+    const row = field.closest?.(".volunteer-review");
+    if (!row) return;
+    const note = String(row.querySelector('[name="review-note"]')?.value ?? "").trim();
+    const picked = row.querySelector('[name="review-reason"]:checked') != null;
+    const send = row.querySelector('[data-action="send-back"]');
+    if (send) send.disabled = !(note || picked) || controller.getState().busy === true;
+  }
+
   root.addEventListener("input", (event) => {
     const field = event.target;
+    syncSendBack(field);
     if (field.closest?.("#update-form")) {
       syncUpdateForm(field.form);
       return;
@@ -2859,6 +2912,7 @@ if (!config) {
 
   root.addEventListener("change", (event) => {
     const field = event.target;
+    syncSendBack(field);
     if (field.closest?.("#update-form")) {
       syncUpdateForm(field.form);
       return;
@@ -2884,6 +2938,10 @@ if (!config) {
     if (field.closest?.("#volunteer-form") && field.name === "certificate") {
       syncVolunteerRoles(field.form, field.value);
       syncCreateAccount();
+      return;
+    }
+    if (field.closest?.("#my-profile-form") && field.name === "languages" && field.value === "other") {
+      syncProfileOther();
       return;
     }
     if (field.closest?.("#volunteer-form") && field.name === "language" && field.value === "other") {
@@ -2953,6 +3011,8 @@ if (!config) {
       );
       if (form.matches(".contact-form")) {
         await submitContact(form, by);
+      } else if (form.id === "my-profile-form") {
+        await submitMyProfile(form, by);
       } else if (form.id === "volunteer-form") {
         await submitVolunteer(form, by);
       } else if (form.id === "update-form") {
@@ -2995,6 +3055,16 @@ if (!config) {
   // The summary's print mode lasts for one print only.
   window.addEventListener("afterprint", () => {
     document.body.classList.remove("print-summary");
+  });
+
+  // Enter in the reason note is Send back (when it is on), never the drawer's
+  // Save: the note sits inside #volunteer-form, so the default would submit it.
+  root.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || !event.target.matches?.('[name="review-note"]')) return;
+    if (event.isComposing || event.keyCode === 229) return;
+    event.preventDefault();
+    const send = event.target.closest(".volunteer-review")?.querySelector('[data-action="send-back"]');
+    if (send && !send.disabled) send.click();
   });
 
   // The case page's tabs follow the ARIA tab pattern: arrows, Home and End move

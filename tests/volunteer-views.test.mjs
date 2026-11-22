@@ -103,7 +103,7 @@ test("the table has the spec's columns and a count", () => {
     filters: { search: "", role: "all" },
   });
   assert.match(html, /class="board-table people-table"/);
-  const headers = [...html.matchAll(/<th scope="col">([^<]*)<\/th>/g)].map((m) => m[1]);
+  const headers = [...html.matchAll(/<th scope="col">([^<]*)<\/th>/g)].map((m) => m[1].replace(/&#39;|&#x27;/g, "'"));
   assert.deepEqual(headers, ["Volunteer", "Roles", "Certificates", "Languages", "Account", "Cleared", "Edit"]);
   assert.match(html, /2 of 2 volunteers/);
   assert.match(html, /data-action="open-edit-volunteer" data-volunteer-id="v-1"/);
@@ -770,4 +770,81 @@ test("Mark reviewed is off while the drawer is busy", () => {
   assert.equal([...busy.matchAll(/data-action="mark-upload-reviewed" data-document="[A-Za-z0-9]+" disabled/g)].length, 2);
   const idle = volunteerDrawerBody({ volunteer: v, isNew: false, ui: {} });
   assert.doesNotMatch(idle, /mark-upload-reviewed"[^>]*disabled/);
+});
+
+// The reason row, Last returned and Usual days (change add-my-profile, D7, D8).
+const drawer = (overrides = {}, ui = {}) =>
+  volunteerDrawerBody({ volunteer: volunteer(overrides), isNew: false, ui });
+const picks = (html) =>
+  [...html.matchAll(/<input[^>]*name="review-reason"[^>]*value="([^"]*)"/g)].map((m) => m[1].replace(/&#39;/g, "'"));
+
+test("Mark reviewed opens the reason row", () => {
+  const closed = drawer({ form13615SentAt: "2026-11-20T15:00:00Z" });
+  assert.doesNotMatch(closed, /review-reason/);
+  const open = drawer({ form13615SentAt: "2026-11-20T15:00:00Z" }, { reviewReasonFor: "form13615" });
+  assert.match(open, /name="review-reason"/);
+  assert.match(open, /<input[^>]*name="review-note"[^>]*maxlength="120"/);
+  assert.match(open, /data-action="send-back"/);
+  assert.match(open, /data-action="cancel-review"/);
+  assert.match(open, />Send back</);
+  assert.match(open, />Cancel</);
+});
+
+test("photo ID picks are Can't read it, Expired and Not a photo ID", () => {
+  const html = drawer({ photoIdSentAt: "2026-11-20T15:00:00Z" }, { reviewReasonFor: "photoId" });
+  assert.deepEqual(picks(html), ["Can't read it", "Expired", "Not a photo ID"]);
+  assert.doesNotMatch(html, /Not signed|Wrong form|Missing a certification|Already on file/);
+});
+
+test("13615 picks are the four, plus Already on file with a role", () => {
+  const html = drawer({ form13615SentAt: "2026-11-20T15:00:00Z", roles: ["preparer"] }, { reviewReasonFor: "form13615" });
+  assert.deepEqual(picks(html), ["Not signed", "Can't read it", "Wrong form", "Missing a certification", "Already on file"]);
+});
+
+test("Already on file only with a role this season", () => {
+  const html = drawer({ form13615SentAt: "2026-11-20T15:00:00Z", roles: [] }, { reviewReasonFor: "form13615" });
+  assert.deepEqual(picks(html), ["Not signed", "Can't read it", "Wrong form", "Missing a certification"]);
+});
+
+test("Send back is disabled until a pick or a note", () => {
+  const html = drawer({ form13615SentAt: "2026-11-20T15:00:00Z" }, { reviewReasonFor: "form13615" });
+  assert.match(html, /data-action="send-back"[^>]* disabled/);
+});
+
+test("a stored reason shows Last returned in the document's place", () => {
+  const stored = drawer({
+    form13615ReviewedAt: "2026-11-21T03:30:00Z",
+    form13615ReviewReason: "Not signed",
+    photoIdReviewedAt: "2026-11-21T03:30:00Z",
+    photoIdReviewReason: "Expired",
+  });
+  assert.match(stored, /Last returned: Not signed · Nov 20/);
+  assert.match(stored, /Last returned: Expired · Nov 20/);
+  assert.ok(stored.indexOf("Last returned: Not signed") > stored.indexOf("<legend>Roles</legend>"));
+  assert.ok(stored.indexOf("Last returned: Not signed") < stored.indexOf("<legend>Certificates</legend>"));
+  assert.ok(stored.indexOf("Last returned: Expired") > stored.indexOf('id="volunteer-photoIdChecked"'));
+  const sent = drawer({
+    form13615SentAt: "2026-11-20T15:00:00Z",
+    form13615ReviewedAt: "2026-11-21T03:30:00Z",
+    form13615ReviewReason: "Not signed",
+  });
+  assert.match(sent, /Form 13615 sent Nov 20/);
+  assert.doesNotMatch(sent, /Last returned/);
+});
+
+test("escapes the last reason in the drawer", () => {
+  const html = drawer({ photoIdReviewedAt: "2026-11-21T03:30:00Z", photoIdReviewReason: '<b>&"' });
+  assert.match(html, /Last returned: &lt;b&gt;&amp;&quot; · Nov 20/);
+  assert.doesNotMatch(html, /<b>/);
+});
+
+test("usual days are ticked from the record", () => {
+  const html = drawer({ usualDays: ["mon", "wed"] });
+  assert.match(html, /<legend>Usual days<\/legend>/);
+  for (const [value, label] of [["mon", "Monday"], ["tue", "Tuesday"], ["wed", "Wednesday"], ["thu", "Thursday"], ["fri", "Friday"], ["sat", "Saturday"], ["sun", "Sunday"]]) {
+    assert.match(html, new RegExp(`<input type="checkbox" name="usualDays" value="${value}"[^>]*>`));
+    assert.match(html, new RegExp(`<span>${label}</span>`));
+  }
+  assert.equal([...html.matchAll(/name="usualDays" value="\w+" checked/g)].length, 2);
+  assert.match(html, /name="usualDays" value="mon" checked/);
 });

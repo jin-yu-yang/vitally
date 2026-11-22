@@ -166,6 +166,7 @@ export const mapDocumentCard = (row) => ({
   status: row.status,
   groupOverride: row.group_override,
   changedAt: row.changed_at,
+  reportedAt: row.reported_at ?? null,
 });
 
 // The materials the site has received (migration 013). Staff only.
@@ -272,7 +273,7 @@ export const CLIENT_COLUMNS = Object.freeze({
   documents: "id,case_id,request_id,filename,source,created_at",
   client_events: "id,case_id,action,message,created_at",
   case_contacts: "case_id,phone,spouse_phone,best_contact_time,best_contact_note",
-  case_document_cards: "slot_id,status,group_override,changed_at",
+  case_document_cards: "slot_id,status,group_override,changed_at,reported_at",
 });
 
 // The staff read's named columns, where it does not take the whole row.
@@ -846,6 +847,20 @@ export function createStore(client) {
         p_volunteer_id: request.volunteerId,
         p_expected_revision: request.expectedRevision,
         p_document: request.document,
+        p_reason: request.reason,
+      });
+    },
+
+    // My profile (migration 057): a volunteer reads and edits their own details.
+    async getMyProfile() {
+      return await call("vitally_my_profile");
+    },
+
+    async saveMyProfile(request) {
+      return await call("vitally_save_my_profile", {
+        p_action_id: actionId(request),
+        p_expected_revision: request.expectedRevision,
+        p_profile: request.profile,
       });
     },
 
@@ -926,6 +941,12 @@ export function createStore(client) {
     // any workspace admin reads, only a site coordinator writes.
     async getSeasonSettings() {
       return await call("vitally_season_settings");
+    },
+
+    // Applicant-safe: returns only the client document upload URL, never the
+    // coordinator-only certificate URL or the rest of Season settings.
+    async getClientDocumentsUrl() {
+      return (await call("vitally_client_documents_link"))?.clientDocumentsUrl ?? null;
     },
 
     async saveSeasonSettings(request) {

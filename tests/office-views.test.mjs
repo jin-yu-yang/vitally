@@ -842,7 +842,7 @@ test("the Documents accordion: office cards, marked only once the draft is saved
   assert.match(w2, /data-status="none" disabled>Don&#39;t have<\/button>/);
   assert.match(w2, /<p class="doc-why">Asked by: /);
   assert.doesNotMatch(w2, /<p class="doc-why">[^<]*You (said|wrote)/);
-  assert.match(w2, /Uploads come later\. Mark what the client will send later or doesn&#39;t have\./);
+  assert.doesNotMatch(w2, /Uploads come later|Take a photo|Choose a file/);
   assert.doesNotMatch(w2, /data-action="go-substep"/);
 
   const saved = addV2({ draftAnswers: answers, savedCase: savedV2(), openAddSubsteps: ["documents"] });

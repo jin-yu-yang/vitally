@@ -43,6 +43,7 @@ Slack). Screening stays in Airtable. Dates are targets.
 | | Work | Issue | Target | State |
 | --- | --- | --- | --- | --- |
 | Adoption | Roster: Form 13615 and photo ID uploads to PCDC's OneDrive link with "I've uploaded it" | [#138](https://github.com/jin-yu-yang/vitally/issues/138) | Nov 29 | **Done** (#243, Nov 21) |
+| Adoption | My profile: a volunteer reads and edits their own details, and sees why an upload came back; the reason an admin gives when a document comes back; the upload link waits for the site check | [#242](https://github.com/jin-yu-yang/vitally/issues/242), [#246](https://github.com/jin-yu-yang/vitally/issues/246) | Nov 29 | **Done** (#242, #246) |
 | Adoption | Season settings, site coordinator role, Start next season | [#138](https://github.com/jin-yu-yang/vitally/issues/138) | Nov 29 | Season settings and site coordinators **done** (#237, Nov 20); Start next season not started |
 | Adoption | Returning-volunteer picker; Roster CSV export | [#138](https://github.com/jin-yu-yang/vitally/issues/138) | Nov 29 | Not started; picker can be cut |
 | Adoption | Clearance fixes: role changes without a reload, a self-cleared admin, screen-reader announcement | [#190](https://github.com/jin-yu-yang/vitally/issues/190) #191 #192 | Nov 22 | **Done**: #191 and #192 (Nov 18), #190 (#234, Nov 19) |
