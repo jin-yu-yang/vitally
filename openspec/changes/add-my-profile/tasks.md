@@ -36,18 +36,18 @@
 
 ## 3. Migration 057: the caller's own profile RPCs
 
-- [ ] 3.1 §6 `vitally_my_profile()` (design D1), granted to `authenticated` only.
-- [ ] 3.2 §7 `vitally_save_my_profile(p_action_id, p_expected_revision, p_profile)` (design D2):
+- [x] 3.1 §6 `vitally_my_profile()` (design D1), granted to `authenticated` only.
+- [x] 3.2 §7 `vitally_save_my_profile(p_action_id, p_expected_revision, p_profile)` (design D2):
   - the exact six-key payload, under the volunteer form's rules;
   - the revision with `CONFLICT`, and a `SAVE_MY_PROFILE` receipt;
   - writes `people.name` and the caller's profile only.
-- [ ] 3.3 Database tests in `tests/database-my-profile.mjs` for every `my-profile` RPC scenario:
+- [x] 3.3 Database tests in `tests/database-my-profile.mjs` for every `my-profile` RPC scenario:
   - the read for a cleared Preparer and for a came-back 13615;
   - a client refused;
   - the save writes only the caller and refuses other keys and a long name;
   - a stale save both ways (volunteer and admin);
   - a repeated action id; a client refused with no receipt.
-- [ ] 3.4 Run the database files through `database-quick.yml` on the pushed branch until green (no local Docker).
+- [x] 3.4 Run the database files through `database-quick.yml` on the pushed branch until green (no local Docker).
 
 ## 4. Store, clearance and controller
 
