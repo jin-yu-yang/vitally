@@ -11248,3 +11248,212 @@ test(
     }
   },
 );
+
+// Removing a volunteer from this season's roster (change
+// add-remove-from-roster) has its own test, outside the story and its time
+// limit, like the Roster's: it adds no phase to either order. Chrome only, on
+// a fixture of its own. Nadia, a cleared Greeter, has the work board open; the
+// Site Coordinator removes her, her window wakes to "This account has no
+// access", and the Site Coordinator adds her back from Add a volunteer by her
+// full email: the drawer stays on her Edit and points to Reactivate (#269).
+// Fictional people only; her address is the synthetic one the fixture makes.
+test(
+  "removing a volunteer from this season's roster",
+  { timeout: 300_000 },
+  async (t) => {
+    const fixture = await createBrowserFixture();
+    const db = fixture.database;
+    const NAME = "Nadia Kerr";
+    const NOTICE = `${NAME} is back on this season's roster. Their account is deactivated. Reactivate it so they can sign in.`;
+    const marks = [];
+    const started = Date.now();
+    const step = (name) => marks.push(`${name} ${Date.now() - started}ms`);
+    const rowOf = (page, name) =>
+      page.locator("tr.volunteer-row").filter({
+        has: page.locator(".volunteer-name", { hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&")}$`) }),
+      });
+    const drawerOpen = (page, title) =>
+      waitFor(
+        page,
+        `the volunteer drawer titled ${JSON.stringify(title)}`,
+        (wanted) =>
+          Boolean(document.querySelector("#volunteer-form")) &&
+          (document.querySelector(".modal")?.innerText ?? "").includes(wanted),
+        title,
+        RENDER_MS,
+      );
+    const drawerClosed = (page) =>
+      waitFor(page, "the volunteer drawer to close", () => !document.querySelector(".modal"), undefined, ARRIVAL_MS);
+    const editButton = (id) => `[data-action="open-edit-volunteer"][data-volunteer-id="${id}"]`;
+    const accountOf = async (userId) =>
+      (
+        await db.sql("select status from public.accounts where workspace_id=$1 and user_id=$2", [db.workspaceId, userId])
+      ).rows.map((row) => row.status);
+    // A window that is told nothing re-reads its clearance on focus: bring it
+    // forward and fire focus until the page says what is wanted, as the
+    // start-next-season test does.
+    const regainFocusUntil = async (page, what, predicate, arg) => {
+      const until = Date.now() + ARRIVAL_MS;
+      let seen = false;
+      while (!seen && Date.now() < until) {
+        await page.bringToFront();
+        await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+        seen = await page
+          .waitForFunction(predicate, arg, { timeout: 3_000, polling: 100 })
+          .then(() => true, () => false);
+      }
+      assert.ok(seen, `${what} did not appear on focus within ${ARRIVAL_MS}ms`);
+    };
+    try {
+      // 1. Nadia, a Greeter (no capabilities), cleared on this season's roster,
+      //    with an active account (add_staff_member gives one, migration 047).
+      const nadia = await db.staff({ key: "remove_volunteer", name: NAME, capabilities: [] });
+      const { rows: entry } = await db.sql(
+        `select r.roles from public.roster_entries r join public.workspaces w on w.id=r.workspace_id and r.season=w.current_season
+          where r.workspace_id=$1 and r.person_id=$2`,
+        [db.workspaceId, nadia.personId],
+      );
+      assert.deepEqual(entry.map((row) => row.roles), [["greeter"]], "Nadia's current-season entry");
+      assert.deepEqual(await accountOf(nadia.userId), ["active"], "Nadia's account");
+
+      const engine = await fixture.launch("chrome");
+      const nadiaWin = await engine.newPage({ viewport: DESKTOP });
+      const nadiaPage = nadiaWin.page;
+      await guardToast(nadiaPage);
+      await loginTestUser({
+        page: nadiaPage,
+        actor: { key: "remove_volunteer", email: nadia.email, userId: nadia.userId },
+        fixture,
+        heading: WORK_BOARD_HEADING,
+      });
+      const adminWin = await engine.newPage({ viewport: DESKTOP });
+      const admin = adminWin.page;
+      await guardToast(admin);
+      await loginTestUser({ page: admin, actor: fixture.actor("siteCoordinator"), fixture, heading: OFFICE_BOARD_HEADING });
+      await watchAlerts(admin);
+      step("1 signed in");
+
+      // 2. The admin opens her drawer and presses Remove: the confirmation
+      //    names her email and says her account is deactivated.
+      await clickAction(admin, "open-volunteers");
+      await rowOf(admin, NAME).waitFor({ timeout: ARRIVAL_MS });
+      await waitForQuiet(admin);
+      await admin.locator(editButton(nadia.personId)).click({ timeout: CLICK_MS });
+      await drawerOpen(admin, NAME);
+      await clickAction(admin, "volunteer-remove", { attributes: `[data-volunteer-id="${nadia.personId}"]` });
+      await waitFor(
+        admin,
+        "the remove-from-roster confirmation",
+        () => Boolean(document.querySelector('.modal [data-action="confirm-remove-from-roster"]')),
+        undefined,
+        RENDER_MS,
+      );
+      assert.equal(
+        (await admin.locator("#modal-title").textContent()).trim(),
+        `Remove ${NAME} from this season's roster?`,
+        "the confirmation's title",
+      );
+      const asked = await admin.locator(".modal").innerText();
+      assert.ok(asked.includes(`${NAME} (${nadia.email})`), "the confirmation does not name her email");
+      assert.ok(
+        asked.includes("Their account is deactivated, so they can no longer sign in."),
+        `the confirmation does not say her account is deactivated: ${asked}`,
+      );
+      assert.equal(await admin.locator("#volunteer-form").count(), 0, "the drawer's form is still shown under the confirmation");
+      assert.deepEqual(await accountOf(nadia.userId), ["active"], "asking changed her account");
+      step("2 asked");
+
+      // 3. Remove from roster: the dialog and drawer close, and the Roster,
+      //    read again, no longer lists her.
+      await clickAction(admin, "confirm-remove-from-roster");
+      await drawerClosed(admin);
+      await waitFor(
+        admin,
+        "the Roster to stop listing Nadia",
+        (name) =>
+          ![...document.querySelectorAll("tr.volunteer-row .volunteer-name")].some((n) => n.textContent.trim() === name) &&
+          document.querySelectorAll("tr.volunteer-row").length > 0,
+        NAME,
+        ARRIVAL_MS,
+      );
+      assert.deepEqual(await accountOf(nadia.userId), ["deactivated"], "her account after the removal");
+      const { rows: left } = await db.sql(
+        `select 1 from public.roster_entries r join public.workspaces w on w.id=r.workspace_id and r.season=w.current_season
+          where r.workspace_id=$1 and r.person_id=$2`,
+        [db.workspaceId, nadia.personId],
+      );
+      assert.equal(left.length, 0, "her current-season entry is still there");
+      step("3 removed");
+
+      // 4. Her window wakes (focus) and shows "This account has no access",
+      //    without a reload, and nothing of the work board.
+      await regainFocusUntil(
+        nadiaPage,
+        `the heading ${JSON.stringify(NO_ACCESS_HEADING)}`,
+        (heading) => (document.querySelector("#main h1")?.textContent ?? "").trim() === heading,
+        NO_ACCESS_HEADING,
+      );
+      const wake = await nadiaPage.evaluate(() => ({
+        actions: [...document.querySelectorAll("#main [data-action]")].map((node) => node.dataset.action),
+        board: document.querySelectorAll(".staff-board, .board-row, #board-title").length,
+        sidebar: document.querySelectorAll(".sidebar-account").length,
+      }));
+      assert.deepEqual(wake, { actions: ["sign-out"], board: 0, sidebar: 0 }, "her woken window shows more than no access");
+      assert.equal(await nadiaPage.locator(".connection-notice").count(), 0, "the no-access window says the connection is lost");
+      assert.deepEqual(nadiaWin.pageErrors, [], "Nadia's window threw in the page");
+      step("4 woke");
+
+      // 5. Add a volunteer: her full email finds her, as an Earlier volunteer.
+      //    Picked and saved, she is back and the drawer stays on her Edit with
+      //    the notice beside Reactivate.
+      await admin.bringToFront();
+      await clickAction(admin, "open-add-volunteer");
+      await drawerOpen(admin, "Add a volunteer");
+      await admin.locator("#returning-search").waitFor({ timeout: RENDER_MS });
+      await waitForQuiet(admin);
+      await admin.locator("#returning-search").fill(nadia.email);
+      const pick = admin.locator(`[data-action="pick-returning-volunteer"][data-id="${nadia.personId}"]`);
+      await pick.waitFor({ timeout: RENDER_MS });
+      assert.equal(
+        (await pick.locator(".remote-badge").textContent()).trim(),
+        "Earlier volunteer",
+        "her candidate is not tagged Earlier volunteer",
+      );
+      await clickAction(admin, "pick-returning-volunteer", { attributes: `[data-id="${nadia.personId}"]` });
+      await admin.locator('[data-action="unpick-returning-volunteer"]').waitFor({ timeout: RENDER_MS });
+      assert.equal(await admin.locator("#volunteer-email").inputValue(), nadia.email, "the picked drawer's email");
+      await waitForQuiet(admin);
+      await admin.locator('#volunteer-form button[type="submit"]').click({ timeout: CLICK_MS });
+      await waitFor(
+        admin,
+        "the back-on-the-roster notice",
+        (wanted) => (document.querySelector("#volunteer-account-notice")?.textContent ?? "").trim() === wanted,
+        NOTICE,
+        ARRIVAL_MS,
+      );
+      await drawerOpen(admin, NAME);
+      assert.equal(await admin.locator('[data-action="unpick-returning-volunteer"]').count(), 0, "the drawer is still the pick");
+      assert.equal(await admin.locator('[data-action="account-reactivate"]').count(), 1, "the drawer offers no Reactivate");
+      assert.equal(await admin.locator("#volunteer-reactivate-note").count(), 0, "the note shows beside the notice");
+      assert.deepEqual(await accountOf(nadia.userId), ["deactivated"], "the re-add reactivated her account");
+      step("5 re-added");
+
+      // 6. Closed and opened again, the drawer has the short note, not the notice.
+      await waitForQuiet(admin);
+      await admin.locator(".modal .close-btn").click({ timeout: CLICK_MS });
+      await drawerClosed(admin);
+      await rowOf(admin, NAME).waitFor({ timeout: ARRIVAL_MS });
+      await waitForQuiet(admin);
+      await admin.locator(editButton(nadia.personId)).click({ timeout: CLICK_MS });
+      await drawerOpen(admin, NAME);
+      await admin.locator("#volunteer-reactivate-note").waitFor({ timeout: RENDER_MS });
+      assert.equal((await admin.locator("#volunteer-reactivate-note").textContent()).trim(), "Reactivate so they can sign in.");
+      assert.equal(await admin.locator("#volunteer-account-notice").count(), 0, "the notice came back on a later opening");
+      step("6 reopened");
+      assertConsoleQuiet(adminWin, { name: "the Site Coordinator's Roster window" });
+    } finally {
+      t.diagnostic(`remove-from-roster steps ${JSON.stringify(marks)}`);
+      await fixture.close();
+    }
+  },
+);
