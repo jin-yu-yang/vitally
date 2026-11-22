@@ -83,6 +83,7 @@ import { cardsFor } from "../src/document-cards.mjs";
 import { CONTACT_NOT_SHOWN } from "../src/staff-views.mjs";
 import { todayIso } from "../src/questionnaires.mjs";
 import { nowInput } from "../src/contact-log.mjs";
+import { SENT_DAY } from "../src/ui.mjs";
 import { findSubstep } from "../src/intake-catalogue.mjs";
 import { t as say, sentence } from "../src/client-text.mjs";
 import { describeStage } from "../src/domain.mjs";
@@ -9758,6 +9759,274 @@ test(
   },
 );
 
+// My profile (change add-my-profile) has its own test, outside the story and
+// its time limit, like Season settings': it adds no phase to either order.
+// Chrome only, on a fixture of its own (the Preparer is renamed, so nothing
+// else may share the workspace). The cleared Preparer edits their details from
+// the account row and says a new Form 13615 was sent; the Site Coordinator
+// sends it back with the quick pick "Wrong form", and the Preparer's window
+// shows why when it regains focus. The Preparer sends it again, and the Site
+// Coordinator sends it back once more with a typed note and Enter, which is
+// Send back and never the drawer's Save. Fictional people and values only.
+test(
+  "A volunteer edits My profile and re-sends a Form 13615",
+  { timeout: 300_000 },
+  async (t) => {
+    const fixture = await createBrowserFixture();
+    const db = fixture.database;
+    const NEW_NAME = "Jordan Vale";
+    const NEW_PHONE = "555-0142";
+    const TYPED_PHONE = "555-0199";
+    const NOTE = "Sign page 2 as well";
+    const today = SENT_DAY.format(new Date());
+    const returnedLine = (reason) => `Your site coordinator looked at this: ${reason}. Please send it again or ask them.`;
+    const marks = [];
+    const started = Date.now();
+    const step = (name) => marks.push(`${name} ${Date.now() - started}ms`);
+    const alertMark = (page) => page.evaluate(() => (window.__vitallyAlerts ?? []).length);
+    const toastSince = (page, text, mark) =>
+      waitFor(
+        page,
+        `the toast ${JSON.stringify(text)}`,
+        ([wanted, from]) =>
+          (window.__vitallyAlerts ?? []).slice(from).some((line) => line.startsWith("toast: ") && line.includes(wanted)),
+        [text, mark],
+        ARRIVAL_MS,
+      );
+    const toastsSince = (page, mark) =>
+      page.evaluate(
+        (from) => (window.__vitallyAlerts ?? []).slice(from).filter((line) => line.startsWith("toast: ")),
+        mark,
+      );
+    const myProfileOpen = (page) =>
+      page.getByRole("heading", { name: "My profile", exact: true }).first().waitFor({ timeout: ARRIVAL_MS });
+    const sendSection = (page) =>
+      page.evaluate(() => {
+        const section = document.querySelector("#my-profile-send");
+        return {
+          reason: section?.querySelector(".setup-reason")?.textContent.trim() ?? null,
+          upload: section?.querySelector(".setup-upload")?.textContent.replace(/\s+/g, " ").trim() ?? null,
+        };
+      });
+    const drawerOpen = (page, title) =>
+      waitFor(
+        page,
+        `the volunteer drawer titled ${JSON.stringify(title)}`,
+        (wanted) =>
+          Boolean(document.querySelector("#volunteer-form")) &&
+          (document.querySelector(".modal")?.innerText ?? "").includes(wanted),
+        title,
+        RENDER_MS,
+      );
+    // The Form 13615's place in the drawer: its sent line's words (without
+    // Mark reviewed), or Last returned.
+    const formLine = (page) =>
+      page.evaluate(
+        () => document.querySelector('.volunteer-sent[data-document="form13615"] > span')?.textContent.replace(/\s+/g, " ").trim() ?? null,
+      );
+    const waitForFormLine = (page, wanted) =>
+      waitFor(
+        page,
+        `the drawer's Form 13615 line to read ${JSON.stringify(wanted)}`,
+        (text) =>
+          (document.querySelector('.volunteer-sent[data-document="form13615"] > span')?.textContent.replace(/\s+/g, " ").trim() ?? null) === text,
+        wanted,
+        ARRIVAL_MS,
+      );
+    const editButton = `[data-action="open-edit-volunteer"][data-volunteer-id="${db.preparerId}"]`;
+    const openDrawer = async (page) => {
+      await clickAction(page, "open-volunteers");
+      await page.locator(editButton).waitFor({ timeout: ARRIVAL_MS });
+      await waitForQuiet(page);
+      await page.locator(editButton).click({ timeout: CLICK_MS });
+      await drawerOpen(page, NEW_NAME);
+    };
+    const storedPhone = async () =>
+      (
+        await db.sql("select phone from public.volunteer_profiles where workspace_id=$1 and person_id=$2", [
+          db.workspaceId,
+          db.preparerId,
+        ])
+      ).rows[0]?.phone ?? null;
+    // A window with no realtime for its own profile re-reads on focus: bring
+    // it forward and fire focus until the page says what is wanted, as the
+    // uploads test does.
+    const regainFocusUntil = async (page, what, predicate, arg) => {
+      const until = Date.now() + ARRIVAL_MS;
+      let seen = false;
+      while (!seen && Date.now() < until) {
+        await page.bringToFront();
+        await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+        seen = await page
+          .waitForFunction(predicate, arg, { timeout: 3_000, polling: 100 })
+          .then(() => true, () => false);
+      }
+      assert.ok(seen, `${what} did not appear on focus within ${ARRIVAL_MS}ms`);
+    };
+    try {
+      const engine = await fixture.launch("chrome");
+
+      // 1. A cleared Preparer opens My profile from the account row.
+      const preparerWin = await engine.newPage({ viewport: DESKTOP });
+      const preparer = preparerWin.page;
+      await guardToast(preparer);
+      await loginTestUser({ page: preparer, actor: fixture.actor("preparer"), fixture, heading: WORK_BOARD_HEADING });
+      assert.equal(await readSignedInAs(preparer), ROLE_NAMES.preparer);
+      await watchAlerts(preparer);
+      assert.equal(
+        (await preparer.locator('[data-action="open-my-profile"] > span').first().textContent()).trim(),
+        "My profile",
+        "the account row's first line",
+      );
+      await clickAction(preparer, "open-my-profile");
+      await myProfileOpen(preparer);
+      await preparer.locator("#my-profile-form").waitFor({ timeout: ARRIVAL_MS });
+      await waitForQuiet(preparer);
+      step("1 opened");
+
+      // 2. The phone, Monday and Saturday, and a new name, saved: the toast,
+      //    the account row's name, and the days after a reload.
+      await preparer.locator("#my-profile-phone").fill(NEW_PHONE);
+      await preparer.locator("#my-profile-usualDays-mon").check();
+      await preparer.locator("#my-profile-usualDays-sat").check();
+      await preparer.locator("#my-profile-name").fill(NEW_NAME);
+      let mark = await alertMark(preparer);
+      await pressControl(preparer, preparer.locator('#my-profile-form button[type="submit"]'), {
+        selector: "button",
+        what: "Save",
+      });
+      await toastSince(preparer, "Profile saved", mark);
+      await waitFor(
+        preparer,
+        "the account row to name Jordan Vale",
+        (name) => document.querySelector('[data-action="open-my-profile"] .account-name')?.textContent.trim() === name,
+        NEW_NAME,
+        ARRIVAL_MS,
+      );
+      assert.equal(await readSignedInAs(preparer), NEW_NAME);
+      await preparer.reload();
+      await myProfileOpen(preparer);
+      await preparer.locator("#my-profile-form").waitFor({ timeout: ARRIVAL_MS });
+      await watchAlerts(preparer);
+      await waitForQuiet(preparer);
+      const kept = await preparer.evaluate(() => ({
+        days: [...document.querySelectorAll('#my-profile-form [name="usualDays"]:checked')].map((box) => box.value),
+        phone: document.querySelector("#my-profile-phone")?.value ?? null,
+        name: document.querySelector("#my-profile-name")?.value ?? null,
+      }));
+      assert.deepEqual(kept, { days: ["mon", "sat"], phone: NEW_PHONE, name: NEW_NAME }, "My profile after a reload");
+      step("2 saved");
+
+      // 3. I've uploaded it: the section waits for review, sent today.
+      await clickAction(preparer, "mark-upload-sent", { attributes: '[data-document="form13615"]' });
+      await waitForText(preparer, `Waiting for review · sent ${today}`);
+      assert.deepEqual(
+        await sendSection(preparer),
+        { reason: null, upload: `Ask your site coordinator how to send it. Waiting for review · sent ${today}` },
+        "the send section after I've uploaded it",
+      );
+      step("3 sent");
+
+      // 4. The Site Coordinator sends it back with the quick pick Wrong form:
+      //    the sent line goes and Last returned takes its place.
+      const adminWin = await engine.newPage({ viewport: DESKTOP });
+      const admin = adminWin.page;
+      await guardToast(admin);
+      await loginTestUser({ page: admin, actor: fixture.actor("siteCoordinator"), fixture, heading: OFFICE_BOARD_HEADING });
+      await watchAlerts(admin);
+      await openDrawer(admin);
+      await waitForFormLine(admin, `Form 13615 sent ${today}`);
+      await clickAction(admin, "mark-upload-reviewed", { attributes: '[data-document="form13615"]' });
+      const row = admin.locator('.volunteer-review[data-document="form13615"]');
+      await row.waitFor({ timeout: RENDER_MS });
+      assert.equal(
+        await row.locator('[data-action="send-back"]').isDisabled(),
+        true,
+        "Send back is on with nothing picked",
+      );
+      await row.locator('input[name="review-reason"][value="Wrong form"]').check();
+      mark = await alertMark(admin);
+      await pressControl(admin, row.locator('[data-action="send-back"]'), {
+        selector: '[data-action="send-back"]',
+        what: "Send back",
+      });
+      await toastSince(admin, "Marked reviewed", mark);
+      await waitForFormLine(admin, `Last returned: Wrong form · ${today}`);
+      assert.equal(await admin.locator(".volunteer-review").count(), 0, "the reason row stayed open");
+      step("4 sent back");
+
+      // 5. The Preparer's window regains focus and shows why it came back.
+      await regainFocusUntil(
+        preparer,
+        "the reason line",
+        (wanted) => document.querySelector("#my-profile-send .setup-reason")?.textContent.trim() === wanted,
+        returnedLine("Wrong form"),
+      );
+      assert.equal(
+        await preparer.locator('[data-action="mark-upload-sent"][data-document="form13615"]').count(),
+        1,
+        "I've uploaded it is not offered",
+      );
+      step("5 reason shown");
+
+      // 6. I've uploaded it again: the reason line goes.
+      await clickAction(preparer, "mark-upload-sent", { attributes: '[data-document="form13615"]' });
+      await waitFor(
+        preparer,
+        "the reason line to go",
+        () => !document.querySelector("#my-profile-send .setup-reason"),
+        undefined,
+        ARRIVAL_MS,
+      );
+      await waitForText(preparer, `Waiting for review · sent ${today}`);
+      assertConsoleQuiet(preparerWin, { name: "the Preparer's My profile window" });
+      step("6 sent again");
+
+      // 7. The Site Coordinator reopens the drawer, types a phone (unsaved),
+      //    and sends it back with a typed note and Enter: Send back happens,
+      //    the drawer stays open with the typed phone, and nothing is saved.
+      await admin.locator(".modal .close-btn").click({ timeout: CLICK_MS });
+      await waitFor(admin, "the drawer to close", () => !document.querySelector("#volunteer-form"), undefined, ARRIVAL_MS);
+      await clickAction(admin, "open-board");
+      await admin.getByRole("heading", { name: OFFICE_BOARD_HEADING, exact: true }).first().waitFor({ timeout: ARRIVAL_MS });
+      await openDrawer(admin);
+      await waitForFormLine(admin, `Form 13615 sent ${today}`);
+      await admin.locator("#volunteer-phone").fill(TYPED_PHONE);
+      await clickAction(admin, "mark-upload-reviewed", { attributes: '[data-document="form13615"]' });
+      await row.waitFor({ timeout: RENDER_MS });
+      const note = row.locator('input[name="review-note"]');
+      await note.fill(NOTE);
+      await waitFor(
+        admin,
+        "Send back to be on",
+        () => document.querySelector('.volunteer-review [data-action="send-back"]')?.disabled === false,
+        undefined,
+        RENDER_MS,
+      );
+      await waitForQuiet(admin);
+      mark = await alertMark(admin);
+      await note.press("Enter");
+      await toastSince(admin, "Marked reviewed", mark);
+      await waitForFormLine(admin, `Last returned: ${NOTE} · ${today}`);
+      await waitForQuiet(admin);
+      assert.equal(await admin.locator("#volunteer-form").count(), 1, "Enter in the note closed the drawer");
+      assert.equal(await admin.locator("#volunteer-phone").inputValue(), TYPED_PHONE, "Enter in the note dropped the typed phone");
+      const toasts = await toastsSince(admin, mark);
+      assert.ok(
+        toasts.length > 0 && toasts.every((line) => line.includes("Marked reviewed")),
+        `the toasts after Enter in the note: ${JSON.stringify(toasts)}`,
+      );
+      assert.equal(await storedPhone(), NEW_PHONE, "Enter in the note saved the drawer");
+      assert.equal(await formLine(admin), `Last returned: ${NOTE} · ${today}`);
+      assertConsoleQuiet(adminWin, { name: "the Site Coordinator's Roster window" });
+      step("7 sent back by Enter");
+    } finally {
+      t.diagnostic(`my-profile steps ${JSON.stringify(marks)}`);
+      await fixture.close();
+    }
+  },
+);
+
 // Start next season (change add-start-next-season) has its own test, outside
 // the story and its time limit, like Season settings': it adds no phase to
 // either order. Chrome only, on a fixture of its own (a start is one-way, so
@@ -9951,8 +10220,10 @@ test(
 // order. Chrome only, on a fixture of its own. Two uncleared volunteers say
 // they sent their Form 13615 and their photo ID; the Site Coordinator sees the
 // count on Volunteers, filters the Roster, reviews them (by saving the
-// certificates and role, and by Mark reviewed) and a window with no realtime
-// channel re-reads on focus. Fictional people and example.org only.
+// certificates and role, and by Mark reviewed with a reason), a window with no
+// realtime channel re-reads on focus, and Sasha's Check again shows why the
+// photo ID came back (change add-my-profile). Fictional people and example.org
+// only.
 test(
   "A volunteer says their uploads were sent, and an admin reviews them",
   { timeout: 300_000 },
@@ -10126,7 +10397,7 @@ test(
 
       // 5. Sasha, who is new, says the photo ID was sent. The Site Coordinator's
       //    window re-reads on focus and counts it. In Sasha's drawer a typed phone
-      //    survives Mark reviewed, and Save then lands with no conflict.
+      //    survives Send back, and Save then lands with no conflict.
       const sashaWin = await engine.newPage({ viewport: DESKTOP });
       const sashaPage = sashaWin.page;
       await guardToast(sashaPage);
@@ -10171,20 +10442,32 @@ test(
       assert.ok((await photoLine.innerText()).includes("Photo ID sent"), "the drawer's photo ID line");
       assert.equal(await admin.locator('.volunteer-sent[data-document="form13615"]').count(), 0, "a Form 13615 line for Sasha");
       await admin.locator("#volunteer-phone").fill(NEW_PHONE);
-      const mark = await alertMark(admin);
+      // Mark reviewed opens the reason row (change add-my-profile): the quick
+      // pick "Can't read it", then Send back.
       await pressControl(admin, photoLine.locator('[data-action="mark-upload-reviewed"]'), {
         selector: '[data-action="mark-upload-reviewed"]',
         what: "Mark reviewed",
       });
+      const reasonRow = admin.locator('.volunteer-review[data-document="photoId"]');
+      await reasonRow.waitFor({ timeout: RENDER_MS });
+      await reasonRow.locator(`input[name="review-reason"][value="Can't read it"]`).check();
+      const mark = await alertMark(admin);
+      await pressControl(admin, reasonRow.locator('[data-action="send-back"]'), {
+        selector: '[data-action="send-back"]',
+        what: "Send back",
+      });
       await toastSince(admin, "Marked reviewed", mark);
+      // The sent line goes, and Last returned takes the photo ID's place.
       await waitFor(
         admin,
-        "the Photo ID sent line to go",
-        () => !document.querySelector('.volunteer-sent[data-document="photoId"]'),
-        undefined,
+        "the Photo ID sent line to become Last returned",
+        (wanted) =>
+          !document.querySelector('.volunteer-sent[data-document="photoId"] [data-action="mark-upload-reviewed"]') &&
+          (document.querySelector('.volunteer-sent[data-document="photoId"] > span')?.textContent.trim() ?? null) === wanted,
+        `Last returned: Can't read it · ${SENT_DAY.format(new Date())}`,
         ARRIVAL_MS,
       );
-      assert.equal(await admin.locator("#volunteer-phone").inputValue(), NEW_PHONE, "Mark reviewed dropped the typed phone");
+      assert.equal(await admin.locator("#volunteer-phone").inputValue(), NEW_PHONE, "Send back dropped the typed phone");
       await admin.locator('#volunteer-form button[type="submit"]').click({ timeout: CLICK_MS });
       await drawerClosed(admin);
       // A CONFLICT keeps the drawer open (app.mjs), so the drawer closing and the
@@ -10221,6 +10504,23 @@ test(
       );
       assert.equal(await volunteersLabel(admin), null);
       assertConsoleQuiet(adminWin, { name: "the Site Coordinator's uploads window" });
+
+      // 6. Sasha presses Check again: the photo ID item says why it came back.
+      await sashaPage.bringToFront();
+      await clickAction(sashaPage, "check-clearance");
+      await waitFor(
+        sashaPage,
+        "the photo ID's reason line",
+        (wanted) => [...document.querySelectorAll("#main .setup-reason")].some((line) => line.textContent.trim() === wanted),
+        "Your site coordinator looked at this: Can't read it. Please send it again or ask them.",
+        ARRIVAL_MS,
+      );
+      assert.equal(
+        await sashaPage.locator('[data-action="mark-upload-sent"][data-document="photoId"]').count(),
+        1,
+        "I've uploaded it is not offered for the returned photo ID",
+      );
+      assertConsoleQuiet(sashaWin, { name: "Sasha's window after Check again" });
     } finally {
       await setLink(null).catch(() => {});
       await fixture.close();
