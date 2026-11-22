@@ -11579,3 +11579,80 @@ test("schedule: a failed first read says so", async () => {
   assert.match(staffScreen(controller.getState()), /The schedule couldn&#39;t load\./);
   controller.stop();
 });
+
+test("schedule: an uncleared viewer on the Schedule follows shift changes live and reads no case", async () => {
+  const store = scheduleStore({ clearance: UNCLEARED_VIEWER });
+  const { controller } = build({ store, clock: SCHEDULE_NOW });
+  await controller.start();
+  // On the setup screen: no channel.
+  assert.equal(store.subscriptions, 0);
+  assert.equal(store.handlers, null);
+  await controller.openSchedule();
+  assert.equal(store.subscriptions, 1);
+  const reads = dayReads(store);
+  await store.handlers.onChange({ table: "shifts", eventType: "INSERT", id: "s-new" });
+  assert.equal(dayReads(store), reads + 1);
+  await store.handlers.onChange({ table: "schedule_settings", eventType: "UPDATE", id: "w1" });
+  assert.equal(dayReads(store), reads + 2);
+  // Anything else does nothing: no list, no case, no workspace.
+  const calls = store.calls.length;
+  for (const table of ["cases", "workspaces", "assistance_items", "posted_updates", "case_labels"])
+    await store.handlers.onChange({ table, eventType: "UPDATE", id: "x", caseId: "case-a" });
+  assert.deepEqual(store.calls.slice(calls), []);
+  assert.equal(store.calls.includes("listCases"), false);
+  assert.equal(store.calls.includes("getWorkspace"), false);
+  // Leaving the Schedule releases the channel; coming back opens one.
+  controller.navigate("staff");
+  assert.equal(store.handlers, null);
+  assert.equal(store.released, 1);
+  await controller.openSchedule();
+  assert.equal(store.subscriptions, 2);
+  controller.stop();
+});
+
+test("schedule: an uncleared viewer restored on the Schedule gets the channel; losing the viewer flag releases it", async () => {
+  const sessionStorage = fakeSession();
+  const seed = build({ store: scheduleStore({ clearance: UNCLEARED_VIEWER }), sessionStorage, clock: SCHEDULE_NOW });
+  await seed.controller.start();
+  await seed.controller.openSchedule();
+  seed.controller.stop();
+  const store = scheduleStore({ clearance: UNCLEARED_VIEWER });
+  const { controller } = build({ store, sessionStorage, clock: SCHEDULE_NOW });
+  await controller.start();
+  assert.equal(controller.getState().screen, "schedule");
+  assert.equal(store.subscriptions, 1);
+  store.nextClearance = { ...UNCLEARED_VIEWER, scheduleViewer: false };
+  await controller.checkClearance();
+  assert.equal(controller.getState().screen, "staff");
+  assert.equal(store.handlers, null);
+  controller.stop();
+});
+
+test("schedule: an uncleared viewer who becomes cleared on the Schedule keeps one channel", async () => {
+  const store = scheduleStore({ clearance: UNCLEARED_VIEWER });
+  const { controller } = build({ store, clock: SCHEDULE_NOW });
+  await controller.start();
+  await controller.openSchedule();
+  assert.equal(store.subscriptions, 1);
+  store.nextClearance = { ...PREPARER_VIEWER };
+  await controller.checkClearance();
+  assert.equal(controller.getState().screen, "schedule");
+  assert.equal(store.subscriptions, 1);
+  assert.equal(store.released, 0);
+  // Now cleared, the channel is the work's: a case change reads the list.
+  await store.handlers.onChange({ table: "cases", eventType: "UPDATE", id: "case-a", caseId: "case-a" });
+  assert.ok(store.calls.includes("listCases"));
+  controller.stop();
+});
+
+test("schedule: signing out releases an uncleared viewer's Schedule channel", async () => {
+  const store = scheduleStore({ clearance: UNCLEARED_VIEWER });
+  const { controller } = build({ store, clock: SCHEDULE_NOW });
+  await controller.start();
+  await controller.openSchedule();
+  assert.equal(store.subscriptions, 1);
+  await controller.signOut();
+  assert.equal(store.handlers, null);
+  assert.equal(store.released, 1);
+  controller.stop();
+});

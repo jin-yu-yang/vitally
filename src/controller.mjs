@@ -1138,6 +1138,15 @@ export function createController({
     };
   }
 
+  // An uncleared schedule viewer's window follows the Schedule live (design
+  // D10): it holds the channel while it is on the Schedule, and only then.
+  // A cleared window's channel is loadWork's and is left alone.
+  function syncScheduleChannel() {
+    if (!staffWindow() || !awaitingClearance(state)) return;
+    if (state.screen === "schedule" && scheduleViewer(state.principal)) subscribe();
+    else unsubscribe();
+  }
+
   function unsubscribe() {
     const release = releaseStore;
     releaseStore = null;
@@ -1148,6 +1157,19 @@ export function createController({
   // through the same access-scoped path — never the payload itself.
   async function handleChange(change) {
     if (!state.principal || !change) return;
+    // An uncleared window holds a channel only while it is on the Schedule
+    // (syncScheduleChannel), and hears nothing but the Schedule's own tables:
+    // it never reads a case, a list or the workspace.
+    if (staffWindow() && awaitingClearance(state)) {
+      if (state.screen !== "schedule" || (change.table !== "shifts" && change.table !== "schedule_settings")) return;
+      try {
+        await readScheduleDay();
+      } catch (error) {
+        noteFailure(error);
+      }
+      show();
+      return;
+    }
     // A workspace change names no case and carries nothing private, so
     // everything this window holds may have changed: all of it is re-read
     // through the same access-scoped paths.
@@ -2454,6 +2476,8 @@ export function createController({
     endNotifications();
     if (!(ceilingAdmin(state.principal) && ADMIN_SETUP_SCREENS.includes(state.screen)) && !keepsSchedule())
       state.screen = "staff";
+    // A viewer kept on the Schedule keeps a channel for it alone.
+    syncScheduleChannel();
   }
 
   async function holdForClearance() {
@@ -2597,7 +2621,9 @@ export function createController({
       return redrawIfUploadsChanged(same);
     }
     if (!now && was) dropWork();
-    // Still not cleared: the feed re-reads with the check.
+    // Still not cleared: the Schedule's channel follows the screen (it may
+    // have been left above), and the feed re-reads with the check.
+    syncScheduleChannel();
     await readFeed();
     persistSession();
     show();
@@ -2859,6 +2885,8 @@ export function createController({
     state.dialog = null;
     state.dialogContext = null;
     endNotifications();
+    // An uncleared window opens or releases the Schedule's channel.
+    syncScheduleChannel();
     persistSession();
     show(true);
   }
