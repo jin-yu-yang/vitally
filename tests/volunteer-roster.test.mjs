@@ -50,9 +50,10 @@ test("combine keeps only people with a roster entry", () => {
   assert.equal(list[1].hasSignIn, false);
   assert.deepEqual(list[0], {
     id: "p1", name: "ana Lopez", email: "ana@x.org", phone: null, works: "remote",
-    languages: ["english", "other"], otherLanguage: "Tagalog", roles: ["preparer"],
+    languages: ["english", "other"], otherLanguage: "Tagalog", usualDays: [], roles: ["preparer"],
     certificates: ["vsc", "basic"], revision: 3, hasSignIn: true, signedInName: null,
     isNew: false, photoIdChecked: false, form13615SentAt: null, photoIdSentAt: null,
+    form13615ReviewedAt: null, form13615ReviewReason: null, photoIdReviewedAt: null, photoIdReviewReason: null,
     account: { status: "active", revision: 2, activatedAt: null, expiresAt: null }, isSiteCoordinator: false,
     cleared: true, missing: []
   });

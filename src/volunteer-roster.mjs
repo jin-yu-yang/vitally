@@ -106,6 +106,7 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
       works: profile.works,
       languages: [...(profile.languages ?? [])],
       otherLanguage: profile.other_language ?? null,
+      usualDays: [...(profile.usual_days ?? [])],
       roles,
       certificates: certsById.get(person.id) ?? [],
       revision: profile.revision,
@@ -117,6 +118,11 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
       // When the volunteer said they sent each document (migration 053); null before.
       form13615SentAt: entry.form_13615_sent_at ?? null,
       photoIdSentAt: entry.photo_id_sent_at ?? null,
+      // What the office last said about each document (migration 057); null when unset.
+      form13615ReviewedAt: entry.form_13615_reviewed_at ?? null,
+      form13615ReviewReason: entry.form_13615_review_reason ?? null,
+      photoIdReviewedAt: entry.photo_id_reviewed_at ?? null,
+      photoIdReviewReason: entry.photo_id_review_reason ?? null,
       account,
       isSiteCoordinator,
       cleared,
