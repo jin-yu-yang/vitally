@@ -40,7 +40,7 @@
 - [x] 5.2 Run Chrome client browser integration tests.
 - [x] 5.3 Run Firefox client browser integration tests.
 - [x] 5.4 Run sign-in integration tests.
-- [ ] 5.5 Investigate and resolve any remaining HTTP 405 errors.
+- [x] 5.5 Investigate and resolve any remaining HTTP 405 errors. Investigated, not reproducible: no HTTP 405 was ever observed (ManQi, Nov 21). The logs of CI runs 44968312239 and 44975200752 contain none, and the only 405s in the repo are intended (`server.mjs` refusing methods other than GET/HEAD, covered by `tests/server.test.mjs`; the `accounts` Edge Function refusing non-POST), neither changed by this PR. No API change needed.
 - [x] 5.6 Confirm all GitHub Actions checks pass.
 
 ## 6. Documentation and OpenSpec
@@ -54,7 +54,7 @@
 
 ## 7. Final review and delivery
 
-- [ ] 7.1 Review the complete diff against the latest main branch.
+- [x] 7.1 Review the complete diff against the latest main branch. Claude Code, Nov 21, against `601b650`. Permissions: a client acts only on their own case, and staff go through `works_on_case` in `check_authority`. Clients can't set `received` / `verified` or change a card once it has one. `vitally_client_documents_link` returns only the client link. Transitions: 056's five functions differ from their last versions (054, 036, 017, 004) only in the intended lines. The new status constraint accepts every existing value (`not_done` is stored as null). Caching: the link is read on load, on wake and after a Settings save, and becomes null if a read fails. Nits fixed in the same pass: a stale 046 comment, two unused text keys, an unused staff `clientDocumentsUrl`, and the clock icon on a verified document. Final review: Zeye.
 - [x] 7.2 Commit the fixes to `issue-157-onedrive-documents`.
 - [x] 7.3 Push the branch to update PR #245.
 - [x] 7.4 Confirm CI passes and address outstanding reviewer comments.

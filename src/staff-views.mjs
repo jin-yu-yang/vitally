@@ -1367,7 +1367,7 @@ function checklistRow(card, { variant, markable, movable, off, answers }) {
         ? button("Move to Needed", "move-card", "secondary", `data-slot="${slot}" data-group="needed"${off}`)
         : button("Move to Maybe needed", "move-card", "secondary", `data-slot="${slot}" data-group="maybe"${off}`)
       : "";
-  return `<article class="doc-row" id="${id}" data-slot="${slot}" tabindex="-1"><div class="doc-row-head"><strong class="doc-label">${esc(card.label?.en)}</strong><span class="doc-group ${group.className}">${icon(group.icon)} ${esc(group.word)}</span></div><p class="doc-owner">${esc(card.ownerLine?.office ?? card.ownerLine?.en)}</p>${why}${statusLine}${when(card.status === "sent", `<p class="field-note">Uploaded ${esc(card.changedAt ? formatTime(card.changedAt) : "")} · to check</p>`)}${when(marks || move, `<div class="doc-marks">${marks}${move}</div>`)}</article>`;
+  return `<article class="doc-row" id="${id}" data-slot="${slot}" tabindex="-1"><div class="doc-row-head"><strong class="doc-label">${esc(card.label?.en)}</strong><span class="doc-group ${group.className}">${icon(group.icon)} ${esc(group.word)}</span></div><p class="doc-owner">${esc(card.ownerLine?.office ?? card.ownerLine?.en)}</p>${why}${statusLine}${when(card.status === "sent", `<p class="field-note">Client reported it ${esc(card.changedAt ? formatTime(card.changedAt) : "")}</p>`)}${when(marks || move, `<div class="doc-marks">${marks}${move}</div>`)}</article>`;
 }
 
 /**

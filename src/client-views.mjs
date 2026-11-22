@@ -402,6 +402,8 @@ export function progressScreen(state) {
     (request) => request.status === "open",
   );
   const documents = record.documents ?? [];
+  const verified = (document) =>
+    (record.requests ?? []).find((request) => request.id === document.requestId)?.status === "verified";
   const history = [...(record.history ?? [])].reverse();
   const firstName = answers.tp_first_name;
   return `<main id="main" class="dashboard" tabindex="-1"><div class="page-intro dashboard-intro"><div><span class="overline">${say("progress.overline")}</span><h1>${firstName ? esc(t("progress.hello", { name: firstName }, lang)) : say("progress.title")}</h1><p>${say("progress.intro")}</p></div><div class="id-pill">${icon("folder")}<div><small>${say("id.application_caps")}</small><strong>${esc(record.reference)}</strong></div>${when(record.clientNumber != null, `<div><small>${say("id.client_number_caps")}</small><strong>${esc(formatClientNumber(record.clientNumber))}</strong></div>`)}</div></div><div class="progress-grid"><section><div class="panel status-panel"><div class="section-head"><h2>${say("progress.your_progress")}</h2>${stageBadge(record.stage, lang, { audience: "client", record })}</div>${progressTrack(record, lang)}<p class="status-explanation">${esc(described.clientMessage)}</p></div>${progressDocumentsV2(state, lang)}${
@@ -413,7 +415,7 @@ export function progressScreen(state) {
     `<section class="panel sent-panel"><div class="section-head"><h2>${say("progress.sent")}</h2></div>${documents
       .map(
         (document) =>
-          `<div class="document-row">${icon("file")}<div><strong>${esc((record.requests ?? []).find((request) => request.id === document.requestId)?.title ?? t("progress.sent", {}, lang))}</strong><small>${(record.requests ?? []).find((request) => request.id === document.requestId)?.status === "verified" ? say("doc.status.verified") : say("progress.upload_reported")} · ${esc(formatTime(document.createdAt, lang))}</small></div><span class="document-check pending">${icon("clock")}</span></div>`,
+          `<div class="document-row">${icon("file")}<div><strong>${esc((record.requests ?? []).find((request) => request.id === document.requestId)?.title ?? t("progress.sent", {}, lang))}</strong><small>${verified(document) ? say("doc.status.verified") : say("progress.upload_reported")} · ${esc(formatTime(document.createdAt, lang))}</small></div>${verified(document) ? `<span class="document-check">${icon("check")}</span>` : `<span class="document-check pending">${icon("clock")}</span>`}</div>`,
       )
       .join("")}</section>`,
   )}${reviewProgress(record, lang)}<section class="panel history-panel"><div class="section-head"><h2>${say("progress.history")}</h2><span class="muted small">${say("progress.history_note")}</span></div>${

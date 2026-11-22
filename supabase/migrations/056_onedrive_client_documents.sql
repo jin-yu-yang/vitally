@@ -26,8 +26,9 @@ alter table public.case_document_cards drop constraint if exists case_document_c
 alter table public.case_document_cards add constraint case_document_cards_status_check
  check (status is null or status in ('later','none','sent','received','verified'));
 
--- Use the most recent check_payload contract (046), updating only document
--- response and document-card statuses. Do not replace with an older version.
+-- Copied from 054's check_payload (046's plus RETURN_TO_SIGNING's Exit Form),
+-- updating only document response and document-card statuses. Do not replace
+-- it with an older version.
 create or replace function vitally_private.check_payload(p_type text,p_payload jsonb) returns void
 language plpgsql immutable security definer set search_path='' as $$
 declare v_e record; -- 035
