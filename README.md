@@ -11,7 +11,7 @@ CSE 416 Final Project Group
 
 By Cody, Hailey, Jinyu, Kelvin, Manqi
 
-**Try it:** [jin-yu-yang.github.io/vitally](https://jin-yu-yang.github.io/vitally/) (test
+**Try it:** [govitally.org](https://govitally.org) (test
 environment with fictional data; sign-in is by invitation only).
 
 What is built and what comes next: **[docs/roadmap.md](docs/roadmap.md)**.
@@ -42,7 +42,7 @@ npm ci
 ## Deployment
 
 Test environment: **live** since Nov 17, on the `govitally.org` domain, for invited testers with
-fictional data, at <https://jin-yu-yang.github.io/vitally/>. It is a hosted Supabase project
+fictional data, at <https://govitally.org>. It is a hosted Supabase project
 plus this repository's static front end ([`public-config.json`](public-config.json)), with email
 from `help@govitally.org`. How to deploy:
 [`docs/setup.md` §6–7](docs/setup.md#6-classroom-and-hosted-setup-pending). What is next:
