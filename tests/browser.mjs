@@ -9790,11 +9790,25 @@ test(
     const newYork = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" });
     const WEEKDAY_INDEX = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
     const daysToSaturday = (6 - WEEKDAY_INDEX[newYork.format(new Date())] + 7) % 7;
+    // The walk's day lies in the current New York Monday-to-Sunday week, which
+    // is what My profile lists: this week's Saturday, or today on a Sunday (the
+    // next Saturday would belong to next week).
+    const stepsToDay = daysToSaturday < 6 ? daysToSaturday : 0;
+    const ymd = Object.fromEntries(
+      new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" })
+        .formatToParts(new Date())
+        .map((part) => [part.type, part.value]),
+    );
+    const dayDate = new Date(Date.UTC(Number(ymd.year), Number(ymd.month) - 1, Number(ymd.day) + stepsToDay, 12));
+    const dayName = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long" }).format(dayDate);
+    const dayLine = (hours) =>
+      `${new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" })
+        .format(dayDate)} · ${hours} · Preparer`;
     const openSaturday = async (page) => {
       await clickAction(page, "open-schedule");
       await page.getByRole("heading", { name: "Schedule", exact: true }).waitFor({ timeout: ARRIVAL_MS });
       await waitFor(page, "the Schedule's day", () => Boolean(document.querySelector("#schedule-day")?.textContent), undefined, ARRIVAL_MS);
-      for (let i = 0; i < daysToSaturday; i += 1) {
+      for (let i = 0; i < stepsToDay; i += 1) {
         const before = await page.locator("#schedule-day").innerText();
         await clickAction(page, "schedule-next");
         await waitFor(
@@ -9807,9 +9821,9 @@ test(
       }
       await waitFor(
         page,
-        "the day to be a Saturday",
-        () => (document.querySelector("#schedule-day")?.textContent ?? "").startsWith("Saturday"),
-        undefined,
+        `the day to be a ${dayName}`,
+        (name) => (document.querySelector("#schedule-day")?.textContent ?? "").startsWith(name),
+        dayName,
         ARRIVAL_MS,
       );
     };
@@ -9854,26 +9868,34 @@ test(
       assert.equal(await readSignedInAs(preparer), ROLE_NAMES.preparer);
       await watchAlerts(preparer);
 
-      // 1. Saturday 10 am to 4 pm in Season settings; the other days as the
-      // card has them (the save sends the whole week).
+      // 1. This week's Saturday and Sunday, 10 am to 4 pm, in Season settings
+      // (the walk's day is one of them, so no save is refused as outside the
+      // site hours); the other days as the card has them (the save sends the
+      // whole week).
       await clickAction(admin, "open-season-settings");
       await admin.getByRole("heading", { name: "Season settings", exact: true }).waitFor({ timeout: ARRIVAL_MS });
       await admin.locator("#site-day-6-open").waitFor({ timeout: ARRIVAL_MS });
       await waitForQuiet(admin);
-      await admin.locator("#site-day-6-open").check();
-      await admin.locator("#site-day-6-from").selectOption("10");
-      await admin.locator("#site-day-6-to").selectOption("16");
+      for (const day of [6, 7]) {
+        await admin.locator(`#site-day-${day}-open`).check();
+        await admin.locator(`#site-day-${day}-from`).selectOption("10");
+        await admin.locator(`#site-day-${day}-to`).selectOption("16");
+      }
       let mark = await alertMark(admin);
       await pressControl(admin, admin.locator('#site-hours-form button[type="submit"]'), { selector: "button", what: "Save" });
       await toastSince(admin, "Site hours saved", mark);
       await waitForQuiet(admin);
       const { rows: saved } = await fixture.database.sql(
-        "select site_hours->'6' as saturday from public.schedule_settings where workspace_id=$1",
+        "select site_hours->'6' as saturday, site_hours->'7' as sunday from public.schedule_settings where workspace_id=$1",
         [fixture.database.workspaceId],
       );
-      assert.deepEqual(saved.map((row) => row.saturday), [{ open: 10, close: 16 }], "the stored Saturday hours");
+      assert.deepEqual(
+        saved.map((row) => [row.saturday, row.sunday]),
+        [[{ open: 10, close: 16 }, { open: 10, close: 16 }]],
+        "the stored Saturday and Sunday hours",
+      );
 
-      // 2. Both windows on the same Saturday's Schedule.
+      // 2. Both windows on the same day's Schedule.
       await openSaturday(admin);
       await openSaturday(preparer);
       assert.equal(await preparer.locator(".schedule-closed").count(), 0, "the Preparer sees Saturday closed");
@@ -9951,28 +9973,18 @@ test(
       await shootDay(admin, "schedule-day-admin");
 
       // 6. The cleared Preparer opens main's My profile from the account row
-      // and sees the Saturday shift under "Your shifts this week". That list
-      // is the New York Monday-to-Sunday week, so on a Sunday the coming
-      // Saturday belongs to next week and the list says so instead.
+      // and sees the shift, exactly as written, under "Your shifts this week":
+      // the walk's day is inside the current New York week every day.
       await clickAction(preparer, "open-my-profile");
       await preparer.getByRole("heading", { name: "Your shifts this week", exact: true }).waitFor({ timeout: ARRIVAL_MS });
-      if (daysToSaturday < 6) {
-        await waitFor(
-          preparer,
-          "the Saturday shift under Your shifts this week",
-          () => [...document.querySelectorAll("#my-profile-shifts li")].some((li) => li.textContent.trim().endsWith("· Preparer")),
-          undefined,
-          ARRIVAL_MS,
-        );
-      } else {
-        await waitFor(
-          preparer,
-          "Your shifts this week to say there are none",
-          () => (document.querySelector("#my-profile-shifts")?.textContent ?? "").includes("No shifts this week."),
-          undefined,
-          ARRIVAL_MS,
-        );
-      }
+      await waitFor(
+        preparer,
+        "the shift under Your shifts this week",
+        (line) => [...document.querySelectorAll("#my-profile-shifts li")].some((li) => li.textContent.trim() === line),
+        dayLine("10 am – 2 pm"),
+        ARRIVAL_MS,
+      );
+      assert.equal(await preparer.locator("#my-profile-shifts li").count(), 1, "the Preparer's shifts this week");
       assertConsoleQuiet(adminWin, { name: "the Site Coordinator's Schedule window" });
       assertConsoleQuiet(preparerWin, { name: "the Preparer's Schedule window" });
       t.diagnostic(`schedule walk ${((Date.now() - started) / 1000).toFixed(1)} s`);
