@@ -1184,16 +1184,18 @@ test("volunteer roster records against real Supabase", async (t) => {
       const past = season - 1;
       // Moves the person's entry and certificates to the previous season. The
       // certificates reference the entry, and roles need their certificates,
-      // so the roles are cleared on the way and put back on the past entry.
+      // so the roles are cleared on the way and put back on the past entry. The past
+      // entry is added by Pat, not the caller, so a current entry that records the
+      // caller did not copy it.
       const makePast = async (personId) => {
         const ids = [f.workspaceId, personId];
         const { roles } = await one(f, "select roles from public.roster_entries where workspace_id=$1 and person_id=$2 and season=$3", [...ids, season]);
         await f.sql("update public.roster_entries set roles='{}' where workspace_id=$1 and person_id=$2 and season=$3", [...ids, season]);
         await f.sql(
           `insert into public.roster_entries(workspace_id,person_id,season,roles,added_by_person_id,is_new,photo_id_checked_at)
-           select workspace_id,person_id,$3,roles,added_by_person_id,is_new,photo_id_checked_at
+           select workspace_id,person_id,$3,roles,$5,is_new,photo_id_checked_at
              from public.roster_entries where workspace_id=$1 and person_id=$2 and season=$4`,
-          [...ids, past, season],
+          [...ids, past, season, prep.personId],
         );
         await f.sql("update public.certificates set season=$3 where workspace_id=$1 and person_id=$2 and season=$4", [...ids, past, season]);
         await f.sql("delete from public.roster_entries where workspace_id=$1 and person_id=$2 and season=$3", [...ids, season]);
@@ -1229,6 +1231,7 @@ test("volunteer roster records against real Supabase", async (t) => {
       const current = await entryIn(personId, season);
       assert.deepEqual(current.roles, []);
       assert.equal(current.is_new, false);
+      assert.equal(pastBefore.added_by_person_id, prep.personId);
       assert.equal(current.added_by_person_id, f.siteCoordinatorId);
       assert.equal(await revisionOf(f, personId), revision + 1);
       assert.deepEqual((await profileOf(f, personId)).usual_days, ["tue", "thu"]);
@@ -1297,6 +1300,26 @@ test("volunteer roster records against real Supabase", async (t) => {
       assert.equal(error.message, "ROLE_NEEDS");
       assert.equal(await entriesIn(shortId, season), 0);
       assert.equal(await revisionOf(f, shortId), shortRevision);
+
+      // A past volunteer who has a sign-in keeps their address and is saved.
+      const account = await f.provision();
+      const linked = volunteer({ name: "Sam Rowe", email: account.email, roles: ["greeter"], certificates: ["vsc"] });
+      const linkedId = (await save(admin, addArgs(linked))).personId;
+      await addStaffMember(f, account.userId, "sam_past_link", "Sam Rowe");
+      assert.equal((await personOf(f, linkedId)).user_id, account.userId, "linked to the sign-in");
+      await makePast(linkedId);
+      assert.equal(await entriesIn(linkedId, season), 0);
+      await save(
+        admin,
+        editArgs(
+          linkedId,
+          await revisionOf(f, linkedId),
+          volunteer({ email: account.email, roles: [], certificates: [] }),
+        ),
+      );
+      assert.equal(await entriesIn(linkedId, season), 1);
+      assert.equal((await profileOf(f, linkedId)).email, account.email.toLowerCase());
+      assert.equal((await personOf(f, linkedId)).user_id, account.userId);
     });
   } finally {
     await f.close();
