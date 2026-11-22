@@ -1873,6 +1873,65 @@ test("listVolunteers is staff-only and maps a failed read", async () => {
   );
 });
 
+// Earlier volunteers (change add-returning-volunteers-and-roster-csv): people
+// with a profile and no entry for the current season.
+const EARLIER_ROWS = () => ({
+  workspaces: [{ id: "workspace-1", current_season: 2026 }],
+  people: [
+    { id: "p-now", name: "Zoe Now", user_id: null },
+    { id: "p-last", name: "Nadia Kerr", user_id: "user-1" },
+    { id: "p-old", name: "Aaron Old", user_id: null },
+  ],
+  volunteer_profiles: ["p-now", "p-last", "p-old"].map((person_id, index) => ({
+    workspace_id: "workspace-1",
+    person_id,
+    email: `${person_id}@example.org`,
+    phone: null,
+    works: "remote",
+    languages: ["english"],
+    other_language: null,
+    usual_days: index === 1 ? ["tue", "thu"] : [],
+    revision: index + 2,
+  })),
+  roster_entries: [
+    { workspace_id: "workspace-1", person_id: "p-now", season: 2026, roles: [] },
+    { workspace_id: "workspace-1", person_id: "p-now", season: 2025, roles: [] },
+    { workspace_id: "workspace-1", person_id: "p-last", season: 2025, roles: [] },
+    { workspace_id: "workspace-1", person_id: "p-old", season: 2024, roles: [] },
+  ],
+});
+
+test("listEarlierVolunteers returns people without a current entry, flagging last season", async () => {
+  const client = fakeClient({ access: "staff", rows: EARLIER_ROWS() });
+  const list = await createStore(client).listEarlierVolunteers();
+  assert.deepEqual(list.map((entry) => entry.id), ["p-old", "p-last"]);
+  const [old, last] = list;
+  assert.equal(old.lastSeason, false);
+  assert.deepEqual(last, {
+    id: "p-last",
+    name: "Nadia Kerr",
+    email: "p-last@example.org",
+    phone: null,
+    works: "remote",
+    languages: ["english"],
+    otherLanguage: null,
+    usualDays: ["tue", "thu"],
+    revision: 3,
+    hasSignIn: true,
+    lastSeason: true,
+  });
+  assert.deepEqual(client.reads.find((read) => read.table === "roster_entries").within, ["season", [2026, 2025]]);
+});
+
+test("listEarlierVolunteers returns nothing without a current season, and refuses an applicant", async () => {
+  const rows = EARLIER_ROWS();
+  rows.workspaces = [{ id: "workspace-1", current_season: null }];
+  assert.deepEqual(await createStore(fakeClient({ access: "staff", rows })).listEarlierVolunteers(), []);
+  await assert.rejects(() =>
+    createStore(fakeClient({ access: "applicant", rows: EARLIER_ROWS() })).listEarlierVolunteers(),
+  );
+});
+
 test("saveVolunteer sends the RPC parameters, nulls for an Add", async () => {
   const client = fakeClient({ access: "staff" });
   const store = createStore(client);

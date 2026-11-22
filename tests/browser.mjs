@@ -9636,6 +9636,232 @@ test(
   },
 );
 
+// Returning volunteers and the Roster's CSV (change
+// add-returning-volunteers-and-roster-csv) have their own test, outside the
+// story and its time limit, like the Roster's: it adds no phase to either
+// order. Chrome only, on a fixture of its own. A past-only volunteer is
+// written with SQL into this fixture's workspace before the Roster is read;
+// the Site Coordinator is refused her email typed by hand, picks her from
+// the search instead and saves, then exports the Preparers shown. Fictional
+// people and example.org addresses only.
+test(
+  "An admin re-adds a returning volunteer and exports the Roster",
+  { timeout: 300_000 },
+  async () => {
+    const fixture = await createBrowserFixture();
+    const NAME = "Nadia Kerr";
+    const EMAIL = "nadia.kerr@example.org";
+    const PHONE = "(215) 555-0142";
+    const HEADER = "Name,Email,Phone,Roles,Certificates,Languages,Account,Cleared";
+    const rowOf = (page, name) =>
+      page.locator("tr.volunteer-row").filter({
+        has: page.locator(".volunteer-name", { hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&")}$`) }),
+      });
+    const rowNames = (page) =>
+      page.evaluate(() => [...document.querySelectorAll("tr.volunteer-row .volunteer-name")].map((n) => n.textContent.trim()));
+    const drawerOpen = (page) =>
+      waitFor(
+        page,
+        "the Add a volunteer drawer",
+        () =>
+          Boolean(document.querySelector("#volunteer-form")) &&
+          (document.querySelector(".modal")?.innerText ?? "").includes("Add a volunteer"),
+        undefined,
+        RENDER_MS,
+      );
+    const drawerClosed = (page) =>
+      waitFor(page, "the volunteer drawer to close", () => !document.querySelector("#volunteer-form"), undefined, ARRIVAL_MS);
+    // One CSV line's cells (toCsv quotes a cell holding a quote, comma or
+    // line break, and doubles its quotes).
+    const csvCells = (line) => {
+      const cells = [];
+      let cell = "";
+      let quoted = false;
+      for (let i = 0; i < line.length; i += 1) {
+        const ch = line[i];
+        if (quoted) {
+          if (ch === '"' && line[i + 1] === '"') {
+            cell += '"';
+            i += 1;
+          } else if (ch === '"') quoted = false;
+          else cell += ch;
+        } else if (ch === '"') quoted = true;
+        else if (ch === ",") {
+          cells.push(cell);
+          cell = "";
+        } else cell += ch;
+      }
+      cells.push(cell);
+      return cells;
+    };
+    try {
+      // 0. Nadia volunteered last season only: a person, her profile, last
+      //    season's entry as Preparer and the certificates that role needs
+      //    (migration 045). One statement, so the entry exists when its
+      //    certificates' keys are checked, and the deferred role check runs
+      //    once all three certificates are in.
+      const { rows: seeded } = await fixture.database.sql(
+        `with w as (select current_season - 1 as season from public.workspaces where id=$1),
+              p as (insert into public.people (workspace_id, person_key, name, capabilities)
+                    values ($1, 'returning_nadia', $2, '{}') returning id),
+              v as (insert into public.volunteer_profiles (workspace_id, person_id, email, phone, works, languages, usual_days)
+                    select $1, p.id, $3, $4, 'on_site', '{english}', '{tue,thu}' from p),
+              r as (insert into public.roster_entries (workspace_id, person_id, season, roles, is_new)
+                    select $1, p.id, w.season, '{preparer}', false from p, w returning person_id, season)
+         insert into public.certificates (workspace_id, person_id, season, certificate, status, confirmed_at)
+         select $1, r.person_id, r.season, c.certificate, 'confirmed', now()
+           from r, unnest(array['vsc','itqr','basic']) as c(certificate)
+         returning person_id::text as id`,
+        [fixture.database.workspaceId, NAME, EMAIL, PHONE],
+      );
+      assert.equal(seeded.length, 3, "Nadia's past season was not written");
+      const nadiaId = seeded[0].id;
+
+      const engine = await fixture.launch("chrome");
+      const adminWin = await engine.newPage({ viewport: DESKTOP });
+      const page = adminWin.page;
+      await guardToast(page);
+      await loginTestUser({ page, actor: fixture.actor("siteCoordinator"), fixture, heading: OFFICE_BOARD_HEADING });
+      assert.equal(await readSignedInAs(page), ROLE_NAMES.siteCoordinator);
+      await clickAction(page, "open-volunteers");
+      await waitFor(
+        page,
+        "the Roster to list the staff",
+        (name) =>
+          [...document.querySelectorAll("tr.volunteer-row .volunteer-name")].some((n) => n.textContent.trim() === name),
+        ROLE_NAMES.siteCoordinator,
+        ARRIVAL_MS,
+      );
+      assert.equal(await rowOf(page, NAME).count(), 0, "a past-only volunteer is on this season's Roster");
+      // At the evidence widths the sidebar is an overlay over the page: it is
+      // closed now, by its own toggle, so the picker's screenshot shows the
+      // drawer (as the story's shootWithoutSidebar does).
+      await waitForQuiet(page);
+      await page.locator('[data-action="toggle-sidebar"]').click({ timeout: CLICK_MS });
+      await waitFor(
+        page,
+        "the sidebar to be closed",
+        () => document.querySelector('[data-action="toggle-sidebar"]')?.getAttribute("aria-expanded") === "false",
+        undefined,
+        RENDER_MS,
+      );
+
+      // 1. Her email typed straight into Add is refused: she is picked, not
+      //    added again.
+      await clickAction(page, "open-add-volunteer");
+      await drawerOpen(page);
+      await page.locator("#returning-search").waitFor({ timeout: RENDER_MS });
+      await page.locator("#volunteer-name").fill(NAME);
+      await page.locator("#volunteer-email").fill(EMAIL);
+      await page.locator('#volunteer-form button[type="submit"]').click({ timeout: CLICK_MS });
+      await waitFor(
+        page,
+        "the earlier-volunteer refusal",
+        (text) => (document.querySelector("#volunteer-form-error")?.textContent ?? "").includes(text),
+        "That email belongs to an earlier volunteer. Pick them above.",
+        RENDER_MS,
+      );
+      assert.equal(await rowOf(page, NAME).count(), 0, "the refused save added her");
+
+      // 2. Search "ker": she is offered, from last season (no Earlier
+      //    volunteer tag). The picker is shot at both evidence widths here,
+      //    while she is still an earlier volunteer (once saved she is not
+      //    offered), with no sideways scroll at the narrow one.
+      await waitForQuiet(page);
+      await page.locator("#returning-search").click({ timeout: CLICK_MS });
+      await page.keyboard.type("ker");
+      const pick = page.locator(`[data-action="pick-returning-volunteer"][data-id="${nadiaId}"]`);
+      await pick.waitFor({ timeout: RENDER_MS });
+      assert.equal(await page.locator('[data-action="pick-returning-volunteer"]').count(), 1, "the search offers more than Nadia");
+      const offered = await pick.innerText();
+      assert.ok(offered.includes(NAME) && offered.includes(EMAIL), `the candidate does not show her name and email: ${offered}`);
+      assert.equal(await pick.locator(".remote-badge").count(), 0, "last season's volunteer is tagged Earlier volunteer");
+      await waitForQuiet(page);
+      await page.evaluate(() => window.scrollTo(0, 0));
+      const shot = await capture(page, SHOTS, "roster-returning-picker");
+      assert.equal(
+        shot.overflow.scrollWidth,
+        shot.overflow.clientWidth,
+        `roster-returning-picker: the page scrolls sideways at ${MOBILE_WIDTH}px`,
+      );
+
+      // 3. Pick her: the form is hers, her email can't be changed, her usual
+      //    days are ticked and New volunteer is not.
+      await clickAction(page, "pick-returning-volunteer", { attributes: `[data-id="${nadiaId}"]` });
+      await page.locator('[data-action="unpick-returning-volunteer"]').waitFor({ timeout: RENDER_MS });
+      const filled = await page.evaluate(() => {
+        const form = document.querySelector("#volunteer-form");
+        return {
+          name: form.querySelector("#volunteer-name").value,
+          email: form.querySelector("#volunteer-email").value,
+          readOnly: form.querySelector("#volunteer-email").readOnly,
+          tue: form.querySelector("#volunteer-usualDays-tue").checked,
+          thu: form.querySelector("#volunteer-usualDays-thu").checked,
+          isNew: form.querySelector("#volunteer-isNew").checked,
+          formError: Boolean(document.querySelector("#volunteer-form-error")),
+        };
+      });
+      assert.deepEqual(
+        filled,
+        { name: NAME, email: EMAIL, readOnly: true, tue: true, thu: true, isNew: false, formError: false },
+        "the picked volunteer's drawer",
+      );
+
+      // 4. Save: she is on this season's Roster with no roles yet, and the
+      //    database has her current entry, not new, with her usual days.
+      await waitForQuiet(page);
+      await page.locator('#volunteer-form button[type="submit"]').click({ timeout: CLICK_MS });
+      await drawerClosed(page);
+      await rowOf(page, NAME).waitFor({ timeout: ARRIVAL_MS });
+      const added = await rowOf(page, NAME).innerText();
+      assert.ok(added.includes("No roles recorded"), `her row does not show No roles recorded: ${added}`);
+      const { rows: current } = await fixture.database.sql(
+        `select r.is_new, v.usual_days
+           from public.roster_entries r
+           join public.workspaces w on w.id=r.workspace_id and r.season=w.current_season
+           join public.volunteer_profiles v on v.workspace_id=r.workspace_id and v.person_id=r.person_id
+          where r.workspace_id=$1 and r.person_id=$2`,
+        [fixture.database.workspaceId, nadiaId],
+      );
+      assert.deepEqual(current, [{ is_new: false, usual_days: ["tue", "thu"] }], "her current entry");
+
+      // 5. Role Preparer, then Export CSV: the file is the Preparers shown.
+      await page.locator("#volunteer-role-filter").selectOption("preparer");
+      await waitFor(
+        page,
+        "the Roster to show only Preparers",
+        (name) =>
+          ![...document.querySelectorAll("tr.volunteer-row .volunteer-name")].some((n) => n.textContent.trim() === name),
+        NAME,
+        RENDER_MS,
+      );
+      await waitForQuiet(page);
+      const shown = await rowNames(page);
+      assert.ok(shown.includes(ROLE_NAMES.preparer), `the Preparer is not shown: ${JSON.stringify(shown)}`);
+      const downloaded = page.waitForEvent("download", { timeout: ARRIVAL_MS });
+      await clickAction(page, "export-roster-csv");
+      const download = await downloaded;
+      assert.match(download.suggestedFilename(), /^roster-\d{4}-\d{4}-\d{2}-\d{2}\.csv$/);
+      const bytes = await readFile(await download.path());
+      assert.deepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf], "the file does not start with the UTF-8 BOM");
+      const lines = bytes.subarray(3).toString("utf8").split("\r\n");
+      assert.equal(lines.pop(), "", "the file does not end its last line with CR LF");
+      assert.equal(lines[0], HEADER);
+      const rows = lines.slice(1).map(csvCells);
+      assert.ok(rows.every((cells) => cells.length === 8), "a row does not have the eight columns");
+      assert.deepEqual(
+        rows.map((cells) => cells[0]),
+        shown,
+        "the file's rows are not exactly the Preparers shown",
+      );
+      assert.ok(rows.every((cells) => cells[3].split("; ").includes("Preparer")), "a row in the file is not a Preparer");
+      assertConsoleQuiet(adminWin, { name: "the Site Coordinator's Roster window" });
+    } finally {
+      await fixture.close();
+    }
+  },
+);
+
 // Season settings (change add-season-settings) have their own test, outside
 // the story and its time limit, like the Roster's: it adds no phase to either
 // order. Chrome only, on a fixture of its own (its SIDN is its own, so nothing

@@ -66,7 +66,7 @@ import { t, SENTENCES } from "./client-text.mjs";
 import { createToastTimer } from "./toast.mjs";
 import { contactEntryFromForm, contactSummary, contactSummaries } from "./contact-log.mjs";
 import { decorateStaffCase, outcomeGroup, staffEligibility } from "./staff-views.mjs";
-import { volunteerFromForm, volunteerFormChanged, roleBoxesToUntick, untickedRolesMessage } from "./volunteer-roster.mjs";
+import { volunteerFromForm, volunteerFormChanged, roleBoxesToUntick, untickedRolesMessage, rosterCsv, rosterCsvFilename, filterVolunteers } from "./volunteer-roster.mjs";
 import { actionToast, renderUpdatePreview, saveToast, updateFormFromValues } from "./update-views.mjs";
 import { startSeasonReady } from "./season-settings-views.mjs";
 
@@ -1761,6 +1761,23 @@ if (!config) {
     }
   }
 
+  // The Roster as shown, as a CSV file (change
+  // add-returning-volunteers-and-roster-csv): the rows that pass the filters.
+  function downloadRosterCsv() {
+    const state = controller.getState();
+    const rows = filterVolunteers(state.volunteers ?? [], state.volunteerFilters ?? {});
+    if (!rows.length) return;
+    const url = URL.createObjectURL(new Blob([rosterCsv(rows)], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = rosterCsvFilename(state.workspace?.currentSeason, new Date());
+    link.hidden = true;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
+
   // A filled copy is read, then held for the preparer to check (change
   // guard-shaded-upload-against-preview, design D1): the case's reference,
   // then the shaded fields by name into readShaded (with the case's household
@@ -2221,6 +2238,21 @@ if (!config) {
         openDialog("volunteer", id ? { volunteerId: id } : null, describeFocus(target));
         break;
       }
+      case "pick-returning-volunteer":
+      case "unpick-returning-volunteer": {
+        // The form is drawn again from the picked person (or empty again), so
+        // nothing typed before stays over it.
+        const pick = action === "pick-returning-volunteer";
+        controller.dismissError();
+        forgetVolunteerDrafts();
+        if (pick) controller.pickReturningVolunteer(target.dataset.id);
+        else controller.unpickReturningVolunteer();
+        root.querySelector(pick ? '[data-action="unpick-returning-volunteer"]' : "#returning-search")?.focus();
+        break;
+      }
+      case "export-roster-csv":
+        if (!target.disabled) downloadRosterCsv();
+        break;
       case "account-resend":
       case "account-reactivate":
         // Said in the drawer (a refusal) or thrown to the safety net.
@@ -2873,6 +2905,10 @@ if (!config) {
       if (ref.scope === "office") paintAddCase();
       else paintV2Rail();
       paintV2Count(ref);
+    } else if (field.name === "returningSearch") {
+      // The Add drawer's returning-volunteer search filters as it is typed,
+      // like the Roster's box.
+      keepTyping(field, "#returning-search", () => controller.setReturningSearch(field.value));
     } else if (field.closest(".staff-form") && field.id) {
       // Held in the wiring layer, not in the controller: this text is not part
       // of any record until the action that carries it is sent.

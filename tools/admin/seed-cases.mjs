@@ -552,6 +552,102 @@ export async function seedVolunteers(client, { workspaceId, actorUserId }) {
   return SEED_VALUES.SEED_VOLUNTEERS.length;
 }
 
+// Adds the previous season's roster after the volunteers (spec
+// local-seed-data, "The local seed adds a previous season's roster"): three
+// people with no current-season entry, and a previous-season entry for one of
+// the 8 volunteers (kept if already there, so a repeat call is safe). This is the spec's one exception to going through
+// `vitally_save_volunteer`, which writes only the current season: these rows
+// are written directly with SQL, in one transaction. A re-run first deletes
+// the earlier three (no sign-in only; the foreign keys remove their rows), so
+// a person an admin has since added to the current season is replaced too. A
+// person with a sign-in is left alone. Only `seedWorkspace` calls this, like
+// `seedVolunteers`. Local only. Returns the number of people added.
+export async function seedPastSeason(client, { workspaceId, actorPersonId }) {
+  const { rows } = await client.query(
+    "select current_season from public.workspaces where id=$1",
+    [workspaceId],
+  );
+  // No current season: nothing to be "previous" to, so write nothing.
+  if (rows[0]?.current_season == null) return 0;
+  const season = rows[0].current_season - 1;
+  const past = SEED_VALUES.SEED_PAST_VOLUNTEERS;
+  await client.query("begin");
+  try {
+    await client.query(
+      `delete from public.people p
+        where p.workspace_id = $1 and p.user_id is null
+          and exists (select 1 from public.volunteer_profiles v
+                       where v.person_id = p.id and v.workspace_id = p.workspace_id
+                         and v.email = any($2::text[]))`,
+      [workspaceId, past.map((v) => v.email)],
+    );
+    const withSignIn = new Set(
+      (
+        await client.query(
+          `select lower(v.email) as email
+             from public.people p join public.volunteer_profiles v
+               on v.person_id = p.id and v.workspace_id = p.workspace_id
+            where p.workspace_id = $1 and p.user_id is not null`,
+          [workspaceId],
+        )
+      ).rows.map((row) => row.email),
+    );
+    const entry = async (personId, roles, certificates) => {
+      await client.query(
+        `insert into public.roster_entries
+           (workspace_id, person_id, season, roles, added_by_person_id, is_new)
+         values ($1, $2, $3, $4, $5, false)
+         on conflict (workspace_id, person_id, season) do nothing`,
+        [workspaceId, personId, season, roles, actorPersonId],
+      );
+      for (const certificate of certificates)
+        await client.query(
+          `insert into public.certificates
+             (workspace_id, person_id, season, certificate, status,
+              confirmed_at, confirmed_by_person_id)
+           values ($1, $2, $3, $4, 'confirmed', now(), $5)
+           on conflict do nothing`,
+          [workspaceId, personId, season, certificate, actorPersonId],
+        );
+    };
+    let added = 0;
+    for (const v of past) {
+      if (withSignIn.has(v.email.toLowerCase())) continue;
+      const { rows: created } = await client.query(
+        `insert into public.people (workspace_id, person_key, name, capabilities)
+         values ($1, 'v_' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 12), $2, '{}')
+         returning id`,
+        [workspaceId, v.name],
+      );
+      await client.query(
+        `insert into public.volunteer_profiles
+           (workspace_id, person_id, email, phone, works, languages, other_language, usual_days)
+         values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [workspaceId, created[0].id, v.email, v.phone, v.works, v.languages, v.otherLanguage, v.usualDays],
+      );
+      await entry(created[0].id, v.roles, v.certificates);
+      added += 1;
+    }
+    // The one of the 8 who also has a previous-season entry (no sign-in only).
+    const also = SEED_VALUES.SEED_VOLUNTEERS.find(
+      (v) => v.email === SEED_VALUES.SEED_PAST_ALSO_CURRENT_EMAIL,
+    );
+    if (also && !withSignIn.has(also.email.toLowerCase())) {
+      const { rows: found } = await client.query(
+        `select person_id from public.volunteer_profiles
+          where workspace_id = $1 and email = $2`,
+        [workspaceId, also.email],
+      );
+      if (found[0]) await entry(found[0].person_id, also.roles, also.certificates);
+    }
+    await client.query("commit");
+    return added;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  }
+}
+
 // What `seed.mjs` runs: the local-only guard, then one seed on its own
 // connection.
 export async function seedWorkspace({
@@ -582,6 +678,10 @@ export async function seedWorkspace({
     const volunteersCreated = await seedVolunteers(client, {
       workspaceId,
       actorUserId: targets.siteCoordinator.userId,
+    });
+    await seedPastSeason(client, {
+      workspaceId,
+      actorPersonId: targets.siteCoordinator.personId,
     });
     return { casesRemoved, casesCreated, volunteersCreated };
   } finally {
