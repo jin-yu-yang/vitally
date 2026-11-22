@@ -1,5 +1,5 @@
 import { esc, button, icon, SENT_DAY } from "./ui.mjs";
-import { missingLines, uploadItems } from "./clearance.mjs";
+import { missingLines, uploadItems, reviewLine } from "./clearance.mjs";
 
 export { awaitingClearance } from "./clearance.mjs";
 
@@ -22,7 +22,8 @@ function uploadItem(item, uploadUrl, busy) {
         "primary",
         `data-document="${item.document}" aria-describedby="${id}"${busy ? " disabled" : ""}`,
       );
-  return `<li><span id="${id}">${esc(item.line)}</span><div class="setup-upload">${send} ${sent}</div></li>`;
+  const why = reviewLine(item);
+  return `<li><span id="${id}">${esc(item.line)}</span>${why ? `<p class="setup-reason">${esc(why)}</p>` : ""}<div class="setup-upload">${send} ${sent}</div></li>`;
 }
 
 export function setupScreen(state) {
