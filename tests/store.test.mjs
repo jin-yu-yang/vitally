@@ -2473,3 +2473,12 @@ test("setSiteCoordinator sends the volunteer, the account revision and granted",
     },
   ]);
 });
+
+test("removeFromRoster sends vitally_remove_from_roster with the action id, volunteer and profile revision", async () => {
+  const client = fakeClient({ access: "staff" });
+  const store = createStore(client);
+  await store.removeFromRoster({ actionId: "a-1", volunteerId: "person-ana", expectedRevision: 4 });
+  assert.deepEqual(client.rpcCalls, [
+    { name: "vitally_remove_from_roster", args: { p_action_id: "a-1", p_volunteer_id: "person-ana", p_expected_revision: 4 } },
+  ]);
+});

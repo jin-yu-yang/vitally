@@ -950,6 +950,16 @@ export function createStore(client) {
       });
     },
 
+    // Take a person off this season's Roster (migration 058). Refusals arrive
+    // as call() errors: OPEN_WORK carries the labels in error.cause.details.
+    async removeFromRoster(request) {
+      return await call("vitally_remove_from_roster", {
+        p_action_id: actionId(request),
+        p_volunteer_id: request.volunteerId,
+        p_expected_revision: request.expectedRevision,
+      });
+    },
+
     // Cancel an invitation nobody has used (migration 047): `target` is
     // `{volunteerId}` from the drawer or `{email}` from the office list, at
     // the account revision the window read.
