@@ -39,6 +39,7 @@ import { isLang, readLanguage, writeLanguage } from "./language.mjs";
 import { volunteerProblem, withoutLostRoles, roleNeedsMessage, openWorkMessage, accountMessage } from "./volunteer-roster.mjs";
 import { emptyUpdateForm, toUpdateRequest, validateUpdate } from "./posted-updates.mjs";
 import { nowInput } from "./contact-log.mjs";
+import { seasonRefusalLines } from "./season-settings-views.mjs";
 
 // The one place browser state lives. It owns what is loaded, what is being
 // edited, and which action envelope is in flight; it renders nothing and knows
@@ -138,7 +139,9 @@ const STAFF_SETTINGS_CONFLICT_MESSAGE = "Someone else changed these settings. Ch
 const STAFF_SIDN_FORMAT_MESSAGE = "Enter the site's SIDN: S followed by eight digits.";
 const STAFF_SIDN_UPDATED = "SIDN updated";
 const SETTINGS_LINK_FIELDS = Object.freeze(["certificateUploadUrl", "clientDocumentsUrl"]);
-const freshSettingsUi = () => ({ notice: null, fieldErrors: null, sidnError: null });
+// Start next season (change add-start-next-season, design D8).
+const STAFF_SEASON_MOVED_MESSAGE = "The season has already moved.";
+const freshSettingsUi = () => ({ notice: null, fieldErrors: null, sidnError: null, startRefusal: null });
 // Post an update (change add-posted-updates): the table is read again and
 // the form keeps what was typed. Staff-only, so named STAFF_.
 const STAFF_UPDATE_CONFLICT_MESSAGE = "Someone changed this update. Check the table and try again.";
@@ -910,6 +913,7 @@ export function createController({
     state.workspace = await store.getWorkspace();
     noteConnected();
     enterOfficeDraftIfNeeded();
+    await seasonMovedUnderDialog(state.workspace?.currentSeason);
   }
 
   async function loadSelected() {
@@ -1088,9 +1092,13 @@ export function createController({
 
   function subscribe() {
     if (releaseStore) return;
-    releaseStore = store.subscribe({
+    // A released channel still reports itself closed (removeChannel): that
+    // is not this window's connection, so it is not heard.
+    let live = true;
+    const release = store.subscribe({
       onChange: (change) => handleChange(change),
       onConnection: (status) => {
+        if (!live) return;
         const previous = state.connection;
         state.connection = status;
         show();
@@ -1099,6 +1107,10 @@ export function createController({
           refresh({ wake: true });
       },
     });
+    releaseStore = () => {
+      live = false;
+      release?.();
+    };
   }
 
   function unsubscribe() {
@@ -1144,6 +1156,12 @@ export function createController({
       if (touchesUpdates) await readFeed();
       if (touchesList) await loadList();
       if (touchesWorkspace) await loadWorkspace();
+      // A start that landed (seasonMovedUnderDialog) may have left this
+      // window uncleared: nothing more of the work is read.
+      if (!state.principal || (staffWindow() && awaitingClearance(state))) {
+        show();
+        return;
+      }
       if (touchesAssistance) await loadAssistance();
       if (touchesUpdates && state.screen === "office-updates") await readPostedUpdates();
       // The open case comes last, because it is the one read that may
@@ -1545,6 +1563,7 @@ export function createController({
       state.seasonSettings = await store.getSeasonSettings();
       state.lists = { ...state.lists, seasonSettings: "ready" };
       noteConnected();
+      await seasonMovedUnderDialog(state.seasonSettings?.season);
     } catch (error) {
       if (state.lists.seasonSettings !== "ready") state.lists = { ...state.lists, seasonSettings: "failed" };
       throw error;
@@ -1652,6 +1671,114 @@ export function createController({
       },
     );
     return answer ? STAFF_SIDN_UPDATED : null;
+  }
+
+  // Start next season (change add-start-next-season, design D8): the year
+  // typed must be the next one (the dialog's confirm waits for it too), sent
+  // with the season the page read. SEASON_NOT_FINISHED keeps the dialog open
+  // with its counts; CONFLICT closes it and says so in the card. On success
+  // the workspace and the clearance are read again: the starter has no roles
+  // in the new season, so the clearance routing gives them the setup screen;
+  // a starter still cleared reads the lists again. Other windows learn
+  // through the realtime `workspaces` change and their own account checks.
+  // Resolves to the toast's text, or null.
+  async function startNextSeason(typedYear) {
+    const season = Number(state.seasonSettings?.season);
+    const typed = String(typedYear ?? "").trim();
+    if (!Number.isInteger(season) || typed !== String(season + 1)) return null;
+    if (state.busy || startingSeason) return null;
+    // The season this dialog is about, for a re-read that shows it moved.
+    if (state.dialog === "start-season" && state.dialogContext?.expectedSeason == null)
+      state.dialogContext = { ...state.dialogContext, expectedSeason: season };
+    startingSeason = true;
+    let answer;
+    try {
+      answer = await settingsWrite(
+        JSON.stringify({ type: "start-season", expectedSeason: season, typed }),
+        () => ({ actionId: newActionId(), expectedSeason: season, typedYear: season + 1 }),
+        (request) => store.startNextSeason(request),
+        (error) => {
+          if (error?.code === "INVALID_TRANSITION" && error?.cause?.message === "SEASON_NOT_FINISHED") {
+            let counts = null;
+            try {
+              counts = JSON.parse(String(error.cause.details ?? ""));
+            } catch {
+              counts = null;
+            }
+            if (!counts || typeof counts !== "object" || Array.isArray(counts)) return false;
+            // Nothing to list: the window's own error, never an empty refusal.
+            if (!seasonRefusalLines(counts).length) return false;
+            state.seasonSettingsUi = { ...state.seasonSettingsUi, startRefusal: counts };
+            return true;
+          }
+          if (error?.code === "CONFLICT") {
+            state.dialog = null;
+            state.dialogContext = null;
+            state.seasonSettingsUi = {
+              ...state.seasonSettingsUi,
+              notice: { place: "next-season", text: STAFF_SEASON_MOVED_MESSAGE },
+            };
+            return true;
+          }
+          return false;
+        },
+      );
+    } finally {
+      startingSeason = false;
+    }
+    if (answer) return await seasonStartLanded(Number(answer.season ?? season + 1));
+    // An answer that never came, for a start that did land: the re-read
+    // already shows the next season (I1).
+    return await seasonMovedUnderDialog(state.seasonSettings?.season);
+  }
+
+  // The start is out: its own answer decides, not a re-read in the middle.
+  let startingSeason = false;
+
+  // The Start next season dialog is open for the season it was opened at,
+  // and a re-read (Season settings, the workspace) shows another. One more
+  // is that start having landed, here or in another window: the success
+  // tail runs, and pressing again can never start the season after. Any
+  // other season just closes the dialog. Resolves to the toast's text when
+  // it landed, else null.
+  async function seasonMovedUnderDialog(current) {
+    if (startingSeason || state.dialog !== "start-season") return null;
+    const expected = Number(state.dialogContext?.expectedSeason);
+    if (current == null || !Number.isInteger(expected) || Number(current) === expected) return null;
+    if (Number(current) === expected + 1) return await seasonStartLanded(expected + 1);
+    state.dialog = null;
+    state.dialogContext = null;
+    show();
+    return null;
+  }
+
+  // A start landed: close the dialog, forget a lost answer kept for it, and
+  // read the workspace and the clearance again. The starter has no roles in
+  // the new season, so the clearance routing gives them the setup screen; a
+  // window still cleared reads the lists again.
+  async function seasonStartLanded(season) {
+    state.dialog = null;
+    state.dialogContext = null;
+    if (pendingSettingsWrite && JSON.parse(pendingSettingsWrite.key)?.type === "start-season") pendingSettingsWrite = null;
+    // A lost answer's notice is answered: the start went through.
+    if (UNKNOWN_OUTCOME.includes(state.error?.code)) state.error = null;
+    try {
+      await loadWorkspace();
+    } catch (error) {
+      noteFailure(error);
+    }
+    await recheckAfterOwnSave();
+    if (!staffWindow()) return null;
+    if (awaitingClearance(state)) {
+      // Finish your setup: the new season's roster has no roles for them yet.
+      state.screen = homeScreen();
+      persistSession();
+      show(true);
+    } else {
+      await refresh();
+      show();
+    }
+    return `The ${season} season has started`;
   }
 
   // Add (the picker's volunteer) or Remove (a row's), at the account
@@ -2115,6 +2242,31 @@ export function createController({
     );
   };
 
+  // A clearance read refused FORBIDDEN may mean the account lost its
+  // membership (Deactivate, or Start next season): a deactivated member gets
+  // no realtime, so a wake is how its window learns. The principal is read
+  // once more. Refused, or no longer staff, the window becomes the first
+  // load's no-access window, holding nothing of the work and no channel.
+  // A member still active keeps the refusal as it was. Resolves true when
+  // the window went to no-access.
+  async function lostMembership(asked) {
+    let gone;
+    try {
+      // An applicant answer counts as gone too: a deactivated staff membership
+      // never reads as applicant, and the next wake's load() corrects it.
+      gone = (await store.getPrincipal())?.access !== "staff";
+    } catch (error) {
+      gone = error?.code === "FORBIDDEN";
+    }
+    if (!gone || !staffWindow() || state.principal.userId !== asked) return false;
+    forgetUser();
+    // Still signed in: focus, online and Try again ask for the principal
+    // again, as on a first load with no membership.
+    state.session = "present";
+    showNoAccess({ code: "FORBIDDEN" });
+    return true;
+  }
+
   async function recheckClearance() {
     if (!staffWindow()) return;
     // A cancelled site check has no membership left to ask about: the screen
@@ -2128,6 +2280,7 @@ export function createController({
       if (!answer || typeof answer !== "object" || Array.isArray(answer) || !Array.isArray(answer.capabilities))
         throw controllerError("SERVER_ERROR", "Something went wrong.");
     } catch (error) {
+      if (same() && error?.code === "FORBIDDEN" && (await lostMembership(asked))) return;
       if (same()) noteLocalFailure(error, checkClearance, { clearanceRead: true });
       // The feed re-reads with every check, answered or not.
       await readFeed();
@@ -2450,10 +2603,14 @@ export function createController({
 
   function openDialog(name, context = null) {
     if (name !== "notifications") endNotifications();
-    // Change the SIDN opens without an earlier refusal.
+    // Change the SIDN and Start next season open without an earlier refusal.
     if (name === "change-sidn") state.seasonSettingsUi = { ...state.seasonSettingsUi, sidnError: null };
+    if (name === "start-season") state.seasonSettingsUi = { ...state.seasonSettingsUi, startRefusal: null };
     state.dialog = name;
     state.dialogContext = context ? { ...context } : null;
+    // Start next season is about the season the page read when it opened.
+    if (name === "start-season" && state.seasonSettings?.season != null)
+      state.dialogContext = { ...state.dialogContext, expectedSeason: Number(state.seasonSettings.season) };
     show();
   }
 
@@ -4795,6 +4952,7 @@ export function createController({
     loadSeasonSettings,
     saveSeasonSettings,
     saveSidn,
+    startNextSeason,
     addSiteCoordinator,
     removeSiteCoordinator,
     saveUpdate,

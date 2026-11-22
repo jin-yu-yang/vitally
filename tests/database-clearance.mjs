@@ -1167,6 +1167,10 @@ test("assignees must be cleared against real Supabase", async (t) => {
           "act_withdraw",
           "hand_to_review",
           "set_default_followup",
+          // Listed for moving the default follow-up person to the starter
+          // (055, add-start-next-season): always a site coordinator, whom
+          // can_be_default_followup accepts uncleared, so system-assigned.
+          "vitally_start_next_season",
         ],
         "a new assigning function must call vitally_private.require_cleared_assignee or be classified as system-assigned (design D13)",
       );

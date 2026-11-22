@@ -356,6 +356,13 @@ export function createStore(client) {
 
   const read = async (query) => (await settled(query)) ?? [];
 
+  // The workspace's current season, or null when it has none (a database from
+  // before migration 010): then staff read every season.
+  const staffSeason = async () => {
+    const row = (await read(client.from("workspaces").select("current_season")))[0];
+    return row?.current_season == null ? null : Number(row.current_season);
+  };
+
   const call = (name, args) => settled(client.rpc(name, args));
 
   // Case labels (staff only): the workspace's labels and the active links of
@@ -539,9 +546,14 @@ export function createStore(client) {
     // themselves, which carry no related record at all (Ruling R56).
     async listCases() {
       const staff = isStaffAccess(await access());
-      const cases = (
-        await read(client.from("cases").select("*").order("reference"))
-      ).map(mapCase);
+      // Staff windows work on the current season (add-start-next-season D7):
+      // this season's cases and the drafts that have no season yet. A past
+      // season stays in the database, read by nobody here. The client path
+      // is untouched.
+      const season = staff ? await staffSeason() : null;
+      let query = client.from("cases").select("*");
+      if (season != null) query = query.or(`season.eq.${season},season.is.null`);
+      const cases = (await read(query.order("reference"))).map(mapCase);
       if (!staff || !cases.length) return cases;
       const ids = cases.map((record) => record.id);
       const participants = await read(
@@ -643,6 +655,13 @@ export function createStore(client) {
       // Absent, another workspace's and another applicant's case are one
       // answer, with no reference, name or revision behind it.
       if (!row) throw createAppError({ code: "VT002" });
+      // A past-season case is not staff's to open: the same answer as an
+      // absent case (add-start-next-season D7). Drafts have no season.
+      if (staff && row.season != null) {
+        const season = await staffSeason();
+        if (season != null && Number(row.season) !== season)
+          throw createAppError({ code: "VT002" });
+      }
       // Row-level security decides which *rows* a client may read; it says
       // nothing about which columns of them are their business. `select("*")`
       // hands the browser whatever the table happens to hold — a staff-recorded
@@ -928,6 +947,16 @@ export function createStore(client) {
       return await call("vitally_set_site_number", {
         p_action_id: actionId(request),
         p_sidn: request.sidn,
+      });
+    },
+
+    // Start next season (change add-start-next-season): the answer is
+    // `{actionId, season, deactivated, defaultFollowupMoved}`.
+    async startNextSeason(request) {
+      return await call("vitally_start_next_season", {
+        p_action_id: actionId(request),
+        p_expected_season: request.expectedSeason,
+        p_typed_year: request.typedYear,
       });
     },
 

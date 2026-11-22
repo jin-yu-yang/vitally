@@ -34,6 +34,7 @@ export const CEILING_DIALOGS = Object.freeze([
   "unpublish-update",
   "delete-update",
   "change-sidn",
+  "start-season",
   "notifications",
 ]);
 

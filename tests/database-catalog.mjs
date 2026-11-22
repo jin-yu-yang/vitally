@@ -50,7 +50,7 @@ const POLICIES = Object.freeze([
   ["volunteer_profiles", "admin_volunteer_profiles"],
   ["workspaces", "member_workspace"],
 ]);
-// The thirty public RPCs after 053, by name and identity arguments.
+// The thirty-one public RPCs after 055, by name and identity arguments.
 const RPCS = Object.freeze([
   "vitally_apply_action(p_action_id uuid, p_case_id uuid, p_expected_revision bigint, p_type text, p_payload jsonb)",
   "vitally_assistance_action(p_action_id uuid, p_item_id uuid, p_expected_revision bigint, p_type text, p_note text)",
@@ -83,6 +83,7 @@ const RPCS = Object.freeze([
   "vitally_set_site_number(p_action_id uuid, p_sidn text)",
   "vitally_mark_upload_sent(p_action_id uuid, p_document text)",
   "vitally_mark_upload_reviewed(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_document text)",
+  "vitally_start_next_season(p_action_id uuid, p_expected_season smallint, p_typed_year smallint)",
 ]);
 // The public RPCs that only read: no action id, no digest.
 // The RPCs that take no action id and store no digest: the reads, and (047,
@@ -197,7 +198,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
     });
 
-    await t.test("the public API is exactly thirty RPCs", async () => {
+    await t.test("the public API is exactly thirty-one RPCs", async () => {
       const { rows } = await sql(
         `select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as signature
            from pg_proc p where p.pronamespace='public'::regnamespace`,

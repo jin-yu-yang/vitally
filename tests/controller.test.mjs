@@ -5,7 +5,7 @@ import { SHADED_EDITOR, SHADED_UPLOAD } from "../src/contracts.mjs";
 import { POOL_FILTER_KEYS } from "../src/pool-views.mjs";
 import { saveStatus } from "../src/client-views.mjs";
 import { closeUnsignedDialogBody, closeUnsignedListKey } from "../src/office-views.mjs";
-import { dialog, staffScreen } from "../src/views.mjs";
+import { dialog, showsNoAccess, staffScreen } from "../src/views.mjs";
 import { staffEligibility } from "../src/staff-views.mjs";
 import { CONTACT_FIELDS, findQuestion, isMemberId } from "../src/intake-catalogue.mjs";
 import { newMemberId, renderQuestion, reviewAlerts, valuesFromControls, withholdInvalid } from "../src/intake-form.mjs";
@@ -5587,6 +5587,23 @@ test("a reload on the case page starts screening", async () => {
   controller.stop();
 });
 
+test("a restored staff window on a past-season case goes home", async () => {
+  // The store answers a past-season case as absent (NOT_FOUND, from VT002),
+  // so the restore takes the same path as any gone case: home, no error.
+  const store = adminStaffStore({ cases: [RECEIVED], people: adminPeople });
+  const sessionStorage = fakeSession({
+    "vitally:client:v1:p1": JSON.stringify({ screen: "staff-case", selectedCaseId: "case-2025" }),
+  });
+  const { controller } = build({ store, sessionStorage });
+  await controller.start();
+  const state = controller.getState();
+  assert.ok(store.calls.includes("getCase:case-2025"), "the saved id was read");
+  assert.equal(state.screen, "staff");
+  assert.equal(state.selectedCaseId, null);
+  assert.equal(state.error, null, "no error toast");
+  controller.stop();
+});
+
 test("the connection's return sends the held start, unchanged", async () => {
   const store = adminStaffStore({ cases: [RECEIVED], people: adminPeople });
   store.failNext = Object.assign(new Error("offline"), { code: "OFFLINE" });
@@ -9868,6 +9885,68 @@ test("a wake check that fails keeps the work and still re-reads the lists", asyn
   controller.stop();
 });
 
+// A deactivated account (Deactivate, or Start next season; add-start-next-season
+// R10): a deactivated member gets no realtime, so its window learns on a wake.
+// The clearance re-read is refused FORBIDDEN; the principal is read once more,
+// and with no active staff membership the window becomes the no-access
+// window the first load shows, with nothing of the work left.
+test("a wake check refused because the membership is gone shows no-access and drops the work", async () => {
+  const store = staffStore({ cases: [{ ...SETUP_CASE }] });
+  const { controller, events } = build({ store });
+  await controller.start();
+  assert.equal(store.subscriptions, 1);
+  const refused = () => Object.assign(new Error("no access"), { code: "FORBIDDEN" });
+  store.nextClearance = refused();
+  store.getPrincipal = async () => {
+    store.calls.push("getPrincipal");
+    throw refused();
+  };
+  const from = store.calls.length;
+  const released = store.handlers;
+  await events.emit("focus");
+  // The released channel then reports itself closed, as removeChannel does:
+  // it is not a lost connection, so no offline notice joins the screen.
+  released.onConnection("offline");
+  const state = controller.getState();
+  assert.notEqual(state.connection, "offline", "the released channel's close reads as a lost connection");
+  assert.equal(state.screen, "no-access");
+  assert.equal(state.principal, null);
+  assert.ok(showsNoAccess(state), "the no-access screen is drawn");
+  assert.equal(state.retryable, false, "a retryable banner is shown");
+  assert.equal(store.released, 1, "realtime is still subscribed");
+  assert.deepEqual(state.cases, []);
+  assert.deepEqual(state.people, []);
+  assert.deepEqual(state.assistance, []);
+  assert.equal(state.workspace, null);
+  assert.equal(state.selectedCaseId, null);
+  // Once: the clearance read, the principal read, and nothing after them.
+  assert.deepEqual(store.calls.slice(from), ["getClearance", "getPrincipal"]);
+  // Later wakes ask only for the principal, as the first load's window does.
+  const after = store.calls.length;
+  await events.emit("focus");
+  assert.ok(store.calls.slice(after).every((call) => call === "getPrincipal"), store.calls.slice(after).join());
+  assert.equal(controller.getState().screen, "no-access");
+  controller.stop();
+});
+
+test("a wake check refused FORBIDDEN for a member still active keeps the window and its work", async () => {
+  const store = staffStore({ cases: [{ ...SETUP_CASE }] });
+  const { controller, events } = build({ store });
+  await controller.start();
+  store.nextClearance = Object.assign(new Error("no access"), { code: "FORBIDDEN" });
+  const from = store.calls.length;
+  await events.emit("focus");
+  const state = controller.getState();
+  assert.equal(store.calls.slice(from).filter((call) => call === "getPrincipal").length, 1, "the principal is read once");
+  assert.ok(state.principal, "the principal was dropped");
+  assert.notEqual(state.screen, "no-access");
+  assert.equal(state.cases.length, 1);
+  assert.equal(store.released, 0);
+  assert.equal(state.error?.code, "FORBIDDEN");
+  assert.equal(state.retryable, true, "the refusal keeps its Try again");
+  controller.stop();
+});
+
 test("signing out while a wake check is out applies nothing to the next window state", async () => {
   const store = staffStore();
   const { controller, events } = build({ store });
@@ -10425,6 +10504,198 @@ test("season settings: another refusal is the window's own error, and the page r
   assert.equal(state.error.code, "OFFLINE");
   assert.equal(state.busy, false);
   assert.equal(settingsReads(store), 2);
+  controller.stop();
+});
+
+// ---------------------------------------------------------------------------
+// Start next season (change add-start-next-season, design D8)
+// ---------------------------------------------------------------------------
+
+// The settings store at season 2026, with the start call. `failNextSettings`
+// makes it reject; a success moves the workspace and leaves the starter a
+// site coordinator with no roles (uncleared).
+async function onStartSeason(overrides = {}) {
+  const built = await onSettingsScreen(overrides);
+  const { store } = built;
+  store.settings.season = 2026;
+  store.workspace = { ...store.workspace, currentSeason: 2026 };
+  store.startNextSeason = async (request) => {
+    store.calls.push("startNextSeason");
+    store.writes.push({ type: "startNextSeason", ...request });
+    const error = store.failNextSettings;
+    store.failNextSettings = null;
+    if (error) throw error;
+    store.settings.season = 2027;
+    store.workspace = { ...store.workspace, currentSeason: 2027 };
+    store.nextClearance = { ...SC_UNCLEARED, missing: [{ kind: "form13615" }, { kind: "photoId" }] };
+    return { actionId: request.actionId, season: 2027, deactivated: 3, defaultFollowupMoved: false };
+  };
+  await built.controller.loadSeasonSettings();
+  built.controller.openDialog("start-season");
+  return built;
+}
+
+test("start next season: sends the action id, the season read and the typed year", async () => {
+  const { store, controller } = await onStartSeason();
+  assert.match(dialog(controller.getState()), /Start the 2027 season/);
+  await controller.startNextSeason("2027");
+  const write = store.writes.find((entry) => entry.type === "startNextSeason");
+  assert.ok(write.actionId);
+  assert.equal(write.expectedSeason, 2026);
+  assert.equal(write.typedYear, 2027);
+  controller.stop();
+});
+
+test("start next season: a year that is not the next one sends nothing", async () => {
+  const { store, controller } = await onStartSeason();
+  assert.equal(await controller.startNextSeason("2028"), null);
+  assert.equal(await controller.startNextSeason(""), null);
+  assert.equal(store.calls.includes("startNextSeason"), false);
+  assert.equal(controller.getState().dialog, "start-season");
+  controller.stop();
+});
+
+test("start next season: SEASON_NOT_FINISHED keeps the dialog open with the lines", async () => {
+  const { store, controller } = await onStartSeason();
+  const counts = { openCases: 2, openFollowups: 1, claimedHelp: 0, unclaimedHelpOnCases: 1 };
+  store.failNextSettings = settingsRefusal("INVALID_TRANSITION", "SEASON_NOT_FINISHED", JSON.stringify(counts));
+  assert.equal(await controller.startNextSeason("2027"), null);
+  const state = controller.getState();
+  assert.equal(state.dialog, "start-season");
+  assert.deepEqual(state.seasonSettingsUi.startRefusal, counts);
+  assert.equal(state.error, null);
+  assert.equal(state.busy, false);
+  const html = dialog(state);
+  assert.match(html, /Finish these first:/);
+  assert.match(html, /<li>2 open cases<\/li><li>1 open follow-up<\/li><li>1 unclaimed help request on cases<\/li>/);
+  // Opening it again starts without the lines.
+  controller.closeDialog();
+  controller.openDialog("start-season");
+  assert.equal(controller.getState().seasonSettingsUi.startRefusal ?? null, null);
+  controller.stop();
+});
+
+test("start next season: CONFLICT re-reads settings, closes the dialog and says The season has already moved.", async () => {
+  const { store, controller } = await onStartSeason();
+  const reads = settingsReads(store);
+  store.failNextSettings = settingsRefusal("CONFLICT");
+  store.settings.season = 2027;
+  assert.equal(await controller.startNextSeason("2027"), null);
+  const state = controller.getState();
+  assert.equal(state.dialog, null);
+  assert.equal(settingsReads(store), reads + 1);
+  assert.equal(state.seasonSettings.season, 2027);
+  assert.deepEqual(state.seasonSettingsUi.notice, { place: "next-season", text: "The season has already moved." });
+  assert.equal(state.error, null);
+  assert.match(staffScreen(state), /The season has already moved\./);
+  controller.stop();
+});
+
+test("start next season: a lost answer sends the same action id again; a new press a new one", async () => {
+  const { store, controller } = await onStartSeason();
+  store.failNextSettings = Object.assign(new Error("Network error."), { code: "OFFLINE" });
+  assert.equal(await controller.startNextSeason("2027"), null);
+  assert.equal(controller.getState().error.code, "OFFLINE");
+  assert.equal(controller.getState().dialog, "start-season");
+  store.failNextSettings = settingsRefusal("INVALID_TRANSITION", "SEASON_NOT_FINISHED", JSON.stringify({ openCases: 1 }));
+  await controller.startNextSeason("2027");
+  await controller.startNextSeason("2027");
+  const ids = store.writes.filter((entry) => entry.type === "startNextSeason").map((entry) => entry.actionId);
+  assert.equal(ids.length, 3);
+  assert.equal(ids[0], ids[1], "the retry after a lost answer replays its action id");
+  assert.notEqual(ids[1], ids[2], "a press after a refusal is a new action");
+  controller.stop();
+});
+
+test("start next season: a lost answer whose start landed closes the dialog and routes the starter", async () => {
+  const { store, controller } = await onStartSeason();
+  const send = store.startNextSeason;
+  store.startNextSeason = async (request) => {
+    await send(request);
+    throw Object.assign(new Error("Network error."), { code: "OFFLINE" });
+  };
+  const checks = clearanceCalls(store);
+  await controller.startNextSeason("2027");
+  const state = controller.getState();
+  assert.equal(state.seasonSettings.season, 2027);
+  assert.equal(state.dialog, null, "the dialog never asks for 2028");
+  assert.ok(clearanceCalls(store) > checks, "the clearance is read again");
+  assert.equal(state.principal.clearance.cleared, false);
+  assert.equal(state.screen, "staff");
+  assert.match(staffScreen(state), /Finish your setup for this season/);
+  assert.equal(store.writes.filter((entry) => entry.type === "startNextSeason").length, 1, "nothing more is sent");
+  controller.stop();
+});
+
+test("start next season: a realtime workspace change to the next season closes the open dialog", async () => {
+  const { store, controller } = await onStartSeason();
+  // Another site coordinator started 2027.
+  store.workspace = { ...store.workspace, currentSeason: 2027 };
+  store.settings.season = 2027;
+  store.nextClearance = { ...SC_UNCLEARED };
+  await store.handlers.onChange({ table: "workspaces" });
+  await new Promise((resolve) => setImmediate(resolve));
+  const state = controller.getState();
+  assert.equal(state.dialog, null);
+  assert.equal(state.screen, "staff");
+  assert.equal(store.calls.includes("startNextSeason"), false);
+  controller.stop();
+});
+
+test("start next season: a season moved to any other value closes the dialog", async () => {
+  const { store, controller } = await onStartSeason();
+  store.workspace = { ...store.workspace, currentSeason: 2029 };
+  await store.handlers.onChange({ table: "workspaces" });
+  assert.equal(controller.getState().dialog, null);
+  controller.stop();
+});
+
+test("start next season: SEASON_NOT_FINISHED with no lines to show is the window's own error", async () => {
+  const { store, controller } = await onStartSeason();
+  store.failNextSettings = settingsRefusal(
+    "INVALID_TRANSITION",
+    "SEASON_NOT_FINISHED",
+    JSON.stringify({ openCases: 0, openFollowups: 0, somethingElse: 4 }),
+  );
+  assert.equal(await controller.startNextSeason("2027"), null);
+  const state = controller.getState();
+  assert.equal(state.seasonSettingsUi.startRefusal, null);
+  assert.equal(state.error.code, "INVALID_TRANSITION");
+  controller.stop();
+});
+
+test("start next season: success re-reads the workspace, clearance and lists", async () => {
+  const { store, controller } = await onStartSeason();
+  const workspaceReads = callCount(store, "getWorkspace");
+  const checks = clearanceCalls(store);
+  const text = await controller.startNextSeason("2027");
+  assert.equal(text, "The 2027 season has started");
+  const state = controller.getState();
+  assert.ok(callCount(store, "getWorkspace") > workspaceReads, "the workspace is read again");
+  assert.ok(clearanceCalls(store) > checks, "the clearance is read again");
+  assert.equal(state.workspace.currentSeason, 2027);
+  assert.equal(state.dialog, null);
+  assert.equal(state.busy, false);
+  // The starter has no roles in the new season: the existing clearance
+  // routing gives them the setup screen.
+  assert.equal(state.principal.clearance.cleared, false);
+  assert.equal(state.screen, "staff");
+  assert.match(staffScreen(state), /Finish your setup for this season/);
+  controller.stop();
+});
+
+test("start next season: a starter still cleared reads the lists again", async () => {
+  const { store, controller } = await onStartSeason();
+  const send = store.startNextSeason;
+  store.startNextSeason = async (request) => {
+    const answer = await send(request);
+    store.nextClearance = { ...SC_CLEARED };
+    return answer;
+  };
+  const lists = callCount(store, "listCases");
+  assert.equal(await controller.startNextSeason("2027"), "The 2027 season has started");
+  assert.ok(callCount(store, "listCases") > lists, "the cases are read again");
+  assert.equal(controller.getState().screen, "office-settings");
   controller.stop();
 });
 

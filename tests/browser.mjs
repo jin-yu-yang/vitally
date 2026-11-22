@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -3304,7 +3304,7 @@ async function runPermutation(t, roles) {
           const { pages, strings } = await draftPageText(bytes, 0);
           assert.equal(pages, 1, "the Exit Form is not one page");
           for (const wanted of [
-            String(expected.season),
+            String(expected.season - 1),
             String(expected.client_number),
             // The class case is a married couple's, so the Exit Form names
             // both, as src/exit-form.mjs joins them.
@@ -9753,6 +9753,194 @@ test(
         "the Preparer is offered Season settings",
       );
       assertConsoleQuiet(preparer, { name: "the Preparer's window" });
+    } finally {
+      await fixture.close();
+    }
+  },
+);
+
+// Start next season (change add-start-next-season) has its own test, outside
+// the story and its time limit, like Season settings': it adds no phase to
+// either order. Chrome only, on a fixture of its own (a start is one-way, so
+// nothing else may share the workspace). The Preparer has the work board open
+// before the start. The Site Coordinator opens Start next season…: the
+// confirm waits for the next year typed, and is refused with "1 open case"
+// while the fixture's one case is open. The case is closed (a duplicate) and
+// the start lands: the starter gets Finish your setup, and the Preparer's
+// open window gets "This account has no access" when it regains focus. The starter then records
+// their own new-season roster entry (the fixture's setup helper, Ruling R7)
+// and their case pool is empty. Fictional people only.
+test(
+  "A site coordinator starts the next season",
+  { timeout: 300_000 },
+  async () => {
+    const fixture = await createBrowserFixture();
+    const db = fixture.database;
+    const SETUP_HEADING = "Finish your setup for this season";
+    const shoot = async (page, name) => {
+      await mkdir(SHOTS, { recursive: true });
+      await page.screenshot({ path: path.join(SHOTS, `start-next-season-${name}.png`), fullPage: true });
+    };
+    const alertMark = (page) => page.evaluate(() => (window.__vitallyAlerts ?? []).length);
+    const toastSince = (page, text, mark) =>
+      waitFor(
+        page,
+        `the toast ${JSON.stringify(text)}`,
+        ([wanted, from]) =>
+          (window.__vitallyAlerts ?? []).slice(from).some((line) => line.startsWith("toast: ") && line.includes(wanted)),
+        [text, mark],
+        ARRIVAL_MS,
+      );
+    const seasonNow = async () =>
+      Number(
+        (await db.sql("select current_season from public.workspaces where id=$1", [db.workspaceId])).rows[0]
+          .current_season,
+      );
+    const submitDisabled = (page) => page.evaluate(() => document.querySelector("#start-season-submit")?.disabled ?? null);
+    // A window whose roles changed re-reads its clearance on focus (roles never
+    // come through realtime): bring it forward and fire focus until the page
+    // says what is wanted, as the uploads test does.
+    const regainFocusUntil = async (page, what, predicate, arg) => {
+      const until = Date.now() + ARRIVAL_MS;
+      let seen = false;
+      while (!seen && Date.now() < until) {
+        await page.bringToFront();
+        await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+        seen = await page
+          .waitForFunction(predicate, arg, { timeout: 3_000, polling: 100 })
+          .then(() => true, () => false);
+      }
+      assert.ok(seen, `${what} did not appear on focus within ${ARRIVAL_MS}ms`);
+    };
+    try {
+      const season = await seasonNow();
+      const next = season + 1;
+      // The one open case: a client's, just submitted.
+      const { caseId } = await db.submittedClientCase();
+
+      const engine = await fixture.launch("chrome");
+
+      // The Preparer's window is open on the work board before the start.
+      const preparerWin = await engine.newPage({ viewport: DESKTOP });
+      const preparer = preparerWin.page;
+      await guardToast(preparer);
+      await loginTestUser({ page: preparer, actor: fixture.actor("preparer"), fixture, heading: WORK_BOARD_HEADING });
+      assert.equal(await readSignedInAs(preparer), ROLE_NAMES.preparer);
+
+      const adminWin = await engine.newPage({ viewport: DESKTOP });
+      const admin = adminWin.page;
+      await guardToast(admin);
+      await loginTestUser({ page: admin, actor: fixture.actor("siteCoordinator"), fixture, heading: OFFICE_BOARD_HEADING });
+      assert.equal(await readSignedInAs(admin), ROLE_NAMES.siteCoordinator);
+      await watchAlerts(admin);
+
+      // 1. Season settings, Start next season…: the confirm stays disabled
+      //    until the next year is typed.
+      await clickAction(admin, "open-season-settings");
+      await admin.getByRole("heading", { name: "Next season", exact: true }).waitFor({ timeout: ARRIVAL_MS });
+      await waitForQuiet(admin);
+      await clickAction(admin, "open-start-season");
+      await waitFor(
+        admin,
+        `the Start the ${next} season dialog`,
+        (title) => Boolean(document.querySelector("#start-season-form")) && (document.querySelector(".modal")?.innerText ?? "").includes(title),
+        `Start the ${next} season`,
+        RENDER_MS,
+      );
+      const year = admin.getByLabel(`Type ${next} to confirm`, { exact: true });
+      await year.waitFor({ timeout: RENDER_MS });
+      assert.equal(await submitDisabled(admin), true, "the confirm is enabled with nothing typed");
+      await year.fill(String(season));
+      assert.equal(await submitDisabled(admin), true, "the confirm is enabled for this season's year");
+      await year.fill(String(next));
+      await waitFor(admin, "the confirm to be enabled", () => document.querySelector("#start-season-submit")?.disabled === false, undefined, RENDER_MS);
+      await shoot(admin, "1-dialog");
+
+      // 2. With the case open, the start is refused: "1 open case" under
+      //    "Finish these first:", the dialog stays open and the season stays.
+      await pressControl(admin, admin.locator("#start-season-submit"), {
+        selector: "#start-season-submit",
+        what: "Start the season",
+      });
+      await waitFor(
+        admin,
+        "the refusal's lines",
+        () => Boolean(document.querySelector("#start-season-refusal li")),
+        undefined,
+        ARRIVAL_MS,
+      );
+      const refusal = await admin.evaluate(() => {
+        const box = document.querySelector("#start-season-refusal");
+        return {
+          lead: box?.querySelector("p")?.textContent.trim() ?? null,
+          lines: [...(box?.querySelectorAll("li") ?? [])].map((li) => li.textContent.trim()),
+        };
+      });
+      assert.deepEqual(refusal, { lead: "Finish these first:", lines: ["1 open case"] }, "the refusal");
+      assert.equal(await admin.locator("#start-season-form").count(), 1, "the refusal closed the dialog");
+      assert.equal(await seasonNow(), season, "a refused start moved the season");
+      await shoot(admin, "2-refused");
+
+      // 3. The case is closed (a duplicate), and the start is confirmed again.
+      await db.act(db.siteCoordinator, caseId, "CLOSE_CASE", { reason: "duplicate", confirmed: true });
+      await waitForQuiet(admin);
+      if ((await year.inputValue()) !== String(next)) await year.fill(String(next));
+      await waitFor(admin, "the confirm to be enabled", () => document.querySelector("#start-season-submit")?.disabled === false, undefined, RENDER_MS);
+      const mark = await alertMark(admin);
+      await pressControl(admin, admin.locator("#start-season-submit"), {
+        selector: "#start-season-submit",
+        what: "Start the season",
+      });
+      await toastSince(admin, `The ${next} season has started`, mark);
+
+      // 4. The starter has no roles in the new season: Finish your setup, with
+      //    the Roster and Season settings still in the sidebar.
+      await admin.getByRole("heading", { name: SETUP_HEADING, exact: true }).first().waitFor({ timeout: ARRIVAL_MS });
+      assert.equal(await seasonNow(), next, "the season did not move");
+      assert.equal(await admin.locator("#start-season-form").count(), 0, "the dialog stayed open");
+      assert.ok(await admin.locator('[data-action="open-season-settings"]').count(), "Season settings left the sidebar");
+      assert.ok(await admin.locator('[data-action="open-volunteers"]').count(), "the Roster left the sidebar");
+      await waitForQuiet(admin);
+      await shoot(admin, "3-setup");
+
+      // 5. The Preparer's window, opened before the start, shows "This account
+      //    has no access" the next time it wakes, without a reload (Ruling R9:
+      //    a deactivated member gets no realtime, so a wake event re-reads).
+      //    Recorded here and asserted at the end, so the steps after it still
+      //    run if it does not.
+      const noAccess = await regainFocusUntil(
+        preparer,
+        `the text ${JSON.stringify(NO_ACCESS_HEADING)}`,
+        (needle) => (document.querySelector("#app")?.innerText ?? "").includes(needle),
+        NO_ACCESS_HEADING,
+      ).then(
+        () => null,
+        (error) => error,
+      );
+      await shoot(preparer, "4-preparer");
+
+      // 6. The starter records their own new-season roster entry (Admin, with
+      //    VSC, IT&QR and SC, not new: the fixture's setup helper, Ruling R7),
+      //    regains focus, and the case pool has nothing this season: the
+      //    closed case is last season's.
+      await db.clearStaff(db.siteCoordinatorId, ["admin", "followup"], db.workspaceId, { siteCoordinator: true });
+      await regainFocusUntil(
+        admin,
+        "All cases in the sidebar",
+        () => Boolean(document.querySelector('[data-action="open-cases"]')),
+        undefined,
+      );
+      assert.equal(await admin.getByRole("heading", { name: SETUP_HEADING, exact: true }).count(), 0);
+      await clickAction(admin, "open-cases");
+      await waitForText(admin, "No cases yet this season.");
+      await waitForQuiet(admin);
+      await shoot(admin, "5-case-pool");
+      assertConsoleQuiet(adminWin, { name: "the Site Coordinator's window", allow: REFUSAL_LINES });
+
+      if (noAccess) throw noAccess;
+      // Its released channel's close is not a lost connection.
+      assert.equal(await preparer.locator(".connection-notice").count(), 0, "the no-access window says the connection is lost");
+      assert.deepEqual(preparerWin.pageErrors, [], "the Preparer's window threw in the page");
     } finally {
       await fixture.close();
     }

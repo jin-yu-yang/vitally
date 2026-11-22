@@ -50,7 +50,7 @@ import {
   deleteDraftConfirm,
   updateGoneBody,
 } from "./update-views.mjs";
-import { renderSeasonSettings, changeSidnDialogBody } from "./season-settings-views.mjs";
+import { renderSeasonSettings, changeSidnDialogBody, startSeasonDialogBody } from "./season-settings-views.mjs";
 
 // The shared shell: the frame every screen sits in, the dialogs, the two
 // screens that belong to nobody in particular (setup needed, no access), and
@@ -735,6 +735,19 @@ export function dialog(state) {
     title = "Change the SIDN";
     body = changeSidnDialogBody({ error: state.seasonSettingsUi?.sidnError ?? null, busy: state.busy === true });
   }
+  // Start next season (change add-start-next-season, design D8). The typed
+  // year is the wiring's draft, put back after a redraw (app.mjs).
+  if (state.dialog === "start-season") {
+    // The season it was opened at (the controller closes it if that moves).
+    const season =
+      state.dialogContext?.expectedSeason ?? state.seasonSettings?.season ?? state.workspace?.currentSeason ?? null;
+    title = season == null ? "Start the next season" : `Start the ${Number(season) + 1} season`;
+    body = startSeasonDialogBody({
+      season,
+      refusal: state.seasonSettingsUi?.startRefusal ?? null,
+      busy: state.busy === true,
+    });
+  }
   if (state.dialog === "notifications") {
     title = "Notifications";
     // A drawer says its own failure (a confirm that did not go through).
@@ -809,7 +822,7 @@ export function dialog(state) {
         ? "OFFICE · WORKLOAD"
         : state.dialog === "notifications"
           ? "FROM THE OFFICE"
-          : ["update-people", "unpublish-update", "delete-update", "change-sidn"].includes(state.dialog)
+          : ["update-people", "unpublish-update", "delete-update", "change-sidn", "start-season"].includes(state.dialog)
             ? "OFFICE · ADMIN"
             : drawer
               ? "OFFICE FOLLOW-UP"
