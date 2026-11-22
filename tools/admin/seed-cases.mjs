@@ -524,7 +524,9 @@ export async function ensureSiteNumber(client, { workspaceId, actorUserId }) {
 // Adds the rehearsal volunteers to the Roster. A re-run first removes the
 // earlier ones (a person with no sign-in and one of these addresses; the
 // foreign keys remove their profile, roster entry and certificates), so
-// the count stays at eight. Only `seedWorkspace` calls this: the browser story
+// the count stays at eight. One who holds a live shift (an admin added it; a
+// re-run has already removed the seeded ones, see `removeSeededShifts`) stays
+// as is, so no shift is deleted with them. Only `seedWorkspace` calls this: the browser story
 // calls `seedCases` directly and must not gain Roster rows.
 export async function seedVolunteers(client, { workspaceId, actorUserId }) {
   await client.query(
@@ -532,24 +534,32 @@ export async function seedVolunteers(client, { workspaceId, actorUserId }) {
       where p.workspace_id = $1 and p.user_id is null
         and exists (select 1 from public.volunteer_profiles v
                      where v.person_id = p.id and v.workspace_id = p.workspace_id
-                       and v.email = any($2::text[]))`,
+                       and v.email = any($2::text[]))
+        and not exists (select 1 from public.shifts s
+                         where s.person_id = p.id and s.workspace_id = p.workspace_id
+                           and s.removed_at is null)`,
     [workspaceId, SEED_VALUES.SEED_VOLUNTEERS.map((v) => v.email)],
   );
   // A seed volunteer who has since been given an account (the demo's Create
-  // account) stays as is: the save below would refuse the address.
-  const withSignIn = new Set(
+  // account), or who holds a live shift, stays as is: the save below would
+  // refuse the address.
+  const kept = new Set(
     (
       await client.query(
         `select lower(v.email) as email
            from public.people p join public.volunteer_profiles v
              on v.person_id = p.id and v.workspace_id = p.workspace_id
-          where p.workspace_id = $1 and p.user_id is not null`,
+          where p.workspace_id = $1
+            and (p.user_id is not null
+                 or exists (select 1 from public.shifts s
+                             where s.person_id = p.id and s.workspace_id = p.workspace_id
+                               and s.removed_at is null))`,
         [workspaceId],
       )
     ).rows.map((row) => row.email),
   );
   for (const volunteer of SEED_VALUES.SEED_VOLUNTEERS) {
-    if (withSignIn.has(volunteer.email.toLowerCase())) continue;
+    if (kept.has(volunteer.email.toLowerCase())) continue;
     await callRpc(client, actorUserId, "vitally_save_volunteer", {
       p_action_id: randomUUID(),
       p_volunteer_id: null,
@@ -560,16 +570,15 @@ export async function seedVolunteers(client, { workspaceId, actorUserId }) {
   return SEED_VALUES.SEED_VOLUNTEERS.length;
 }
 
-// Fills a week of the schedule through the public RPCs, acting as the Site
-// Coordinator (change add-volunteer-schedule, design D12). Site hours are saved
-// only when never saved; saved hours are kept and the shifts go on this week's
-// open days inside them. The shift ids go to the run file, and a re-run removes
-// exactly those (a shift already gone is skipped) and no other. Only
-// `seedWorkspace` calls this: the browser story calls `seedCases` directly.
-export async function seedSchedule(
+// Removes the shifts an earlier run recorded, through the shift removal RPC
+// (a soft delete), acting as the Site Coordinator. A shift already gone is
+// skipped and no other shift is touched. `seedWorkspace` calls this before
+// `seedVolunteers`, so no seeded shift is deleted with its volunteer; it is
+// safe to call again. Answers how many it removed. Local only.
+export async function removeSeededShifts(
   client,
   { workspaceId, actorUserId },
-  { runDir = ".vitally-runs", values = SEED_VALUES } = {},
+  { runDir = ".vitally-runs" } = {},
 ) {
   const run = await readRun(workspaceId, runDir);
   let shiftsRemoved = 0;
@@ -588,6 +597,26 @@ export async function seedSchedule(
   }
   run.shifts = [];
   await recordRun(run, runDir);
+  return shiftsRemoved;
+}
+
+// Fills a week of the schedule through the public RPCs, acting as the Site
+// Coordinator (change add-volunteer-schedule, design D12). Site hours are saved
+// only when never saved; saved hours are kept and the shifts go on this week's
+// open days inside them. The shift ids go to the run file, and a re-run removes
+// exactly those (a shift already gone is skipped) and no other. Only
+// `seedWorkspace` calls this: the browser story calls `seedCases` directly.
+export async function seedSchedule(
+  client,
+  { workspaceId, actorUserId },
+  { runDir = ".vitally-runs", values = SEED_VALUES } = {},
+) {
+  const shiftsRemoved = await removeSeededShifts(
+    client,
+    { workspaceId, actorUserId },
+    { runDir },
+  );
+  const run = await readRun(workspaceId, runDir);
 
   let settings = (
     await callRpc(client, actorUserId, "vitally_season_settings", {})
@@ -706,6 +735,12 @@ export async function seedWorkspace({
     const { casesRemoved, casesCreated } = await seedCases(client, targets, {
       runDir,
     });
+    // Before volunteers are re-created: their shifts cascade on delete.
+    await removeSeededShifts(
+      client,
+      { workspaceId, actorUserId: targets.siteCoordinator.userId },
+      { runDir },
+    );
     const volunteersCreated = await seedVolunteers(client, {
       workspaceId,
       actorUserId: targets.siteCoordinator.userId,

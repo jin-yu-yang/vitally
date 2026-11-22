@@ -1032,6 +1032,107 @@ test("seed command against real Supabase", async (t) => {
       }
     });
 
+    await t.test("a re-run keeps a seed volunteer an admin gave a shift, and soft-removes the seeded shifts", async () => {
+      const runDir = await tempRunDir();
+      const args = { workspaceId: f.workspaceId, clientAEmail: f.applicantAEmail, runDir };
+      const emails = SEED_VALUES.SEED_VOLUNTEERS.map((v) => v.email);
+      const today = (await f.sql("select (now() at time zone 'America/New_York')::date::text as d")).rows[0].d;
+      const saturday = addDays(weekBounds(today).monday, 5);
+      try {
+        await resetSchedule();
+        await seedWorkspace(args);
+        const first = await liveShifts();
+        assert.ok(first.length > 0);
+        // A seed volunteer with no sign-in and no seeded shift, so the admin's shift cannot overlap.
+        const candidates = (
+          await f.sql(
+            `select p.id, v.email, e.roles[1] as role from public.people p
+               join public.workspaces w on w.id=p.workspace_id
+               join public.volunteer_profiles v on v.person_id=p.id and v.workspace_id=p.workspace_id
+               join public.roster_entries e on e.person_id=p.id and e.workspace_id=p.workspace_id and e.season=w.current_season
+              where p.workspace_id=$1 and p.user_id is null and v.email=any($2)
+                and not exists (select 1 from public.shifts s where s.person_id=p.id and s.removed_at is null)`,
+            [f.workspaceId, emails],
+          )
+        ).rows;
+        assert.ok(candidates.length > 0, "a seed volunteer without a shift");
+        const volunteer = candidates[0];
+        const { data: own, error } = await f.siteCoordinator.rpc("vitally_save_shift", {
+          p_action_id: randomUUID(),
+          p_shift_id: null,
+          p_expected_revision: null,
+          p_shift: { volunteerId: volunteer.id, date: saturday, startHour: 15, endHour: 16, role: volunteer.role },
+        });
+        assert.equal(error, null);
+
+        await seedWorkspace(args);
+
+        const mine = (await f.sql("select id, removed_at from public.shifts where id=$1", [own.shiftId])).rows;
+        assert.equal(mine.length, 1, "the admin's shift row is still there");
+        assert.equal(mine[0].removed_at, null, "and still live");
+        const person = (
+          await f.sql(
+            "select p.id from public.people p join public.volunteer_profiles v on v.person_id=p.id where p.workspace_id=$1 and v.email=$2",
+            [f.workspaceId, volunteer.email],
+          )
+        ).rows;
+        assert.deepEqual(person.map((r) => r.id), [volunteer.id], "the same person");
+        const old = (
+          await f.sql("select id, removed_at from public.shifts where id=any($1::uuid[])", [first.map((s) => s.id)])
+        ).rows;
+        // A re-created no-sign-in volunteer takes their (already soft-removed)
+        // shift rows with them; a role account's shifts stay as removed rows.
+        const roleAccountShifts = first.filter((s) => !s.no_sign_in);
+        assert.ok(roleAccountShifts.length > 0);
+        const kept = old.filter((r) => roleAccountShifts.some((s) => s.id === r.id));
+        assert.equal(kept.length, roleAccountShifts.length, "the role accounts' shifts are still rows");
+        assert.ok(old.every((r) => r.removed_at), "and every shift still there is soft-removed");
+        const count = (
+          await f.sql(
+            `select count(distinct v.email)::int n from public.people p
+               join public.volunteer_profiles v on v.person_id=p.id and v.workspace_id=p.workspace_id
+              where p.workspace_id=$1 and v.email=any($2)`,
+            [f.workspaceId, emails],
+          )
+        ).rows[0].n;
+        assert.equal(count, 8);
+      } finally {
+        await deletePreviousRun(client, await readRun(f.workspaceId, runDir));
+        await resetSchedule();
+        await rm(runDir, { recursive: true, force: true });
+      }
+    });
+
+    await t.test("a plain re-run leaves one seeded set and the same eight volunteers", async () => {
+      const runDir = await tempRunDir();
+      const args = { workspaceId: f.workspaceId, clientAEmail: f.applicantAEmail, runDir };
+      const emails = SEED_VALUES.SEED_VOLUNTEERS.map((v) => v.email);
+      try {
+        await resetSchedule();
+        await seedWorkspace(args);
+        const first = await liveShifts();
+        await seedWorkspace(args);
+        const second = await liveShifts();
+        assert.equal(second.length, first.length);
+        assert.ok(first.every((s) => !second.some((x) => x.id === s.id)));
+        const run = await readRunFile(f.workspaceId, runDir);
+        assert.deepEqual(run.shifts.map((s) => s.id).sort(), second.map((s) => s.id).sort());
+        const volunteers = (
+          await f.sql(
+            `select count(distinct p.id)::int n from public.people p
+               join public.volunteer_profiles v on v.person_id=p.id and v.workspace_id=p.workspace_id
+              where p.workspace_id=$1 and v.email=any($2)`,
+            [f.workspaceId, emails],
+          )
+        ).rows[0].n;
+        assert.equal(volunteers, 8);
+      } finally {
+        await deletePreviousRun(client, await readRun(f.workspaceId, runDir));
+        await resetSchedule();
+        await rm(runDir, { recursive: true, force: true });
+      }
+    });
+
     await t.test("saved site hours are kept and the seeded shifts fit inside them", async () => {
       const runDir = await tempRunDir();
       const args = { workspaceId: f.workspaceId, clientAEmail: f.applicantAEmail, runDir };
