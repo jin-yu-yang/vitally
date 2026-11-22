@@ -27,9 +27,9 @@
 
 ## 6. Local seed
 
-- [ ] 6.1 Add three fictional previous-season volunteers (one with usual days) to `tools/admin/seed-values.mjs`, and pick one of the 8 to also get a previous-season entry
-- [ ] 6.2 `seed:local` inserts their profiles, previous-season roster entries and confirmed certificates directly with SQL after the 8; a re-run first deletes the previous-season list's people with no sign-in; the browser story's use adds none
-- [ ] 6.3 Seed tests: unit tests in `tests/seed.test.mjs` and the database check in `tests/database-seed.mjs` (three previous-season-only people, the one of the 8 on both, re-run stable, current Roster unchanged)
+- [x] 6.1 Add three fictional previous-season volunteers (one with usual days) to `tools/admin/seed-values.mjs`, and pick one of the 8 to also get a previous-season entry
+- [x] 6.2 `seed:local` inserts their profiles, previous-season roster entries and confirmed certificates directly with SQL after the 8; a re-run first deletes the previous-season list's people with no sign-in; the browser story's use adds none
+- [x] 6.3 Seed tests: unit tests in `tests/seed.test.mjs` and the database check in `tests/database-seed.mjs` (three previous-season-only people, the one of the 8 on both, re-run stable, current Roster unchanged)
 
 ## 7. Browser test
 
