@@ -12,14 +12,14 @@
 
 ## 3. Picker in Add a volunteer
 
-- [ ] 3.1 Render the search box "Returning volunteer? Search last season's roster" and its list at the top of the Add drawer, with "Earlier volunteer" labels; view unit tests
-- [ ] 3.2 Pick and "Not this person" actions: a pick fills the form, locks the email and carries the person id and profile revision; "Not this person" restores a blank Add with New ticked
+- [x] 3.1 Render the search box "Returning volunteer? Search last season's roster" and its list at the top of the Add drawer, with "Earlier volunteer" labels; view unit tests
+- [x] 3.2 Pick and "Not this person" actions: a pick fills the form, locks the email and carries the person id and profile revision; "Not this person" restores a blank Add with New ticked
 - [x] 3.3 Save of a picked person sends `vitally_save_volunteer` with that person id and profile revision (the Edit call); conflicts handled as for Edit; controller unit tests
 
 ## 4. Roster CSV export
 
 - [x] 4.1 Pure CSV row builder for the Roster: the columns of design D6 in order, the table's labels (IT&QR), certificate dates in New York time, Account and Cleared; the filename `roster-<season>-<YYYY-MM-DD>.csv` from the New York date; unit tests
-- [ ] 4.2 "Export CSV" button in the Roster toolbar, disabled when no row is shown; it downloads the rows `filterVolunteers` keeps, as a Blob; view unit tests
+- [x] 4.2 "Export CSV" button in the Roster toolbar, disabled when no row is shown; it downloads the rows `filterVolunteers` keeps, as a Blob; view unit tests
 
 ## 5. Database contract
 
