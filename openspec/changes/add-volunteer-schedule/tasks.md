@@ -74,7 +74,7 @@
 
 ## 6. Seed
 
-- [ ] 6.1 `tools/admin/seed*.mjs`:
+- [x] 6.1 `tools/admin/seed*.mjs`:
   - site hours only when never saved;
   - usual days for at least four fictional volunteers, two of them on Saturdays;
   - about six shifts this week, with one Saturday gap and one no-sign-in volunteer;
