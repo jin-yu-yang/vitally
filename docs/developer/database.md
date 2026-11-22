@@ -25,7 +25,7 @@ it. Run everything described here against the local stack from [`docs/setup.md`]
 
 ## Migrations
 
-The schema is fifty-one plain SQL files (001 to 051) in [`supabase/migrations/`](../../supabase/migrations/), applied
+The schema is fifty-seven plain SQL files (001 to 057) in [`supabase/migrations/`](../../supabase/migrations/), applied
 in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 
 | File | Adds |
@@ -78,9 +78,15 @@ in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 | `046_volunteer_workload.sql` | Hand-written: the admin Workload's one write, the case action `ASSIGN_CASE` `{slot, personId, expectedHolderId}` (`vitally_private.act_assign_case`), added to `vitally_apply_action`, `check_operation_authority` (admin-only group) and `check_payload`, each re-created from its latest definition. No new table, column or Realtime change: the page reads what the staff window already holds |
 | `047_accounts.sql` | Hand-written: sign-in accounts (change `add-account-invitations`). The `accounts` table (one row per membership: `invited`, `active` or `deactivated`, with `expires_at` and site-check attempts), admin-only to read; a backfill giving every existing membership a row; a trigger on `auth.users` that activates a client's invitation at first sign-in and cancels an expired one; triggers on the six tables that refer to a membership, activating an invited client's account at first use; an expiry sweep that leaves an invitation in use alone and skips (and logs) one it cannot cancel; `add_staff_member` and `initialize_workspace` writing active accounts; `cleared` requiring an active account; `vitally_private.site_numbers` (the site's SIDN, set by the roster command, unreadable through the API) and `volunteer_profiles.signed_in_name`; the RPCs `vitally_prepare_account`, `vitally_record_account`, `vitally_deactivate_account`, `vitally_reactivate_account`, `vitally_client_invitations`, `vitally_cancel_invitation`, `vitally_expire_invitations`, `vitally_complete_site_check` and `vitally_activate_client_account`; and `vitally_my_clearance` with `siteCheck` |
 | `048_closed_lines_after_filing.sql` | Hand-written: a close after a filing says what was filed (issue #170, change `fix-closed-lines-after-filing`). `vitally_private.return_outcome` (one return: accepted, waiting, on paper or not filed) and a five-argument `vitally_private.closed_line` (the reason and each return's method and result) that replaces 036's `closed_line(text)`, which is dropped; `act_close_case` passes the case's filing columns and words the staff notice for a close after a filing; `vitally_close_unsigned` passes them too. No table, policy, RPC signature or Realtime change ([closing after a filing](#closing-after-a-filing)) |
-| `049_posted_updates.sql` | Hand-written: posted updates ([below](#posted-updates)). The tables `posted_updates` and `update_reads`, written only through the RPCs; the live audience `vitally_private.audience_member` and the policy helper `vitally_policy.in_update_audience`; two SELECT policies on `posted_updates` (the audience reads an unpublished update only for `vitally_policy.unpublished_read_window()`, 10 minutes, after Unpublish) and none on `update_reads`; the RPCs `vitally_save_update` and `vitally_update_action` (ceiling admins, with receipts), `vitally_mark_updates` and `vitally_my_updates` (every staff member, cleared or not) and `vitally_posted_updates` (ceiling admins); `posted_updates` joins the Realtime publication and `update_reads` does not. No clearance check: an update holds no case data |
+| `049_posted_updates.sql` | Hand-written: posted updates ([below](#posted-updates)). The tables `posted_updates` and `update_reads`, written only through the RPCs; the live audience `vitally_private.audience_member` and the policy helper `vitally_policy.in_update_audience`; two SELECT policies on `posted_updates` (the audience reads an unpublished update only for `vitally_policy.unpublished_read_window()`, 10 minutes, after Unpublish) and none on `update_reads`; the RPCs `vitally_save_update` and `vitally_update_action` (workspace admins, with receipts), `vitally_mark_updates` and `vitally_my_updates` (every staff member, cleared or not) and `vitally_posted_updates` (workspace admins); `posted_updates` joins the Realtime publication and `update_reads` does not. No clearance check: an update holds no case data |
 | `050_hidden_household_rows.sql` | Hand-written: `vitally_private.household_rows(version, answers)`, the number of household rows the case shows, and `act_save_preparer_fields` re-created from 039 to use it (#175) |
 | `051_case_labels.sql` | Hand-written: case labels ([below](#case-labels)). The tables `case_labels` (a workspace's labels: name trimmed of spaces, tabs and line breaks, 1 to 24 characters on one line, unique ignoring case, one of six colors, its own `revision`) and `case_label_links` (which labels a case carries; a link is switched off, never deleted), both staff-only and cleared-gated, with no write grant for a browser role, no grant at all for `service_role` (as on 049's tables), and both in the Realtime publication; the trigger `vitally_private.add_starter_labels` on `workspaces` (City Tax, MFS and Multi-state for each new workspace) and a one-time backfill for the existing ones; `vitally_private.check_label`; and the two RPCs `vitally_save_label` and `vitally_set_case_label`, which write the case events `ADD_CASE_LABEL` and `REMOVE_CASE_LABEL`. It redefines no earlier function and leaves `cases.revision` and `updated_at` alone |
+| `052_season_settings.sql` | Hand-written: Season settings and site coordinators (change `add-season-settings`; [below](#season-settings-and-site-coordinators)). A guard refuses with `VT008` if the recompute would change anyone's admin: an active staff member holds `admin` in `people.capabilities` without the Admin role this season, or someone with a sign-in has the Admin role without `admin` ([setup](../setup.md#052s-guard)); the snapshot `vitally_private.capabilities_before_052` (dropped by 055); `people.capabilities` becomes a mirror of this season's roles; `accounts.is_site_coordinator`, the audit table `site_coordinator_changes` and `vitally_set_site_coordinator`; `season_settings` with `vitally_season_settings` and `vitally_save_season_settings`; `is_workspace_admin` and `vitally_my_clearance` (`isAdmin`, `isSiteCoordinator`); `can_be_default_followup`; `add_staff_member` without capabilities. It marks nobody as a site coordinator |
+| `053_clearance_uploads.sql` | Hand-written: clearance uploads (change `add-clearance-uploads`; [below](#clearance-uploads)). `roster_entries.form_13615_sent_at` and `photo_id_sent_at`; the RPCs `vitally_mark_upload_sent` and `vitally_mark_upload_reviewed` (receipts `MARK_UPLOAD_SENT` and `MARK_UPLOAD_REVIEWED`); `vitally_save_volunteer` re-created from 052 to clear the sent dates when it acts on them; `vitally_my_clearance` re-created from 052 with `sentAt`, `uploadUrl` and empty `capabilities` when not cleared. No backfill: existing rows start null |
+| `054_return_to_signing_exit_forms.sql` | Hand-written: the staff-only `return_to_signing_exit_forms` table (the corrected Exit Form values entered at Return to signing; select for cleared staff only, no write grant for a browser role, no grant at all for `service_role`, as on 049's and 051's tables); `check_payload` accepts optional `exitForm` and `remarks` on `RETURN_TO_SIGNING`; `act_return_to_signing` stores them and puts `exitFormId` in the event's detail. `apply_fixture_scenario` is not touched: 040 dropped it |
+| `055_start_next_season.sql` | Hand-written: Start next season (change `add-start-next-season`; [below](#start-next-season)). `lock_case` and `vitally_assistance_action` refuse a write to a past-season case (`VT004` `INVALID_TRANSITION`, detail `PAST_SEASON`); `open_work` counts only current-season cases; drops `vitally_private.capabilities_before_052`; the table `season_starts`; the RPC `vitally_start_next_season` |
+| `056_onedrive_client_documents.sql` | Hand-written: client documents through the OneDrive link (change `add-client-documents-onedrive`, #157). The RPC `vitally_client_documents_link` returns only the workspace's client documents upload link to a signed-in member (never the certificate / photo ID link); a client may report a document as sent only when that link is set, and only staff can mark it received or verified; `check_payload`, `receive_document`, `act_respond_document`, `act_set_document_card` and `act_record_document_response` re-created from their latest definitions |
+| `057_my_profile.sql` | Hand-written: My profile (change `add-my-profile`; [below](#my-profile)). `roster_entries.form_13615_reviewed_at`, `form_13615_review_reason`, `photo_id_reviewed_at` and `photo_id_review_reason` (each pair both null or both set, a reason of 1 to 120 characters), and `volunteer_profiles.usual_days`; `vitally_my_clearance` re-created from 053 with `reviewedAt` and `reviewReason` on the two document items and `uploadUrl` null while the site check is owed; `vitally_mark_upload_sent` re-created (sending again clears the reviewed pair); `vitally_save_volunteer` re-created to accept `usualDays` and clear the reviewed pairs with the sent dates; `vitally_mark_upload_reviewed` now takes a required reason (the four-argument version is dropped); the new RPCs `vitally_my_profile` and `vitally_save_my_profile` |
 **Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
 never edit an applied one.** The build writes a file only when the hash differs from the newest
 catalogue migration's. The hash covers the catalogue and `LOADER_VERSION` in
@@ -126,17 +132,20 @@ do not copy them from older files:
 | Function | Current definition |
 | --- | --- |
 | `vitally_private.return_outcome`, `closed_line`, `act_close_case`, `public.vitally_close_unsigned` | `048_closed_lines_after_filing.sql` |
-| `vitally_private.check_payload`, `check_operation_authority`, `act_assign_case`, and the RPC `public.vitally_apply_action` | `046_volunteer_workload.sql` |
+| `vitally_private.check_operation_authority`, `act_assign_case`, and the RPC `public.vitally_apply_action` | `046_volunteer_workload.sql` |
+| `vitally_private.check_payload`, `receive_document`, `act_respond_document`, `act_set_document_card`, `act_record_document_response`, and the RPC `public.vitally_client_documents_link` | `056_onedrive_client_documents.sql` |
 | `vitally_private.household_rows`, `act_save_preparer_fields` | `050_hidden_household_rows.sql` |
 | `vitally_private.check_preparer_fields` | `039_preparer_shaded_fields.sql` |
-| `vitally_private.acting_person`, `contact_person`, `require_cleared`, `open_work`, the role helpers, `role_certificates_check`, `vitally_policy.cleared_workspace_id`, and the RPCs `public.vitally_assistance_action`, `vitally_create_case`, `vitally_log_contact`, `vitally_edit_contact`, `vitally_save_volunteer`, `vitally_my_clearance` | `045_volunteer_clearance.sql` |
+| `vitally_private.lock_case`, `open_work`, and the RPCs `public.vitally_assistance_action`, `vitally_start_next_season` | `055_start_next_season.sql` |
+| `vitally_private.acting_person`, `contact_person`, `require_cleared`, the role helpers, `role_certificates_check`, `vitally_policy.cleared_workspace_id`, and the RPCs `public.vitally_create_case`, `vitally_log_contact`, `vitally_edit_contact` | `045_volunteer_clearance.sql` |
 | `vitally_private.audience_member`, `vitally_policy.in_update_audience`, `vitally_policy.unpublished_read_window`, and the RPCs `public.vitally_save_update`, `vitally_update_action`, `vitally_mark_updates`, `vitally_my_updates`, `vitally_posted_updates` | `049_posted_updates.sql` |
+| `public.vitally_save_volunteer`, `vitally_my_clearance`, `vitally_mark_upload_sent`, `vitally_mark_upload_reviewed` (five arguments), and the RPCs `vitally_my_profile`, `vitally_save_my_profile` | `057_my_profile.sql` (053 introduced the first four; see [My profile](#my-profile)) |
 | `vitally_private.add_starter_labels`, `check_label`, and the RPCs `public.vitally_save_label`, `vitally_set_case_label` | `051_case_labels.sql` |
 | `vitally_private.add_staff_member`, `vitally_policy.is_workspace_admin` | `044_volunteer_roster_records.sql` |
-| `vitally_private.lock_case`, `lock_assistance_item`, `initialize_workspace` | `043_remove_presenter_access.sql` |
+| `vitally_private.lock_assistance_item`, `initialize_workspace` | `043_remove_presenter_access.sql` |
 | `vitally_private.check_staff_links`, `set_default_followup` | `038_staff_identity.sql` |
 | `vitally_private.filing_notes_append_only`, `reserve_receipt` | `040_remove_sample_case_tools.sql` |
-| `vitally_private.check_authority`, `receive_document`, `act_verify_document` | `036_hold_and_closing.sql` |
+| `vitally_private.check_authority`, `act_verify_document` | `036_hold_and_closing.sql` |
 | `vitally_private.act_verify_intake` | `034_screening_checks.sql` |
 | `vitally_private.act_submit_review`, `act_resubmit_review`, `act_approve_review` | `033_review_questionnaires.sql` |
 | `vitally_private.act_resolve_followup` | `041_resolve_go_over_during_hold.sql` |
@@ -149,7 +158,7 @@ do not copy them from older files:
 | `vitally_private.act_submit`, `act_start_screening` | `032_screening_and_efiling_stages.sql` |
 | `vitally_private.act_request_documents_at_intake`, `act_put_on_hold`, `act_resume_from_hold`, `act_withdraw` | `036_hold_and_closing.sql` |
 | `vitally_private.act_mark_ready_to_efile`, `act_mark_efiled`, `act_record_filing_result`, `filing_line`, `efiled_line` | `037_adjust_filing_to_pcdc.sql` |
-| `vitally_private.act_return_to_signing` | `035_post_efiling_stages.sql` |
+| `vitally_private.act_return_to_signing` | `054_return_to_signing_exit_forms.sql` |
 | `vitally_private.load_intake_catalogue`, `check_intake_value`, `intake_holds`, `intake_missing` | `011_intake_v2.sql` |
 | `vitally_private.works_on_case` | `013_contact_materials.sql` |
 | `public.vitally_assistance_action` | `038_staff_identity.sql` |
@@ -164,7 +173,7 @@ grep -n -E "^create (or replace )?function" supabase/migrations/*.sql
 
 Two schemas:
 
-- **`public`**: the application tables and the twenty-four browser-callable functions.
+- **`public`**: the application tables and the thirty-four browser-callable functions.
 - **`vitally_private`**: helper functions, the migration ledger, and tables browsers must never
   reach. Every function here is `SECURITY DEFINER` with `search_path=''`, and `EXECUTE` is revoked
   from every role, including `service_role`.
@@ -212,7 +221,7 @@ erDiagram
 | `admin_followups` | An office task to contact a client: about a document request, or (033) to go over the return with the client | `purpose` (`request_documents`, `go_over_return` or (036) `withdrawal_notice`, the contact log's keys; a `withdrawal_notice` has no request, and tells the office to stop the preparer's or reviewer's work); `request_id` is set for `request_documents` and null for the other two; `status`: `open`, `resolved`, `cancelled`; at most one open task per request; resolution outcome `reached` or `no_further_contact` |
 | `contact_attempts` | Old call attempts on a follow-up | Empty since 031 moved its rows into `contact_log`; kept until a later cleanup. Nothing reads or writes it |
 | `volunteer_profiles` | A volunteer's email, phone and availability (044) | Primary key `(workspace_id, person_id)`; `email` (stored trimmed and lower-case, unique per workspace), `phone`, `works` (`on_site`, `remote`, `on_site_and_remote`), `languages` (`english`, `mandarin`, `cantonese`, `other`), `other_language` (set exactly when `other` is chosen), `revision` (a stale Edit gets `CONFLICT`). Admin-only select; written only by `vitally_save_volunteer`; not published |
-| `roster_entries` | A volunteer's roles for a season (044) | Primary key `(workspace_id, person_id, season)`; `roles` from `greeter`, `intaker`, `preparer`, `reviewer`, `admin`; `added_by_person_id`; `is_new` and `photo_id_checked_at` (045). A role needs its confirmed certificates (045, [roster clearance](#roster-clearance)). Admin-only select; not published |
+| `roster_entries` | A volunteer's roles for a season (044) | Primary key `(workspace_id, person_id, season)`; `roles` from `greeter`, `intaker`, `preparer`, `reviewer`, `admin`; `added_by_person_id`; `is_new` and `photo_id_checked_at` (045); `form_13615_sent_at` and `photo_id_sent_at` (053; set when the volunteer says they sent the document, null when nothing waits for review). A role needs its confirmed certificates (045, [roster clearance](#roster-clearance)). Admin-only select; not published |
 | `certificates` | The certificates an admin has confirmed for a roster entry (044) | One row per certificate per entry, from `vsc`, `itqr`, `sc`, `basic`, `advanced`; `status` (only `confirmed` is written), `confirmed_at`, `confirmed_by_person_id`. Unticking deletes the row. Admin-only select; not published |
 | `posted_updates` | An update an admin posts to volunteers (049) | `kind` (`irs_policy`, `office_notice`), `title` (1 to 120 characters), `message` (1 to 2000), `irs_link` (an https link on irs.gov, IRS policy updates only), `audience` (`everyone` or `roles`) with `audience_roles`, `keep_top_until` (a New York date), `ask_confirm`, `status` (`draft`, `posted`, `unpublished`), `created_by_person_id`, `posted_by_person_id`, `posted_at`, `edited_at`, `unpublished_at`, `revision`. Written only by `vitally_save_update` and `vitally_update_action`; published to Realtime |
 | `update_reads` | Who has read and confirmed each update (049) | Primary key `(update_id, person_id)`; `read_at` (the first read), `confirmed_at` (the first confirmation). Written only by `vitally_mark_updates`; Ask everyone to read it again deletes the update's rows. No policy, so browsers read none of it directly; not published |
@@ -229,10 +238,11 @@ erDiagram
 | `filing_attempts` | One row per filing of a case (035) | Unique `(case_id, attempt)`; `filed_at`, `filed_by`. Staff-only (013's presenter-only select); written only by MARK_EFILED; not in the Realtime publication, so a `cases` update triggers the staff reload |
 | `filing_returns` | The federal and the state return of one attempt (035) | Unique `(case_id, attempt, return_kind)`; `method`, `result`, `answered_on` (the acknowledgment date; null for a return given to the client), `reject_code` (1–40 characters), `recorded_by`. Staff-only; written by MARK_EFILED and RECORD_FILING_RESULT; not in the publication. A reject code never reaches a client |
 | `filing_notes` | What the office fixed after a rejection (035) | `case_id`, `attempt`, `note` (1–1000), `recorded_by`, `recorded_at`. Staff-only, **append-only**: a `before update or delete` trigger refuses any change, the service role included. One exception: a note goes with its whole case (a case or workspace delete). Written by RECORD_FILING_RESULT's `fixNote`; not in the publication |
-| `case_document_cards` | The state of a version-2 case's document cards | Primary key `(case_id, slot_id)`; `status` is `later`, `none`, or null for "Not done"; `group_override` is null or `needed` (staff moved a Maybe card up). One row per card someone has marked; written only by SET_DOCUMENT_CARD and SET_DOCUMENT_GROUP; never deleted. **No person column**: the client reads these rows and Realtime sends them whole; who changed a card is in `case_events`. Published to Realtime (insert and update) |
+| `case_document_cards` | The state of a version-2 case's document cards | Primary key `(case_id, slot_id)`; `status` is `later`, `none`, `sent` (the client reported a OneDrive upload), `received`, `verified` (staff only, 056), or null for "Not done"; `reported_at` (056) is when the client last reported the upload, kept through staff marks and undos and cleared when the status leaves `sent` / `received` / `verified`; `group_override` is null or `needed` (staff moved a Maybe card up). One row per card someone has marked; written only by SET_DOCUMENT_CARD and SET_DOCUMENT_GROUP; never deleted. **No person column**: the client reads these rows and Realtime sends them whole; who changed a card is in `case_events`. Published to Realtime (insert and update) |
 | `vitally_private.intake_fields` | The version-2 question catalogue | Private; one row per question and per household sub-field (`hh.dob`), with type, options, required flag and show-if rule. Loaded (replaced whole) by each catalogue migration through `load_intake_catalogue`; read by the server-side answer checks. It holds no wording |
 | `vitally_private.intake_substeps` | The version-2 sub-steps, in order | Private; one row per catalogue sub-step (id, step, position), loaded with the catalogue through 015's `load_intake_catalogue`; read by SAVE_ANSWERS' `visited` check |
 | `assistance_items` | Requests for help with forms, beside the tax workflow | Own `revision`; `status`: `open` → `assigned` → `resolved`; optional `case_id`; `language`, `contact_preference` |
+| `season_starts` | One row per Start next season (055) | `from_season`, `to_season` (always `from_season` + 1), `started_by_person_id`, `started_at`, `default_followup_from` and `default_followup_to` (both null when the default follow-up person was kept), `deactivated_count`. Row security on, no policy, no grant to signed-in users and none for `service_role` (as on 049's, 051's and 054's tables); written only by `vitally_start_next_season`; not published |
 | `vitally_private.schema_migrations` | Migration ledger | `name`, `digest` (SHA-256 of the file) |
 | `vitally_private.test_workspaces` | Workspaces created by test runs | Test only |
 
@@ -295,8 +305,12 @@ policy and `vitally_private.lock_case` (which applies the same rule to writes) i
 
 ## The action API
 
-Browsers can call exactly twenty-four functions. Each runs as its owner (`SECURITY DEFINER`), checks the
-caller itself, and returns a JSON receipt.
+Browsers can call exactly thirty-four functions. Each runs as its owner (`SECURITY DEFINER`), checks the
+caller itself, and returns a JSON receipt. The table below lists the case, Roster, clearance, update and label
+functions. The account functions (047, [migrations](#migrations)) and Season settings' four
+(`vitally_season_settings`, `vitally_save_season_settings`, `vitally_set_site_coordinator`,
+`vitally_set_site_number`; 052, [below](#season-settings-and-site-coordinators)) are described where
+they belong.
 
 | Function | Purpose | Returns |
 | --- | --- | --- |
@@ -306,13 +320,17 @@ caller itself, and returns a JSON receipt.
 | `vitally_log_contact(p_action_id uuid, p_case_id uuid, p_followup_id uuid, p_entry jsonb)` | Log a contact on a case, optionally linked to an open follow-up task | `{actionId, contactId, caseId, revision}` |
 | `vitally_edit_contact(p_action_id uuid, p_contact_id uuid, p_expected_revision bigint, p_entry jsonb)` | Edit a logged contact; appends a version | `{actionId, contactId, caseId, revision}` |
 | `vitally_close_unsigned(p_action_id uuid, p_cases jsonb, p_confirmed boolean)` | Season end (037): close the listed signing cases as Dismissed, all or nothing ([below](#season-end-close)) | `{actionId, cases: [{caseId, reference, revision}]}` |
-| `vitally_save_volunteer(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_volunteer jsonb)` | Add or edit a volunteer on the Roster (044; admins, on the ceiling; 045 adds role needs, the photo ID check and the open-work rule) | `{actionId, personId, revision}` |
-| `vitally_my_clearance()` | The caller's own clearance (045, [below](#roster-clearance)) | `{cleared, missing, capabilities, isAdmin, siteCoordinatorName}` |
-| `vitally_save_update(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_update jsonb)` | Save a draft, post it, or edit a draft, a posted update or an unpublished one (049; ceiling admins). An unpublished update stays unpublished, with its reads and `unpublished_at`; `post` changes nothing there and `askAgain` is refused (`VT007`, detail `askAgain`). `askAgain` on a posted update clears every read and confirmation | `{actionId, updateId, revision, status}` |
-| `vitally_update_action(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_type text)` | `POST` a draft, `UNPUBLISH` a posted update, or `DELETE` a draft (049; ceiling admins). A replayed delete answers `deleted` | `{actionId, updateId, revision, status}` |
+| `vitally_save_volunteer(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_volunteer jsonb)` | Add or edit a volunteer on the Roster (044; workspace admins, that is a site coordinator or the Admin role this season; only a site coordinator changes the Admin role; 045 adds role needs, the photo ID check and the open-work rule) | `{actionId, personId, revision}` |
+| `vitally_my_clearance()` | The caller's own clearance (045, [below](#roster-clearance); 053 adds the sent dates, the upload link and empty capabilities when not cleared; 057 adds `reviewedAt` and `reviewReason` and nulls the link while the site check is owed) | `{cleared, missing, capabilities, isAdmin, isSiteCoordinator, siteCoordinatorName, siteCheck, uploadUrl}`; `missing` items for `form13615` and `photoId` carry `sentAt` (053), `reviewedAt` and `reviewReason` (057); `uploadUrl` is null while the site check is owed (057) |
+| `vitally_mark_upload_sent(p_action_id uuid, p_document text)` | The caller says they sent their own `form13615` or `photoId` (053; any staff member with a current-season entry, cleared or not; [below](#clearance-uploads)) | `{actionId, document, sentAt}` |
+| `vitally_mark_upload_reviewed(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_document text, p_reason text)` | A workspace admin clears a volunteer's sent date and records why (053; 057 adds the required reason; [below](#clearance-uploads)) | `{actionId, personId, revision}` |
+| `vitally_my_profile()` | The caller's own profile (057; any staff member with a person and profile row, cleared or not, once the site check is passed: `FORBIDDEN` while the account is `invited`; [below](#my-profile)) | `{personId, name, email, phone, works, languages, otherLanguage, usualDays, revision, accountStatus, roles, certificates, form13615, uploadUrl, siteCoordinatorName}` |
+| `vitally_save_my_profile(p_action_id uuid, p_expected_revision bigint, p_profile jsonb)` | The caller saves their own name, phone, works, languages, other language and usual days (057; `FORBIDDEN` while the account is `invited`; [below](#my-profile)) | `{actionId, personId, revision}` |
+| `vitally_save_update(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_update jsonb)` | Save a draft, post it, or edit a draft, a posted update or an unpublished one (049; workspace admins). An unpublished update stays unpublished, with its reads and `unpublished_at`; `post` changes nothing there and `askAgain` is refused (`VT007`, detail `askAgain`). `askAgain` on a posted update clears every read and confirmation | `{actionId, updateId, revision, status}` |
+| `vitally_update_action(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_type text)` | `POST` a draft, `UNPUBLISH` a posted update, or `DELETE` a draft (049; workspace admins). A replayed delete answers `deleted` | `{actionId, updateId, revision, status}` |
 | `vitally_mark_updates(p_update_ids uuid[], p_confirm boolean)` | Record that the caller read up to 200 updates in their feed, and with `p_confirm` that they confirmed them (049; any staff member). No receipt: a repeat changes nothing | `{marked}` |
 | `vitally_my_updates()` | The caller's feed, pinned first and then newest first (049; any staff member) | `{items, unread}` |
-| `vitally_posted_updates()` | Every update in the workspace, with its live audience and counts (049; ceiling admins) | `{updates}` |
+| `vitally_posted_updates()` | Every update in the workspace, with its live audience and counts (049; workspace admins) | `{updates}` |
 | `vitally_save_label(p_action_id uuid, p_label_id uuid, p_expected_revision bigint, p_label jsonb)` | Create or edit a case label (051; admins only; `p_label` is `{name, color}`; no id and no revision creates, an id with its revision edits) ([below](#case-labels)) | `{actionId, labelId, revision}` |
 | `vitally_set_case_label(p_action_id uuid, p_case_id uuid, p_label_id uuid, p_on boolean)` | Put a label on a case or take it off (051; an admin or follow-up holder, or the case's preparer or reviewer) | `{actionId, caseId, labelId, on}` |
 
@@ -321,7 +339,7 @@ None of them takes a person parameter (043 removed `p_person_id`). The database 
 the caller acts as ([below](#who-is-acting)).
 
 The exact signatures are pinned by a test ([`tests/support/rpc-signatures.mjs`](../../tests/support/rpc-signatures.mjs)),
-so adding a twenty-fifth function or changing an argument fails the database suite until the list is
+so adding a thirty-fifth function or changing an argument fails the database suite until the list is
 updated.
 
 ### Who is acting
@@ -349,18 +367,22 @@ member can never be saved (`VT007`).
 **Creating staff.** Two private functions, run only by the roster command's connection inside its
 transaction (no browser role may execute them):
 
-- `vitally_private.add_staff_member(workspace, user, person_key, name, capabilities)` inserts the
-  `staff` membership and the linked person. Repeating identical values changes nothing and returns
-  the existing person, so a roster re-run succeeds. It refuses (`VT007`) a capability outside the known set, capabilities with `followup` but not `admin` (042), different values for an existing key or
-  account, and an account with a membership in another workspace.
+- `vitally_private.add_staff_member(p_workspace_id, p_user_id, p_person_key, p_name)` inserts the
+  `staff` membership and the linked person. Since 052 it takes no capabilities: they come from the
+  person's roles this season (`people.capabilities` mirrors them). Repeating identical values changes
+  nothing and returns the existing person, so a roster re-run succeeds. It refuses (`VT007`) a
+  different name for an existing key or account, and an account with a membership in another
+  workspace.
 - `vitally_private.set_default_followup(workspace, person_key)` moves
-  `workspaces.default_followup_person_id`, and refuses a person who is not a staff member's or lacks
-  `followup`. Open follow-ups keep their assignee; new ones go to the new default.
+  `workspaces.default_followup_person_id`, and refuses a person who is not a staff member's. Who may be
+  the default is decided by `vitally_private.can_be_default_followup` (052): a person with a sign-in
+  who is a site coordinator, or whose capabilities include `followup`. Open follow-ups keep their
+  assignee; new ones go to the new default.
 
 `initialize_workspace(workspace, applicants)` (043) creates the workspace and the applicant
 memberships only. A new workspace has no people and no default follow-up person until the roster
 adds staff and calls `set_default_followup`; on a re-run, an existing workspace's default must still
-hold `followup`.
+pass `can_be_default_followup`.
 
 ### Roster clearance
 
@@ -382,16 +404,143 @@ and the behaviour in the canonical spec
   `acting_person`, before any lookup or receipt: an uncleared staff member gets `VT009`
   `NOT_CLEARED`, a replay included. A client is not checked.
 - **Effective capabilities.** The caller acts with the capabilities of their current-season roles
-  that `people.capabilities` (the ceiling) also allows (`effective_capabilities`). The admin check of
-  `vitally_save_volunteer` and checks of another person's capability (the follow-up assignee, the
-  default follow-up person) stay on the ceiling.
+  (`effective_capabilities`). Since 052 there is no ceiling to intersect with: `people.capabilities`
+  mirrors the roles (see [Season settings and site coordinators](#season-settings-and-site-coordinators)).
 - **`vitally_my_clearance()`** answers for the caller only: `cleared`, what is `missing` (the Form
   13615, the photo ID check, each role's missing certificates), the effective `capabilities`,
-  `isAdmin` (the ceiling) and `siteCoordinatorName`.
+  `isAdmin` (workspace admin, since 052), `isSiteCoordinator`, `siteCoordinatorName` and
+  `siteCheck` (true while the caller's account is still `invited`). A rostered
+  site coordinator also needs the SC certificate to be cleared. Since 053 the `form13615` and
+  `photoId` missing items carry `sentAt`, there is a top-level `uploadUrl`, and `capabilities` is
+  `[]` whenever `cleared` is false (#193).
+
+### Season settings and site coordinators
+
+Migration 052 (change `add-season-settings`; the behaviour is in the change's specs, and in
+`openspec/specs/` once archived) does five things.
+
+- **Capabilities mirror roles.** `people.capabilities` is no longer a separate ceiling. A trigger
+  on `people` sets it from this season's Roster roles (`role_capabilities`) for a person with a
+  sign-in, and to empty for one without, so a direct write to the column is replaced. A trigger on
+  `roster_entries` recomputes the person when roles or the season change. The column and 042's
+  `followup` needs `admin` check stay; nothing but the mirror writes it. The old ceiling is gone:
+  052 copied it into `vitally_private.capabilities_before_052` for rollback, and 055 ([Start next
+  season](#start-next-season)) dropped that table, so the old ceiling cannot be restored.
+- **Workspace admin.** `vitally_policy.is_workspace_admin` is true for a staff member with an active
+  account who is a site coordinator or holds the Admin role this season. There is no clearance
+  check, so an uncleared admin can still reach the Roster and tick their own certificates.
+- **Site coordinators.** `accounts.is_site_coordinator` is changed only by
+  `vitally_set_site_coordinator` (site coordinators only; refuses the last one and the default
+  follow-up person), and by the roster command's `siteCoordinator: true`, which only grants. Each
+  change is a row in `site_coordinator_changes`. Only a site coordinator changes the Admin role of
+  another volunteer or edits Season settings. Deactivating a site coordinator needs a site coordinator (`FORBIDDEN` otherwise) and clears the flag.
+- **Season settings.** `season_settings` holds one row per workspace, kept across seasons: the
+  certificate upload link and the client documents link (`https://` or empty). The site's SIDN stays
+  in `vitally_private.site_numbers`, where 047 put it, and is set through the same screen. Neither
+  table has grants for signed-in users; the RPCs answer.
+- **Default follow-up person.** `vitally_private.can_be_default_followup` accepts a site coordinator
+  with a sign-in or a person with `followup` this season, in `set_default_followup`, the
+  `initialize_workspace` re-run check, the case RPCs' assignee checks and `open_work`.
+
+A person with no sign-in has no capabilities and is hidden from non-admin staff.
+
+### Start next season
+
+Migration 055 (change `add-start-next-season`; the behaviour is in the change's specs, and in
+`openspec/specs/` once archived) lets a site coordinator move the workspace to the next season from
+Season settings.
+
+- **`vitally_start_next_season(p_action_id, p_expected_season, p_typed_year)`** is for a site
+  coordinator only (`FORBIDDEN`, no receipt). A repeated action id returns the stored answer. A
+  season that already moved is `CONFLICT`; a typed year that is not the next season is
+  `VALIDATION`. While work is open it is `VT004` with message `SEASON_NOT_FINISHED` and its counts
+  as JSON in the detail: `openCases` (any stage but `draft`, `accepted` and `closed`),
+  `openFollowups`, `claimedHelp` and `unclaimedHelpOnCases`.
+- **Locks, in order:** the workspace advisory lock (which removing a site coordinator and Deactivate
+  also take). Then the caller is checked again: one removed or deactivated while waiting is
+  `FORBIDDEN`, with no receipt. Then the membership rows it will deactivate (`for update`, in user
+  order: staff whose account is invited or active and not a site coordinator's). Site coordinators'
+  memberships are not locked, so a second site coordinator's start gets `CONFLICT`, not a
+  deadlock. Then `cases`, `admin_followups` and `assistance_items` in exclusive mode. Then the
+  workspace row (`for no key update`). A staff write takes `for share` on its own membership before
+  its case row, so locking memberships before the tables keeps the two from deadlocking. A staff
+  write that comes after the start is refused once it commits: a deactivated person's by the
+  membership check, a site coordinator's as `PAST_SEASON`.
+- **What a start does,** in one transaction: the default follow-up person moves to the starter
+  unless a site coordinator; `workspaces.current_season` goes up by one; the starter gets a
+  new-season roster entry with no roles; every other invited or active staff account that isn't a
+  site coordinator's is deactivated (no email); the capability mirror is recomputed; one
+  `season_starts` row is written.
+- **Past seasons are read-only.** `lock_case` refuses any write to a case whose season is set and
+  is not the current one (`VT004`, detail `PAST_SEASON`), so every case action, the season-end
+  close, contact logging and case labels are covered; `vitally_assistance_action` does the same for
+  a help request that names such a case. A draft has no season, so it stays writable. Reads are
+  unchanged.
+- **Open work is this season's.** `open_work` counts only current-season cases (and cases with no
+  season yet), so a past season's cases never block a role change or a deactivation.
+
+### Clearance uploads
+
+Migration 053 (change `add-clearance-uploads`; the behaviour is in the change's specs, and in
+`openspec/specs/` once archived) lets a volunteer say they sent their signed Form 13615 or photo ID
+through the certificate upload link, and lets an admin see and clear what is waiting. ViTally stores
+no file, only a date.
+
+- **Two dates.** `roster_entries.form_13615_sent_at` and `photo_id_sent_at`: null means nothing is
+  waiting, a value means "to review". They sit on the current-season entry, so only workspace admins
+  read them (the 044 policy); `roster_entries` is not published to Realtime.
+- **`vitally_mark_upload_sent`** acts only on the caller (`require_membership`; a client or a staff
+  caller with no person row gets `FORBIDDEN`), with no clearance check. The document is `form13615`
+  or `photoId`. `NO_ROSTER_ENTRY` and `PHOTO_ID_NOT_NEEDED` (the entry is not new, or its photo ID
+  is already checked) are `VT007` `VALIDATION` refusals. The receipt `MARK_UPLOAD_SENT` is reserved
+  before those entry checks, and a refusal rolls it back. It sets the column to `now()` (sending again
+  updates the date) and raises `volunteer_profiles.revision`, so an admin's Save from an older drawer gets
+  `CONFLICT` instead of silently clearing a date.
+- **`vitally_mark_upload_reviewed`** opens like `vitally_save_volunteer` (workspace admin, cleared or
+  not, else `FORBIDDEN`) and takes the same revision check (`NOT_FOUND`, `CONFLICT`). It clears the
+  column and raises the revision; with nothing waiting it writes nothing and returns the current
+  revision. The receipt is `MARK_UPLOAD_REVIEWED`. Since 057 it takes a fifth argument, a required reason ([My profile](#my-profile)); the
+  four-argument form above is dropped.
+- **`vitally_save_volunteer`** clears `form_13615_sent_at` when the roles change (as sets) or the
+  confirmed certificates change (including an uploaded certificate being confirmed), and `photo_id_sent_at` when the Photo ID check is newly set or New
+  is unticked. A save that changes neither leaves both dates. Its payload and other refusals are
+  unchanged.
+- **`vitally_my_clearance`** returns the workspace's `season_settings.certificate_upload_url` as
+  `uploadUrl` to any caller with a current-season entry (null otherwise), so a caller who cannot read
+  `season_settings` still gets the link.
+
+### My profile
+
+Migration 057 (change `add-my-profile`; the behaviour is in the change's specs, and in `openspec/specs/`
+once archived) lets any signed-in staff member read and edit their own details, and tells a volunteer why
+a document came back.
+
+- **`vitally_my_profile`** is a read for the caller alone (`require_membership`; a client, or a staff
+  caller with no person or profile row, gets `FORBIDDEN`, and so does a caller whose account is `invited`,
+  before any other check: an invitation sent to a mistyped email must not let a stranger read the
+  volunteer's details). It is not gated by clearance; only the screen
+  is. It returns the profile fields, `usualDays`, the profile `revision`, the account status, this
+  season's roles and confirmed certificates, the Form 13615 item (`sentAt`, `reviewedAt`,
+  `reviewReason`), the upload link and the site coordinator's name. `uploadUrl` follows
+  `vitally_my_clearance`: null with no current-season entry (the site check is already passed here).
+- **`vitally_save_my_profile`** writes only the caller's own `people.name` and `volunteer_profiles` row
+  (phone, works, languages, other language, usual days). It never writes email, roles, certificates, the
+  roster entry or another person. The payload has exactly those six keys and follows the field rules of
+  `vitally_save_volunteer` (`VT007` `VALIDATION`). It shares `volunteer_profiles.revision` with the
+  admin's Roster save, so a stale revision gets `CONFLICT`. The receipt is `SAVE_MY_PROFILE`. An
+  `invited` account is refused `FORBIDDEN` first, storing no receipt.
+- **A required reason.** `vitally_mark_upload_reviewed` now takes `p_reason` (1 to 120 characters after
+  trimming) and stores it with the time in the document's `*_reviewed_at` and `*_review_reason` pair. It
+  has five arguments, and 057 drops the four-argument version: a function left behind would still clear
+  a date with no reason. The admin check still comes first. Sending again (`vitally_mark_upload_sent`)
+  clears the pair, and so does an admin's save that clears the sent date, so a document shows a sent
+  date or a reason, never both. Only workspace admins read the new columns (the 044 policy).
+- **`volunteer_profiles.usual_days`** is a text array of `mon` to `sun`, no repeats; it is a habit, not
+  seasonal, so it is not on the roster entry.
 
 ### Posted updates
 
-Since 049 a ceiling admin posts IRS policy updates and office notices, and every staff member reads
+Since 049 a workspace admin (a site coordinator, or the Admin role this season) posts IRS policy updates and office notices, and every staff member reads
 the ones addressed to them. The behaviour is in the spec,
 [`openspec/specs/posted-updates/spec.md`](../../openspec/specs/posted-updates/spec.md).
 
@@ -550,6 +699,14 @@ admin-only actions and one submit rule shape the earlier stages:
 - `RETURN_TO_SIGNING` moves `rejected` to `review_approved`, and is refused until every return has
   an answer. The methods and results are kept: "returned to signing" is `review_approved` with
   `federal_method` set, so no preparation or review pass repeats and the client signs again.
+  Since 054 the action may also carry the corrected Exit Form values (`exitForm`, `remarks`), both
+  optional. When it does, `act_return_to_signing` inserts one row into
+  `public.return_to_signing_exit_forms` (`id`, `workspace_id`, `case_id`, `entered_by_person_id`,
+  `created_at`, `exit_form`, `remarks`) and records its id in the event's detail as
+  `{exitFormId}`; with neither, no row is written and the event has no `exitFormId`. The table is
+  staff-only: staff members cleared for the workspace and the case (the reviewer questionnaire's
+  gate) may select, no browser role may write, and the rows go with their case. A case may have
+  one row for each Return to signing; the Exit Form reads the one the latest event names.
 
 ## Action catalogue
 
@@ -586,7 +743,7 @@ shorthands in the table:
 | `MARK_READY_TO_EFILE` | Staff + `admin` person | `review_approved` | The approved review's contact step is `completed`, and no `go_over_return` follow-up is open (else `INVALID_TRANSITION`): it waits for the contact step and for the office's go-over | → `ready_to_efile` | Yes |
 | `MARK_EFILED` | Staff + `admin` person | `ready_to_efile` | Any of the four method pairs; a second filing takes exactly the rejected returns | Sets the methods, gives a paper return to the client (`given_to_client`), resets the outstanding e-filed results, adds a filing attempt; → `efiled`, or `accepted` when no e-filed return waits | Yes |
 | `RECORD_FILING_RESULT` | Staff + `admin` person | `efiled`; `rejected` while a return is waiting | Only waiting e-filed returns; `accepted` or `rejected` only; date not future and not before the filing; a reject code exactly when rejected | Saves results on `cases` and `filing_returns`, plus a `filing_notes` row for a fix note; → `rejected`, `accepted` or stays | Yes (per return; no code, no note) |
-| `RETURN_TO_SIGNING` | Staff + `admin` person | `rejected` | No return waiting | → `review_approved`; methods and results kept | Yes |
+| `RETURN_TO_SIGNING` | Staff + `admin` person | `rejected` | No return waiting | → `review_approved`; methods and results kept; corrected Exit Form values stored when sent (054) | Yes |
 | `REMIND` | Staff + `admin` person | `preparation_ready` with no preparer, or `review_ready` with no reviewer | | Sets `last_reminded_at` (no message is sent) | No |
 | `REQUEST_DOCUMENTS_AT_INTAKE` | Staff + `admin` person | `screening`, `preparation_ready` | | New `open` requests (1 to 5); → `awaiting_documents`; sets `documents_origin` | Yes (titles) |
 | `PUT_ON_HOLD` | Staff + `admin` person | `awaiting_documents`, `review_approved` | | → `on_hold`; sets `hold_origin`; the note is staff history only | Yes (no note, no phone) |
@@ -595,7 +752,7 @@ shorthands in the table:
 | `CLOSE_CASE` | Staff + `admin` person | `received` through `corrections_required` (`screening` included), `awaiting_documents`, `on_hold` (036), `rejected` (035), or an assisted `draft`; `review_approved` and `ready_to_efile` with reason `withdrawn` only (036) | | → `closed` with `closing_reason`; cancels open requests and tasks; any close before filing (withdrawn, or any reason from a signing hold) opens the TaxSlayer `withdrawal_notice` task | Yes (reason only) |
 | `UPDATE_CONTACT` | Owner on own draft; `followup` or `admin` person; a preparer or reviewer on their own case | Draft (owner); any (staff) | | Edits best time and note in `case_contacts`; never a phone | No |
 | `RECORD_MATERIALS` | Staff + person (same authority as above); no applicant | Any | | Replaces the set of materials received | No |
-| `SET_DOCUMENT_CARD` | Applicant owner, or staff + a person who works on the case (`works_on_case`, 018; never on a client's unsent draft) | Any but `closed` | | Upserts the card's `status` in `case_document_cards` (`not_done` stores null) | No |
+| `SET_DOCUMENT_CARD` | Applicant owner, or staff + a person who works on the case (`works_on_case`, 018; never on a client's unsent draft) | Any but `closed` | | Upserts the card's `status` in `case_document_cards` (`not_done` stores null). `sent` from a client needs the client documents link (056); `received` / `verified` are staff only, and a client can't change a card that has one | No |
 | `SET_DOCUMENT_GROUP` | Staff + a person who works on the case (`works_on_case`, 018; never on a client's unsent draft) | Any but `closed` | `maybe` only undoes a staff `needed` | Sets or clears the card's `group_override` | No |
 | `SAVE_PREPARER_FIELDS` | Staff + person (the person must have `prepare`, `INELIGIBLE` otherwise) | `preparing`, `corrections_required` | Current preparer; `basedOnVersion` equals the stored version (0 when there is no row), else `CONFLICT`; the year is before the season and a household row has a member | Replaces the whole set in `preparer_shaded_fields` and adds 1 to its version; the history lists the changed keys | No |
 | `ASSIGN_CASE` | Staff + `admin` person (046) | Preparer slot: `preparation_ready` with no preparer (Assign), or `preparing`, `corrections_required`, `review_ready`, `reviewing` (Reassign); reviewer slot: `review_ready` with no reviewer (Assign), or `reviewing` (Reassign) | The slot's holder must be `expectedHolderId` (null for an empty slot), else `CONFLICT` whatever the revision, so an Assign never becomes a Reassign; naming the current holder again is `INVALID_TRANSITION`; the person is in the case's workspace (`FORBIDDEN`), cleared and has the slot's effective capability, `prepare` or `review` (an uncleared or incapable person is `INELIGIBLE`; `NOT_CLEARED` is only for an uncleared caller); a reviewer must pass `require_review_eligibility` and a preparer must not be the case's reviewer (`SELF_REVIEW`) | Sets `preparer_id` or `reviewer_id`; for the preparer slot only, adds a `preparation_participants` row (if not there), so a former preparer can never review; Assign also moves the stage as the person's own claim does (→ `preparing` or `reviewing`) and, for a reviewer, opens an `active` review; Reassign keeps the stage and the case's work, and passes the active review to the new reviewer. Nothing else is written | Assign only (the claim's line); Reassign adds none. The case event carries `{slot, personId, previousPersonId}`; the history reads "assigned <person> as preparer\|reviewer (was <previous>)" |
@@ -611,7 +768,8 @@ Payload shapes are whitelisted exactly in `vitally_private.check_payload`; an ex
 | `VERIFY_INTAKE` | `{checks: {phone: true, documents: true, in_scope: true}}`, plus `identity: true` exactly when the case's `answers.service` is `online`; any other set is a `VALIDATION` error (034). The browser builds the set with `screeningCheckKeys(service)` |
 | `START_SCREENING`, `CLAIM_PREPARATION`, `CLAIM_REVIEW`, `REMIND` | `{}` |
 | `SUBMIT_REVIEW`, `APPROVE_REVIEW` | `{questionnaire}` (the preparer's or the reviewer's, see design D2 and D3) |
-| `MARK_READY_TO_EFILE`, `RETURN_TO_SIGNING` | `{confirmed: true}` |
+| `MARK_READY_TO_EFILE` | `{confirmed: true}` |
+| `RETURN_TO_SIGNING` | `{confirmed: true, exitForm?, remarks?}` (054); `exitForm` is the reviewer questionnaire's Exit Form object (`federal`, `state` and `local` groups, checked by `check_exit_form` as before, so no account or routing number is ever stored), `remarks` is at most 2000 characters. `{confirmed: true}` alone is still valid and behaves as before |
 | `MARK_EFILED` | `{confirmed: true, methods: {federal?, state?}}`, each `efile` or `paper` (035; all four pairs since 037) |
 | `RECORD_FILING_RESULT` | `{confirmed: true, results: {federal?: {result, date, code?}, state?: {…}}, fixNote? (≤1000)}` (035); `result` is `accepted` or `rejected` (037); `code` ≤40 characters |
 | `REQUEST_DOCUMENT` | `{title (≤120), message (≤2000)}` |

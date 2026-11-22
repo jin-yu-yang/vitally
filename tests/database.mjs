@@ -414,20 +414,32 @@ test("identity, references, ownership, and privileged setup on real Supabase", a
             [f.workspaceId],
           )
         ).rows;
+        // The capabilities are the mirror of each person's roles (052); the
+        // Reviewer role gives `prepare` too.
         assert.deepEqual(people, [
           {
             person_key: "intaker",
             user_id: f.intakerUserId,
-            capabilities: ["receive_documents", "assist"],
+            capabilities: ["assist", "receive_documents"],
           },
           { person_key: "preparer", user_id: f.preparerUserId, capabilities: ["prepare"] },
-          { person_key: "reviewer", user_id: f.reviewerUserId, capabilities: ["review"] },
+          { person_key: "reviewer", user_id: f.reviewerUserId, capabilities: ["prepare", "review"] },
           {
             person_key: "site_coordinator",
             user_id: f.siteCoordinatorUserId,
-            capabilities: ["admin", "followup", "assist", "receive_documents"],
+            capabilities: ["admin", "assist", "followup", "receive_documents"],
           },
         ]);
+        // The setup's site coordinator, and only them (design D9).
+        assert.deepEqual(
+          (
+            await f.sql(
+              "select p.person_key from public.accounts a join public.people p on p.workspace_id=a.workspace_id and p.id=a.person_id where a.workspace_id=$1 and a.is_site_coordinator order by 1",
+              [f.workspaceId],
+            )
+          ).rows,
+          [{ person_key: "site_coordinator" }],
+        );
         const workspace = (
           await f.sql(
             "select default_followup_person_id from public.workspaces where id=$1",

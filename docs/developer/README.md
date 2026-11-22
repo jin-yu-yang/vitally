@@ -71,7 +71,7 @@ src/
   app.mjs                  Bootstrap and DOM event wiring. No state, no HTML, no queries.
   controller.mjs           All browser state and every user-level operation.
   window-state.mjs         Per-window, per-user navigation memory (sessionStorage).
-  supabase-store.mjs       The only data adapter: reads, the 8 RPCs, Realtime, row mapping.
+  supabase-store.mjs       The only data adapter: reads, the thirty-four RPCs, Realtime, row mapping.
   auth.mjs                 Email one-time-code sign-in, resend cooldown, neutral messages.
   contact-log.mjs          The contact log's summary line, labels and New York time helpers.
   contracts.mjs            Shared vocabulary: stages, actions, error codes.
@@ -88,9 +88,12 @@ src/
   staff-views.mjs          Volunteer work board and case page; staff eligibility rules.
   admin-views.mjs          The office's case page; admin eligibility rules.
   office-views.mjs         The office's Follow-ups queue and Add a case.
+  role-gates.mjs           The dialog-to-capability table, and the "Your roles changed" line a form shows
+                           when its capability is gone while its text stays.
   pool-views.mjs           The office's case pool (every case, by phase).
   volunteer-views.mjs      The admin-only Volunteers Roster page and its Add / Edit drawer.
-  volunteer-roster.mjs     The Roster's pure logic: roles, certificates, search, form reading, validation.
+  volunteer-roster.mjs     The Roster's pure logic: roles, certificates, search, form reading, validation, the returning-volunteer picker, the CSV rows.
+  csv.mjs                  `toCsv`: the shared CSV encoder (UTF-8 BOM, RFC 4180 quoting, CR LF, formula guard).
   workload-views.mjs       The Volunteers > Workload tab (admins) and its Assign / Reassign drawer; the tab strip.
   volunteer-workload.mjs   The Workload's pure logic: per-volunteer counts, stalled cases, Unassigned, drawer candidates.
   update-views.mjs         The Notifications panel, the admin's Post an update screen, and their dialogs.
@@ -104,7 +107,7 @@ src/
   vendor/pdfjs.mjs, vendor/pdfjs-worker.mjs
                            Committed copy of pdfjs-dist's legacy build (the shaded-section editor).
 supabase/
-  migrations/001-050       The whole schema, RLS, business logic and intake catalogue, in order.
+  migrations/001-057       The whole schema, RLS, business logic and intake catalogue, in order.
   test-stack.config.example.toml   Reference config for the local test stack.
 tools/
   admin/                   Privileged tooling: target guards, migrate, roster, workspace setup.

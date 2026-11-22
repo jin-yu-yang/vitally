@@ -867,13 +867,17 @@ export const OFFICE_BOARD_HEADING = "Office queue";
 /**
  * The name a staff account's sidebar says it is signed in as (OpenSpec change
  * add-staff-identity): its account row reads "Signed in as" in a `<small>`
- * and the person's name in a `<strong>`. Null when there is no such row (a
+ * and the person's name in a `<strong>`, or, once cleared (add-my-profile),
+ * is the My profile link with the name as its second line. Null when there is no such row (a
  * no-access screen has none), so such a window can never pass for a staff
  * one.
  */
 export const readSignedInAs = (page) =>
   page.evaluate(() => {
     const row = document.querySelector(".sidebar-account .account-row");
+    // A cleared window's row is the My profile link: its second line is the name.
+    if (row?.querySelector(".account-link span")?.textContent.trim() === "My profile")
+      return row.querySelector(".account-link .account-name")?.textContent.trim() ?? "";
     if (row?.querySelector("small")?.textContent.trim() !== "Signed in as") return null;
     return row.querySelector("strong")?.textContent.trim() ?? "";
   });

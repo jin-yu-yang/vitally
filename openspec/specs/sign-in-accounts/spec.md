@@ -100,7 +100,7 @@ A volunteer's account SHALL NOT become `active` by use; only the site check make
 ### Requirement: A volunteer confirms the site at first sign-in
 A signed-in volunteer whose account is `invited` SHALL see "Confirm your site" instead of the setup screen or the work, and SHALL enter their name (required, at most 80 characters) and the site's SIDN. Client invitations SHALL have no site check.
 
-The SIDN SHALL be a workspace setting, `S` followed by eight digits, set by the developer with the roster command (`siteNumber`). No signed-in user SHALL read it. Spaces, hyphens and letter case in the number entered SHALL be ignored. The repository, the seed, the tests and screenshots SHALL use fictional numbers only.
+The SIDN SHALL be a workspace setting, `S` followed by eight digits, set by a site coordinator on Season settings (capability `season-settings`). No signed-in user SHALL read it. Spaces, hyphens and letter case in the number entered SHALL be ignored. The repository, the seed, the tests and screenshots SHALL use fictional numbers only.
 
 The check SHALL be a database RPC for the caller's own account. In order:
 - an invitation past its `expires_at` SHALL be cancelled, and the window SHALL say "This invitation was cancelled. Ask your site coordinator to invite you again.";
@@ -131,6 +131,10 @@ The signed-in name SHALL be stored on the admin-only volunteer profile, never on
 - **WHEN** an invited volunteer with roles and certificates has signed in but not passed the site check
 - **THEN** they read no cases, documents, document requests or client events, and every case action is refused with `NOT_CLEARED`
 
+#### Scenario: A SIDN changed on Season settings
+- **WHEN** a site coordinator changes the SIDN on Season settings, and an invited volunteer then enters the old number
+- **THEN** they see "That isn't this site's number.", and the new number passes
+
 ### Requirement: An admin can create a volunteer's account from the Roster
 The Roster Edit drawer SHALL have an Account section after the season section, showing the account status: "Not created", "Invited", "Active" or "Deactivated". With no account, it SHALL offer Create account.
 
@@ -140,21 +144,20 @@ Create account SHALL go through the `accounts` Edge Function, which SHALL:
 3. create a confirmed, password-free auth user for the volunteer's profile email, unless an auth user with that email exists with no account row, which SHALL be reused;
 4. in one database transaction:
    - create the volunteer's active `staff` membership;
-   - link the person to it;
-   - set the person's capabilities to `prepare`, `review`, `receive_documents` and `assist`;
+   - link the person to it, so their capabilities become those of their current-season roles (capability `volunteer-clearance`);
    - record the account as `invited` with `invited_at` and the admin who invited them;
    - store an action receipt;
 5. send the invitation email to that address.
 
-The invitation SHALL expire seven days after it is recorded. A volunteer with no roles or certificates SHALL be allowed an account. `admin` and `followup` SHALL NOT be granted by Create account. A repeated request with the same action id SHALL return the stored result and create nothing more.
+The invitation SHALL expire seven days after it is recorded. A volunteer with no roles or certificates SHALL be allowed an account. Create account SHALL NOT choose any capability: a volunteer gets `admin` and `followup` only from the Admin role, which only a site coordinator gives (capability `volunteer-roster`). A repeated request with the same action id SHALL return the stored result and create nothing more.
 
 Create account SHALL be disabled, with "Save your changes first.", while the drawer has unsaved changes, so the invitation always goes to the saved email. Before anything is sent, the drawer SHALL ask "Send a sign-in invitation to <email>?" with the saved email, and only its confirmation SHALL send.
 
 When the email cannot be sent, the account SHALL stay `invited`, and the drawer SHALL say "Account created; the invitation email wasn't sent. Use Resend later." A repeated request that returns the stored result SHALL say "This invitation was already sent. If it didn't arrive, use Resend.", never that the email was not sent. Otherwise it SHALL say "Account created and invitation sent".
 
 #### Scenario: Creating an account
-- **WHEN** an admin presses Create account for a volunteer with an email and no sign-in
-- **THEN** the volunteer has an active `staff` membership, their account is `invited`, their capabilities are `assist`, `prepare`, `receive_documents` and `review`, an invitation email with no code reaches their address, the drawer says "Account created and invitation sent", and the Roster shows "Invited"
+- **WHEN** an admin presses Create account for a volunteer with an email, no sign-in and the Preparer role
+- **THEN** the volunteer has an active `staff` membership, their account is `invited`, their capabilities are `prepare`, an invitation email with no code reaches their address, the drawer says "Account created and invitation sent", and the Roster shows "Invited"
 
 #### Scenario: Signing in after the invitation
 - **WHEN** that volunteer enters their email on the sign-in screen and then the code they are sent
@@ -170,7 +173,7 @@ When the email cannot be sent, the account SHALL stay `invited`, and the drawer 
 
 #### Scenario: A volunteer waiting for their form
 - **WHEN** an admin creates an account for a volunteer with no roles
-- **THEN** the account is created and the volunteer is not cleared
+- **THEN** the account is created, the volunteer has no capabilities, and is not cleared
 
 #### Scenario: Reusing an account-less auth user
 - **WHEN** an auth user exists for the volunteer's email with no account row, and an admin presses Create account
@@ -262,17 +265,19 @@ The drawer SHALL offer Deactivate for an `invited` or `active` staff account, af
 Deactivate SHALL:
 - in one transaction, set the account to `deactivated` with `deactivated_at`, and make the membership inactive;
 - keep the auth user and the person's link, so the email stays locked and the person stays on the Roster;
-- be refused with `OPEN_WORK` (SQLSTATE VT004), the open work as its detail, while the person holds open work as defined for a volunteer save. The drawer SHALL say "<name> still has open work: <list>. Finish it or hand it over first.";
+- be refused with `OPEN_WORK` (SQLSTATE VT004), the open work as its detail, while the person holds open work as defined for a volunteer save, which counts only current-season cases (capability `volunteer-roster`). Being the default follow-up person SHALL always count as open work here, site coordinator or not. The drawer SHALL say "<name> still has open work: <list>. Finish it or hand it over first.";
+- be refused with `INVALID_TRANSITION` (`LAST_SITE_COORDINATOR`) for the last site coordinator, and the drawer SHALL say "At least one site coordinator must remain. Make someone else a site coordinator first.";
+- for any other site coordinator, remove their site coordinator mark in the same transaction (capability `site-coordinators`);
 - be refused with `VALIDATION` (`SELF`) for the caller's own account.
 
 Reactivate SHALL:
 - make the membership active again;
 - set the account to `active` if the person has signed in before, or to `invited` if not;
 - send no email;
-- restore the account only: the person SHALL still need roles, certificates and any photo ID check to be cleared;
+- restore the account only: the person SHALL still need roles, certificates and any photo ID check to be cleared, and SHALL NOT be a site coordinator again;
 - be refused with `VALIDATION` (`EMAIL_IN_USE`) when the user meanwhile has an active membership in another workspace.
 
-Deactivate and reactivate SHALL each be built on one internal function that acts on a single membership, so a season rollover can reuse them.
+Deactivate and reactivate SHALL each be built on one internal function that acts on a single membership, so Start next season can reuse them (capability `season-rollover`), deactivating each account as Deactivate does.
 
 Clients SHALL NOT be deactivated in this release.
 
@@ -280,11 +285,19 @@ A Reactivate that gives `invited` SHALL start a new seven days and a new five si
 
 #### Scenario: Deactivating
 - **WHEN** an admin deactivates a volunteer who holds no open work
-- **THEN** the account is `deactivated`, the membership is inactive, the Roster shows "Deactivated", and the volunteer's open window shows "This account has no access"
+- **THEN** the account is `deactivated`, the membership is inactive, the Roster shows "Deactivated", and the volunteer's open window shows "This account has no access" the next time it wakes (focus, the tab becoming visible, `online`, or a realtime reconnect), without a reload
 
 #### Scenario: Deactivating with open work
 - **WHEN** an admin deactivates a volunteer who is preparing an open case
 - **THEN** it is refused with `OPEN_WORK`, the drawer lists that case, and the account is unchanged
+
+#### Scenario: Deactivating the default follow-up person
+- **WHEN** a site coordinator deactivates the default follow-up person, who is another site coordinator
+- **THEN** it is refused with `OPEN_WORK`, and the drawer lists being the default follow-up person
+
+#### Scenario: Deactivating the last site coordinator
+- **WHEN** an admin who is not a site coordinator deactivates the only site coordinator, who is not the default follow-up person
+- **THEN** it is refused with `FORBIDDEN` (only a site coordinator deactivates a site coordinator, capability `site-coordinators`), and the account is unchanged
 
 #### Scenario: Deactivating yourself
 - **WHEN** an admin deactivates their own account
@@ -301,6 +314,10 @@ A Reactivate that gives `invited` SHALL start a new seven days and a new five si
 #### Scenario: A stale drawer
 - **WHEN** two admins open the same volunteer, one deactivates, and the other then presses Deactivate
 - **THEN** the second is refused with `CONFLICT`
+
+#### Scenario: A past-season case is not open work
+- **WHEN** an admin deactivates a volunteer whose only cases are Accepted cases from an earlier season
+- **THEN** the account is `deactivated`
 
 ### Requirement: An admin can cancel an invitation that was never completed
 The drawer SHALL offer Cancel invitation, after a confirmation, for a volunteer whose account is `invited` and was never `active`; the office panel SHALL offer Cancel for such a client. It SHALL be a database RPC that takes an action id, the target (the volunteer, or the client's email) and the account revision the window read. It SHALL refuse a stale revision with `CONFLICT`, an account that is not `invited`, or was ever `active`, with `INVALID_TRANSITION`, and a membership that is in use (anything other than the person's link and the account refers to it) with `INVALID_TRANSITION` and the reason `IN_USE`. It SHALL store a receipt, and a replay SHALL return it.

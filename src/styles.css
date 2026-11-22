@@ -2373,6 +2373,13 @@ textarea::placeholder {
 .setup-screen ul {
   padding-left: 20px;
 }
+.setup-upload {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 6px;
+}
 .review-panel {
   margin-bottom: 20px;
 }
@@ -3470,6 +3477,68 @@ textarea::placeholder {
   flex: 1 1 240px;
   min-width: 0;
 }
+.volunteer-toolbar .volunteer-export {
+  margin-left: auto;
+}
+/* The Add drawer's returning-volunteer picker. */
+.returning-picker,
+.returning-picked {
+  margin: 0 0 16px;
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--vt-line);
+}
+.returning-picker #returning-search {
+  width: 100%;
+}
+.returning-list {
+  display: grid;
+  gap: 8px;
+  max-height: 240px;
+  margin: 10px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.returning-person {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--vt-line);
+  border-radius: var(--vt-radius-sm);
+  background: var(--vt-surface);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.returning-person:hover {
+  background: var(--vt-primary-soft);
+  border-color: var(--vt-primary-line);
+}
+.returning-picked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.returning-person-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.returning-person .volunteer-name {
+  font-weight: 600;
+}
+.returning-person-info .volunteer-contact {
+  font-size: 12px;
+  color: var(--vt-muted);
+}
 .volunteer-roster .volunteer-row th {
   font-weight: 600;
 }
@@ -3478,6 +3547,13 @@ textarea::placeholder {
   margin-top: 2px;
   font-size: 12px;
   font-weight: 400;
+  color: var(--vt-muted);
+}
+/* "Signed in as …" under the account status, on its own line like the contact line. */
+.volunteer-roster td .volunteer-signed-in {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
   color: var(--vt-muted);
 }
 .volunteer-roster .board-table td,
@@ -3523,6 +3599,27 @@ textarea::placeholder {
   align-items: center;
   gap: 8px 12px;
   margin-top: 18px;
+}
+/* Uploads to review (change add-clearance-uploads, design D7): the Roster's
+   note stands out from the muted missing list, in the attention colours the
+   Workload's stalled chip uses; the drawer's sent line keeps its Mark reviewed
+   beside the text. */
+.volunteer-to-review {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: var(--vt-attention-bg);
+  color: var(--vt-age-soon-ink);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.volunteer-sent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 6px 0 12px;
 }
 /* end Volunteers */
 
@@ -4623,6 +4720,21 @@ textarea::placeholder {
 .doc-status.is-none {
   background: var(--vt-stage-prep-bg);
   color: var(--vt-stage-prep);
+}
+/* Issue 157: the client's report waits for staff; staff's confirmation is done. */
+.doc-status.is-sent {
+  background: var(--vt-stage-intake-bg);
+  color: var(--vt-stage-intake);
+}
+.doc-status.is-received,
+.doc-status.is-verified {
+  background: var(--vt-stage-filing-bg);
+  color: var(--vt-stage-filing);
+}
+/* The upload notes inside a document request keep their small size. */
+.action-card .doc-note {
+  font-size: 13px;
+  line-height: 1.5;
 }
 .doc-maybe {
   margin-top: 20px;
@@ -6275,6 +6387,10 @@ html:lang(zh-Hant) {
   flex: 1 1 auto;
   text-align: left;
 }
+.nav-count {
+  font-weight: 700;
+}
+
 .nav-badge {
   min-width: 20px;
   height: 20px;
@@ -6683,4 +6799,329 @@ html:lang(zh-Hant) {
   .update-actions .btn {
     flex: 1 1 auto;
   }
+}
+
+/* Season settings (change add-season-settings): the season card with its two
+   links and the SIDN row, and the Site coordinators card. One column at any
+   width; long links and emails wrap instead of widening the page. */
+.season-settings {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.settings-card {
+  padding: 20px 22px;
+  border-radius: var(--vt-radius);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.settings-card .card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin-bottom: 16px;
+}
+.settings-card .card-head h2 {
+  font-size: 17px;
+  letter-spacing: 0;
+  margin: 0;
+}
+.settings-card .card-head h2 .badge {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.settings-card .field-error {
+  margin: -14px 0 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vt-error);
+}
+.settings-notice,
+.settings-readonly {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  font-size: 14px;
+}
+.settings-readonly {
+  background: var(--vt-primary-soft);
+  color: var(--vt-muted);
+}
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.settings-value {
+  margin-bottom: 18px;
+}
+.settings-label {
+  display: block;
+  font-size: 14px;
+  font-weight: 550;
+  margin-bottom: 6px;
+  color: #3b5158;
+}
+.settings-link {
+  margin: 0 0 12px;
+}
+.settings-sidn {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--vt-line);
+}
+.settings-sidn h3 {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+.settings-sidn-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 14px;
+}
+.settings-sidn-row p {
+  margin: 0;
+}
+.settings-sidn .field-note {
+  margin: 0;
+}
+.sc-list {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+}
+.sc-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--vt-line);
+}
+.sc-person {
+  min-width: 0;
+}
+.sc-person small {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--vt-muted);
+}
+.sc-list .danger-text {
+  color: var(--vt-error);
+  flex: none;
+}
+.sc-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.sc-add select {
+  flex: 1 1 220px;
+  width: auto;
+  min-width: 0;
+}
+.sc-log summary {
+  cursor: pointer;
+  font-weight: 550;
+  min-height: var(--vt-tap);
+  display: flex;
+  align-items: center;
+}
+.sc-log ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  font-size: 14px;
+}
+.sc-log li {
+  padding: 6px 0;
+}
+#sidn-form .drawer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+#sidn-form .field-error {
+  margin: -14px 0 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vt-error);
+}
+@media (max-width: 480px) {
+  .settings-card {
+    padding: 16px 14px;
+  }
+  .sc-add .btn {
+    flex: 1 1 auto;
+  }
+}
+
+/* Volunteers: the Mark reviewed reason row and the setup screen's reason (change add-my-profile) */
+.volunteer-review {
+  margin: 0 0 12px;
+}
+.setup-reason {
+  margin: 4px 0 0;
+}
+/* My profile (change add-my-profile): the sidebar's account link and the screen */
+.account-row .btn.account-link {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  padding: 2px 8px;
+  text-align: left;
+  color: var(--vt-ink);
+  font-weight: 600;
+}
+.account-row .btn.account-link .account-name {
+  font-weight: 400;
+}
+/* A cleared window's account row is one link (icon, "My profile", the name):
+   the whole row takes the hover and current colours, like the nav links above
+   it, instead of a pill around the text beside a loose icon. The button's
+   ::after covers the row, so the icon is part of the target too. */
+.account-row:has(.account-link) {
+  position: relative;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+.account-row:has(.account-link:hover) {
+  background: var(--vt-background);
+}
+.account-row:has(.account-link.current) {
+  background: var(--vt-primary-soft);
+}
+.account-row:has(.account-link) > svg {
+  flex: none;
+  color: var(--vt-muted);
+}
+.account-row:has(.account-link.current) > svg {
+  color: var(--vt-primary);
+}
+.account-row .btn.nav-link.account-link,
+.account-row .btn.nav-link.account-link:hover,
+.account-row .btn.nav-link.account-link.current {
+  min-height: 0;
+  padding: 0;
+  gap: 1px;
+  background: transparent;
+  color: var(--vt-ink);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  transform: none;
+}
+.account-row .btn.nav-link.account-link.current {
+  color: var(--vt-primary);
+}
+.account-row .btn.account-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+}
+.account-row .btn.account-link .account-name {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--vt-muted);
+}
+/* The sections are cards like Season settings': inner padding, a smaller
+   heading, and no extra rule above the form, since the card already frames it. */
+.my-profile-section {
+  margin-bottom: 20px;
+  padding: 20px 22px;
+  border-radius: var(--vt-radius);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.my-profile-section h2 {
+  margin: 0 0 16px;
+  font-size: 17px;
+  letter-spacing: 0;
+}
+.my-profile-section .staff-form {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 0;
+}
+/* The email is the sign-in and can't be changed here: show it as read-only. */
+.my-profile-section input[readonly] {
+  background: var(--vt-background);
+  color: var(--vt-muted);
+  cursor: default;
+}
+.my-profile-status {
+  margin: 0 0 22px;
+  font-size: 14px;
+}
+/* `.field` sets `display: block`, which beats the browser's own [hidden]:
+   without this, "Other language" shows before Other is ticked. */
+.my-profile-section .field[hidden] {
+  display: none;
+}
+/* Short choices sit side by side and wrap, so Works, Languages and Usual days
+   don't make a long single column. Each keeps its full tap height. */
+.my-profile-section .check-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 20px;
+  margin-bottom: 18px;
+}
+/* My profile's "This season" card: the office's records as label / value rows
+   (Roles, Certificates), and "Managed by the office" as the card's subtitle. */
+#my-profile-season > h2 {
+  margin-bottom: 2px;
+}
+#my-profile-season > p {
+  margin: 0;
+  font-size: 14px;
+}
+#my-profile-season > p.muted:first-of-type {
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+#my-profile-season > p:has(> span.muted:first-child) {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid var(--vt-line);
+}
+#my-profile-season > p > span.muted:first-child {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vt-muted);
+}
+#my-profile-season .volunteer-chips {
+  gap: 6px;
+}
+#my-profile-season .volunteer-chip {
+  padding: 3px 10px;
+  border-color: var(--vt-primary-line);
+  background: var(--vt-primary-soft);
+  color: var(--vt-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+/* Inside the app the page column is up to 1240px wide; a one-column form
+   that wide is hard to read, so the My profile cards stop at 720px. */
+.my-profile-section {
+  max-width: 720px;
+}
+#my-profile-send .setup-upload > span {
+  font-size: 14px;
+  color: var(--vt-muted);
+}
+#my-profile-send .setup-reason {
+  margin: 0 0 12px;
+  font-size: 14px;
 }

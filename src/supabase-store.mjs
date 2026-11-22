@@ -45,6 +45,7 @@ const STAFF_TABLES = Object.freeze([
   "preparer_questionnaires",
   "reviewer_questionnaires",
   "preparer_shaded_fields",
+  "return_to_signing_exit_forms",
   "case_labels",
   "case_label_links",
   "posted_updates",
@@ -165,6 +166,7 @@ export const mapDocumentCard = (row) => ({
   status: row.status,
   groupOverride: row.group_override,
   changedAt: row.changed_at,
+  reportedAt: row.reported_at ?? null,
 });
 
 // The materials the site has received (migration 013). Staff only.
@@ -271,7 +273,7 @@ export const CLIENT_COLUMNS = Object.freeze({
   documents: "id,case_id,request_id,filename,source,created_at",
   client_events: "id,case_id,action,message,created_at",
   case_contacts: "case_id,phone,spouse_phone,best_contact_time,best_contact_note",
-  case_document_cards: "slot_id,status,group_override,changed_at",
+  case_document_cards: "slot_id,status,group_override,changed_at,reported_at",
 });
 
 // The staff read's named columns, where it does not take the whole row.
@@ -316,6 +318,7 @@ export const mapStaffCase = ({
   materials = [],
   preparerQuestionnaires = [],
   reviewerQuestionnaires = [],
+  returnToSigningExitForms = [],
   preparerShadedFields = [],
   filingAttempts = [],
   filingReturns = [],
@@ -330,6 +333,8 @@ export const mapStaffCase = ({
   internalHistory: internalHistory.map(camelRow),
   preparerQuestionnaires: preparerQuestionnaires.map(camelRow),
   reviewerQuestionnaires: reviewerQuestionnaires.map(camelRow),
+  // Oldest first (relatedRows); `[]` when the case was never corrected.
+  returnToSigningExitForms: returnToSigningExitForms.map(camelRow),
   // One row at most (case_id is unique): `[row]`, or `[]` before the first save.
   preparerShadedFields: preparerShadedFields.map(camelRow),
   filingAttempts: mapFilingAttempts(filingAttempts, filingReturns, filingNotes),
@@ -351,6 +356,13 @@ export function createStore(client) {
   };
 
   const read = async (query) => (await settled(query)) ?? [];
+
+  // The workspace's current season, or null when it has none (a database from
+  // before migration 010): then staff read every season.
+  const staffSeason = async () => {
+    const row = (await read(client.from("workspaces").select("current_season")))[0];
+    return row?.current_season == null ? null : Number(row.current_season);
+  };
 
   const call = (name, args) => settled(client.rpc(name, args));
 
@@ -535,9 +547,14 @@ export function createStore(client) {
     // themselves, which carry no related record at all (Ruling R56).
     async listCases() {
       const staff = isStaffAccess(await access());
-      const cases = (
-        await read(client.from("cases").select("*").order("reference"))
-      ).map(mapCase);
+      // Staff windows work on the current season (add-start-next-season D7):
+      // this season's cases and the drafts that have no season yet. A past
+      // season stays in the database, read by nobody here. The client path
+      // is untouched.
+      const season = staff ? await staffSeason() : null;
+      let query = client.from("cases").select("*");
+      if (season != null) query = query.or(`season.eq.${season},season.is.null`);
+      const cases = (await read(query.order("reference"))).map(mapCase);
       if (!staff || !cases.length) return cases;
       const ids = cases.map((record) => record.id);
       const participants = await read(
@@ -639,6 +656,13 @@ export function createStore(client) {
       // Absent, another workspace's and another applicant's case are one
       // answer, with no reference, name or revision behind it.
       if (!row) throw createAppError({ code: "VT002" });
+      // A past-season case is not staff's to open: the same answer as an
+      // absent case (add-start-next-season D7). Drafts have no season.
+      if (staff && row.season != null) {
+        const season = await staffSeason();
+        if (season != null && Number(row.season) !== season)
+          throw createAppError({ code: "VT002" });
+      }
       // Row-level security decides which *rows* a client may read; it says
       // nothing about which columns of them are their business. `select("*")`
       // hands the browser whatever the table happens to hold — a staff-recorded
@@ -720,6 +744,8 @@ export function createStore(client) {
         // Staff only: the applicant path above never names these tables.
         preparerQuestionnaires: await relatedRows("preparer_questionnaires", id),
         reviewerQuestionnaires: await relatedRows("reviewer_questionnaires", id),
+        // Staff only (migration 054), and never named on the applicant path.
+        returnToSigningExitForms: await relatedRows("return_to_signing_exit_forms", id),
         // Staff only (migration 038), and never named on the applicant path.
         preparerShadedFields: await relatedRows("preparer_shaded_fields", id),
         // Staff only (migration 035). These tables have no created_at, so they
@@ -791,10 +817,48 @@ export function createStore(client) {
         read(
           client
             .from("accounts")
-            .select("workspace_id,user_id,person_id,status,revision,activated_at,expires_at"),
+            .select("workspace_id,user_id,person_id,status,revision,activated_at,expires_at,is_site_coordinator"),
         ),
       ]);
       return combineVolunteers({ profiles, entries, certificates, people, accounts });
+    },
+
+    // Earlier volunteers (change add-returning-volunteers-and-roster-csv): people
+    // with a profile and no roster entry for the current season, so the Roster's
+    // Add can pick one instead of retyping them. `lastSeason` marks those who
+    // had an entry the season before. Staff only; none without a season.
+    async listEarlierVolunteers() {
+      await requireStaffAccess();
+      const season = (await read(client.from("workspaces").select("current_season")))[0]
+        ?.current_season;
+      if (season == null) return [];
+      const [profiles, people, entries] = await Promise.all([
+        read(client.from("volunteer_profiles").select("*")),
+        read(client.from("people").select("id,name,user_id")),
+        read(client.from("roster_entries").select("person_id,season").in("season", [season, season - 1])),
+      ]);
+      const now = new Set(entries.filter((e) => e.season === season).map((e) => e.person_id));
+      const last = new Set(entries.filter((e) => e.season === season - 1).map((e) => e.person_id));
+      const profileById = new Map(profiles.map((p) => [p.person_id, p]));
+      const list = [];
+      for (const person of people) {
+        const profile = profileById.get(person.id);
+        if (!profile || now.has(person.id)) continue;
+        list.push({
+          id: person.id,
+          name: person.name,
+          email: profile.email,
+          phone: profile.phone ?? null,
+          works: profile.works,
+          languages: [...(profile.languages ?? [])],
+          otherLanguage: profile.other_language ?? null,
+          usualDays: [...(profile.usual_days ?? [])],
+          revision: profile.revision,
+          hasSignIn: Boolean(person.user_id),
+          lastSeason: last.has(person.id),
+        });
+      }
+      return list.sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
     },
 
     async saveVolunteer(request) {
@@ -804,6 +868,59 @@ export function createStore(client) {
         p_expected_revision: request.expectedRevision ?? null,
         p_volunteer: request.volunteer,
       });
+    },
+
+    // Clearance uploads (migration 053). A volunteer records that they sent a
+    // document; an admin records that they reviewed it.
+    async markUploadSent(request) {
+      return await call("vitally_mark_upload_sent", {
+        p_action_id: actionId(request),
+        p_document: request.document,
+      });
+    },
+
+    async markUploadReviewed(request) {
+      return await call("vitally_mark_upload_reviewed", {
+        p_action_id: actionId(request),
+        p_volunteer_id: request.volunteerId,
+        p_expected_revision: request.expectedRevision,
+        p_document: request.document,
+        p_reason: request.reason,
+      });
+    },
+
+    // My profile (migration 057): a volunteer reads and edits their own details.
+    async getMyProfile() {
+      return await call("vitally_my_profile");
+    },
+
+    async saveMyProfile(request) {
+      return await call("vitally_save_my_profile", {
+        p_action_id: actionId(request),
+        p_expected_revision: request.expectedRevision,
+        p_profile: request.profile,
+      });
+    },
+
+    // The Volunteers badge (design D8): current-season roster entries with
+    // either sent date set. A head count, so no rows travel.
+    async countUploadsToReview() {
+      await requireStaffAccess();
+      const season = (await read(client.from("workspaces").select("current_season")))[0]
+        ?.current_season;
+      if (season == null) return 0;
+      let result;
+      try {
+        result = await client
+          .from("roster_entries")
+          .select("person_id", { count: "exact", head: true })
+          .eq("season", season)
+          .or("form_13615_sent_at.not.is.null,photo_id_sent_at.not.is.null");
+      } catch (cause) {
+        throw createAppError(cause);
+      }
+      if (result?.error) throw createAppError(result.error);
+      return result?.count ?? 0;
     },
 
     // Accounts (migration 047). Create, invite and resend go through the
@@ -855,6 +972,53 @@ export function createStore(client) {
         p_action_id: actionId(request),
         p_volunteer_id: request.volunteerId,
         p_expected_revision: request.expectedRevision,
+      });
+    },
+
+    // Season settings (migration 052). The RPCs enforce who may call them:
+    // any workspace admin reads, only a site coordinator writes.
+    async getSeasonSettings() {
+      return await call("vitally_season_settings");
+    },
+
+    // Applicant-safe: returns only the client document upload URL, never the
+    // coordinator-only certificate URL or the rest of Season settings.
+    async getClientDocumentsUrl() {
+      return (await call("vitally_client_documents_link"))?.clientDocumentsUrl ?? null;
+    },
+
+    async saveSeasonSettings(request) {
+      return await call("vitally_save_season_settings", {
+        p_action_id: actionId(request),
+        p_expected_revision: request.expectedRevision,
+        p_settings: request.settings,
+      });
+    },
+
+    // The SIDN is write-only: the answer is `{set, updatedAt}`, never the number.
+    async setSiteNumber(request) {
+      return await call("vitally_set_site_number", {
+        p_action_id: actionId(request),
+        p_sidn: request.sidn,
+      });
+    },
+
+    // Start next season (change add-start-next-season): the answer is
+    // `{actionId, season, deactivated, defaultFollowupMoved}`.
+    async startNextSeason(request) {
+      return await call("vitally_start_next_season", {
+        p_action_id: actionId(request),
+        p_expected_season: request.expectedSeason,
+        p_typed_year: request.typedYear,
+      });
+    },
+
+    async setSiteCoordinator(request) {
+      return await call("vitally_set_site_coordinator", {
+        p_action_id: actionId(request),
+        p_volunteer_id: request.volunteerId,
+        p_expected_revision: request.expectedRevision,
+        p_granted: request.granted,
       });
     },
 

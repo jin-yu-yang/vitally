@@ -1,9 +1,11 @@
 // The admin-only Roster (change add-volunteer-roster-records, design D9): the
 // Volunteers page and its Add / Edit drawer. Staff screens stay English. Each
 // row says whether the volunteer is cleared (change add-volunteer-clearance).
-import { esc, button, icon, loadingLine, unloadedLine, emptyLine, confirmBody } from "./ui.mjs";
+import { esc, button, icon, SENT_DAY, loadingLine, unloadedLine, emptyLine, confirmBody } from "./ui.mjs";
 import { drawerError } from "./office-views.mjs";
-import { ROLES, CERTIFICATES, WORKS, LANGUAGES, filterVolunteers } from "./volunteer-roster.mjs";
+import { ROLES, CERTIFICATES, WORKS, LANGUAGES, SHOW_VIEWS, filterVolunteers, languagesText, accountLabel, ACCOUNT_LABELS, returningFill } from "./volunteer-roster.mjs";
+
+export { languagesText, accountLabel };
 
 const when = (condition, html) => (condition ? html : "");
 const labelOf = (list, value) => list.find((entry) => entry.value === value)?.label ?? value;
@@ -18,40 +20,36 @@ const chips = (values, list, none) =>
         .join("")}</span>`
     : `<span class="muted">${esc(none)}</span>`;
 
-// The languages, with Other replaced by the language it names.
-export const languagesText = (volunteer) => {
-  const names = (volunteer.languages ?? []).map((value) =>
-    value === "other" && volunteer.otherLanguage ? volunteer.otherLanguage : labelOf(LANGUAGES, value),
-  );
-  return names.length ? names.join(", ") : "—";
-};
-
 const MISSING_TEXT = Object.freeze({
   form13615: "Form 13615 missing",
   photoId: "Photo ID check missing",
+  scCertificate: "SC certificate missing",
   noAccount: "No account yet",
   notSignedIn: "Hasn't signed in yet",
   deactivated: "Account deactivated",
 });
 
-const ACCOUNT_LABELS = Object.freeze({
-  none: "Not created",
-  invited: "Invited",
-  active: "Active",
-  deactivated: "Deactivated",
-});
-const accountLabel = (volunteer) => ACCOUNT_LABELS[volunteer?.account?.status ?? "none"] ?? "Not created";
-
 // The name the volunteer gave at their site check, under the account status.
 const signedInAs = (volunteer, className) =>
   volunteer?.signedInName ? `<span class="${className}">Signed in as ${esc(volunteer.signedInName)}</span>` : "";
 
-const clearedCell = (volunteer) =>
-  volunteer.cleared === true
-    ? `<span class="volunteer-cleared">Cleared</span>`
-    : `<span class="volunteer-not-cleared">Not cleared</span> <span class="muted">${esc(
-        (volunteer.missing ?? []).map((item) => MISSING_TEXT[item] ?? item).join(", "),
-      )}</span>`;
+// What a volunteer said they sent and nobody has marked reviewed yet.
+const toReview = (volunteer) =>
+  [
+    volunteer.form13615SentAt != null ? "Form 13615 to review" : "",
+    volunteer.photoIdSentAt != null ? "Photo ID to review" : "",
+  ].filter(Boolean);
+
+const clearedCell = (volunteer) => {
+  const status =
+    volunteer.cleared === true
+      ? `<span class="volunteer-cleared">Cleared</span>`
+      : `<span class="volunteer-not-cleared">Not cleared</span> <span class="muted">${esc(
+          (volunteer.missing ?? []).map((item) => MISSING_TEXT[item] ?? item).join(", "),
+        )}</span>`;
+  const review = toReview(volunteer);
+  return review.length ? `${status} <span class="volunteer-to-review">${esc(review.join(", "))}</span>` : status;
+};
 
 function volunteerRow(volunteer) {
   const contact = [volunteer.email, volunteer.phone].filter(Boolean).join(" · ");
@@ -72,48 +70,64 @@ function volunteerRow(volunteer) {
   )}</td></tr>`;
 }
 
-function toolbar(filters) {
+function toolbar(filters, { exportable = false, empty = false } = {}) {
   const role = filters.role || "all";
+  const show = SHOW_VIEWS.find((entry) => entry.value === filters.show)?.value ?? "all";
+  const showOptions = SHOW_VIEWS.map(
+    (entry) => `<option value="${esc(entry.value)}"${entry.value === show ? " selected" : ""}>${esc(entry.label)}</option>`,
+  ).join("");
   const options = [{ value: "all", label: "All roles" }, ...ROLES]
     .map(
       (entry) =>
         `<option value="${esc(entry.value)}"${entry.value === role ? " selected" : ""}>${esc(entry.label)}</option>`,
     )
     .join("");
-  return `<div class="volunteer-toolbar"><label class="field pool-filter" for="volunteer-role-filter"><span>Role</span><select id="volunteer-role-filter" data-volunteer-filter="role">${options}</select></label><input id="volunteer-search" name="volunteerSearch" type="search" value="${esc(
+  return `<div class="volunteer-toolbar"><label class="field pool-filter" for="volunteer-role-filter"><span>Role</span><select id="volunteer-role-filter" data-volunteer-filter="role">${options}</select></label><label class="field pool-filter" for="volunteer-show-filter"><span>Show</span><select id="volunteer-show-filter" data-volunteer-filter="show">${showOptions}</select></label><input id="volunteer-search" name="volunteerSearch" type="search" value="${esc(
     filters.search ?? "",
-  )}" placeholder="Search name, email or phone" aria-label="Search volunteers" autocomplete="off"></div>`;
+  )}" placeholder="Search name, email or phone" aria-label="Search volunteers" autocomplete="off">${when(
+    exportable,
+    button("Export CSV", "export-roster-csv", "secondary volunteer-export", empty ? "disabled" : ""),
+  )}</div>`;
 }
 
 /**
  * The Roster's panel: the toolbar, the table and its count.
  *
  * @param {object[]} volunteers the combined list (`combineVolunteers`)
- * @param {object} ui `{list, filters}` — `list` is "loading", "failed" or "ready".
+ * @param {object} ui `{list, filters, exportable}` — `list` is "loading",
+ *   "failed" or "ready"; `exportable` adds Export CSV, off while no row passes
+ *   the filters.
  */
-export function renderRoster(volunteers, { list = "ready", filters = {} } = {}) {
+export function renderRoster(volunteers, { list = "ready", filters = {}, exportable = false } = {}) {
   const open = `<section class="panel volunteer-roster" aria-labelledby="roster-title"><h2 id="roster-title">Roster</h2>`;
   if (list === "loading") return `${open}${loadingLine("Loading volunteers…")}</section>`;
   if (list === "failed") return `${open}${unloadedLine("The volunteers couldn't load.")}</section>`;
   const all = Array.isArray(volunteers) ? volunteers : [];
-  const chosen = { search: filters.search ?? "", role: filters.role || "all" };
+  const chosen = { search: filters.search ?? "", role: filters.role || "all", show: filters.show || "all" };
   const shown = filterVolunteers(all, chosen);
   const body = shown.length
     ? `<div class="board-table-wrap"><table class="board-table people-table"><thead><tr><th scope="col">Volunteer</th><th scope="col">Roles</th><th scope="col">Certificates</th><th scope="col">Languages</th><th scope="col">Account</th><th scope="col">Cleared</th><th scope="col">Edit</th></tr></thead><tbody>${shown
         .map(volunteerRow)
         .join("")}</tbody></table></div>`
     : emptyLine(all.length ? "Nobody matches." : "No volunteers yet.");
-  return `${open}${toolbar(chosen)}${body}<p class="board-foot" role="status">${shown.length} of ${all.length} volunteers</p></section>`;
+  return `${open}${toolbar(chosen, { exportable, empty: shown.length === 0 })}${body}<p class="board-foot" role="status">${shown.length} of ${all.length} volunteers</p></section>`;
 }
 
-const ticks = (name, list, chosen, { full = false } = {}) =>
+// `locked` maps a value to the id of the note that says why its box is
+// disabled. A disabled box is not sent with the form, so a ticked one is
+// carried by a hidden input: its saved value goes back unchanged.
+const ticks = (name, list, chosen, { full = false, locked = {} } = {}) =>
   list
     .map((entry) => {
       const id = `volunteer-${name}-${entry.value}`;
       const text = full && entry.full !== entry.label ? `${entry.label} · ${entry.full}` : entry.label;
+      const note = locked[entry.value];
+      const on = chosen.includes(entry.value);
       return `<label class="checkbox-row small" for="${id}"><input type="checkbox" name="${name}" value="${esc(
         entry.value,
-      )}"${chosen.includes(entry.value) ? " checked" : ""} id="${id}"><span>${esc(text)}</span></label>`;
+      )}"${on ? " checked" : ""} id="${id}"${note ? ` disabled aria-describedby="${note}"` : ""}><span>${esc(
+        text,
+      )}</span></label>${when(note && on, `<input type="hidden" name="${name}" value="${esc(entry.value)}">`)}`;
     })
     .join("");
 
@@ -122,15 +136,92 @@ const tickRow = (name, text, on) =>
     on ? " checked" : ""
   }><span>${esc(text)}</span></label>`;
 
+// A "sent" line in the drawer with its Mark reviewed (design D7). The date is
+// the New York day; an unreadable one leaves the line without it.
+function sentLine(sentAt, name, document, busy = false) {
+  const day = new Date(sentAt);
+  const date = Number.isNaN(day.getTime()) ? "" : ` ${SENT_DAY.format(day)}`;
+  return `<p class="volunteer-sent" data-document="${document}"><span>${name} sent${esc(date)}</span> ${button(
+    "Mark reviewed",
+    "mark-upload-reviewed",
+    "secondary",
+    `data-document="${document}"${busy ? " disabled" : ""}`,
+  )}</p>`;
+}
+
+// The reasons an admin can pick when sending a document back (change
+// add-my-profile, D7). "Already on file" is for a Form 13615 of a volunteer
+// with a role this season.
+const REVIEW_PICKS = {
+  form13615: ["Not signed", "Can't read it", "Wrong form", "Missing a certification"],
+  photoId: ["Can't read it", "Expired", "Not a photo ID"],
+};
+const DAYS = [
+  ["mon", "Monday"],
+  ["tue", "Tuesday"],
+  ["wed", "Wednesday"],
+  ["thu", "Thursday"],
+  ["fri", "Friday"],
+  ["sat", "Saturday"],
+  ["sun", "Sunday"],
+];
+
+// The reason row Mark reviewed opens: quick picks, a note, Send back and
+// Cancel. Send back stays off until a pick or a note; the page turns it on.
+export function reasonRow(document, { hasRole = false, busy = false } = {}) {
+  const picks = [...(REVIEW_PICKS[document] ?? []), ...(document === "form13615" && hasRole ? ["Already on file"] : [])];
+  const radios = picks
+    .map((text, index) => {
+      const id = `volunteer-review-${document}-${index}`;
+      return `<label class="checkbox-row small" for="${id}"><input type="radio" name="review-reason" value="${esc(text)}" id="${id}"><span>${esc(text)}</span></label>`;
+    })
+    .join("");
+  const note = `volunteer-review-note-${document}`;
+  return `<fieldset class="check-group volunteer-review" data-document="${document}"><legend>Why send it back?</legend>${radios}<label class="field" for="${note}"><span>Or write a note</span><input id="${note}" name="review-note" type="text" maxlength="120" autocomplete="off"></label><div class="drawer-actions">${button(
+    "Send back",
+    "send-back",
+    "primary",
+    `data-document="${document}" disabled`,
+  )}${button("Cancel", "cancel-review", "text", `data-document="${document}"${busy ? " disabled" : ""}`)}</div></fieldset>`;
+}
+
+// The document's place in the drawer: its sent line (with the reason row when
+// Mark reviewed was pressed), else what the office last said about it.
+function documentLine(v, document, ui) {
+  const sentAt = v[`${document}SentAt`];
+  const name = document === "form13615" ? "Form 13615" : "Photo ID";
+  if (sentAt != null)
+    return (
+      sentLine(sentAt, name, document, ui?.busy === true) +
+      when(
+        ui?.reviewReasonFor === document,
+        reasonRow(document, { hasRole: (v.roles ?? []).length > 0, busy: ui?.busy === true }),
+      )
+    );
+  const reason = v[`${document}ReviewReason`];
+  if (!reason) return "";
+  const day = new Date(v[`${document}ReviewedAt`]);
+  const date = Number.isNaN(day.getTime()) ? "" : ` · ${SENT_DAY.format(day)}`;
+  return `<p class="volunteer-sent" data-document="${document}"><span>Last returned: ${esc(reason)}${esc(date)}</span></p>`;
+}
+
 // The drawer's Account section: the status and the one or two actions it
 // allows. A volunteer who is not saved yet has none. `notice` is the last
 // result, `{kind: "ok" | "error", text}`.
 // Create account sends the saved profile, so it waits while the form has
 // unsaved changes: the page turns it off and shows the hint as the form is
 // edited (`volunteerFormChanged`).
-function accountSection(volunteer, notice) {
+// Deactivating a site coordinator's account needs a site coordinator (change
+// add-season-settings): for anyone else the drawer says so instead.
+function accountSection(volunteer, notice, { viewerIsSiteCoordinator = true } = {}) {
   const status = volunteer?.account?.status ?? "none";
   const id = `data-volunteer-id="${esc(volunteer.id)}"`;
+  const deactivate =
+    volunteer?.isSiteCoordinator === true && !viewerIsSiteCoordinator
+      ? `<p class="field-note" id="volunteer-deactivate-note">${esc(
+          "Only site coordinators deactivate a site coordinator's account.",
+        )}</p>`
+      : button("Deactivate", "account-deactivate", "secondary", id);
   // An invitation nobody has used yet can be taken back; one that was ever
   // active cannot.
   const cancellable = volunteer?.account?.activatedAt == null;
@@ -144,8 +235,8 @@ function accountSection(volunteer, notice) {
     invited: `${button("Resend", "account-resend", "secondary", id)}${when(
       cancellable,
       button("Cancel invitation", "account-cancel-invitation", "secondary", id),
-    )}${button("Deactivate", "account-deactivate", "secondary", id)}`,
-    active: button("Deactivate", "account-deactivate", "secondary", id),
+    )}${deactivate}`,
+    active: deactivate,
     deactivated: button("Reactivate", "account-reactivate", "secondary", id),
   }[status];
   const said = notice?.text
@@ -204,25 +295,70 @@ export function cancelInvitationDialogBody({ volunteer = null, email = "" } = {}
   });
 }
 
+// The Add drawer's returning-volunteer picker (change
+// add-returning-volunteers-and-roster-csv): a search over the earlier
+// volunteers, each a button that fills the drawer; once one is picked, their
+// name and Not this person. It sits before the form, so its search box is not
+// one of the form's fields.
+function returningPicker(returning, picked) {
+  if (picked)
+    return `<div class="returning-picked"><span class="returning-person-info"><strong>${esc(
+      picked.name,
+    )}</strong><span class="volunteer-contact">${esc(picked.email)}</span></span>${button(
+      "Not this person",
+      "unpick-returning-volunteer",
+      "secondary",
+    )}</div>`;
+  const query = String(returning?.query ?? "");
+  const candidates = returning?.candidates ?? [];
+  const list = candidates.length
+    ? `<ul class="returning-list">${candidates
+        .map(
+          (entry) =>
+            `<li><button type="button" class="returning-person" data-action="pick-returning-volunteer" data-id="${esc(
+              entry.id,
+            )}"><span class="returning-person-info"><span class="volunteer-name">${esc(
+              entry.name,
+            )}</span><span class="volunteer-contact">${esc(entry.email)}</span></span>${when(
+              entry.earlier === true,
+              `<span class="remote-badge">Earlier volunteer</span>`,
+            )}</button></li>`,
+        )
+        .join("")}</ul>`
+    : when(query.trim(), emptyLine("Nobody matches."));
+  return `<div class="returning-picker"><label class="field" for="returning-search"><span>Returning volunteer? Search last season's roster</span><input id="returning-search" name="returningSearch" type="search" value="${esc(
+    query,
+  )}" placeholder="Search name or email" autocomplete="off"></label>${list}</div>`;
+}
+
 /**
  * The Add / Edit drawer's body. Add has no volunteer; an Edit whose volunteer
  * is no longer listed says so and offers Close, never a blank form.
  *
- * @param {object} args `{volunteer, isNew, ui}` — `ui` is
- *   `{busy, error, retryable, formError}`.
+ * @param {object} args `{volunteer, isNew, ui, canChangeAdmin}` — `ui` is
+ *   `{busy, error, retryable, formError}`. `canChangeAdmin` is false for a
+ *   caller who is not a site coordinator: the Admin tick is then disabled,
+ *   showing its saved state, and a site coordinator's account offers no
+ *   Deactivate (change add-season-settings). `returning` (Add only) is
+ *   `{query, candidates, picked}` for the returning-volunteer picker, or null;
+ *   with `picked`, the form is filled from that person and New volunteer is
+ *   left unticked.
  */
-export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {} } = {}) {
+export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {}, canChangeAdmin = true, returning = null } = {}) {
   if (!isNew && !volunteer)
     return `${drawerError(ui, VOLUNTEER_CONFLICT_HEADING)}<p>This volunteer could not be opened. Close this and try again.</p>${button(
       "Close",
       "close-dialog",
       "secondary",
     )}`;
-  const v = volunteer ?? {};
+  const picked = isNew ? (returning?.picked ?? null) : null;
+  const v = volunteer ?? (picked ? returningFill(picked) : {});
   const works = v.works || "on_site";
   const languages = v.languages ?? [];
   const otherOpen = languages.includes("other");
-  const locked = !isNew && v.hasSignIn === true;
+  // A picked earlier volunteer keeps their email: it is who they are.
+  const signInEmail = (!isNew || picked) && v.hasSignIn === true;
+  const locked = signInEmail || Boolean(picked);
   const worksRadios = WORKS.map((entry) => {
     const id = `volunteer-works-${entry.value}`;
     return `<label class="checkbox-row small" for="${id}"><input type="radio" name="works" value="${esc(
@@ -233,8 +369,8 @@ export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {} }
     v.name ?? "",
   )}" maxlength="80" autocomplete="off"></label><label class="field" for="volunteer-email"><span>Email</span><input id="volunteer-email" name="email" type="email" value="${esc(
     v.email ?? "",
-  )}" maxlength="254" autocomplete="off"${locked ? ' readonly aria-describedby="volunteer-email-note"' : ""}></label>${when(
-    locked,
+  )}" maxlength="254" autocomplete="off"${locked ? " readonly" : ""}${signInEmail ? ' aria-describedby="volunteer-email-note"' : ""}></label>${when(
+    signInEmail,
     `<p class="field-note" id="volunteer-email-note">This is their sign-in email.</p>`,
   )}<label class="field" for="volunteer-phone"><span>Phone (optional)</span><input id="volunteer-phone" name="phone" type="tel" value="${esc(
     v.phone ?? "",
@@ -246,11 +382,18 @@ export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {} }
     otherOpen ? "" : " hidden"
   }><span>Other language</span><input id="volunteer-other-language-input" name="otherLanguage" type="text" value="${esc(
     v.otherLanguage ?? "",
-  )}" maxlength="40" autocomplete="off"></label><fieldset class="check-group"><legend>Roles</legend>${ticks(
+  )}" maxlength="40" autocomplete="off"></label><fieldset class="check-group"><legend>Usual days</legend>${DAYS.map(([value, label]) => {
+    const id = `volunteer-usualDays-${value}`;
+    return `<label class="checkbox-row small" for="${id}"><input type="checkbox" name="usualDays" value="${value}"${(v.usualDays ?? []).includes(value) ? " checked" : ""} id="${id}"><span>${label}</span></label>`;
+  }).join("")}</fieldset><fieldset class="check-group"><legend>Roles</legend>${ticks(
     "role",
     ROLES,
     v.roles ?? [],
-  )}</fieldset><fieldset class="check-group"><legend>Certificates</legend>${ticks(
+    { locked: canChangeAdmin ? {} : { admin: "volunteer-admin-note" } },
+  )}${when(
+    !canChangeAdmin,
+    `<p class="field-note" id="volunteer-admin-note">Only site coordinators change the Admin role.</p>`,
+  )}</fieldset>${when(!isNew, documentLine(v, "form13615", ui))}<fieldset class="check-group"><legend>Certificates</legend>${ticks(
     "certificate",
     CERTIFICATES,
     v.certificates ?? [],
@@ -258,15 +401,15 @@ export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {} }
   )}</fieldset><fieldset class="check-group"><legend>Clearance</legend>${tickRow(
     "isNew",
     "New volunteer",
-    isNew ? true : v.isNew === true,
-  )}${tickRow("photoIdChecked", "Photo ID checked", v.photoIdChecked === true)}</fieldset>${when(!isNew && volunteer, accountSection(v, ui?.accountNotice))}`;
+    isNew && !picked ? true : v.isNew === true,
+  )}${tickRow("photoIdChecked", "Photo ID checked", v.photoIdChecked === true)}${when(!isNew, documentLine(v, "photoId", ui))}</fieldset>${when(!isNew && volunteer, accountSection(v, ui?.accountNotice, { viewerIsSiteCoordinator: canChangeAdmin }))}`;
   const formError = ui?.formError
     ? `<p class="notice error" role="alert" id="volunteer-form-error">${icon("help")}<span>${esc(ui.formError)}</span></p>`
     : "";
   // Filled by the app when a certificate change unticks roles (#192), so a
   // screen reader hears it; empty on every draw.
   const roleNotice = `<p class="sr-only" role="status" aria-live="polite" id="volunteer-role-notice"></p>`;
-  return `<form id="volunteer-form" class="staff-form" novalidate>${fields}${roleNotice}${formError}${drawerError(
+  return `${when(isNew && returning, returningPicker(returning, picked))}<form id="volunteer-form" class="staff-form" novalidate>${fields}${roleNotice}${formError}${drawerError(
     ui,
     VOLUNTEER_CONFLICT_HEADING,
   )}<div class="drawer-actions"><button type="submit" class="btn primary"${ui?.busy ? " disabled" : ""}>${

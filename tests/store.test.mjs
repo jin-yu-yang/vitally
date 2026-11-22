@@ -371,8 +371,13 @@ function fakeClient({
       const read = { table: name, filters: [], orders: [] };
       client.reads.push(read);
       const builder = {
-        select(columns) {
+        select(columns, options) {
           read.columns = columns;
+          if (options) read.options = options;
+          return builder;
+        },
+        or(expression) {
+          read.or = expression;
           return builder;
         },
         eq(column, value) {
@@ -401,6 +406,17 @@ function fakeClient({
               // PostgREST returns the columns that were asked for and no
               // others, so the double projects them too: a read that names its
               // columns cannot quietly deliver the rest of the row.
+              // A head count returns the count of the matching rows and no data.
+              if (read.options?.head) {
+                const set = (read.or ?? "")
+                  .split(",")
+                  .map((part) => part.match(/^(\w+)\.not\.is\.null$/)?.[1])
+                  .filter(Boolean);
+                const counted = matches.filter(
+                  (row) => !set.length || set.some((column) => row[column] != null),
+                );
+                return { data: null, count: counted.length, error: null };
+              }
               if (!read.columns || read.columns === "*")
                 return { data: matches, error: null };
               const wanted = read.columns.split(",").map((name_) => name_.trim());
@@ -425,7 +441,7 @@ function fakeClient({
       client.rpcCalls.push({ name, args });
       return rpc
         ? rpc(name, args)
-        : { data: { actionId: args.p_action_id }, error: null };
+        : { data: { actionId: args?.p_action_id }, error: null };
     },
     channel(name) {
       const record = { name, bindings: [], status: null, handlers: {} };
@@ -508,6 +524,49 @@ test("a staff case list reads the filing notes", async () => {
   await createStore(client).listCases();
   const tables = client.reads.map((read) => read.table).filter((name) => name !== "memberships");
   assert.ok(tables.includes("filing_notes"));
+});
+
+const seasonRows = (season) => ({ workspaces: [{ id: "workspace-1", current_season: season }] });
+
+test("staff listCases asks only for the current season and drafts", async () => {
+  const client = fakeClient({ access: "staff", rows: seasonRows(2027) });
+  await createStore(client).listCases();
+  const cases = client.reads.find((read) => read.table === "cases");
+  assert.equal(cases.or, "season.eq.2027,season.is.null");
+});
+
+test("client listCases is unchanged", async () => {
+  const client = fakeClient({ access: "applicant", rows: seasonRows(2027) });
+  await createStore(client).listCases();
+  assert.equal(client.reads.find((read) => read.table === "cases").or, undefined);
+  assert.ok(!client.reads.some((read) => read.table === "workspaces"));
+});
+
+test("staff listCases with no season set asks for every season", async () => {
+  const client = fakeClient({ access: "staff", rows: seasonRows(null) });
+  await createStore(client).listCases();
+  assert.equal(client.reads.find((read) => read.table === "cases").or, undefined);
+});
+
+test("staff getCase of a past-season case is not found", async () => {
+  const client = fakeClient({ access: "staff", rows: seasonRows(2026) });
+  await assert.rejects(() => createStore(client).getCase("case-1"), { code: "NOT_FOUND" });
+});
+
+test("staff getCase reads a current-season case and a draft", async () => {
+  for (const season of [2025, null]) {
+    const client = fakeClient({
+      access: "staff",
+      rows: { ...seasonRows(2025), cases: [{ ...CASE_ROW, season }] },
+    });
+    assert.equal((await createStore(client).getCase("case-1")).id, "case-1");
+  }
+});
+
+test("a client getCase does not read the workspace season", async () => {
+  const client = fakeClient({ access: "applicant", rows: seasonRows(2026) });
+  await createStore(client).getCase("case-1");
+  assert.ok(!client.reads.some((read) => read.table === "workspaces"));
 });
 
 test("a staff case read adds the staff sections, filing tables too", async () => {
@@ -775,7 +834,7 @@ test("an empty staff list asks for no summaries at all", async () => {
   assert.deepEqual(await createStore(client).listCases(), []);
   assert.deepEqual(
     client.reads.map((read) => read.table),
-    ["memberships", "cases"],
+    ["memberships", "workspaces", "cases"],
   );
 });
 
@@ -955,8 +1014,10 @@ test("a staff case read adds exactly the staff sections", async () => {
       "preparation_participants",
       "preparer_questionnaires",
       "preparer_shaded_fields",
+      "return_to_signing_exit_forms",
       "reviewer_questionnaires",
       "reviews",
+      "workspaces",
     ],
   );
   assert.equal(found.intakeVersion, 2);
@@ -1334,6 +1395,8 @@ test("every other RPC uses its documented signature", async () => {
     type: "CLAIM",
     note: null,
   });
+  await store.getMyProfile();
+  await store.saveMyProfile({ actionId: "action-3", expectedRevision: 2, profile: { name: "Ana Example" } });
   assert.deepEqual(client.rpcCalls, [
     {
       name: "vitally_create_case",
@@ -1352,6 +1415,11 @@ test("every other RPC uses its documented signature", async () => {
         p_type: "CLAIM",
         p_note: null,
       },
+    },
+    { name: "vitally_my_profile", args: undefined },
+    {
+      name: "vitally_save_my_profile",
+      args: { p_action_id: "action-3", p_expected_revision: 2, p_profile: { name: "Ana Example" } },
     },
   ]);
 });
@@ -1433,6 +1501,7 @@ test("a subscription watches only the tables its principal may read", async () =
     "preparer_questionnaires",
     "reviewer_questionnaires",
     "preparer_shaded_fields",
+    "return_to_signing_exit_forms",
     "case_labels",
     "case_label_links",
     "posted_updates",
@@ -1541,12 +1610,12 @@ test("both principals read the card rows by named columns and map them", async (
     const client = fakeClient({ access });
     const found = await createStore(client).getCase("case-1");
     const [read] = client.reads.filter((entry) => entry.table === "case_document_cards");
-    assert.equal(read.columns, "slot_id,status,group_override,changed_at", access);
+    assert.equal(read.columns, "slot_id,status,group_override,changed_at,reported_at", access);
     assert.deepEqual(read.filters, [["case_id", "case-1"]], access);
     assert.deepEqual(read.orders, ["slot_id"], access);
     assert.deepEqual(found.documentCards, [
-      { slotId: "w2.household", status: "later", groupOverride: null, changedAt: "2026-09-08T00:00:00Z" },
-      { slotId: "ssn.tp", status: null, groupOverride: "needed", changedAt: "2026-09-08T01:00:00Z" },
+      { slotId: "w2.household", status: "later", groupOverride: null, changedAt: "2026-09-08T00:00:00Z", reportedAt: null },
+      { slotId: "ssn.tp", status: null, groupOverride: "needed", changedAt: "2026-09-08T01:00:00Z", reportedAt: null },
     ], access);
     assert.deepEqual(found.intakeVisited, ["about.you", "before.ready"], access);
   }
@@ -1690,6 +1759,57 @@ test("a staff case read carries the shaded section, an applicant read never name
   assert.ok(!client.reads.some((entry) => entry.table === "preparer_shaded_fields"));
 });
 
+test("a staff case read carries the corrected Exit Form rows oldest first, an applicant read never names the table", async () => {
+  const rows = {
+    return_to_signing_exit_forms: [
+      {
+        id: "rtse-1",
+        case_id: "case-1",
+        entered_by_person_id: "person-sam",
+        created_at: "2026-11-02T14:00:00Z",
+        exit_form: { federal: null, state: null, local: [] },
+        remarks: "First correction",
+      },
+      {
+        id: "rtse-2",
+        case_id: "case-1",
+        entered_by_person_id: "person-alex",
+        created_at: "2026-11-03T14:00:00Z",
+        exit_form: { federal: { method: "efile", result: "none" }, state: null, local: [] },
+        remarks: null,
+      },
+    ],
+  };
+  const staffClient = fakeClient({ access: "staff", rows });
+  const staff = await createStore(staffClient).getCase("case-1");
+  assert.deepEqual(staff.returnToSigningExitForms, [
+    {
+      id: "rtse-1",
+      caseId: "case-1",
+      enteredByPersonId: "person-sam",
+      createdAt: "2026-11-02T14:00:00Z",
+      exitForm: { federal: null, state: null, local: [] },
+      remarks: "First correction",
+    },
+    {
+      id: "rtse-2",
+      caseId: "case-1",
+      enteredByPersonId: "person-alex",
+      createdAt: "2026-11-03T14:00:00Z",
+      exitForm: { federal: { method: "efile", result: "none" }, state: null, local: [] },
+      remarks: null,
+    },
+  ]);
+  const [read] = staffClient.reads.filter((entry) => entry.table === "return_to_signing_exit_forms");
+  assert.deepEqual(read.filters, [["case_id", "case-1"]]);
+  assert.deepEqual(read.orders, ["created_at", "id"]);
+  assert.deepEqual((await createStore(fakeClient({ access: "staff" })).getCase("case-1")).returnToSigningExitForms, []);
+  const client = fakeClient({ access: "applicant", rows });
+  const applicant = await createStore(client).getCase("case-1");
+  assert.ok(!("returnToSigningExitForms" in applicant));
+  assert.ok(!client.reads.some((entry) => entry.table === "return_to_signing_exit_forms"));
+});
+
 test("closeUnsigned calls vitally_close_unsigned", async () => {
   const client = fakeClient({ access: "staff" });
   const cases = [{ caseId: "case-1", revision: 4 }];
@@ -1753,6 +1873,65 @@ test("listVolunteers is staff-only and maps a failed read", async () => {
   );
 });
 
+// Earlier volunteers (change add-returning-volunteers-and-roster-csv): people
+// with a profile and no entry for the current season.
+const EARLIER_ROWS = () => ({
+  workspaces: [{ id: "workspace-1", current_season: 2026 }],
+  people: [
+    { id: "p-now", name: "Zoe Now", user_id: null },
+    { id: "p-last", name: "Nadia Kerr", user_id: "user-1" },
+    { id: "p-old", name: "Aaron Old", user_id: null },
+  ],
+  volunteer_profiles: ["p-now", "p-last", "p-old"].map((person_id, index) => ({
+    workspace_id: "workspace-1",
+    person_id,
+    email: `${person_id}@example.org`,
+    phone: null,
+    works: "remote",
+    languages: ["english"],
+    other_language: null,
+    usual_days: index === 1 ? ["tue", "thu"] : [],
+    revision: index + 2,
+  })),
+  roster_entries: [
+    { workspace_id: "workspace-1", person_id: "p-now", season: 2026, roles: [] },
+    { workspace_id: "workspace-1", person_id: "p-now", season: 2025, roles: [] },
+    { workspace_id: "workspace-1", person_id: "p-last", season: 2025, roles: [] },
+    { workspace_id: "workspace-1", person_id: "p-old", season: 2024, roles: [] },
+  ],
+});
+
+test("listEarlierVolunteers returns people without a current entry, flagging last season", async () => {
+  const client = fakeClient({ access: "staff", rows: EARLIER_ROWS() });
+  const list = await createStore(client).listEarlierVolunteers();
+  assert.deepEqual(list.map((entry) => entry.id), ["p-old", "p-last"]);
+  const [old, last] = list;
+  assert.equal(old.lastSeason, false);
+  assert.deepEqual(last, {
+    id: "p-last",
+    name: "Nadia Kerr",
+    email: "p-last@example.org",
+    phone: null,
+    works: "remote",
+    languages: ["english"],
+    otherLanguage: null,
+    usualDays: ["tue", "thu"],
+    revision: 3,
+    hasSignIn: true,
+    lastSeason: true,
+  });
+  assert.deepEqual(client.reads.find((read) => read.table === "roster_entries").within, ["season", [2026, 2025]]);
+});
+
+test("listEarlierVolunteers returns nothing without a current season, and refuses an applicant", async () => {
+  const rows = EARLIER_ROWS();
+  rows.workspaces = [{ id: "workspace-1", current_season: null }];
+  assert.deepEqual(await createStore(fakeClient({ access: "staff", rows })).listEarlierVolunteers(), []);
+  await assert.rejects(() =>
+    createStore(fakeClient({ access: "applicant", rows: EARLIER_ROWS() })).listEarlierVolunteers(),
+  );
+});
+
 test("saveVolunteer sends the RPC parameters, nulls for an Add", async () => {
   const client = fakeClient({ access: "staff" });
   const store = createStore(client);
@@ -1778,6 +1957,128 @@ test("saveVolunteer sends the RPC parameters, nulls for an Add", async () => {
   });
 });
 
+test("markUploadSent calls vitally_mark_upload_sent", async () => {
+  const client = fakeClient({
+    access: "staff",
+    rpc: (name, args) => ({ data: { actionId: args.p_action_id, document: args.p_document, sentAt: "2026-11-20T15:00:00Z" }, error: null }),
+  });
+  const store = createStore(client);
+  const request = { document: "form13615" };
+  const result = await store.markUploadSent(request);
+  assert.ok(request.actionId);
+  assert.deepEqual(client.rpcCalls[0], {
+    name: "vitally_mark_upload_sent",
+    args: { p_action_id: request.actionId, p_document: "form13615" },
+  });
+  assert.equal(result.sentAt, "2026-11-20T15:00:00Z");
+  await store.markUploadSent({ actionId: "a-2", document: "photoId" });
+  assert.deepEqual(client.rpcCalls[1].args, { p_action_id: "a-2", p_document: "photoId" });
+});
+
+test("markUploadReviewed sends the five arguments", async () => {
+  const client = fakeClient({ access: "staff" });
+  const store = createStore(client);
+  await store.markUploadReviewed({
+    actionId: "a-3",
+    volunteerId: "person-ana",
+    expectedRevision: 4,
+    document: "photoId",
+    reason: "Expired",
+  });
+  assert.deepEqual(client.rpcCalls[0], {
+    name: "vitally_mark_upload_reviewed",
+    args: {
+      p_action_id: "a-3",
+      p_volunteer_id: "person-ana",
+      p_expected_revision: 4,
+      p_document: "photoId",
+      p_reason: "Expired",
+    },
+  });
+  const request = { volunteerId: "person-ana", expectedRevision: 4, document: "form13615", reason: "Not signed" };
+  await store.markUploadReviewed(request);
+  assert.ok(request.actionId);
+});
+
+test("getMyProfile calls vitally_my_profile", async () => {
+  const answer = { personId: "person-ana", name: "Ana Example", revision: 3 };
+  const client = fakeClient({ access: "staff", rpc: () => ({ data: answer, error: null }) });
+  assert.deepEqual(await createStore(client).getMyProfile(), answer);
+  assert.equal(client.rpcCalls[0].name, "vitally_my_profile");
+  assert.equal(client.rpcCalls[0].args, undefined);
+});
+
+test("saveMyProfile sends its three parameters", async () => {
+  const client = fakeClient({ access: "staff" });
+  const store = createStore(client);
+  const profile = { name: "Ana Example", phone: null, works: "remote", languages: ["english"], otherLanguage: null, usualDays: ["mon", "wed"] };
+  await store.saveMyProfile({ actionId: "a-4", expectedRevision: 3, profile });
+  assert.deepEqual(client.rpcCalls[0], {
+    name: "vitally_save_my_profile",
+    args: { p_action_id: "a-4", p_expected_revision: 3, p_profile: profile },
+  });
+  const request = { expectedRevision: 3, profile };
+  await store.saveMyProfile(request);
+  assert.ok(request.actionId);
+});
+
+test("listVolunteers carries the review fields and usual days", async () => {
+  const rows = {
+    ...ROSTER_ROWS,
+    volunteer_profiles: [{ ...ROSTER_ROWS.volunteer_profiles[0], usual_days: ["mon", "fri"] }],
+    roster_entries: [
+      {
+        workspace_id: "workspace-1",
+        person_id: "person-ana",
+        season: 2026,
+        roles: ["greeter"],
+        form_13615_reviewed_at: "2026-11-20T15:00:00Z",
+        form_13615_review_reason: "Not signed",
+        photo_id_reviewed_at: "2026-11-21T15:00:00Z",
+        photo_id_review_reason: "Expired",
+      },
+    ],
+  };
+  const [ana] = await createStore(fakeClient({ access: "staff", rows })).listVolunteers();
+  assert.deepEqual(ana.usualDays, ["mon", "fri"]);
+  assert.equal(ana.form13615ReviewedAt, "2026-11-20T15:00:00Z");
+  assert.equal(ana.form13615ReviewReason, "Not signed");
+  assert.equal(ana.photoIdReviewedAt, "2026-11-21T15:00:00Z");
+  assert.equal(ana.photoIdReviewReason, "Expired");
+  const [plain] = await createStore(fakeClient({ access: "staff", rows: ROSTER_ROWS })).listVolunteers();
+  assert.deepEqual(plain.usualDays, []);
+  for (const key of ["form13615ReviewedAt", "form13615ReviewReason", "photoIdReviewedAt", "photoIdReviewReason"])
+    assert.equal(plain[key], null, key);
+});
+
+test("countUploadsToReview counts the current season's rows with a sent date", async () => {
+  const rows = {
+    ...ROSTER_ROWS,
+    roster_entries: [
+      { person_id: "a", season: 2026, form_13615_sent_at: "2026-11-20T15:00:00Z", photo_id_sent_at: null },
+      { person_id: "b", season: 2026, form_13615_sent_at: null, photo_id_sent_at: "2026-11-20T15:00:00Z" },
+      { person_id: "c", season: 2026, form_13615_sent_at: null, photo_id_sent_at: null },
+      { person_id: "d", season: 2025, form_13615_sent_at: "2025-11-20T15:00:00Z", photo_id_sent_at: null },
+    ],
+  };
+  const client = fakeClient({ access: "staff", rows });
+  assert.equal(await createStore(client).countUploadsToReview(), 2);
+  const head = client.reads.find((read) => read.table === "roster_entries");
+  assert.deepEqual(head.options, { count: "exact", head: true });
+  assert.equal(head.columns, "person_id");
+  assert.deepEqual(head.filters, [["season", 2026]]);
+  assert.equal(head.or, "form_13615_sent_at.not.is.null,photo_id_sent_at.not.is.null");
+});
+
+test("countUploadsToReview is 0 with no season, staff-only, and maps a failed read", async () => {
+  assert.equal(await createStore(fakeClient({ access: "staff", rows: { workspaces: [{ id: "workspace-1", current_season: null }] } })).countUploadsToReview(), 0);
+  await assert.rejects(() => createStore(fakeClient({ access: "applicant", rows: ROSTER_ROWS })).countUploadsToReview());
+  await assert.rejects(
+    () => createStore(fakeClient({ access: "staff", readError: { code: "VT001" } })).countUploadsToReview(),
+    { code: "FORBIDDEN" },
+  );
+});
+
 test("listVolunteers reads the accounts and puts each on its volunteer", async () => {
   const client = fakeClient({
     access: "staff",
@@ -1787,7 +2088,7 @@ test("listVolunteers reads the accounts and puts each on its volunteer", async (
   assert.deepEqual(list[0].account, { status: "invited", revision: 2, activatedAt: null, expiresAt: null });
   assert.equal(
     client.reads.find((read) => read.table === "accounts").columns,
-    "workspace_id,user_id,person_id,status,revision,activated_at,expires_at",
+    "workspace_id,user_id,person_id,status,revision,activated_at,expires_at,is_site_coordinator",
   );
 });
 
@@ -2114,4 +2415,61 @@ test("an update RPC error with VT004 becomes INVALID_TRANSITION", async () => {
     code: "INVALID_TRANSITION",
   });
   await assert.rejects(() => createStore(client).saveUpdate({ update: {} }), { code: "INVALID_TRANSITION" });
+});
+
+test("getSeasonSettings calls vitally_season_settings and returns its answer", async () => {
+  const answer = { season: 2027, certificateUploadUrl: "", clientDocumentsUrl: "", revision: 1, canEdit: true };
+  const client = fakeClient({ access: "staff", rpc: async () => ({ data: answer, error: null }) });
+  assert.deepEqual(await createStore(client).getSeasonSettings(), answer);
+  assert.equal(client.rpcCalls[0].name, "vitally_season_settings");
+});
+
+test("saveSeasonSettings sends the action id, the expected revision and the links", async () => {
+  const client = fakeClient({ access: "staff" });
+  const store = createStore(client);
+  const settings = { certificateUploadUrl: "https://example.org/sc", clientDocumentsUrl: "" };
+  await store.saveSeasonSettings({ actionId: "a-1", expectedRevision: 4, settings });
+  assert.deepEqual(client.rpcCalls[0], {
+    name: "vitally_save_season_settings",
+    args: { p_action_id: "a-1", p_expected_revision: 4, p_settings: settings },
+  });
+  const request = { expectedRevision: 4, settings };
+  await store.saveSeasonSettings(request);
+  assert.ok(request.actionId);
+  assert.equal(client.rpcCalls[1].args.p_action_id, request.actionId);
+});
+
+test("setSiteNumber sends the action id and the SIDN", async () => {
+  const client = fakeClient({ access: "staff" });
+  await createStore(client).setSiteNumber({ actionId: "a-1", sidn: "S00000000" });
+  assert.deepEqual(client.rpcCalls[0], {
+    name: "vitally_set_site_number",
+    args: { p_action_id: "a-1", p_sidn: "S00000000" },
+  });
+});
+
+test("startNextSeason sends the action id, the season read and the typed year", async () => {
+  const client = fakeClient({ access: "staff" });
+  await createStore(client).startNextSeason({ actionId: "a-1", expectedSeason: 2026, typedYear: 2027 });
+  assert.deepEqual(client.rpcCalls[0], {
+    name: "vitally_start_next_season",
+    args: { p_action_id: "a-1", p_expected_season: 2026, p_typed_year: 2027 },
+  });
+});
+
+test("setSiteCoordinator sends the volunteer, the account revision and granted", async () => {
+  const client = fakeClient({ access: "staff" });
+  const store = createStore(client);
+  await store.setSiteCoordinator({ actionId: "a-1", volunteerId: "person-ana", expectedRevision: 2, granted: true });
+  await store.setSiteCoordinator({ actionId: "a-2", volunteerId: "person-ana", expectedRevision: 3, granted: false });
+  assert.deepEqual(client.rpcCalls, [
+    {
+      name: "vitally_set_site_coordinator",
+      args: { p_action_id: "a-1", p_volunteer_id: "person-ana", p_expected_revision: 2, p_granted: true },
+    },
+    {
+      name: "vitally_set_site_coordinator",
+      args: { p_action_id: "a-2", p_volunteer_id: "person-ana", p_expected_revision: 3, p_granted: false },
+    },
+  ]);
 });

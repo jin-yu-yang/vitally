@@ -69,14 +69,13 @@ const personRow = async (f, key) =>
     )
   ).rows[0];
 // The roster function the fixture's `f.staff` uses, called directly.
-const addStaffMember = (f, userId, key, name, capabilities) =>
+const addStaffMember = (f, userId, key, name) =>
   f.withSetupLock(() =>
-    f.sql("select vitally_private.add_staff_member($1,$2,$3,$4,$5::text[]) as person_id", [
+    f.sql("select vitally_private.add_staff_member($1,$2,$3,$4) as person_id", [
       f.workspaceId,
       userId,
       key,
       name,
-      capabilities,
     ]),
   );
 const revisionOf = async (f, caseId) =>
@@ -598,7 +597,7 @@ test("staff identity against real Supabase", async (t) => {
     });
 
     await t.test("add_staff_member repeated with identical values changes nothing", async () => {
-      const again = await addStaffMember(f, riley.userId, "riley", "Riley Park", ["prepare"]);
+      const again = await addStaffMember(f, riley.userId, "riley", "Riley Park");
       assert.equal(again.rows[0].person_id, riley.personId);
       assert.equal(
         (
@@ -611,34 +610,29 @@ test("staff identity against real Supabase", async (t) => {
     });
 
     await t.test("add_staff_member refuses what the roster must refuse", async () => {
-      const refused = (userId, key, name, capabilities) =>
-        assert.rejects(() => addStaffMember(f, userId, key, name, capabilities), rejected("VALIDATION"), key);
-      // Different capabilities for an existing key or account. The name is not
-      // compared since 044 (add-volunteer-roster-records, design D5): a renamed
-      // re-run succeeds and keeps the stored name.
-      await addStaffMember(f, riley.userId, "riley", "Riley Parker", ["prepare"]);
-      assert.equal(
-        (await f.sql("select name from public.people where id=$1", [riley.personId])).rows[0].name,
-        "Riley Park",
-      );
-      await refused(riley.userId, "riley", "Riley Park", ["prepare", "review"]);
+      const refused = (userId, key, name) =>
+        assert.rejects(() => addStaffMember(f, userId, key, name), rejected("VALIDATION"), key);
+      // The name is not compared since 044 (add-volunteer-roster-records,
+      // design D5): a renamed re-run succeeds and keeps the stored name. Since
+      // 052 there are no capabilities to compare either: they are the mirror of
+      // the person's roles, which the re-run leaves alone.
+      await addStaffMember(f, riley.userId, "riley", "Riley Parker");
+      const stored = (
+        await f.sql("select name,capabilities from public.people where id=$1", [riley.personId])
+      ).rows[0];
+      assert.equal(stored.name, "Riley Park");
+      assert.deepEqual(stored.capabilities, ["prepare"]);
       // The same account under another key, and the key of another account.
-      await refused(riley.userId, "riley_two", "Riley Park", ["prepare"]);
-      await refused(f.unapprovedUserId, "riley", "Riley Park", ["prepare"]);
+      await refused(riley.userId, "riley_two", "Riley Park");
+      await refused(f.unapprovedUserId, "riley", "Riley Park");
       // A key outside the person-key pattern, a name outside 1-80 characters.
-      await refused(f.unapprovedUserId, "Quinn-Ross", "Quinn Ross", ["prepare"]);
-      await refused(f.unapprovedUserId, "quinn", "", ["prepare"]);
-      await refused(f.unapprovedUserId, "quinn", "Q".repeat(81), ["prepare"]);
-      // A capability outside the known set, or a repeated one.
-      await refused(f.unapprovedUserId, "quinn", "Quinn Ross", ["prepare", "teach"]);
-      await refused(f.unapprovedUserId, "quinn", "Quinn Ross", ["prepare", "prepare"]);
-      // Follow-up access without admin (042).
-      await refused(f.unapprovedUserId, "quinn", "Quinn Ross", ["followup"]);
-      await refused(f.unapprovedUserId, "quinn", "Quinn Ross", ["followup", "review"]);
+      await refused(f.unapprovedUserId, "Quinn-Ross", "Quinn Ross");
+      await refused(f.unapprovedUserId, "quinn", "");
+      await refused(f.unapprovedUserId, "quinn", "Q".repeat(81));
       // Nothing was created for the account.
       assert.deepEqual(await f.readMembership(f.unapprovedUserId), []);
       // An account with an active membership in another workspace.
-      await refused(f.outsiderUserId, "zed", "Zed Moss", ["prepare"]);
+      await refused(f.outsiderUserId, "zed", "Zed Moss");
       const riley2 = await personRow(f, "riley");
       assert.equal(riley2.name, "Riley Park");
       assert.deepEqual(riley2.capabilities, ["prepare"]);
@@ -651,30 +645,32 @@ test("staff identity against real Supabase", async (t) => {
       }
     });
 
+    // Since 052 people.capabilities is the mirror of the person's roles: a
+    // direct write of follow-up access without admin is replaced by the
+    // mirror, so it is never stored. 042's check stays as a backstop.
     await t.test("no follow-up-only person can be stored (042)", async () => {
-      // f.sql wraps the pg error; the constraint name is on its cause.
-      const byTheCheck = (error) =>
-        error.code === "23514" && error.cause?.constraint === "people_followup_needs_admin";
       try {
-        await assert.rejects(
-          () => f.sql("update public.people set capabilities=$1 where id=$2", [["followup", "review"], riley.personId]),
-          byTheCheck,
+        assert.equal(
+          (
+            await f.sql(
+              "select count(*)::int as count from pg_constraint where conname='people_followup_needs_admin' and conrelid='public.people'::regclass",
+            )
+          ).rows[0].count,
+          1,
         );
-        // The refused write leaves Riley's capabilities as they were.
+        await f.sql("update public.people set capabilities=$1 where id=$2", [["followup", "review"], riley.personId]);
+        // The write is replaced: Riley keeps the capabilities of their roles.
         assert.deepEqual((await personRow(f, "riley")).capabilities, ["prepare"]);
-        await assert.rejects(
-          () =>
-            f.sql(
-              "insert into public.people(workspace_id,person_key,name,capabilities) values($1,'quinn_direct','Quinn Direct',$2)",
-              [f.workspaceId, ["followup"]],
-            ),
-          byTheCheck,
+        await f.sql(
+          "insert into public.people(workspace_id,person_key,name,capabilities) values($1,'quinn_direct','Quinn Direct',$2)",
+          [f.workspaceId, ["followup"]],
         );
-        // Admin without follow-up is still a valid person.
+        // No sign-in, so the mirror is empty.
+        assert.deepEqual((await personRow(f, "quinn_direct")).capabilities, []);
+        // Admin without the Admin role is replaced the same way.
         await f.sql("update public.people set capabilities=$1 where id=$2", [["admin", "prepare"], riley.personId]);
+        assert.deepEqual((await personRow(f, "riley")).capabilities, ["prepare"]);
       } finally {
-        // On 041 the refused writes succeed; put Riley back so later subtests are unaffected.
-        await f.sql("update public.people set capabilities=$1 where id=$2", [["prepare"], riley.personId]);
         await f.sql("delete from public.people where workspace_id=$1 and person_key='quinn_direct'", [f.workspaceId]);
       }
       assert.deepEqual((await personRow(f, "riley")).capabilities, ["prepare"]);
@@ -876,12 +872,11 @@ test("staff identity against real Supabase", async (t) => {
       await assert.rejects(
         () =>
           f.withSetupLock(() =>
-            f.sql("select vitally_private.add_staff_member($1,$2,$3,$4,$5::text[])", [
+            f.sql("select vitally_private.add_staff_member($1,$2,$3,$4)", [
               workspaceId,
               account.userId,
               "sam",
               "Sam Rivera",
-              ["prepare"],
             ]),
           ),
         rejected("VALIDATION"),

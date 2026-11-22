@@ -78,6 +78,12 @@ names are fictional:
 | Diego Fairbanks | Hold | Office: Got in touch, or Close |
 | Yuki Morrow | Closed, withdrawn | Closed |
 
+At **Return to signing** (Rafael Lindqvist), the dialog can also take the corrected Exit Form values:
+open a part (for example the Pennsylvania return), choose how it was filed this time, the result, the
+amount and how the refund is paid, and optionally add Remarks. Everything is optional, and a part left
+empty is filled in by hand. The office's Exit Form panel then says the form was filled from the
+corrected values, and **Mark e-filed** starts with the planned method chosen.
+
 Only Lena Okafor's case has a client account. The others were entered by the office, so no client
 window shows them.
 
@@ -213,7 +219,7 @@ every email the stack would have sent.
    address. It is the invitation: it has the site's link and an expiry, and no code. Open the site
    in a second window, type the address on the sign-in screen and ask for a code. A second message
    arrives, "Your ViTally code is" followed by six digits. Type the code. Maya sees **Confirm your site**: enter a name and the
-   roster file's fictional `siteNumber` (`S00000000`). A wrong number says "That isn't this site's
+   fictional SIDN `S00000000` that `seed:local` sets when none is set (or the one set on Season settings). A wrong number says "That isn't this site's
    number."; the fifth cancels the invitation. The account turns **Active**, the Roster shows
    "Signed in as" the name, and because Maya has her Preparer role and certificates and is not
    new, she is now **Cleared** and lands on the staff screen.

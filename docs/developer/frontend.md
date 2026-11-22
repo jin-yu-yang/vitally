@@ -26,6 +26,7 @@ The front end **predicts** what a person may do so it can show the right buttons
 - [Live updates](#live-updates)
 - [The contact log](#the-contact-log)
 - [Case labels](#case-labels)
+- [Clearance uploads](#clearance-uploads)
 - [Posted updates](#posted-updates)
 - [Sign-in](#sign-in)
 - [Window state](#window-state)
@@ -84,7 +85,8 @@ Dependency rules that keep the pieces testable:
    publishable key from the config.
 4. It creates `auth` ([`auth.mjs`](../../src/auth.mjs)), `store`
    ([`supabase-store.mjs`](../../src/supabase-store.mjs)) and the controller, passing `render`,
-   `window.sessionStorage` and `window` (for online/focus events).
+   `window.sessionStorage` and `window` (for online/focus events) and `document` (for `visibilitychange`, which wakes a hidden tab
+   when it becomes visible).
 5. The controller restores the session, reads the membership, loads the right data, subscribes
    to Realtime, and renders.
 
@@ -120,7 +122,7 @@ sign-in (`sendCode`, `verifyCode`, `editAuthEmail`, `editAuthCode`, `restartSign
 **`staffWindow()`** is everything a staff screen does (its reads, its eligibility rules and its
 actions), true only for a `staff` account (`isStaffWindow` in [`src/contracts.mjs`](../../src/contracts.mjs)
 says the same for the views). The person acting is always the account's own `principal.personId`; a
-client sends none. None of the twenty-two RPCs takes the acting person, so the browser never claims an identity (`vitally_save_volunteer` takes a volunteer's person id, but as the record to change, not as who is acting); the
+client sends none. None of the thirty-four RPCs takes the acting person, so the browser never claims an identity (`vitally_save_volunteer` takes a volunteer's person id, but as the record to change, not as who is acting); the
 database resolves it ([Database: who is acting](database.md#who-is-acting)). An account with any
 other access (a former presenter) gets the "This account has no access" screen and nothing is
 loaded for it.
@@ -145,7 +147,7 @@ Three rules the controller keeps:
 | Signed out | Email and code form ([`client-views.mjs`](../../src/client-views.mjs) `accessScreen`); "cannot reach the server" and "no access" screens ([`views.mjs`](../../src/views.mjs)) |
 | Applicant | `applications` (list and lookup by Application ID), `reference` (new ID to keep), `intake` (the sub-step form, built by `src/intake-views.mjs`), `progress` (status, client number, requests, send document) |
 | Staff window, volunteer account | `staff`: the work board; `staff-case`: the case page with its tabs ([`staff-views.mjs`](../../src/staff-views.mjs)) |
-| Staff window, `admin` account | `staff`: the Follow-ups queue ([`office-views.mjs`](../../src/office-views.mjs)); `office-cases`: the case pool ([`pool-views.mjs`](../../src/pool-views.mjs)); `office-add-case`: Add a case for a walk-in client ([`office-views.mjs`](../../src/office-views.mjs)); `staff-case`: the office's case page ([`admin-views.mjs`](../../src/admin-views.mjs)); `office-volunteers`: the Volunteers Roster and its Add / Edit drawer ([`volunteer-views.mjs`](../../src/volunteer-views.mjs), rules in [`volunteer-roster.mjs`](../../src/volunteer-roster.mjs)); the same page's **Workload** tab for cleared admins, with the Unassigned lists, tagged rows for anyone holding a case without the role, and the Assign / Reassign drawer, which sends `ASSIGN_CASE` with the revision and holder it was opened on ([`workload-views.mjs`](../../src/workload-views.mjs), counts and candidates in [`volunteer-workload.mjs`](../../src/volunteer-workload.mjs)). The Workload is built from the staff case list, `volunteers` and `people` already in the window, so it adds no table or subscription; its tab, sort, search and open rows are window-local and never saved; `office-updates`: Post an update ([`update-views.mjs`](../../src/update-views.mjs)), for a ceiling admin only, cleared or not |
+| Staff window, `admin` account | `staff`: the Follow-ups queue ([`office-views.mjs`](../../src/office-views.mjs)); `office-cases`: the case pool ([`pool-views.mjs`](../../src/pool-views.mjs)); `office-add-case`: Add a case for a walk-in client ([`office-views.mjs`](../../src/office-views.mjs)); `staff-case`: the office's case page ([`admin-views.mjs`](../../src/admin-views.mjs)); `office-volunteers`: the Volunteers Roster and its Add / Edit drawer ([`volunteer-views.mjs`](../../src/volunteer-views.mjs), rules in [`volunteer-roster.mjs`](../../src/volunteer-roster.mjs)); the same page's **Workload** tab for cleared admins, with the Unassigned lists, tagged rows for anyone holding a case without the role, and the Assign / Reassign drawer, which sends `ASSIGN_CASE` with the revision and holder it was opened on ([`workload-views.mjs`](../../src/workload-views.mjs), counts and candidates in [`volunteer-workload.mjs`](../../src/volunteer-workload.mjs)). The Workload is built from the staff case list, `volunteers` and `people` already in the window, so it adds no table or subscription; its tab, sort, search and open rows are window-local and never saved; `office-updates`: Post an update ([`update-views.mjs`](../../src/update-views.mjs)), for a workspace admin only (a site coordinator, or the Admin role this season), cleared or not; `office-settings`: Season settings ([`season-settings-views.mjs`](../../src/season-settings-views.mjs)), for the same admins, with the current season's links and SIDN and the **Next season** card, whose Start next season… dialog (site coordinators only) asks for the next year typed and lists what to finish first when `vitally_start_next_season` refuses ([Start next season](database.md#start-next-season)) |
 | Staff account | The staff screens: the sidebar and the case page header say "Signed in as <name>", and the person is the account's own (`staffScreen` in `views.mjs` picks the office screens when that person has `admin`, and the volunteer work board otherwise). Always English |
 
 **Fill tools.** They follow the demo-tools switch. Three controls exist: the staff "Auto-fill fictional data" button, the client intake's fiction toolbar and the office's Add a case "Fill fictional details" pill. With the switch on, an "Auto-fill fictional data" button appears at the top of each questionnaire, the review-contact form and the filing dialogs (Mark ready to e-file, Mark e-filed, Record filing result, Return to signing). [`src/demo-fill.mjs`](../../src/demo-fill.mjs) fills the form with fictional values that the form's own payload builder accepts. It never overwrites typed text or a defaulted choice, and it sends nothing: the form's own button still submits. `demoFillButton(enabled)` renders nothing when the switch (`state.demoTools`) is off, and the `demo-fill` handler in `app.mjs` checks `demoToolsOn` again. The switch is on only when `/public-config.json` sends `demoTools: true` (`server.mjs` does so only with `VITALLY_DEMO_TOOLS=1` and a loopback `SUPABASE_URL`) and the config's `supabaseUrl` is loopback. When on, these controls show to whoever is on that screen; when off, to no one
@@ -505,10 +507,25 @@ in the browser from an approval's reviewer questionnaire, and nothing is uploade
   the return was corrected. The PDF itself carries no note, only the blanks. Without staff history,
   no form is offered. Fixed in
   [#173](https://github.com/jin-yu-yang/vitally/issues/173). Still open:
-  [#203](https://github.com/jin-yu-yang/vitally/issues/203) (collect the corrected
-  values at Return to signing) and
   [#204](https://github.com/jin-yu-yang/vitally/issues/204) (the review-contact
   line after a Return to signing).
+- **Corrected values at Return to signing (#203).** The Return to signing dialog
+  (`returnToSigningDialogBody` in `admin-views.mjs`) optionally collects the corrected Exit Form
+  values: a closed `<details class="q-exit-group">` for each return the case has a method for and
+  for each of the five Local types, and Remarks. A settled return shows its method as text with a
+  hidden `<prefix>.fixedMethod`; a rejected return has method radios. The payload builder
+  (`returnToSigning` in `case-actions.mjs`) sends `exitForm` and `remarks` only when something is
+  filled, and refuses a method-only group or a bad amount in the browser (the dialog stays open and
+  the typed group stays open). The values go to `return_to_signing_exit_forms`
+  ([database](database.md#action-catalogue)), and the event's `detail.exitFormId` names the row.
+  `exitFormSource` then prints the stored values: the settled methods come from the case, the rest
+  from the row, and the note reads "This form was filled from the corrected values recorded on
+  <date>." (the New York date of the event), plus " Fill in by hand: <list>." only for what is
+  still missing. With no stored values the #173 note and blank form are unchanged.
+- **Mark e-filed after a Return to signing.** Each rejected return's method radios
+  (`method-federal`, `method-state`) start with the method planned at Return to signing checked
+  (`plannedMethod`), but only when every rejected return has a plan; otherwise nothing is
+  preselected. The admin can change it.
 - **Who may make it.** `viewExitForm` in `app.mjs` returns at once for anything but a staff window
   (`isStaffWindow`). Like the drafts, it opens a new tab and, if the browser blocks the tab,
   offers a link instead (`draftOffers`). A blocked tab's link is drawn on the Intake answers tab, so
@@ -518,7 +535,7 @@ in the browser from an approval's reviewer questionnaire, and nothing is uploade
 - **What goes on it.** `exitFormMarks(questionnaire, header, today)` in
   [`src/exit-form.mjs`](../../src/exit-form.mjs) decides everything, with no DOM. Its questionnaire comes from `exitFormSource`. `buildExitFormPdf`
   then draws it on the blank template.
-  - The header has the tax year (the case's season), today's date, the client number, and the
+  - The header has the tax year (the case's season − 1), today's date, the client number, and the
     taxpayer's name. A couple (married, or widowed in the tax year, by the intake's own spouse
     rule) gets "Taxpayer & Spouse".
   - Federal and State tick e-file or paper and the refund or payment method, then write the
@@ -655,7 +672,7 @@ choice "given to the client to mail") and sends `{confirmed, methods}`; filing a
 rejected returns and lists the rest as done. "Record filing result…" (`efiled`, or `rejected` while an
 e-filed return is waiting) asks for e-filed returns only, never a paper one, and sends each waiting
 return's result, date and, when rejected, a code, plus an optional fix note. "Return to signing…" (`rejected`
-with every return answered) sends `{confirmed: true}`; "Close case…" is also offered at `rejected`.
+with every return answered) sends `{confirmed: true}` plus the optional corrected Exit Form values (`exitForm`, `remarks`; see [The Exit Form](#the-exit-form)); "Close case…" is also offered at `rejected`.
 A staff-only Filing panel on the case page lists every attempt, newest first, with each return's
 method, result, date and code, and the fix notes in the order recorded. The case pool has two more
 tabs, Needs attention (`rejected`) and Done (`accepted`), and Follow-ups gains the kinds "Filing
@@ -852,7 +869,9 @@ live in [`src/case-labels.mjs`](../../src/case-labels.mjs); the database decides
 - **State.** The labels and the open menu (`state.labels`, `state.labelMenu`) are window-local and
   never saved. The labels ride with the case list: `loadList` reads `store.listLabels()` for a
   staff window. The chips on a board or pool row come from `listCases`, which joins
-  `case_labels` and the active `case_label_links`.
+  `case_labels` and the active `case_label_links`. For staff, `listCases` reads only the
+  current season's cases plus drafts (no season yet), and `getCase` answers `VT002` for a
+  past-season case, as for an absent one (`add-start-next-season` design D7).
 - **Writes.** `controller.toggleCaseLabel` and `saveLabelEdit` call the store's
   `setCaseLabel` and `saveLabel`. A write whose answer never came (`UNKNOWN_OUTCOME`) is kept, so
   pressing it again sends the same action id, before the form's own checks: after a create whose
@@ -892,6 +911,54 @@ database side is in [Database: the contact log](database.md#the-contact-log).
   re-read the case. The store reads `contact_log` and `contact_log_versions` for `getCase`.
 - **Copy** writes to the system clipboard with `navigator.clipboard.writeText` (`copyContacts` in
   `app.mjs`). A refused clipboard shows a warning toast instead. Tests that check the text read the clipboard back.
+
+## Clearance uploads
+
+A volunteer says they sent their Form 13615 or photo ID, and a workspace admin sees what is waiting.
+The database side is in [Database: clearance uploads](database.md#clearance-uploads).
+
+- **The setup screen** ([`setup-views.mjs`](../../src/setup-views.mjs)). The `form13615` and
+  `photoId` items show **Upload** (a link to the clearance's `uploadUrl`, `target="_blank"
+  rel="noopener"`) or, with no link, "Ask your site coordinator how to send it.", and an **I've
+  uploaded it** button carrying the document. Once the item has a `sentAt`, the button is replaced by
+  "Waiting for review · sent Nov 20" (New York, as `SENT_DAY` in `ui.mjs`, which the drawer's sent line also uses); Upload stays so a
+  corrected file can be sent. Role and SC items are unchanged.
+- **`controller.markUploadSent(document)`** calls the store's `markUploadSent` with a fresh action
+  id, or the same one when the last send's outcome was unknown, then re-reads the clearance as Check
+  again does. `VALIDATION` details `PHOTO_ID_NOT_NEEDED` and `NO_ROSTER_ENTRY` get their own
+  sentences; other failures use the usual notice.
+- **The returning-volunteer picker** (change `add-returning-volunteers-and-roster-csv`). The Add a
+  volunteer drawer can pick an earlier volunteer instead of retyping them. The controller's
+  `readVolunteers` reads `store.listEarlierVolunteers()` beside `listVolunteers()` into
+  `state.earlierVolunteers` (people with a profile and no current-season roster entry, each marked
+  `lastSeason` when they had an entry the season before). `returningCandidates` in
+  [`volunteer-roster.mjs`](../../src/volunteer-roster.mjs) lists last season's people matching the
+  search, plus an older volunteer whose full email was typed (flagged `earlier`); `returningFill`
+  builds the drawer's volunteer from a pick, with no roles or certificates. A pick sets
+  `dialogContext = { volunteerId, returning: true }`, and Save sends the existing Edit call to
+  `vitally_save_volunteer` with the person id and profile revision, which creates the current-season
+  roster entry. No RPC or migration changed.
+- **Export CSV.** The Roster's **Export CSV** button (disabled while no row passes the filters)
+  downloads the filtered rows. `rosterCsv` and `rosterCsvFilename` in `volunteer-roster.mjs` build
+  the text and the name `roster-<season>-<YYYY-MM-DD>.csv` (the date in New York time); `toCsv` in
+  [`csv.mjs`](../../src/csv.mjs) encodes it: a UTF-8 BOM, RFC 4180 quoting, CR LF line ends, and an
+  apostrophe before any cell starting `=`, `+`, `-`, `@`, tab or CR. The later season export (#256)
+  reuses `toCsv`.
+- **The Roster's Show filter.** `SHOW_VIEWS` in [`volunteer-roster.mjs`](../../src/volunteer-roster.mjs)
+  lists the views (`all` "Everyone", `uploads` "Uploads to review"); `filterVolunteers` ANDs the
+  chosen view's predicate with Role and search, and `setVolunteerFilter` accepts `show`. A new view
+  is one more entry in the list. `combineVolunteers` carries `form13615SentAt` and `photoIdSentAt`,
+  and the row status adds "Form 13615 to review" and "Photo ID to review".
+- **The drawer** shows "Form 13615 sent <date>" and "Photo ID sent <date>" with a **Mark reviewed**
+  button for each. `controller.markUploadReviewed(document)` sends the drawer's revision, re-reads
+  the Roster, and keeps the admin's unsaved edits (Mark reviewed changes nothing Save sends). A
+  `CONFLICT` shows the drawer's usual conflict message.
+- **The sidebar count.** For a workspace admin (cleared or not) Volunteers reads "Volunteers · n"
+  with `aria-label="Volunteers, n uploads to review"` ("1 upload" at one); at 0 it is plain
+  "Volunteers". `state.uploadsToReview` counts people, from the store's `countUploadsToReview()`
+  (`roster_entries` is not live). It is re-read with the data load, every clearance check, a cleared
+  window's wake refresh, the admin's Save and Mark reviewed, and every Roster read. A failed read
+  keeps the last count; it is reset on sign-out and on losing admin.
 
 ## Posted updates
 
@@ -1091,3 +1158,35 @@ If you migrate, keep the parts that are framework-independent and already tested
 A build step also means GitHub Pages needs a build workflow, or a host that builds for you. Keep
 `public-config.json` loaded at runtime, not baked in at build time, so one build can serve several
 environments.
+
+
+### Client document uploads (Issue #157)
+
+The site coordinator sets **Client documents upload link** in Season settings; use a
+OneDrive **file request** (upload-only) link. Client Intake document cards and open
+document requests open that URL in a new tab. They do not send file bytes or
+filenames to ViTally. Clients name their OneDrive file with the case's `VT-…`
+reference, which stays the same after submit and is never reused in a later season
+(client numbers restart each season).
+
+`I've uploaded it` is a client declaration only: the corresponding card moves
+from `not_done` / `later` to `sent`, or an open document request becomes
+`awaiting_verification`. The database refuses both while the workspace has no
+client documents link; the office's `RECORD_DOCUMENT_RESPONSE` needs none. Until
+staff confirm it, a client who reported a card by mistake can still mark it
+Later, Don't have or not done. Staff see the date it was reported, then confirm a
+card as `received` / `verified` (with **Undo received** and **Undo verified** to
+take a mis-click back one step) or verify a document request using its existing
+`VERIFY_DOCUMENT` action. Staff get no OneDrive folder link: the client link is
+upload-only, so site coordinators open the folder in OneDrive themselves. If
+there is no configured URL, the client is told to bring documents to PCDC and no
+upload control appears. The application never reads OneDrive or checks whether a
+file arrived.
+
+A client window reads the link (`readClientDocumentsUrl`) when it loads its data and
+on each wake (focus, tab visible, `online`), not on every realtime refresh. Staff
+windows don't read it. The staff note "Client reported it <date>" uses the card's
+`reported_at`, so an undo doesn't change the date.
+
+Migration `056_onedrive_client_documents.sql` adds an applicant-safe URL read
+RPC and expands card statuses; *clients cannot set* `received` or `verified`.

@@ -205,10 +205,7 @@ async function openRequest(f, owner) {
 }
 
 async function respondTo(f, owner, requestId) {
-  await f.act(owner.client, owner.caseId, "RESPOND_DOCUMENT", {
-    requestId,
-    filename: f.sampleFilename,
-  });
+  await f.act(owner.client, owner.caseId, "RESPOND_DOCUMENT", { requestId });
   const [row] = (
     await f.sql(
       "select id from public.documents where request_id=$1 order by created_at desc limit 1",
@@ -488,6 +485,22 @@ const INTERNAL = Object.freeze([
     },
   },
   {
+    // 054: the corrected values entered at Return to signing are staff work.
+    table: "return_to_signing_exit_forms",
+    identity: (row) => row.id,
+    commit: async (f) => {
+      const caseId = await f.preparedCase();
+      const [row] = (
+        await f.sql(
+          `insert into public.return_to_signing_exit_forms(workspace_id,case_id,entered_by_person_id,exit_form)
+           values($1,$2,$3,'{"federal":null,"state":null,"local":[]}') returning id`,
+          [f.workspaceId, caseId, f.reviewerId],
+        )
+      ).rows;
+      return { id: row.id };
+    },
+  },
+  {
     // Assistance items are staff work the client never sees (Ruling R12), and
     // migration 007 publishes the table. No action creates one in this scope,
     // so the row is written through the privileged connection exactly as
@@ -532,6 +545,7 @@ const INTERNAL = Object.freeze([
 
 test("Realtime carries one applicant's rows to that applicant only", async (t) => {
   const f = await createDatabaseFixture();
+  await f.setClientDocumentsLink();
   // One channel held open for the whole file so the tenant keeps streaming
   // between checks; it is a staff member's, so it proves nothing about isolation
   // and is never read for evidence.
@@ -1002,6 +1016,7 @@ test("Realtime carries one applicant's rows to that applicant only", async (t) =
 // sign-in is streamed to admins only.
 test("a volunteer with no sign-in reaches admins only", async () => {
   const f = await createDatabaseFixture();
+  await f.setClientDocumentsLink();
   let adminWatch = null;
   let staffWatch = null;
   try {
@@ -1010,13 +1025,13 @@ test("a volunteer with no sign-in reaches admins only", async () => {
     staffWatch = watchTable(f.preparer, bindings, "staff");
     await withDeadline(adminWatch.subscribed, "the admin channel never subscribed");
     await withDeadline(staffWatch.subscribed, "the staff channel never subscribed");
-    // A person every staff member may read, each under a fresh key.
+    // A person every staff member may read, each under a fresh key. Since 052
+    // a person with no sign-in has no capabilities and only admins read them,
+    // so each probe is a staff member with a sign-in.
     const probe = async () => {
       const key = `probe_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
-      const added = await f.enrich({
-        addPeople: [{ key, name: "Realtime probe", capabilities: ["assist"] }],
-      });
-      return { id: added[key] };
+      const added = await f.staff({ key, name: "Realtime probe", capabilities: [], cleared: false });
+      return { id: added.personId };
     };
     const byId = (change) => (row) => row.id === change.id;
     await controlUntilSeen(staffWatch, probe, byId, "the staff warm-up");
@@ -1067,6 +1082,7 @@ test("a volunteer with no sign-in reaches admins only", async () => {
 // so the uncleared channel's warm-up and fence are people rows.
 test("an uncleared subscriber gets no case change", async () => {
   const f = await createDatabaseFixture();
+  await f.setClientDocumentsLink();
   let clearedWatch = null;
   let unclearedWatch = null;
   try {
@@ -1088,13 +1104,13 @@ test("an uncleared subscriber gets no case change", async () => {
     );
     await withDeadline(clearedWatch.subscribed, "the cleared channel never subscribed");
     await withDeadline(unclearedWatch.subscribed, "the uncleared channel never subscribed");
-    // A person every staff member may read, each under a fresh key.
+    // A person every staff member may read, each under a fresh key. Since 052
+    // a person with no sign-in has no capabilities and only admins read them,
+    // so each probe is a staff member with a sign-in.
     const probe = async () => {
       const key = `probe_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
-      const added = await f.enrich({
-        addPeople: [{ key, name: "Realtime probe", capabilities: ["assist"] }],
-      });
-      return { id: added[key] };
+      const added = await f.staff({ key, name: "Realtime probe", capabilities: [], cleared: false });
+      return { id: added.personId };
     };
     const byId = (change) => (row) => row.id === change.id;
     await controlUntilSeen(unclearedWatch, probe, byId, "the uncleared warm-up");
@@ -1135,6 +1151,7 @@ test("an uncleared subscriber gets no case change", async () => {
 // publication, and the history lines name neither.
 test("realtime carries no code", async () => {
   const f = await createDatabaseFixture();
+  await f.setClientDocumentsLink();
   const CODE = "IND-031-04";
   const NOTE = "Fictional note: preparer to correct the dependent's SSN in TaxSlayer.";
   let watch = null;
@@ -1213,6 +1230,7 @@ test("realtime carries no code", async () => {
 // an applicant, even the owner of the labelled case.
 test("label changes reach staff and no applicant", async () => {
   const f = await createDatabaseFixture();
+  await f.setClientDocumentsLink();
   let staff = null;
   let applicant = null;
   let fence = null;

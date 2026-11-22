@@ -107,3 +107,15 @@ test("every fill handler checks the switch", async () => {
   assert.ok(body.includes("demoToolsOn("), "fillAssistedIntake checks demoToolsOn");
   assert.ok(!body.includes('access !== "presenter"'));
 });
+
+test("the Return to signing fill is one Federal refund group", async () => {
+  const { returnToSigningDemoValues } = await import("../src/demo-fill.mjs");
+  const values = returnToSigningDemoValues(demoValues(NOW), "federal");
+  assert.equal(values["state.result"], undefined);
+  assert.equal(values.remarks, undefined);
+  const { payload } = payloadFor("RETURN_TO_SIGNING", {}, asForm(values, "true"));
+  assert.equal(payload.exitForm.federal.result, "refund");
+  assert.equal(payload.exitForm.state, null);
+  assert.deepEqual(Object.keys(returnToSigningDemoValues(demoValues(NOW), null)), ["confirmed"]);
+});
+

@@ -216,7 +216,7 @@ test("posted updates against real Supabase", async (t) => {
         [f.workspaceId, invited.personId],
       );
       assert.equal(await isMember(f, invited.personId), true, "active again");
-      await f.sql("select vitally_private.deactivate_account($1,$2)", [f.workspaceId, invited.userId]);
+      await f.sql("select vitally_private.deactivate_account($1,$2,$3)", [f.workspaceId, invited.userId, f.siteCoordinatorId]);
       assert.equal(await isMember(f, invited.personId), false, "deactivated");
       assert.deepEqual(await selectedIds(invited.client, [posted.updateId]), [], "no row once deactivated");
       assert.equal(await sizeOf(), activeSize - 1, "not counted once deactivated");
@@ -258,12 +258,15 @@ test("posted updates against real Supabase", async (t) => {
       await refusedWith(f, f.anonymous, "vitally_my_updates", {}, ANONYMOUS_DENIAL);
     });
 
-    await t.test("write: an admin with no roles can post", async () => {
+    // 052: an admin with no roles is a site coordinator (the workspace admin
+    // check); the Admin role is a role.
+    await t.test("write: a site coordinator with no roles can post", async () => {
       const lead = await f.staff({
         key: "quinn_uncleared_admin",
         name: "Quinn Adair",
-        capabilities: ["admin", "followup"],
+        capabilities: [],
         cleared: false,
+        siteCoordinator: true,
       });
       const posted = await call(lead.client, SAVE, newArgs(update({ title: "Welcome back, volunteers", post: true })));
       assert.equal(posted.status, "posted");

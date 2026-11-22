@@ -73,6 +73,7 @@ import {
   changedAnswers,
 } from "./questionnaires.mjs";
 import { demoFillButton } from "./demo-fill.mjs";
+import { dialogLocked, rolesChangedLine } from "./role-gates.mjs";
 import {
   CONTACT_DIRECTIONS,
   CONTACT_WITH,
@@ -1327,6 +1328,9 @@ const CARD_STATUS = Object.freeze({
   not_done: { word: "Not done", icon: "upload" },
   later: { word: "Later", icon: "clock" },
   none: { word: "Don't have", icon: "close" },
+  sent: { word: "Uploaded · to check", icon: "clock" },
+  received: { word: "Received by PCDC", icon: "check" },
+  verified: { word: "Verified by PCDC", icon: "check" },
 });
 
 function groupMark(card) {
@@ -1348,14 +1352,14 @@ function checklistRow(card, { variant, markable, movable, off, answers }) {
   const asked = card.ask ? wording(findQuestion(2, card.ask), { variant, answers }) : "";
   const why = asked ? `<p class="doc-why">Asked by: ${esc(asked)}</p>` : "";
   const status = CARD_STATUS[card.status] ?? CARD_STATUS.not_done;
-  const statusLine = optional
+  const statusLine = optional && card.status === "not_done"
     ? ""
     : `<p class="doc-status is-${esc(card.status)}" id="${id}-status" tabindex="-1">${icon(status.icon)}<span class="sr-only">Status: </span>${esc(status.word)}</p>`;
   const mark = (value, text) =>
     button(esc(text), "mark-card", "secondary", `data-slot="${slot}" data-status="${value}"${off}`);
   const marks =
-    markable && !optional
-      ? `${mark("later", "Later")}${mark("none", "Don't have")}${when(card.status !== "not_done", mark("not_done", "Mark as not done"))}`
+    markable && (!optional || ["sent", "received", "verified"].includes(card.status))
+      ? `${optional ? "" : mark("later", "Later")}${optional ? "" : mark("none", "Don't have")}${when(card.status === "sent", `${mark("received", "Mark received")}${mark("verified", "Mark verified")}`)}${when(card.status === "received", `${mark("verified", "Mark verified")}${mark("sent", "Undo received")}`)}${when(card.status === "verified", mark("received", "Undo verified"))}${when(!["not_done", "received", "verified"].includes(card.status), mark("not_done", "Mark as not done"))}`
       : "";
   const move =
     movable && card.baseGroup === "maybe"
@@ -1363,7 +1367,7 @@ function checklistRow(card, { variant, markable, movable, off, answers }) {
         ? button("Move to Needed", "move-card", "secondary", `data-slot="${slot}" data-group="needed"${off}`)
         : button("Move to Maybe needed", "move-card", "secondary", `data-slot="${slot}" data-group="maybe"${off}`)
       : "";
-  return `<article class="doc-row" id="${id}" data-slot="${slot}" tabindex="-1"><div class="doc-row-head"><strong class="doc-label">${esc(card.label?.en)}</strong><span class="doc-group ${group.className}">${icon(group.icon)} ${esc(group.word)}</span></div><p class="doc-owner">${esc(card.ownerLine?.office ?? card.ownerLine?.en)}</p>${why}${statusLine}${when(marks || move, `<div class="doc-marks">${marks}${move}</div>`)}</article>`;
+  return `<article class="doc-row" id="${id}" data-slot="${slot}" tabindex="-1"><div class="doc-row-head"><strong class="doc-label">${esc(card.label?.en)}</strong><span class="doc-group ${group.className}">${icon(group.icon)} ${esc(group.word)}</span></div><p class="doc-owner">${esc(card.ownerLine?.office ?? card.ownerLine?.en)}</p>${why}${statusLine}${when(["sent", "received", "verified"].includes(card.status) && card.reportedAt, `<p class="field-note">Client reported it ${esc(formatTime(card.reportedAt))}</p>`)}${when(marks || move, `<div class="doc-marks">${marks}${move}</div>`)}</article>`;
 }
 
 /**
@@ -1373,7 +1377,10 @@ function checklistRow(card, { variant, markable, movable, off, answers }) {
  */
 export function documentChecklist(record, rights, ui = {}) {
   const answers = serverAnswersV2(record);
-  const cards = cardsFor(answers, record.documentCards ?? []);
+  const cards = cardsFor(answers, record.documentCards ?? []).map((card) => ({
+    ...card,
+    reportedAt: (record.documentCards ?? []).find((item) => item.slotId === card.slotId)?.reportedAt ?? null,
+  }));
   const variant = variantOf(answers);
   const markable = Boolean(rights?.markDocumentCard?.allowed);
   const movable = Boolean(rights?.moveDocumentCard?.allowed);
@@ -1436,9 +1443,7 @@ function requestCard(record, request, rights, ui) {
     `<ul class="document-list">${documents
       .map(
         (document) =>
-          `<li>${icon("file")} ${esc(document.filename)} <small>${esc(
-            document.source === "client" ? "sent by the client" : "recorded by the office",
-          )} · ${esc(formatTime(document.createdAt))}</small></li>`,
+          `<li>${icon("file")} ${esc(request?.title)} <small>${document.source === "client" ? "Uploaded" : "Office recorded"} ${esc(formatTime(document.createdAt))} · ${request.status === "verified" ? "verified" : "to check"}</small></li>`,
       )
       .join("")}</ul>`,
   )}${when(
@@ -1577,7 +1582,7 @@ export function nextStep(record, rights, ui = {}) {
       break;
     }
     case "review_approved": {
-      const line = contactStepLine(approved, reviewerQuestionnaireOf(record, approved));
+      const line = contactStepLine(approved, reviewerQuestionnaireOf(record, approved), { returned: returnedToSigning(record) });
       body = line
         ? `<p class="muted">${esc(line)}</p>`
         : approved?.clientContactStatus === "pending"
@@ -1700,15 +1705,13 @@ function preparerForm(record, previous, ui = {}) {
 // the debit date only for a direct debit. Showing and hiding is CSS alone
 // (q-exit-when-*); the payload builder (questionnaires.mjs, group) drops whatever
 // the Result does not use.
-function exitGroup(title, prefix) {
-  const scope = "rev";
-  return `<details class="q-exit-group" data-exit-group="${esc(prefix)}"><summary>${esc(title)}</summary><div class="q-exit-group-body">${radios(
-    "How it was filed",
-    scope,
-    `${prefix}.method`,
-    FILING_METHODS,
-    "",
-  )}${radios("Result", scope, `${prefix}.result`, RESULTS, "")}<div class="q-exit-when-amount">${input(
+// With fixedMethod (a return already settled at Return to signing) the method
+// is text plus a hidden field instead of radios.
+export function exitGroup(title, prefix, { scope = "rev", fixedMethod = null } = {}) {
+  const method = fixedMethod
+    ? `<p class="hint">How it was filed: ${esc(optionLabel(FILING_METHODS, fixedMethod))}</p><input type="hidden" name="${esc(prefix)}.fixedMethod" value="${esc(fixedMethod)}">`
+    : radios("How it was filed", scope, `${prefix}.method`, FILING_METHODS, "");
+  return `<details class="q-exit-group" data-exit-group="${esc(prefix)}"><summary>${esc(title)}</summary><div class="q-exit-group-body">${method}${radios("Result", scope, `${prefix}.result`, RESULTS, "")}<div class="q-exit-when-amount">${input(
     "Amount",
     `${prefix}.amount`,
     "",
@@ -1876,10 +1879,18 @@ function submissionComparison(previous, current, version) {
 
 /**
  * The review-contact step's line once the approval carries a questionnaire
- * (D10), or null for an approval from before the questionnaires.
+ * (D10), or null for an approval from before the questionnaires. After a
+ * Return to signing (`returned`), the second signing is under way and the
+ * conversation belongs to the first one, so the line places it there and says
+ * it is not gone over again (#204).
  */
-function contactStepLine(attempt, questionnaire) {
+function contactStepLine(attempt, questionnaire, { returned = false } = {}) {
   if (!attempt || !questionnaire) return null;
+  if (returned) {
+    return questionnaire.wentOver
+      ? `At the first signing, the reviewer went over the return with the client on ${staffDate(questionnaire.wentOverOn)}. It isn't gone over again.`
+      : "At the first signing, going over the return with the client was passed to the office. It isn't gone over again.";
+  }
   return questionnaire.wentOver
     ? `The reviewer went over the return with the client on ${staffDate(questionnaire.wentOverOn)}.`
     : "The office will go over the return with the client.";
@@ -1985,7 +1996,7 @@ export function correctionsDialogBody(state = {}) {
         "corrections",
       ),
     },
-    confirm: caseSubmit(
+    confirm: dialogLocked(state) ? rolesChangedLine() : caseSubmit(
       `${icon("back")} Send back for corrections`,
       "REQUEST_CORRECTIONS",
       "primary full",
@@ -2107,7 +2118,9 @@ export function logContactForm(
         "secondary",
         `data-contact-id="${esc(contact.id)}"`,
       )}</div>`
-    : `<button type="submit" class="btn primary" id="${submitId}"${busy}>Log contact</button>`;
+    : view.locked
+      ? rolesChangedLine()
+      : `<button type="submit" class="btn primary" id="${submitId}"${busy}>Log contact</button>`;
   return `<form class="staff-form contact-form" ${attrs}>${heading}${segGroup(
     "Direction",
     "direction",

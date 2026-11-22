@@ -10,6 +10,7 @@ import {
   exitFormFontFields,
   exitFormMarks,
   exitFormNeedsFont,
+  exitFormTaxYear,
 } from "../src/exit-form.mjs";
 import { DRAFT_FONT_FIXTURES, draftFontFiles, draftFontsFor } from "../src/draft-pdf.mjs";
 
@@ -297,4 +298,18 @@ test("the reduced questionnaire draws the header and method ticks only", () => {
   assert.equal(valueAt(marks, L.date), "11/03/2026");
   assert.equal(valueAt(marks, L.clientNumber), "31");
   assert.equal(valueAt(marks, L.taxpayer), "Mei Chen");
+});
+
+test("a season-2026 case's Exit Form shows 2025", () => {
+  assert.equal(exitFormTaxYear({ season: 2026 }, { currentSeason: 2027 }), 2025);
+});
+
+test("a case with no season falls back to the current season minus one", () => {
+  assert.equal(exitFormTaxYear({}, { currentSeason: 2026 }), 2025);
+  assert.equal(exitFormTaxYear(null, { currentSeason: 2026 }), 2025);
+});
+
+test("with no season anywhere the tax year is left blank", () => {
+  assert.equal(exitFormTaxYear({}, {}), null);
+  assert.equal(exitFormTaxYear(undefined, undefined), null);
 });

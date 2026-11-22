@@ -4,22 +4,33 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
-import { createDatabaseFixture } from "./support/database-fixture.mjs";
+import { createDatabaseFixture, TEST_SITE_NUMBER } from "./support/database-fixture.mjs";
 import { openDatabase } from "../tools/admin/database.mjs";
+import { applyRoster, parseRoster } from "../tools/admin/roster.mjs";
+import { initializeWorkspace } from "../tools/admin/workspace-setup.mjs";
 import {
   applyAction,
   deletePreviousRun,
+  ensureSiteNumber,
   readRun,
   recordRun,
   resolveSeedTargets,
   runFilePath,
   SEED_SCENARIOS,
   seedCases,
+  seedPastSeason,
   seedVolunteers,
   seedWorkspace,
 } from "../tools/admin/seed-cases.mjs";
 import * as SEED_VALUES from "../tools/admin/seed-values.mjs";
 
+// The fixture's role account (f.roleAccounts) for each person key.
+const ROLE_BY_KEY = Object.freeze({
+  site_coordinator: "siteCoordinator",
+  preparer: "preparer",
+  reviewer: "reviewer",
+  intaker: "intaker",
+});
 const tempRunDir = () => mkdtemp(path.join(tmpdir(), "seed-run-"));
 const readRunFile = async (workspaceId, runDir) =>
   JSON.parse(await readFile(runFilePath(workspaceId, runDir), "utf8"));
@@ -134,6 +145,157 @@ test("seed command against real Supabase", async (t) => {
         }
       },
     );
+
+    // Change add-season-settings (spec local-seed-data, "The Site Coordinator
+    // is not a site coordinator"), as on a stack set up from an older roster.
+    await t.test(
+      "refuses when the site_coordinator account is not a site coordinator",
+      async () => {
+        const runDir = await tempRunDir();
+        const setFlag = (value) =>
+          f.sql(
+            "update public.accounts set is_site_coordinator=$3 where workspace_id=$1 and person_id=$2",
+            [f.workspaceId, f.siteCoordinatorId, value],
+          );
+        const counts = async () =>
+          (
+            await f.sql(
+              `select (select count(*)::int from public.cases where workspace_id=$1) as cases,
+                      (select count(*)::int from public.people where workspace_id=$1) as people`,
+              [f.workspaceId],
+            )
+          ).rows[0];
+        const before = await counts();
+        await setFlag(false);
+        try {
+          const refusal = (error) =>
+            error.code === "SEED_SETUP" &&
+            error.message.includes('"site_coordinator"') &&
+            error.message.includes("siteCoordinator: true") &&
+            error.message.includes("roster command") &&
+            !error.message.includes("@");
+          await assert.rejects(
+            resolveSeedTargets(client, {
+              workspaceId: f.workspaceId,
+              clientAEmail: f.applicantAEmail,
+            }),
+            refusal,
+          );
+          await assert.rejects(
+            seedWorkspace({ workspaceId: f.workspaceId, clientAEmail: f.applicantAEmail, runDir }),
+            refusal,
+          );
+          assert.deepEqual(await counts(), before, "nothing created or deleted");
+        } finally {
+          await setFlag(true);
+          await rm(runDir, { recursive: true, force: true });
+        }
+      },
+    );
+
+    // Change add-season-settings (spec local-seed-data, "No SIDN yet"). The
+    // fixture's own SIDN is put back afterwards. Fictional numbers only.
+    await t.test("sets the fictional SIDN only when none is set", async () => {
+      const runDir = await tempRunDir();
+      const stored = async () =>
+        (
+          await f.sql(
+            "select sidn, updated_at from vitally_private.site_numbers where workspace_id=$1",
+            [f.workspaceId],
+          )
+        ).rows[0];
+      try {
+        await f.sql("delete from vitally_private.site_numbers where workspace_id=$1", [f.workspaceId]);
+        await seedWorkspace({ workspaceId: f.workspaceId, clientAEmail: f.applicantAEmail, runDir });
+        assert.equal((await stored())?.sidn, "S00000000");
+        // A SIDN already set (here, another fictional one) is left alone.
+        await f.sql("select vitally_private.set_site_number($1,$2)", [f.workspaceId, "S12345678"]);
+        const set = await stored();
+        assert.equal(
+          await ensureSiteNumber(client, {
+            workspaceId: f.workspaceId,
+            actorUserId: f.siteCoordinatorUserId,
+          }),
+          false,
+        );
+        assert.deepEqual(await stored(), set);
+      } finally {
+        // The seeded cases go, so later tests start from the fixture's own.
+        await deletePreviousRun(client, await readRun(f.workspaceId, runDir));
+        await f.sql("select vitally_private.set_site_number($1,$2)", [f.workspaceId, TEST_SITE_NUMBER]);
+        await rm(runDir, { recursive: true, force: true });
+      }
+    });
+
+    // Review Focus 5 (spec sign-in, "Running the roster again" and "An old
+    // roster with a site number"): the fixture's roster, run again through the
+    // roster command's own path with old keys, adds no site coordinator
+    // history row and leaves the SIDN set on Season settings alone.
+    await t.test("re-running the same roster is a no-op", async () => {
+      const history = async () =>
+        (
+          await f.sql(
+            "select count(*)::int as count from public.site_coordinator_changes where workspace_id=$1",
+            [f.workspaceId],
+          )
+        ).rows[0].count;
+      const sidn = async () =>
+        (
+          await f.sql(
+            "select sidn, updated_at from vitally_private.site_numbers where workspace_id=$1",
+            [f.workspaceId],
+          )
+        ).rows[0];
+      const accounts = [
+        ...Object.values(f.roleAccounts).map(({ userId, email }) => ({ id: userId, email })),
+        { id: f.applicantAUserId, email: f.applicantAEmail },
+        { id: f.applicantBUserId, email: f.applicantBEmail },
+      ].map((user) => ({ ...user, email_confirmed_at: "then" }));
+      const admin = {
+        auth: {
+          admin: {
+            listUsers: async () => ({ data: { users: accounts }, error: null }),
+            createUser: async () => assert.fail("a re-run creates no account"),
+            updateUserById: async () => assert.fail("a re-run confirms no account"),
+          },
+        },
+      };
+      const raw = {
+        workspaceId: f.workspaceId,
+        staff: f.setup.staff.map((member) => ({
+          email: f.roleAccounts[ROLE_BY_KEY[member.personKey]].email,
+          name: member.name,
+          personKey: member.personKey,
+          capabilities: member.capabilities,
+          ...(member.siteCoordinator ? { siteCoordinator: true } : {}),
+        })),
+        defaultFollowup: f.setup.defaultFollowup,
+        siteNumber: "S99999999",
+        applicants: [f.applicantAEmail, f.applicantBEmail],
+      };
+      const roster = parseRoster(raw);
+      assert.ok(roster.notices.some((note) => note.startsWith("siteNumber is no longer used")));
+      const beforeHistory = await history();
+      const beforeSidn = await sidn();
+      const people = async () =>
+        (
+          await f.sql(
+            "select id, person_key, name, user_id from public.people where workspace_id=$1 order by id",
+            [f.workspaceId],
+          )
+        ).rows;
+      const beforePeople = await people();
+      for (let run = 0; run < 2; run += 1) {
+        const result = await applyRoster(roster, {
+          admin,
+          initialize: (setup) => f.withSetupLock(() => initializeWorkspace(setup)),
+        });
+        assert.equal(result.created, 0);
+        assert.equal(await history(), beforeHistory, "no site coordinator history row");
+        assert.deepEqual(await sidn(), beforeSidn, "the SIDN is unchanged");
+        assert.deepEqual(await people(), beforePeople, "no person added or renamed");
+      }
+    });
 
     await t.test("refuses when the first applicant has no account", async () => {
       await assert.rejects(
@@ -486,10 +648,12 @@ test("seed command against real Supabase", async (t) => {
           );
         try {
           // Site Coordinator: an extra certificate and an extra role it backs
-          // (already cleared, so nothing needs saving). Reviewer: an extra
-          // certificate. Intaker: no role yet and an extra certificate, so the
-          // save does run and must add to what it has.
-          await extraCertificate(ids.site_coordinator, "sc");
+          // (already cleared, so nothing needs saving). Its SC is not extra:
+          // as a site coordinator it needs SC to be cleared (add-season-settings,
+          // D6), so the extra one is Basic. Reviewer: an extra certificate.
+          // Intaker: no role yet and an extra certificate, so the save does
+          // run and must add to what it has.
+          await extraCertificate(ids.site_coordinator, "basic");
           await f.sql(
             `update public.roster_entries e set roles=array['admin','intaker']
                from public.workspaces w
@@ -515,7 +679,7 @@ test("seed command against real Supabase", async (t) => {
           const first = await state();
           const has = (row, list) => list.every((x) => row.certificates.includes(x));
           assert.deepEqual(first.site_coordinator.roles, ["admin", "intaker"]);
-          assert.ok(has(first.site_coordinator, ["vsc", "itqr", "sc"]));
+          assert.ok(has(first.site_coordinator, ["vsc", "itqr", "sc", "basic"]));
           assert.deepEqual(first.reviewer.roles, ["reviewer"]);
           assert.ok(has(first.reviewer, ["vsc", "itqr", "advanced", "basic"]));
           assert.deepEqual(first.intaker.roles, ["intaker"]);
@@ -539,7 +703,7 @@ test("seed command against real Supabase", async (t) => {
             await f.sql(
               `delete from public.certificates where workspace_id=$1 and person_id=$2
                 and certificate = any($3::text[])`,
-              [f.workspaceId, personId, key === "reviewer" ? ["basic"] : ["sc"]],
+              [f.workspaceId, personId, key === "intaker" ? ["sc"] : ["basic"]],
             );
           }
         }
@@ -737,6 +901,96 @@ test("seed command against real Supabase", async (t) => {
         await rm(runDir, { recursive: true, force: true });
       }
     });
+    // Spec local-seed-data, "The local seed adds a previous season's roster".
+    await t.test("the previous season's roster is added, and replaced on a re-run", async () => {
+      const past = SEED_VALUES.SEED_PAST_VOLUNTEERS.map((v) => v.email);
+      const alsoCurrent = SEED_VALUES.SEED_PAST_ALSO_CURRENT_EMAIL;
+      const seedClient = await openDatabase({ kind: "test" });
+      const args = { workspaceId: f.workspaceId, actorPersonId: f.siteCoordinatorId };
+      const rowsFor = async () =>
+        (
+          await f.sql(
+            `select v.email, w.current_season,
+                    array(select e.season::int from public.roster_entries e
+                           where e.person_id=p.id order by e.season) as seasons,
+                    (select count(*)::int from public.certificates c
+                      where c.person_id=p.id and c.season=w.current_season-1) as certs
+               from public.people p
+               join public.volunteer_profiles v on v.person_id=p.id
+               join public.workspaces w on w.id=p.workspace_id
+              where p.workspace_id=$1 and v.email=any($2)`,
+            [f.workspaceId, [...past, alsoCurrent]],
+          )
+        ).rows;
+      const rosterCount = async () =>
+        (
+          await f.sql(
+            `select count(*)::int n from public.roster_entries e
+               join public.workspaces w on w.id=e.workspace_id
+              where e.workspace_id=$1 and e.season=w.current_season`,
+            [f.workspaceId],
+          )
+        ).rows[0].n;
+      try {
+        await seedVolunteers(seedClient, {
+          workspaceId: f.workspaceId,
+          actorUserId: f.siteCoordinatorUserId,
+        });
+        const before = await rosterCount();
+        for (let run = 0; run < 2; run += 1) {
+          assert.equal(await seedPastSeason(seedClient, args), 3);
+          const rows = await rowsFor();
+          const pastOnly = rows.filter((r) => past.includes(r.email));
+          assert.equal(pastOnly.length, 3);
+          for (const r of pastOnly) {
+            assert.deepEqual(r.seasons, [r.current_season - 1]);
+            assert.ok(r.certs > 0);
+          }
+          const both = rows.find((r) => r.email === alsoCurrent);
+          assert.deepEqual(both.seasons, [both.current_season - 1, both.current_season]);
+          assert.equal(await rosterCount(), before);
+        }
+        // A picked person (added to the current season, no sign-in) is replaced.
+        await f.sql(
+          `insert into public.roster_entries(workspace_id,person_id,season,roles)
+           select p.workspace_id,p.id,w.current_season,'{}'
+             from public.people p join public.volunteer_profiles v on v.person_id=p.id
+             join public.workspaces w on w.id=p.workspace_id
+            where p.workspace_id=$1 and v.email=$2`,
+          [f.workspaceId, past[0]],
+        );
+        assert.equal(await rosterCount(), before + 1);
+        assert.equal(await seedPastSeason(seedClient, args), 3);
+        assert.equal(await rosterCount(), before);
+        const rows = await rowsFor();
+        assert.equal(rows.filter((r) => past.includes(r.email)).length, 3);
+        assert.ok(rows.filter((r) => past.includes(r.email)).every((r) => r.seasons.length === 1));
+      } finally {
+        await seedClient.end();
+      }
+    });
+
+    await t.test("the story's use of the seed module adds no previous-season people", async () => {
+      const past = SEED_VALUES.SEED_PAST_VOLUNTEERS.map((v) => v.email);
+      await f.sql(
+        `delete from public.people p using public.volunteer_profiles v
+          where v.person_id=p.id and p.workspace_id=$1 and p.user_id is null and v.email=any($2)`,
+        [f.workspaceId, past],
+      );
+      const runDir = await tempRunDir();
+      try {
+        await seedCases(client, await targetsFor(), { runDir });
+        const { rows } = await f.sql(
+          `select count(*)::int n from public.volunteer_profiles
+            where workspace_id=$1 and email=any($2)`,
+          [f.workspaceId, past],
+        );
+        assert.equal(rows[0].n, 0);
+      } finally {
+        await rm(runDir, { recursive: true, force: true });
+      }
+    });
+
     await t.test("a seed re-run keeps a seed volunteer who got an account", async () => {
       const emails = SEED_VALUES.SEED_VOLUNTEERS.map((v) => v.email);
       const args = { workspaceId: f.workspaceId, actorUserId: f.siteCoordinatorUserId };

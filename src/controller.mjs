@@ -36,9 +36,10 @@ import { LABEL_COLORS, labelNameTaken } from "./case-labels.mjs";
 import { createShadedSave } from "./shaded-editor.mjs";
 import { createWindowState } from "./window-state.mjs";
 import { isLang, readLanguage, writeLanguage } from "./language.mjs";
-import { volunteerProblem, withoutLostRoles, roleNeedsMessage, openWorkMessage, accountMessage } from "./volunteer-roster.mjs";
+import { volunteerProblem, profileProblem, withoutLostRoles, roleNeedsMessage, openWorkMessage, accountMessage } from "./volunteer-roster.mjs";
 import { emptyUpdateForm, toUpdateRequest, validateUpdate } from "./posted-updates.mjs";
 import { nowInput } from "./contact-log.mjs";
+import { seasonRefusalLines } from "./season-settings-views.mjs";
 
 // The one place browser state lives. It owns what is loaded, what is being
 // edited, and which action envelope is in flight; it renders nothing and knows
@@ -75,13 +76,22 @@ const STAFF_SCREENS = Object.freeze([
   "office-cases",
   "office-add-case",
   "office-volunteers",
-  // Post an update (change add-posted-updates): a ceiling admin's only,
-  // cleared or not (`screenAllowed`).
+  // Post an update (change add-posted-updates) and Season settings (change
+  // add-season-settings): a workspace admin's only, cleared or not
+  // (`screenAllowed`).
   "office-updates",
+  "office-settings",
+  // My profile (change add-my-profile, design D9): a cleared window's only
+  // (`screenAllowed`).
+  "my-profile",
 ]);
-// The admin screens an uncleared ceiling admin keeps (design D10 of
-// add-volunteer-clearance, and add-posted-updates).
-const ADMIN_SETUP_SCREENS = Object.freeze(["office-volunteers", "office-updates"]);
+// The admin screens an uncleared workspace admin keeps (design D10 of
+// add-volunteer-clearance, add-posted-updates and add-season-settings).
+const ADMIN_SETUP_SCREENS = Object.freeze(["office-volunteers", "office-updates", "office-settings"]);
+// The screens only a workspace admin may be on.
+const CEILING_ONLY_SCREENS = Object.freeze(["office-updates", "office-settings"]);
+// The screens only a cleared window may be on.
+const CLEARED_ONLY_SCREENS = Object.freeze(["my-profile"]);
 
 // An action whose answer never arrived may or may not have been applied. Those
 // are the only failures worth retrying with the same envelope; a refusal is
@@ -120,6 +130,26 @@ const STAFF_CONTACT_CONFLICT_MESSAGE =
 const STAFF_VOLUNTEER_CONFLICT_MESSAGE =
   "Someone else changed this volunteer. Close this and open it again to see their changes.";
 export const VOLUNTEER_CONFLICT_MESSAGE = STAFF_VOLUNTEER_CONFLICT_MESSAGE;
+// Site coordinators (change add-season-settings): a save that changes the
+// Admin role by someone who is not one, deactivating a site coordinator by
+// someone who is not one, and deactivating the last one.
+const STAFF_ADMIN_ROLE_MESSAGE = "Only site coordinators change the Admin role.";
+const STAFF_DEACTIVATE_SITE_COORDINATOR_MESSAGE = "Only site coordinators deactivate a site coordinator's account.";
+const STAFF_LAST_SITE_COORDINATOR_MESSAGE =
+  "At least one site coordinator must remain. Make someone else a site coordinator first.";
+// Season settings (change add-season-settings): what its writes say.
+const STAFF_SETTINGS_SAVED = "Season settings saved";
+const STAFF_SETTINGS_LINK_MESSAGE = "Enter a link that starts with https://.";
+const STAFF_SETTINGS_CONFLICT_MESSAGE = "Someone else changed these settings. Check them and save again.";
+const STAFF_SIDN_FORMAT_MESSAGE = "Enter the site's SIDN: S followed by eight digits.";
+const STAFF_SIDN_UPDATED = "SIDN updated";
+const SETTINGS_LINK_FIELDS = Object.freeze(["certificateUploadUrl", "clientDocumentsUrl"]);
+// Start next season (change add-start-next-season, design D8).
+const STAFF_SEASON_MOVED_MESSAGE = "The season has already moved.";
+const freshSettingsUi = () => ({ notice: null, fieldErrors: null, sidnError: null, startRefusal: null });
+// My profile (change add-my-profile, design D9). Staff-only text.
+export const STAFF_MY_PROFILE_CONFLICT_MESSAGE = "Someone else changed these details. Here they are now.";
+const STAFF_MY_PROFILE_SAVED = "Profile saved";
 // Post an update (change add-posted-updates): the table is read again and
 // the form keeps what was typed. Staff-only, so named STAFF_.
 const STAFF_UPDATE_CONFLICT_MESSAGE = "Someone changed this update. Check the table and try again.";
@@ -279,6 +309,8 @@ export function createController({
   render,
   sessionStorage,
   windowEvents = globalThis,
+  // The document, for visibilitychange (a tab that becomes visible is a wake).
+  documentEvents = globalThis.document,
   clock = () => Date.now(),
   newActionId = () => crypto.randomUUID(),
   cooldownSeconds = 65,
@@ -331,14 +363,22 @@ export function createController({
       volunteers: "loading",
       updates: "loading",
       postedUpdates: "loading",
+      seasonSettings: "loading",
+      myProfile: "loading",
     },
     people: [],
     // The Roster (admin only): read when its screen opens and after each
     // save, never live. Its filters and the drawer's own sentence are
     // window-local and never persisted.
     volunteers: [],
+    // People with a profile and no entry this season, for the Add drawer's
+    // returning-volunteer picker, and its search text (window-local).
+    earlierVolunteers: [],
+    returningSearch: "",
     volunteerFilters: { search: "", role: "all" },
     volunteerFormError: null,
+    // The document whose Mark reviewed reason row is open in the drawer; window-local.
+    reviewReasonFor: null,
     // The last account action's result in the drawer: {kind: "ok" | "error", text}.
     volunteerAccountNotice: null,
     // The office screen's Invite a client panel (admin only): the client
@@ -365,15 +405,27 @@ export function createController({
     // highlights them until it closes, though they are marked read at once.
     updates: [],
     updatesUnread: 0,
+    // Volunteers with an upload to review (a workspace admin's sidebar; D8).
+    uploadsToReview: 0,
     notificationsOpen: false,
     notificationsFresh: [],
-    // The Post an update screen (a ceiling admin's): the table, the form as
+    // The Post an update screen (a workspace admin's): the table, the form as
     // typed, the update being edited (`{id, revision, status}` or null) and
     // the form's own errors (`{field: message}` or null). None persisted.
     postedUpdates: [],
     updateForm: emptyUpdateForm(),
     updateEditing: null,
     updateFormError: null,
+    // Season settings (a workspace admin's): the `vitally_season_settings`
+    // answer as last read (null until then), and the page's own sentences:
+    // `notice` ({place: "links" | "coordinators", text}), `fieldErrors`
+    // ({field: message}) and the SIDN dialog's `sidnError`. None persisted.
+    seasonSettings: null,
+    clientDocumentsUrl: null,
+    seasonSettingsUi: freshSettingsUi(),
+    // My profile (a cleared staff window's): the `vitally_my_profile` answer
+    // as last read, or null until then. Not persisted.
+    myProfile: null,
     // The caller's own workspace row, read only for a staff window: the
     // office's defaults.
     workspace: null,
@@ -460,6 +512,8 @@ export function createController({
   // The Roster save whose outcome is unknown, likewise the very request sent
   // (`saveVolunteer`). Window memory only: a reload starts without it.
   let pendingVolunteerSave = null;
+  // An upload send whose answer never came (change add-clearance-uploads).
+  let pendingUploadSend = null;
   // An account action whose answer never came, kept with the revision it was
   // sent at, so pressing the same button again sends the same action id.
   let pendingAccountAction = null;
@@ -467,6 +521,18 @@ export function createController({
   // Post an update's save and table action whose outcome is unknown, kept
   // the same way: `{ key, request }`, where the key says what was pressed.
   let pendingUpdateSave = null;
+  // A Season settings write whose answer never came: the same press sends
+  // that very request again, so the database replays its receipt.
+  let pendingSettingsWrite = null;
+  // A My profile save whose answer never came: `{ key, request }`, the key
+  // being the values as typed.
+  let pendingProfileSave = null;
+  // The revision My profile's form was drawn from: set by the first read
+  // after the screen opens, by a landed save's answer and by a CONFLICT's
+  // re-read. A focus refresh or the re-read after "I've uploaded it" never
+  // moves it, so an edit made elsewhere in between is a CONFLICT, never
+  // overwritten (PR #262 review). null until a read sets it.
+  let profileFormRevision = null;
   let pendingUpdateAction = null;
   // The screening start for the open case, if one is due or held:
   // `{ action, inFlight, gaveUp }` (`startScreeningIfDue`).
@@ -548,10 +614,13 @@ export function createController({
   // Screens the current principal may be on, first entry first.
   const screens = () => (staffWindow() ? STAFF_SCREENS : CLIENT_SCREENS);
 
-  // Whether this principal may be on a screen: in its list, and Post an
-  // update only for a ceiling admin.
+  // Whether this principal may be on a screen: in its list, Post an update
+  // and Season settings only for a workspace admin, and My profile only
+  // while cleared.
   const screenAllowed = (screen) =>
-    screens().includes(screen) && (screen !== "office-updates" || ceilingAdmin(state.principal));
+    screens().includes(screen) &&
+    (!CEILING_ONLY_SCREENS.includes(screen) || ceilingAdmin(state.principal)) &&
+    (!CLEARED_ONLY_SCREENS.includes(screen) || !awaitingClearance(state));
 
   // Where "back to the list" goes for whoever is signed in.
   const homeScreen = () => screens()[0];
@@ -640,7 +709,9 @@ export function createController({
     localRetry = null;
   }
 
-  function noteFailure(error, { message } = {}) {
+  // `clearanceRead`: the failure is the clearance read's own, which never
+  // starts a re-check (no loop).
+  function noteFailure(error, { message, clearanceRead = false } = {}) {
     dropLocalRetry();
     state.errorCount += 1;
     // Not cleared (any action, change add-volunteer-clearance): the setup
@@ -660,6 +731,16 @@ export function createController({
     // A newer error replaces a shaded save's "Saved".
     state.shadedStatus = null;
     if (error?.code === "OFFLINE") state.connection = "offline";
+    // A refusal for a role or clearance reason may mean the roster changed
+    // under this cleared window (#190): re-read it. A refusal of the read
+    // itself starts none.
+    if (
+      !clearanceRead &&
+      staffWindow() &&
+      !awaitingClearance(state) &&
+      (error?.code === "FORBIDDEN" || error?.code === "INELIGIBLE")
+    )
+      void recheckAfterRefusal();
   }
 
   // One error at a time (design D2): a newer error replaces a failed save's.
@@ -679,9 +760,9 @@ export function createController({
     return controllerError(code, message);
   }
 
-  function noteLocalFailure(error, retry = null) {
+  function noteLocalFailure(error, retry = null, { clearanceRead = false } = {}) {
     replaceFailedSave();
-    noteFailure(error ?? {}, { message: error?.message ?? "Something went wrong." });
+    noteFailure(error ?? {}, { message: error?.message ?? "Something went wrong.", clearanceRead });
     setLocalRetry(retry);
     show();
   }
@@ -862,6 +943,7 @@ export function createController({
     state.workspace = await store.getWorkspace();
     noteConnected();
     enterOfficeDraftIfNeeded();
+    await seasonMovedUnderDialog(state.workspace?.currentSeason);
   }
 
   async function loadSelected() {
@@ -874,7 +956,22 @@ export function createController({
   // The public re-fetch: the list plus whatever case is open. Used by the
   // reconnect, the window focus and the online event alike, because a
   // subscription is never the only way back.
-  async function refresh() {
+  // A wake refresh that starts while another is in flight joins it: focus and
+  // visibilitychange come together when a tab returns. The refresh after an
+  // action neither joins nor is joined. Signing out forgets it (forgetUser).
+  let wakeRefresh = null;
+  function refresh({ wake = false } = {}) {
+    if (!wake) return runRefresh({ wake });
+    if (!wakeRefresh) {
+      const run = runRefresh({ wake }).finally(() => {
+        if (wakeRefresh === run) wakeRefresh = null;
+      });
+      wakeRefresh = run;
+    }
+    return wakeRefresh;
+  }
+
+  async function runRefresh({ wake = false } = {}) {
     // Without a principal there is nothing to re-read, but there may still be
     // an identity to establish: a visitor whose session could not be read, or
     // who is signed in and could not be identified, gets another attempt here.
@@ -890,8 +987,25 @@ export function createController({
       // Post an update's table re-reads on focus too (an uncleared admin's
       // window has no realtime channel).
       if (awaitingClearance(state) && state.screen === "office-updates") await loadPostedUpdates();
+      if (awaitingClearance(state) && state.screen === "office-settings") await loadSeasonSettings();
       return;
     }
+    // A wake event re-reads the clearance first: role changes never come
+    // through realtime. A failed check leaves the window cleared, so the
+    // refresh goes on; a check that finds no clearance has already dropped the
+    // work and redrawn the setup screen.
+    if (wake) {
+      const asked = state.principal.userId;
+      const wasStaff = staffWindow();
+      await checkClearance();
+      // Signed out, or another user signed in, while the check was out.
+      if (!state.principal || state.principal.userId !== asked) return;
+      if (staffWindow() !== wasStaff) return;
+      if (awaitingClearance(state)) return;
+    }
+    // The client documents link is read once in loadData; a wake re-reads it,
+    // since Season settings may change in another window.
+    if (wake) await readClientDocumentsUrl();
     // The feed never blocks the rest, and never fails the refresh.
     await readFeed();
     let failure = null;
@@ -917,9 +1031,23 @@ export function createController({
       }
       // A client who signed in since shows as Active (never throws).
       await readInvitations();
+      // The sidebar's uploads count (never throws).
+      await readUploadsCount();
       if (state.screen === "office-updates")
         try {
           await readPostedUpdates();
+        } catch (error) {
+          failure = failure ?? error;
+        }
+      if (state.screen === "office-settings")
+        try {
+          await readSeasonSettings();
+        } catch (error) {
+          failure = failure ?? error;
+        }
+      if (state.screen === "my-profile")
+        try {
+          await readMyProfile();
         } catch (error) {
           failure = failure ?? error;
         }
@@ -968,7 +1096,7 @@ export function createController({
     state.revealed = [];
     state.officeDraft = false;
     // Open panels are per case: a confirmation ticked on one application, or a
-    // simulated upload failure on one request, means nothing on another.
+    // client document states on another, means nothing on this application.
     state.openPanels = [];
     pendingAction = null;
     screeningStart = null;
@@ -979,13 +1107,16 @@ export function createController({
 
   // ---- start / stop ------------------------------------------------------
 
-  const onWake = () => refresh();
+  const onWake = () => refresh({ wake: true });
+  const onVisible = () =>
+    documentEvents?.visibilityState === "visible" ? refresh({ wake: true }) : undefined;
 
   function listen() {
     if (listening) return;
     listening = true;
     windowEvents?.addEventListener?.("focus", onWake);
     windowEvents?.addEventListener?.("online", onWake);
+    documentEvents?.addEventListener?.("visibilitychange", onVisible);
   }
 
   function unlisten() {
@@ -993,21 +1124,30 @@ export function createController({
     listening = false;
     windowEvents?.removeEventListener?.("focus", onWake);
     windowEvents?.removeEventListener?.("online", onWake);
+    documentEvents?.removeEventListener?.("visibilitychange", onVisible);
   }
 
   function subscribe() {
     if (releaseStore) return;
-    releaseStore = store.subscribe({
+    // A released channel still reports itself closed (removeChannel): that
+    // is not this window's connection, so it is not heard.
+    let live = true;
+    const release = store.subscribe({
       onChange: (change) => handleChange(change),
       onConnection: (status) => {
+        if (!live) return;
         const previous = state.connection;
         state.connection = status;
         show();
         // Reconnecting means the browser may have missed changes entirely.
         if (status === "online" && previous !== "online" && previous !== "unknown")
-          refresh();
+          refresh({ wake: true });
       },
     });
+    releaseStore = () => {
+      live = false;
+      release?.();
+    };
   }
 
   function unsubscribe() {
@@ -1053,6 +1193,12 @@ export function createController({
       if (touchesUpdates) await readFeed();
       if (touchesList) await loadList();
       if (touchesWorkspace) await loadWorkspace();
+      // A start that landed (seasonMovedUnderDialog) may have left this
+      // window uncleared: nothing more of the work is read.
+      if (!state.principal || (staffWindow() && awaitingClearance(state))) {
+        show();
+        return;
+      }
       if (touchesAssistance) await loadAssistance();
       if (touchesUpdates && state.screen === "office-updates") await readPostedUpdates();
       // The open case comes last, because it is the one read that may
@@ -1074,7 +1220,22 @@ export function createController({
   // `dataLoaded` is true once one whole pass has succeeded; until then a
   // refresh reads everything, not only the lists.
   let dataLoaded = false;
+  // Client windows only: staff screens no longer link to it (#245 review).
+  async function readClientDocumentsUrl() {
+    if (staffWindow()) {
+      state.clientDocumentsUrl = null;
+      return;
+    }
+    try {
+      state.clientDocumentsUrl = (await store.getClientDocumentsUrl?.()) ?? null;
+    } catch {
+      // Never display a stale or staff-only URL if this optional read fails.
+      state.clientDocumentsUrl = null;
+    }
+  }
+
   async function loadData() {
+    await readClientDocumentsUrl();
     await loadList();
     if (staffWindow()) {
       state.people = withOwnCapabilities(await store.listPeople(), state.principal);
@@ -1082,8 +1243,11 @@ export function createController({
       await loadWorkspace();
       // The Roster is read only where it is shown (a restored window on it).
       if (state.screen === "office-volunteers") await readVolunteers();
+      else await readUploadsCount();
       await readInvitations();
       if (state.screen === "office-updates") await readPostedUpdates();
+      if (state.screen === "office-settings") await readSeasonSettings();
+      if (state.screen === "my-profile") await readMyProfile();
     } else {
       state.lists.assistance = "ready";
     }
@@ -1092,18 +1256,46 @@ export function createController({
 
   // The Roster's list (design D9). Only an admin's window asks: the policies
   // would answer anyone else with no rows, and asking is already a mistake.
-  // It is the ceiling admin's (design D10), cleared or not. A
+  // It is the workspace admin's (design D10), cleared or not. A
   // first read that fails marks the list failed, so it never looks empty; one
   // that loaded once keeps what it shows. It throws, for loadData.
   async function readVolunteers() {
     if (!staffWindow() || !ceilingAdmin(state.principal)) return;
     try {
-      state.volunteers = await store.listVolunteers();
+      const [volunteers, earlier] = await Promise.all([store.listVolunteers(), store.listEarlierVolunteers()]);
+      state.volunteers = volunteers;
+      state.earlierVolunteers = earlier;
       state.lists.volunteers = "ready";
       noteConnected();
     } catch (error) {
       if (state.lists.volunteers !== "ready") state.lists.volunteers = "failed";
       throw error;
+    } finally {
+      // After the list, and whatever the list did: the count is its own read,
+      // started here and not waited for, so the list's callers never wait on it.
+      if (staffWindow() && ceilingAdmin(state.principal)) {
+        const asked = state.principal.userId;
+        void redrawIfUploadsChanged(() => staffWindow() && state.principal?.userId === asked);
+      }
+    }
+  }
+
+  // The sidebar's uploads-to-review count (design D8): only a workspace
+  // admin's staff window asks, cleared or not. Returns whether the number
+  // changed. A failed read keeps the last count; it never throws and never
+  // changes what its caller does.
+  async function readUploadsCount() {
+    try {
+      if (!staffWindow() || !ceilingAdmin(state.principal)) return false;
+      const asked = state.principal.userId;
+      const count = Number(await store.countUploadsToReview());
+      if (!Number.isFinite(count) || count < 0) return false;
+      if (!staffWindow() || state.principal.userId !== asked) return false;
+      if (state.uploadsToReview === count) return false;
+      state.uploadsToReview = count;
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -1133,8 +1325,31 @@ export function createController({
     show();
   }
 
+  // The Add drawer's returning-volunteer picker: choosing an earlier volunteer
+  // makes the drawer an Edit of that person (saving creates this season's entry);
+  // Not them clears it back to a plain add.
+  function pickReturningVolunteer(id) {
+    if (state.dialog !== "volunteer" || state.busy) return;
+    if (!state.earlierVolunteers.some((entry) => entry?.id === id)) return;
+    state.dialogContext = { volunteerId: id, returning: true };
+    state.volunteerFormError = null;
+    show();
+  }
+
+  function unpickReturningVolunteer() {
+    if (!state.dialogContext?.returning) return;
+    state.dialogContext = null;
+    state.volunteerFormError = null;
+    show();
+  }
+
+  function setReturningSearch(text) {
+    state.returningSearch = String(text ?? "");
+    show();
+  }
+
   function setVolunteerFilter(key, value) {
-    if (key !== "search" && key !== "role") return;
+    if (key !== "search" && key !== "role" && key !== "show") return;
     state.volunteerFilters = { ...state.volunteerFilters, [key]: String(value ?? "") };
     show();
   }
@@ -1275,7 +1490,13 @@ export function createController({
     return { receipt, notice: `Assigned ${name} as ${slot}.` };
   }
 
+  function setReviewReasonFor(document) {
+    state.reviewReasonFor = document ?? null;
+    show();
+  }
+
   function clearVolunteerFormError() {
+    state.reviewReasonFor = null;
     state.volunteerFormError = null;
     state.volunteerAccountNotice = null;
   }
@@ -1376,7 +1597,7 @@ export function createController({
     return true;
   }
 
-  // Post an update's table: a ceiling admin's, cleared or not. Like the
+  // Post an update's table: a workspace admin's, cleared or not. Like the
   // Roster's list, a first read that fails marks it failed, and one that
   // loaded once keeps what it shows. It throws, for loadData and refresh.
   async function readPostedUpdates() {
@@ -1403,6 +1624,400 @@ export function createController({
     }
     show();
   }
+
+  // ---- My profile (change add-my-profile, design D9) ---------------------
+  //
+  // A cleared staff window's own details. It is read when the screen opens,
+  // on focus, after a save and after a send; there is no realtime for it.
+  // Like Season settings, a first read that fails marks it failed, and one
+  // that loaded once keeps what it shows. It throws, for loadData and refresh.
+  async function readMyProfile() {
+    if (!staffWindow() || awaitingClearance(state)) return;
+    try {
+      state.myProfile = await store.getMyProfile();
+      if (profileFormRevision === null) profileFormRevision = Number(state.myProfile?.revision ?? 0);
+      state.lists = { ...state.lists, myProfile: "ready" };
+      noteConnected();
+    } catch (error) {
+      if (state.lists.myProfile !== "ready") state.lists = { ...state.lists, myProfile: "failed" };
+      throw error;
+    }
+  }
+
+  // Opening the screen: read it, and say a failure with its own Try again.
+  // Never rejects.
+  async function loadMyProfile() {
+    // The form is drawn afresh: it starts from what this read finds.
+    profileFormRevision = null;
+    try {
+      await readMyProfile();
+    } catch (error) {
+      noteLocalFailure(error, loadMyProfile);
+      return;
+    }
+    show();
+  }
+
+  // The six fields the save sends, and nothing else: strings trimmed, an
+  // empty phone or other language as null, the lists as lists.
+  const profileFields = (values) => {
+    const text = (value) => String(value ?? "").trim();
+    const list = (value) => (Array.isArray(value) ? value.map(String) : []);
+    const languages = list(values?.languages);
+    return {
+      name: text(values?.name),
+      phone: text(values?.phone) || null,
+      works: text(values?.works),
+      languages,
+      // A hidden box still holds its stored name: only Other names a language.
+      otherLanguage: languages.includes("other") ? text(values?.otherLanguage) || null : null,
+      usualDays: list(values?.usualDays),
+    };
+  };
+
+  // Save: the typed details at the revision the form was drawn from
+  // (profileFormRevision), not the latest refresh. A save whose
+  // answer never came is kept, and Save pressed again with the same values
+  // sends that very request, so the stored receipt answers; changed values
+  // are a new save. A CONFLICT re-reads and says someone else changed them
+  // (the page then shows what is stored now). Any other refusal is said and
+  // leaves the read alone, so the form keeps what was typed. After a landed
+  // save the profile, the people (the name the window shows for the
+  // signed-in person) and the clearance are read again. Resolves to the
+  // toast's text, or null.
+  async function saveMyProfile(values) {
+    if (state.busy || !staffWindow() || awaitingClearance(state) || !state.myProfile) return null;
+    const profile = profileFields(values);
+    const key = JSON.stringify(profile);
+    let request = pendingProfileSave?.key === key ? pendingProfileSave.request : null;
+    pendingProfileSave = null;
+    if (!request) {
+      // The drawer's own check and sentences: nothing is sent, and the form
+      // keeps what was typed.
+      const problem = profileProblem(profile);
+      if (problem) {
+        state.error = { code: "VALIDATION", message: problem };
+        state.retryable = false;
+        show();
+        return null;
+      }
+    }
+    if (!request)
+      request = {
+        actionId: newActionId(),
+        expectedRevision: profileFormRevision ?? Number(state.myProfile.revision ?? 0),
+        profile,
+      };
+    state.busy = true;
+    state.error = null;
+    show();
+    let answer;
+    try {
+      answer = await store.saveMyProfile(request);
+    } catch (error) {
+      state.busy = false;
+      // An earlier action's Try again does not belong beside this refusal.
+      state.retryable = false;
+      const lost = UNKNOWN_OUTCOME.includes(error?.code);
+      if (lost) pendingProfileSave = { key, request };
+      noteFailure(error, error?.code === "CONFLICT" ? { message: STAFF_MY_PROFILE_CONFLICT_MESSAGE } : undefined);
+      // What changed under it, or what a lost save did: the details as they
+      // are now.
+      // A CONFLICT draws the stored details, so the form starts again from
+      // them; a lost save keeps its revision for the retry.
+      if (error?.code === "CONFLICT") profileFormRevision = null;
+      if (lost || error?.code === "CONFLICT") await readMyProfile().catch(() => {});
+      show();
+      return null;
+    }
+    state.busy = false;
+    noteConnected();
+    // The form now holds what was saved, at the revision the save made.
+    profileFormRevision = Number.isFinite(Number(answer?.revision))
+      ? Number(answer.revision)
+      : request.expectedRevision + 1;
+    // A landed save whose re-read fails is a stale page, never a failed save.
+    await readMyProfile().catch((error) => noteFailure(error));
+    try {
+      state.people = withOwnCapabilities(await store.listPeople(), state.principal);
+    } catch (error) {
+      noteFailure(error);
+    }
+    show();
+    await recheckAfterOwnSave();
+    show();
+    return STAFF_MY_PROFILE_SAVED;
+  }
+
+  // ---- Season settings (change add-season-settings, design D10) ----------
+  //
+  // A workspace admin's page, cleared or not. It is read on open, on focus and
+  // after each of its writes; there is no realtime for it. Like the Roster's
+  // list, a first read that fails marks it failed, and one that loaded once
+  // keeps what it shows. It throws, for loadData and refresh.
+  async function readSeasonSettings() {
+    if (!staffWindow() || !ceilingAdmin(state.principal)) return;
+    try {
+      state.seasonSettings = await store.getSeasonSettings();
+      state.lists = { ...state.lists, seasonSettings: "ready" };
+      noteConnected();
+      await seasonMovedUnderDialog(state.seasonSettings?.season);
+    } catch (error) {
+      if (state.lists.seasonSettings !== "ready") state.lists = { ...state.lists, seasonSettings: "failed" };
+      throw error;
+    }
+  }
+
+  // Opening the page: read it, and say a failure with its own Try again.
+  // Never rejects.
+  async function loadSeasonSettings() {
+    try {
+      await readSeasonSettings();
+    } catch (error) {
+      noteLocalFailure(error, loadSeasonSettings);
+      return;
+    }
+    show();
+  }
+
+  // One write: the request kept for a lost answer (matched on `key`), busy
+  // while it is out, and `refused(error)` saying a refusal on the page (true
+  // when it did; anything else is the window's own error). The page is read
+  // again after any answer. Resolves to the store's answer, or null.
+  async function settingsWrite(key, makeRequest, send, refused) {
+    if (state.busy || !staffWindow() || !state.seasonSettings) return null;
+    let request = pendingSettingsWrite?.key === key ? pendingSettingsWrite.request : null;
+    pendingSettingsWrite = null;
+    if (!request) request = makeRequest();
+    state.seasonSettingsUi = freshSettingsUi();
+    state.busy = true;
+    state.error = null;
+    show();
+    let answer;
+    try {
+      answer = await send(request);
+    } catch (error) {
+      state.busy = false;
+      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingSettingsWrite = { key, request };
+      if (!refused(error)) noteFailure(error);
+      // What the write did, or what changed under it: the page as it is now.
+      await readSeasonSettings().catch(() => {});
+      show();
+      return null;
+    }
+    state.busy = false;
+    noteConnected();
+    try {
+      await readSeasonSettings();
+    } catch (error) {
+      noteFailure(error);
+    }
+    show();
+    return answer ?? {};
+  }
+
+  // Save: both links, trimmed, at the revision the page read. Resolves to
+  // the toast's text, or null (the page says why).
+  async function saveSeasonSettings(values) {
+    const settings = Object.fromEntries(
+      SETTINGS_LINK_FIELDS.map((field) => [field, String(values?.[field] ?? "").trim()]),
+    );
+    const expectedRevision = Number(state.seasonSettings?.revision ?? 0);
+    const answer = await settingsWrite(
+      JSON.stringify({ type: "links", settings, expectedRevision }),
+      () => ({ actionId: newActionId(), expectedRevision, settings }),
+      (request) => store.saveSeasonSettings(request),
+      (error) => {
+        const field = error?.cause?.details;
+        if (error?.code === "VALIDATION" && SETTINGS_LINK_FIELDS.includes(field)) {
+          state.seasonSettingsUi = { ...state.seasonSettingsUi, fieldErrors: { [field]: STAFF_SETTINGS_LINK_MESSAGE } };
+          return true;
+        }
+        if (error?.code === "CONFLICT") {
+          state.seasonSettingsUi = {
+            ...state.seasonSettingsUi,
+            notice: { place: "links", text: STAFF_SETTINGS_CONFLICT_MESSAGE },
+          };
+          return true;
+        }
+        return false;
+      },
+    );
+    return answer ? STAFF_SETTINGS_SAVED : null;
+  }
+
+  // Change the SIDN. Spaces, hyphens and case are ignored here as they are
+  // by the database, so a malformed number is said without sending it; the
+  // number goes as typed and is never kept in state.
+  async function saveSidn(sidn) {
+    if (state.busy || !staffWindow() || !state.seasonSettings) return null;
+    const typed = String(sidn ?? "");
+    if (!/^S[0-9]{8}$/.test(typed.replace(/[\s-]/g, "").toUpperCase())) {
+      state.seasonSettingsUi = { ...state.seasonSettingsUi, sidnError: STAFF_SIDN_FORMAT_MESSAGE };
+      show();
+      return null;
+    }
+    const answer = await settingsWrite(
+      // A lost answer is sent again only for the same number typed again.
+      JSON.stringify({ type: "sidn", typed }),
+      () => ({ actionId: newActionId(), sidn: typed }),
+      (request) => store.setSiteNumber(request),
+      (error) => {
+        if (error?.code !== "VALIDATION") return false;
+        state.seasonSettingsUi = { ...state.seasonSettingsUi, sidnError: STAFF_SIDN_FORMAT_MESSAGE };
+        return true;
+      },
+    );
+    return answer ? STAFF_SIDN_UPDATED : null;
+  }
+
+  // Start next season (change add-start-next-season, design D8): the year
+  // typed must be the next one (the dialog's confirm waits for it too), sent
+  // with the season the page read. SEASON_NOT_FINISHED keeps the dialog open
+  // with its counts; CONFLICT closes it and says so in the card. On success
+  // the workspace and the clearance are read again: the starter has no roles
+  // in the new season, so the clearance routing gives them the setup screen;
+  // a starter still cleared reads the lists again. Other windows learn
+  // through the realtime `workspaces` change and their own account checks.
+  // Resolves to the toast's text, or null.
+  async function startNextSeason(typedYear) {
+    const season = Number(state.seasonSettings?.season);
+    const typed = String(typedYear ?? "").trim();
+    if (!Number.isInteger(season) || typed !== String(season + 1)) return null;
+    if (state.busy || startingSeason) return null;
+    // The season this dialog is about, for a re-read that shows it moved.
+    if (state.dialog === "start-season" && state.dialogContext?.expectedSeason == null)
+      state.dialogContext = { ...state.dialogContext, expectedSeason: season };
+    startingSeason = true;
+    let answer;
+    try {
+      answer = await settingsWrite(
+        JSON.stringify({ type: "start-season", expectedSeason: season, typed }),
+        () => ({ actionId: newActionId(), expectedSeason: season, typedYear: season + 1 }),
+        (request) => store.startNextSeason(request),
+        (error) => {
+          if (error?.code === "INVALID_TRANSITION" && error?.cause?.message === "SEASON_NOT_FINISHED") {
+            let counts = null;
+            try {
+              counts = JSON.parse(String(error.cause.details ?? ""));
+            } catch {
+              counts = null;
+            }
+            if (!counts || typeof counts !== "object" || Array.isArray(counts)) return false;
+            // Nothing to list: the window's own error, never an empty refusal.
+            if (!seasonRefusalLines(counts).length) return false;
+            state.seasonSettingsUi = { ...state.seasonSettingsUi, startRefusal: counts };
+            return true;
+          }
+          if (error?.code === "CONFLICT") {
+            state.dialog = null;
+            state.dialogContext = null;
+            state.seasonSettingsUi = {
+              ...state.seasonSettingsUi,
+              notice: { place: "next-season", text: STAFF_SEASON_MOVED_MESSAGE },
+            };
+            return true;
+          }
+          return false;
+        },
+      );
+    } finally {
+      startingSeason = false;
+    }
+    if (answer) return await seasonStartLanded(Number(answer.season ?? season + 1));
+    // An answer that never came, for a start that did land: the re-read
+    // already shows the next season (I1).
+    return await seasonMovedUnderDialog(state.seasonSettings?.season);
+  }
+
+  // The start is out: its own answer decides, not a re-read in the middle.
+  let startingSeason = false;
+
+  // The Start next season dialog is open for the season it was opened at,
+  // and a re-read (Season settings, the workspace) shows another. One more
+  // is that start having landed, here or in another window: the success
+  // tail runs, and pressing again can never start the season after. Any
+  // other season just closes the dialog. Resolves to the toast's text when
+  // it landed, else null.
+  async function seasonMovedUnderDialog(current) {
+    if (startingSeason || state.dialog !== "start-season") return null;
+    const expected = Number(state.dialogContext?.expectedSeason);
+    if (current == null || !Number.isInteger(expected) || Number(current) === expected) return null;
+    if (Number(current) === expected + 1) return await seasonStartLanded(expected + 1);
+    state.dialog = null;
+    state.dialogContext = null;
+    show();
+    return null;
+  }
+
+  // A start landed: close the dialog, forget a lost answer kept for it, and
+  // read the workspace and the clearance again. The starter has no roles in
+  // the new season, so the clearance routing gives them the setup screen; a
+  // window still cleared reads the lists again.
+  async function seasonStartLanded(season) {
+    state.dialog = null;
+    state.dialogContext = null;
+    if (pendingSettingsWrite && JSON.parse(pendingSettingsWrite.key)?.type === "start-season") pendingSettingsWrite = null;
+    // A lost answer's notice is answered: the start went through.
+    if (UNKNOWN_OUTCOME.includes(state.error?.code)) state.error = null;
+    try {
+      await loadWorkspace();
+    } catch (error) {
+      noteFailure(error);
+    }
+    await recheckAfterOwnSave();
+    if (!staffWindow()) return null;
+    if (awaitingClearance(state)) {
+      // Finish your setup: the new season's roster has no roles for them yet.
+      state.screen = homeScreen();
+      persistSession();
+      show(true);
+    } else {
+      await refresh();
+      show();
+    }
+    return `The ${season} season has started`;
+  }
+
+  // Add (the picker's volunteer) or Remove (a row's), at the account
+  // revision the page read. Resolves to the toast's text, or null.
+  async function changeSiteCoordinator(volunteerId, granted) {
+    const view = state.seasonSettings;
+    if (!volunteerId || !view) return null;
+    const list = granted ? view.candidates : view.siteCoordinators;
+    const person = (Array.isArray(list) ? list : []).find((entry) => entry?.volunteerId === volunteerId);
+    if (!person) return null;
+    const name = person.name ?? "";
+    const expectedRevision = Number(person.accountRevision);
+    const answer = await settingsWrite(
+      JSON.stringify({ type: "coordinator", volunteerId, granted, expectedRevision }),
+      () => ({ actionId: newActionId(), volunteerId, expectedRevision, granted }),
+      (request) => store.setSiteCoordinator(request),
+      (error) => {
+        const reason = error?.cause?.message;
+        const text =
+          error?.code === "INVALID_TRANSITION" && reason === "LAST_SITE_COORDINATOR"
+            ? STAFF_LAST_SITE_COORDINATOR_MESSAGE
+            : error?.code === "INVALID_TRANSITION" && reason === "DEFAULT_FOLLOWUP"
+              ? `${name} is the default follow-up person, so they stay a site coordinator.`
+              : // Somebody else changed them first: the page read again shows how.
+                error?.code === "CONFLICT" || error?.code === "INVALID_TRANSITION"
+                ? STAFF_SETTINGS_CONFLICT_MESSAGE
+                : null;
+        if (!text) return false;
+        state.seasonSettingsUi = { ...state.seasonSettingsUi, notice: { place: "coordinators", text } };
+        return true;
+      },
+    );
+    if (!answer) return null;
+    // Their own mark changed what they may do here and on the Roster: ask
+    // again, as a save of their own Roster row does. Not awaited.
+    if (volunteerId === state.principal?.personId) void recheckAfterOwnSave();
+    return granted ? `${name} is now a site coordinator` : `${name} is no longer a site coordinator`;
+  }
+
+  const addSiteCoordinator = (volunteerId) => changeSiteCoordinator(volunteerId, true);
+  const removeSiteCoordinator = (volunteerId) => changeSiteCoordinator(volunteerId, false);
 
   function copyUpdateForm(form) {
     const source = form && typeof form === "object" ? form : {};
@@ -1754,7 +2369,7 @@ export function createController({
   //
   // An uncleared staff window shows the setup screen and holds no work: no
   // case, no help request, no workspace row and no realtime channel. A
-  // ceiling admin's window keeps the Roster, which needs none of them.
+  // workspace admin's window keeps the Roster, which needs none of them.
   function dropWork() {
     unsubscribe();
     clearSelection();
@@ -1780,6 +2395,7 @@ export function createController({
     show();
     if (state.screen === "office-volunteers") await loadVolunteers();
     if (state.screen === "office-updates") await loadPostedUpdates();
+    if (state.screen === "office-settings") await loadSeasonSettings();
   }
 
   // An action refused NOT_CLEARED: the window is not cleared any more. It
@@ -1813,6 +2429,42 @@ export function createController({
     return clearanceCheck;
   }
 
+  // The same effective capabilities (as a set) and the same ceiling flag.
+  const sameStanding = (before, after) => {
+    const had = new Set(before?.capabilities ?? []);
+    const has = new Set(after?.capabilities ?? []);
+    return (
+      had.size === has.size &&
+      [...has].every((capability) => had.has(capability)) &&
+      (before?.isAdmin === true) === (after?.isAdmin === true)
+    );
+  };
+
+  // A clearance read refused FORBIDDEN may mean the account lost its
+  // membership (Deactivate, or Start next season): a deactivated member gets
+  // no realtime, so a wake is how its window learns. The principal is read
+  // once more. Refused, or no longer staff, the window becomes the first
+  // load's no-access window, holding nothing of the work and no channel.
+  // A member still active keeps the refusal as it was. Resolves true when
+  // the window went to no-access.
+  async function lostMembership(asked) {
+    let gone;
+    try {
+      // An applicant answer counts as gone too: a deactivated staff membership
+      // never reads as applicant, and the next wake's load() corrects it.
+      gone = (await store.getPrincipal())?.access !== "staff";
+    } catch (error) {
+      gone = error?.code === "FORBIDDEN";
+    }
+    if (!gone || !staffWindow() || state.principal.userId !== asked) return false;
+    forgetUser();
+    // Still signed in: focus, online and Try again ask for the principal
+    // again, as on a first load with no membership.
+    state.session = "present";
+    showNoAccess({ code: "FORBIDDEN" });
+    return true;
+  }
+
   async function recheckClearance() {
     if (!staffWindow()) return;
     // A cancelled site check has no membership left to ask about: the screen
@@ -1823,10 +2475,11 @@ export function createController({
     let answer;
     try {
       answer = await store.getClearance();
-      if (!answer || typeof answer !== "object" || Array.isArray(answer))
+      if (!answer || typeof answer !== "object" || Array.isArray(answer) || !Array.isArray(answer.capabilities))
         throw controllerError("SERVER_ERROR", "Something went wrong.");
     } catch (error) {
-      if (same()) noteLocalFailure(error, checkClearance);
+      if (same() && error?.code === "FORBIDDEN" && (await lostMembership(asked))) return;
+      if (same()) noteLocalFailure(error, checkClearance, { clearanceRead: true });
       // The feed re-reads with every check, answered or not.
       await readFeed();
       if (same()) show();
@@ -1835,7 +2488,10 @@ export function createController({
     if (!same()) return;
     noteConnected();
     const was = !awaitingClearance(state);
+    const oldClearance = state.principal.clearance;
     state.principal = { ...state.principal, clearance: answer };
+    // No longer a workspace admin: a later regain must not flash an old number.
+    if (!ceilingAdmin(state.principal)) state.uploadsToReview = 0;
     // The person's own entry follows what they may do now.
     state.people = withOwnCapabilities(state.people, state.principal);
     // An earlier failed check's notice is answered.
@@ -1850,11 +2506,35 @@ export function createController({
       await loadWork({ focus: true });
       return;
     }
+    if (now && was) {
+      // Cleared before and after: nothing to reload, and nothing to draw unless
+      // what the person may do changed. Their entry is already narrowed above.
+      // The uploads count is the one thing that can still have moved.
+      if (sameStanding(oldClearance, answer)) return redrawIfUploadsChanged(same);
+      // All cases is Admin's; the other screens stay, and Admin coming back
+      // moves nobody.
+      let focus = false;
+      if (!answer.capabilities?.includes("admin") && state.screen === "office-cases") {
+        state.screen = homeScreen();
+        focus = true;
+      }
+      persistSession();
+      show(focus);
+      return redrawIfUploadsChanged(same);
+    }
     if (!now && was) dropWork();
     // Still not cleared: the feed re-reads with the check.
     await readFeed();
     persistSession();
     show();
+    await redrawIfUploadsChanged(same);
+  }
+
+  // The uploads count, read after the clearance's own outcome is drawn, so a
+  // slow or failed count never delays or changes it. Redraws only when the
+  // number moved and the window is still the one that asked.
+  async function redrawIfUploadsChanged(same) {
+    if ((await readUploadsCount()) && same()) show();
   }
 
   async function start() {
@@ -1991,6 +2671,8 @@ export function createController({
     dropLocalRetry();
     // The next user's first Check again asks afresh.
     clearanceCheck = null;
+    wakeRefresh = null;
+    afterRefusal = null;
     if (state.principal) windowState.clear(state.principal.userId);
     unsubscribe();
     clearSelection();
@@ -2006,12 +2688,17 @@ export function createController({
       volunteers: "loading",
       updates: "loading",
       postedUpdates: "loading",
+      seasonSettings: "loading",
+      myProfile: "loading",
     };
     dataLoaded = false;
     state.people = [];
     state.volunteers = [];
+    state.earlierVolunteers = [];
+    state.returningSearch = "";
     state.volunteerFilters = { search: "", role: "all" };
     state.volunteerFormError = null;
+    state.reviewReasonFor = null;
     state.volunteerAccountNotice = null;
     state.invitations = null;
     state.invitationsFailed = false;
@@ -2021,10 +2708,12 @@ export function createController({
     state.volunteerTab = "roster";
     state.workload = freshWorkloadView();
     pendingVolunteerSave = null;
+    pendingUploadSend = null;
     pendingAccountAction = null;
     pendingInviteAction = null;
     state.updates = [];
     state.updatesUnread = 0;
+    state.uploadsToReview = 0;
     endNotifications();
     state.postedUpdates = [];
     state.updateForm = emptyUpdateForm();
@@ -2032,6 +2721,13 @@ export function createController({
     state.updateFormError = null;
     pendingUpdateSave = null;
     pendingUpdateAction = null;
+    state.seasonSettings = null;
+    state.clientDocumentsUrl = null;
+    state.seasonSettingsUi = freshSettingsUi();
+    pendingSettingsWrite = null;
+    state.myProfile = null;
+    pendingProfileSave = null;
+    profileFormRevision = null;
     state.assistance = [];
     state.workspace = null;
     state.openPanels = [];
@@ -2073,8 +2769,13 @@ export function createController({
     // The no-access window has nowhere to go: the logo and every other
     // navigation do nothing, so the screen and its Sign out stay.
     if (state.screen === "no-access" && !state.principal) return;
-    // Post an update is a ceiling admin's: anyone else lands on their home.
-    if (screen === "office-updates" && !screenAllowed(screen)) screen = homeScreen();
+    // Post an update and Season settings are a workspace admin's: anyone else
+    // lands on their home.
+    if (CEILING_ONLY_SCREENS.includes(screen) && !screenAllowed(screen)) screen = homeScreen();
+    // My profile is a cleared window's: an uncleared one stays on its home.
+    if (CLEARED_ONLY_SCREENS.includes(screen) && !screenAllowed(screen)) screen = homeScreen();
+    // Season settings starts without an earlier visit's sentences.
+    if (screen === "office-settings") state.seasonSettingsUi = freshSettingsUi();
     // A new office draft belongs to the Add a case page: leaving drops it.
     if (screen !== "office-add-case") {
       state.officeDraft = false;
@@ -2089,6 +2790,10 @@ export function createController({
     endNotifications();
     persistSession();
     show(true);
+    // My profile is read each time it opens. The promise is returned for
+    // callers that wait on the read; it never rejects.
+    if (screen === "my-profile") return loadMyProfile();
+    return undefined;
   }
 
   function togglePanel(name) {
@@ -2109,8 +2814,15 @@ export function createController({
 
   function openDialog(name, context = null) {
     if (name !== "notifications") endNotifications();
+    // Change the SIDN and Start next season open without an earlier refusal.
+    if (name === "change-sidn") state.seasonSettingsUi = { ...state.seasonSettingsUi, sidnError: null };
+    if (name === "start-season") state.seasonSettingsUi = { ...state.seasonSettingsUi, startRefusal: null };
     state.dialog = name;
     state.dialogContext = context ? { ...context } : null;
+    if (name === "volunteer") state.returningSearch = "";
+    // Start next season is about the season the page read when it opened.
+    if (name === "start-season" && state.seasonSettings?.season != null)
+      state.dialogContext = { ...state.dialogContext, expectedSeason: Number(state.seasonSettings.season) };
     show();
   }
 
@@ -3708,9 +4420,106 @@ export function createController({
   // instead of a second save (which an Add's own email would refuse). It skips
   // the window's checks, which the re-read list may now fail on the save's own
   // result. Changed values are a new save, with a new action id.
+  // "I've uploaded it" on the setup screen (change add-clearance-uploads,
+  // design D6). A send whose answer never came may have landed, so, as
+  // saveVolunteer does, pressing it again for the same document sends the same
+  // action id and the stored receipt answers. Refusals are said on the screen.
+  // A refusal's reason is the database's detail (`cause.details`; its message
+  // is VALIDATION), and it means the screen is stale (a photo ID no longer
+  // needed, an entry removed): the clearance is asked again. After a send, a
+  // check already out (a focus fired by the same click, say) was asked before
+  // the send landed, so, as saveVolunteer does, it is followed by one more.
+  const UPLOAD_REFUSALS = Object.freeze({
+    PHOTO_ID_NOT_NEEDED: "Your photo ID doesn't need sending any more.",
+    NO_ROSTER_ENTRY: "You're not on this season's roster yet. Ask your site coordinator.",
+  });
+  async function markUploadSent(document) {
+    if (state.busy || !staffWindow()) return false;
+    const request =
+      pendingUploadSend?.request.document === document
+        ? pendingUploadSend.request
+        : { actionId: newActionId(), document };
+    pendingUploadSend = null;
+    state.busy = true;
+    state.error = null;
+    show();
+    try {
+      await store.markUploadSent(request);
+    } catch (error) {
+      state.busy = false;
+      // An earlier action's Try again does not belong beside this refusal.
+      state.retryable = false;
+      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingUploadSend = { request };
+      const known = error?.code === "VALIDATION" ? UPLOAD_REFUSALS[String(error?.cause?.details ?? "")] : null;
+      noteFailure(error, { message: known ?? (error?.code === "OFFLINE" ? undefined : "Something went wrong.") });
+      show();
+      if (error?.code === "VALIDATION") void recheckAfterOwnSave();
+      // A stale My profile section: what it is now.
+      if (error?.code === "VALIDATION" && state.screen === "my-profile") {
+        await readMyProfile().catch(() => {});
+        show();
+      }
+      return false;
+    }
+    state.busy = false;
+    await recheckAfterOwnSave();
+    // My profile shows the send: read it again (change add-my-profile, D9).
+    if (state.screen === "my-profile") await readMyProfile().catch((error) => noteFailure(error));
+    show();
+    return true;
+  }
+
+  // The drawer's Mark reviewed (change add-clearance-uploads, design D7): the
+  // admin has looked at a document the volunteer said they sent. It sends the
+  // drawer volunteer's revision, as Save does, and then re-reads the Roster so
+  // the next Save sends the new one. The drawer stays open and its typed
+  // values are untouched. Returns the toast's text, or null when it did not
+  // land (the banner says why). Since change add-my-profile (design D6) it
+  // carries the reason the admin picked or typed, trimmed; the database
+  // refuses an empty one or one over 120 characters.
+  async function markUploadReviewed(document, reason) {
+    if (state.busy || state.dialog !== "volunteer") return null;
+    const volunteerId = state.dialogContext?.volunteerId ?? null;
+    const current = volunteerId ? (state.volunteers.find((entry) => entry?.id === volunteerId) ?? null) : null;
+    if (!current) throw refuse("NOT_FOUND", STAFF_VOLUNTEER_GONE_MESSAGE);
+    state.busy = true;
+    state.error = null;
+    show();
+    try {
+      await store.markUploadReviewed({
+        actionId: newActionId(),
+        volunteerId,
+        expectedRevision: Number(current.revision),
+        document,
+        reason: String(reason ?? "").trim(),
+      });
+    } catch (error) {
+      state.busy = false;
+      // An earlier action's Try again does not belong beside this refusal.
+      state.retryable = false;
+      noteFailure(error, error?.code === "CONFLICT" ? { message: VOLUNTEER_CONFLICT_MESSAGE } : undefined);
+      // What changed under it: the list as it is now.
+      await readVolunteers().catch(() => {});
+      show();
+      return null;
+    }
+    state.busy = false;
+    state.reviewReasonFor = null;
+    noteConnected();
+    try {
+      await readVolunteers();
+      state.error = null;
+    } catch (error) {
+      noteFailure(error);
+    }
+    show();
+    return "Marked reviewed";
+  }
+
   async function saveVolunteer(values) {
     if (state.busy) return false;
     const volunteerId = state.dialogContext?.volunteerId ?? null;
+    const returning = state.dialogContext?.returning === true;
     // `values` is what the form held; the request may send fewer roles, so the
     // kept save is matched on the form's values.
     let request =
@@ -3721,12 +4530,16 @@ export function createController({
         : null;
     pendingVolunteerSave = null;
     if (!request) {
+      // A picked earlier volunteer is not on this season's list yet.
       const current = volunteerId
-        ? (state.volunteers.find((entry) => entry?.id === volunteerId) ?? null)
+        ? ((returning ? state.earlierVolunteers : state.volunteers).find((entry) => entry?.id === volunteerId) ?? null)
         : null;
       if (volunteerId && !current)
         throw refuse("NOT_FOUND", STAFF_VOLUNTEER_GONE_MESSAGE);
-      const problem = volunteerProblem(values, state.volunteers, volunteerId);
+      // The earlier-volunteer sentence is for Add only; an Edit of a current
+      // volunteer is sent and the server decides.
+      const earlierList = !volunteerId || returning ? state.earlierVolunteers : [];
+      const problem = volunteerProblem(values, state.volunteers, volunteerId, earlierList);
       if (problem) {
         state.volunteerFormError = problem;
         show();
@@ -3759,7 +4572,9 @@ export function createController({
           ? roleNeedsMessage(cause.details)
           : error?.code === "INVALID_TRANSITION" && cause?.message === "OPEN_WORK"
             ? openWorkMessage(request.volunteer.name || "This volunteer", cause.details)
-            : null;
+            : error?.code === "FORBIDDEN" && cause?.message === "ADMIN_ROLE"
+              ? STAFF_ADMIN_ROLE_MESSAGE
+              : null;
       if (sentence) {
         state.volunteerFormError = sentence;
         await readVolunteers().catch(() => {});
@@ -3784,20 +4599,38 @@ export function createController({
       noteFailure(error);
     }
     show();
-    // An uncleared admin who just saved their own row may have cleared
-    // themselves (#191): ask again, so the setup screen gives way without
-    // Check again. Not awaited, so the drawer closes on the save alone.
-    if (volunteerId && volunteerId === state.principal?.personId && awaitingClearance(state))
-      void recheckAfterOwnSave();
+    // Someone who just saved their own row may have changed their own roles
+    // (#190, #191): ask again, so the setup screen gives way (or comes) and
+    // the buttons follow, without Check again. Not awaited, so the drawer
+    // closes on the save alone.
+    if (volunteerId && volunteerId === state.principal?.personId) void recheckAfterOwnSave();
     return true;
   }
 
   // A check already out (a focus, say) was asked before the save landed, so
-  // its answer may be the old one: wait for it, then ask once more if the
-  // window is still waiting. checkClearance never rejects.
+  // its answer may be the old one: wait for it, then ask once more.
+  // checkClearance never rejects.
   async function recheckAfterOwnSave() {
     if (clearanceCheck) await clearanceCheck;
-    if (awaitingClearance(state)) await checkClearance();
+    await checkClearance();
+  }
+
+  // A refused action in a cleared window: a check already out was asked
+  // before the refusal, so its answer may be the old one. Wait for it, then
+  // ask once more, still only for a cleared window of the same user. Refusals
+  // while one is waiting share it. Never rejects; never awaited.
+  let afterRefusal = null;
+  function recheckAfterRefusal() {
+    if (!clearanceCheck) return checkClearance();
+    if (afterRefusal) return afterRefusal;
+    const asked = state.principal.userId;
+    const pending = (async () => {
+      await clearanceCheck;
+      if (afterRefusal === pending) afterRefusal = null;
+      if (staffWindow() && !awaitingClearance(state) && state.principal.userId === asked) await checkClearance();
+    })();
+    afterRefusal = pending;
+    return pending;
   }
 
   // The drawer's Account section (change add-account-invitations): Create
@@ -3868,11 +4701,15 @@ export function createController({
       const sentence =
         cause?.message === "OPEN_WORK"
           ? openWorkMessage(current.name || "This volunteer", cause.details)
-          : error?.code === "CONFLICT"
-            ? null
-            : kind === "cancel" && error?.code === "INVALID_TRANSITION"
-              ? cancelRefusal(error)
-              : accountMessage(cause?.details);
+          : error?.code === "INVALID_TRANSITION" && cause?.message === "LAST_SITE_COORDINATOR"
+            ? STAFF_LAST_SITE_COORDINATOR_MESSAGE
+            : kind === "deactivate" && error?.code === "FORBIDDEN" && current.isSiteCoordinator === true
+              ? STAFF_DEACTIVATE_SITE_COORDINATOR_MESSAGE
+              : error?.code === "CONFLICT"
+                ? null
+                : kind === "cancel" && error?.code === "INVALID_TRANSITION"
+                  ? cancelRefusal(error)
+                  : accountMessage(cause?.details);
       if (sentence) {
         state.volunteerAccountNotice = { kind: "error", text: sentence };
         await readVolunteers().catch(() => {});
@@ -4258,6 +5095,7 @@ export function createController({
       people: [...state.people],
       assistance: [...state.assistance],
       volunteers: state.volunteers.map((entry) => ({ ...entry })),
+      earlierVolunteers: state.earlierVolunteers.map((entry) => ({ ...entry })),
       volunteerFilters: { ...state.volunteerFilters },
       workload: {
         ...state.workload,
@@ -4323,7 +5161,12 @@ export function createController({
     cancelInvitation,
     completeSiteCheck,
     setVolunteerFilter,
+    pickReturningVolunteer,
+    unpickReturningVolunteer,
+    setReturningSearch,
     saveVolunteer,
+    markUploadReviewed,
+    setReviewReasonFor,
     createAccount,
     resendAccount,
     deactivateAccount,
@@ -4339,6 +5182,14 @@ export function createController({
     closeNotifications,
     confirmUpdate,
     loadPostedUpdates,
+    loadSeasonSettings,
+    saveSeasonSettings,
+    loadMyProfile,
+    saveMyProfile,
+    saveSidn,
+    startNextSeason,
+    addSiteCoordinator,
+    removeSiteCoordinator,
     saveUpdate,
     updateAction,
     editUpdate,
@@ -4375,6 +5226,7 @@ export function createController({
     cancelShadedReview,
     retryLast,
     checkClearance,
+    markUploadSent,
     navigate,
     togglePanel,
     setLookup,

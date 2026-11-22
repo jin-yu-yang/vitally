@@ -44,19 +44,19 @@ const staffState = (extra = {}, overrides = {}) => ({
 test("the setup screen for a missing Form 13615 names it and the site coordinator", () => {
   const html = setupScreen(staffState());
   assert.match(html, /<h1>Finish your setup for this season<\/h1>/);
-  assert.match(html, /<li>Upload your signed Form 13615\.<\/li>/);
+  assert.ok(html.includes('<span id="setup-item-form13615">Upload your signed Form 13615.</span>'));
   assert.match(html, /Ask Jordan Avery, your site coordinator\./);
   assert.match(html, /<button type="button" class="btn primary" data-action="check-clearance" >Check again<\/button>/);
 });
 
 test("the setup screen for an unchecked photo ID says so", () => {
   const html = setupScreen(staffState({ missing: [{ kind: "photoId" }] }));
-  assert.match(html, /<li>Have your photo ID checked\.<\/li>/);
+  assert.ok(html.includes('<span id="setup-item-photoId">Have your photo ID checked.</span>'));
   assert.doesNotMatch(html, /Form 13615/);
 });
 
 test("with no site coordinator name the setup screen leaves the Ask line out", () => {
-  const html = setupScreen(staffState({ siteCoordinatorName: null }));
+  const html = setupScreen(staffState({ siteCoordinatorName: null, uploadUrl: "https://example.org/certificates" }));
   assert.doesNotMatch(html, /Ask /);
   assert.doesNotMatch(html, /site coordinator/);
   assert.match(html, /data-action="check-clearance"/);
@@ -161,4 +161,121 @@ test("a staff window with siteCheck shows the site check instead of the setup sc
   assert.match(cancelled, /data-action="sign-out"/);
   // Without siteCheck: the setup screen as before.
   assert.match(staffScreen(staffState({ siteCheck: false })), /Finish your setup for this season/);
+});
+
+// Uploads (change add-clearance-uploads, design D6).
+const URL13615 = "https://example.org/certificates";
+const withItem = (sentAt, uploadUrl = URL13615) =>
+  setupScreen(staffState({ missing: [{ kind: "form13615", sentAt }], uploadUrl }));
+
+test("setup uploads: offers Upload and I've uploaded it", () => {
+  const html = withItem(null);
+  assert.match(html, /<a [^>]*href="https:\/\/example\.org\/certificates"/);
+  assert.match(html, /<a [^>]*target="_blank"/);
+  assert.match(html, /<a [^>]*rel="noopener"/);
+  assert.match(html, />Upload<\/a>/);
+  assert.match(html, /data-action="mark-upload-sent"\s+data-document="form13615" aria-describedby="setup-item-form13615"[^>]*>I've uploaded it</);
+  assert.ok(html.includes('<li><span id="setup-item-form13615">Upload your signed Form 13615.</span><div class="setup-upload">'));
+});
+
+test("setup uploads: shows the waiting state once sent", () => {
+  const html = withItem("2026-11-20T15:00:00Z");
+  assert.match(html, /Waiting for review · sent Nov 20/);
+  assert.doesNotMatch(html, /mark-upload-sent/);
+  assert.match(html, />Upload<\/a>/);
+});
+
+test("setup uploads: asks the site coordinator with no link", () => {
+  const html = withItem(null, null);
+  assert.match(html, /Ask your site coordinator how to send it\./);
+  assert.doesNotMatch(html, /<a /);
+  assert.match(html, /mark-upload-sent/);
+});
+
+test("setup uploads: no link and sent", () => {
+  const html = withItem("2026-11-20T15:00:00Z", null);
+  assert.match(html, /Ask your site coordinator how to send it\./);
+  assert.match(html, /Waiting for review · sent Nov 20/);
+  assert.doesNotMatch(html, /mark-upload-sent/);
+});
+
+test("setup uploads: shows the New York day", () => {
+  assert.match(withItem("2026-11-21T03:30:00Z"), /sent Nov 20/);
+});
+
+test("setup uploads: escapes the upload link", () => {
+  const html = withItem(null, 'https://example.org/a?x=1&y="2"');
+  assert.ok(html.includes('href="https://example.org/a?x=1&amp;y=&quot;2&quot;"'));
+});
+
+test("setup uploads: disables the button while busy", () => {
+  const state = staffState({ missing: [{ kind: "photoId", sentAt: null }], uploadUrl: null });
+  state.busy = true;
+  const html = setupScreen(state);
+  assert.match(html, /data-document="photoId"[^>]*disabled/);
+});
+
+test("setup uploads: role and SC items are unchanged", () => {
+  const html = setupScreen(
+    staffState({
+      missing: [
+        { kind: "role", role: "preparer", certificates: ["VSC", "Basic"] },
+        { kind: "siteCoordinator" },
+      ],
+      uploadUrl: URL13615,
+    }),
+  );
+  assert.match(html, /Preparer needs VSC and Basic\./);
+  assert.match(html, /Site coordinators need the SC certificate\./);
+  assert.doesNotMatch(html, /mark-upload-sent|Upload<\/a>/);
+});
+
+test("setup uploads: a sent time that does not parse still says waiting", () => {
+  const html = withItem("not a date");
+  assert.ok(html.includes("Waiting for review</span>"));
+  assert.doesNotMatch(html, /sent /);
+});
+
+test("setup uploads: keeps the order Form 13615, photo ID, roles, SC", () => {
+  const html = setupScreen(
+    staffState({
+      missing: [
+        { kind: "form13615", sentAt: null },
+        { kind: "photoId", sentAt: null },
+        { kind: "role", role: "preparer", certificates: ["VSC"] },
+        { kind: "siteCoordinator" },
+      ],
+    }),
+  );
+  const at = ["Form 13615", "photo ID", "Preparer needs", "SC certificate"].map((text) => html.indexOf(text));
+  assert.deepEqual([...at].sort((x, y) => x - y), at);
+  assert.ok(at[0] > -1);
+});
+
+// Why a document came back (change add-my-profile, design D8).
+const returned = (document, reviewReason, sentAt = null) =>
+  setupScreen(staffState({ missing: [{ kind: document, sentAt, reviewedAt: "2026-11-21T03:30:00Z", reviewReason }], uploadUrl: URL13615 }));
+
+test("setup reason: a returned item shows the reason line", () => {
+  const html = returned("form13615", "Not signed");
+  assert.match(html, /Your site coordinator looked at this: Not signed\. Please send it again or ask them\./);
+  assert.match(html, /data-action="mark-upload-sent"/);
+});
+
+test("setup reason: already on file shows its own line", () => {
+  const html = returned("form13615", "Already on file");
+  assert.match(html, /Your site coordinator says this is already on file\. You don(?:'|&#39;|&#x27;)t need to send it again\./);
+  assert.doesNotMatch(html, /looked at this/);
+});
+
+test("setup reason: a sent item shows no reason", () => {
+  const html = returned("form13615", "Not signed", "2026-11-20T15:00:00Z");
+  assert.doesNotMatch(html, /looked at this|already on file/);
+  assert.match(html, /Waiting for review/);
+});
+
+test("setup reason: escapes a typed reason", () => {
+  const html = returned("photoId", '<b>&"');
+  assert.match(html, /&lt;b&gt;&amp;&quot;/);
+  assert.doesNotMatch(html, /<b>/);
 });

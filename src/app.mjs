@@ -4,7 +4,7 @@ import { createController } from "./controller.mjs";
 import { CASE_ACTIONS, ASSISTANCE_ACTIONS, SHADED_EDITOR, SHADED_UPLOAD, isStaffWindow } from "./contracts.mjs";
 import { payloadFor } from "./case-actions.mjs";
 import { demoToolsFromConfig, demoToolsOn, fillForm } from "./demo-fill.mjs";
-import { checkDrafts, forgetDrafts, formValuesWithLists, isCheckable, groupsToOpen, restoreDraft, textDraft } from "./form-values.mjs";
+import { checkDrafts, clearableFields, forgetDrafts, formValuesWithLists, isCheckable, groupsToOpen, restoreDraft, textDraft } from "./form-values.mjs";
 import { sampleAnswersFor, fictionalAnswers } from "./sample-data.mjs";
 import { checkValue, findQuestion, findSubstep, isAnswered, spouseShown, visibleAnswers } from "./intake-catalogue.mjs";
 import {
@@ -32,7 +32,7 @@ import { cardsFor } from "./document-cards.mjs";
 import { FORM_FILES, draftFields } from "./draft-form.mjs";
 import { FORM_14446_FILES, draft14446Fields } from "./draft-virtual-consent.mjs";
 import { exitFormSource } from "./exit-form-source.mjs";
-import { EXIT_FORM_FILE, buildExitFormPdf, exitFormFontFields, exitFormMarks, exitFormNeedsFont } from "./exit-form.mjs";
+import { EXIT_FORM_FILE, buildExitFormPdf, exitFormFontFields, exitFormMarks, exitFormNeedsFont, exitFormTaxYear } from "./exit-form.mjs";
 import {
   buildDraftPdf,
   buildEditingCopy,
@@ -66,8 +66,9 @@ import { t, SENTENCES } from "./client-text.mjs";
 import { createToastTimer } from "./toast.mjs";
 import { contactEntryFromForm, contactSummary, contactSummaries } from "./contact-log.mjs";
 import { decorateStaffCase, outcomeGroup, staffEligibility } from "./staff-views.mjs";
-import { volunteerFromForm, volunteerFormChanged, rolesToUntick, untickedRolesMessage } from "./volunteer-roster.mjs";
+import { volunteerFromForm, volunteerFormChanged, roleBoxesToUntick, untickedRolesMessage, rosterCsv, rosterCsvFilename, filterVolunteers } from "./volunteer-roster.mjs";
 import { actionToast, renderUpdatePreview, saveToast, updateFormFromValues } from "./update-views.mjs";
+import { startSeasonReady } from "./season-settings-views.mjs";
 
 // Bootstrap and DOM wiring, and nothing else. No state lives here (the
 // controller owns it), no HTML is written here (the view modules own it), and
@@ -136,6 +137,7 @@ if (!config) {
     render,
     sessionStorage: window.sessionStorage,
     windowEvents: window,
+    documentEvents: document,
     cooldownSeconds: config.authResendCooldownSeconds,
     localStorage: readLocalStorage(),
     languages: [...(navigator.languages ?? [navigator.language])],
@@ -310,7 +312,9 @@ if (!config) {
     restoreFormDrafts();
     syncContactForms();
     syncCloseUnsigned();
+    syncStartSeason();
     syncVolunteerOther();
+    syncProfileOther();
     syncCreateAccount();
     showDraftLink();
     markPressed(state);
@@ -471,6 +475,14 @@ if (!config) {
     if (box && field) field.hidden = !box.checked;
   }
 
+  // My profile shows its Other language box only while Other is ticked (change
+  // add-my-profile), at once on a tick and after a redraw that put a tick back.
+  function syncProfileOther() {
+    const box = root.querySelector("#my-profile-languages-other");
+    const field = root.querySelector("#my-profile-other-language");
+    if (box && field) field.hidden = !box.checked;
+  }
+
   // Create account sends the saved profile (decision 5), so it waits while
   // the drawer's form holds unsaved changes: off, with its hint shown. On
   // every edit of the form, and after a redraw that put unsent text back.
@@ -488,17 +500,17 @@ if (!config) {
   }
 
   // Unticking a certificate unticks the roles that lose what they need, in the
-  // form (rolesToUntick decides; the save would drop them anyway).
+  // form (roleBoxesToUntick decides; the save would drop them anyway). A
+  // disabled box keeps its saved state and is not announced.
   function syncVolunteerRoles(form, changed) {
-    const roles = [...form.querySelectorAll('input[name="role"]:checked')];
+    const roles = [...form.querySelectorAll('input[type="checkbox"][name="role"]')];
     const certificates = [...form.querySelectorAll('input[name="certificate"]:checked')].map((box) => box.value);
-    const drop = rolesToUntick(roles.map((box) => box.value), certificates, changed);
-    for (const box of roles) {
-      if (!drop.includes(box.value)) continue;
+    const drop = roleBoxesToUntick(roles, certificates, changed);
+    for (const box of drop) {
       box.checked = false;
       for (const [id, draft] of checkDrafts(box)) keepDraft(id, draft);
     }
-    announceUntickedRoles(form, untickedRolesMessage(drop, certificates));
+    announceUntickedRoles(form, untickedRolesMessage(drop.map((box) => box.value), certificates));
   }
 
   // The drawer's polite status line (#192). Emptied first and filled on the
@@ -546,6 +558,15 @@ if (!config) {
   // board control's claim select the next without passing `open-case`. A page
   // with no case open changes nothing, so the board's own forms keep theirs
   // and a list and back to the same case keeps the case's.
+  // Add is enabled only while a person is picked (and the page is not busy);
+  // a restored draft sets the picker without a change event, so this runs
+  // after the drafts are restored as well as on change.
+  function syncSiteCoordinatorAdd() {
+    const pick = root.querySelector("#sc-pick");
+    const add = root.querySelector('[data-action="add-site-coordinator"]');
+    if (pick && add) add.disabled = pick.value === "" || pick.disabled;
+  }
+
   function restoreFormDrafts() {
     dropStaleCloseConfirmation();
     const userId = signedInUserId();
@@ -557,6 +578,9 @@ if (!config) {
     if (caseId !== null) draftsCase = caseId;
     for (const [id, value] of formDrafts)
       restoreDraft(root.querySelector(`#${CSS.escape(id)}`), value);
+    syncSiteCoordinatorAdd();
+    // An open reason row's Send back follows its restored pick or note.
+    for (const row of root.querySelectorAll(".volunteer-review")) syncSendBack(row);
     // A collapsed Exit Form group holding something typed is opened again, so
     // the field a refusal names is in view (design D7).
     const exitGroups = [...root.querySelectorAll("details.q-exit-group:not([open])")];
@@ -1224,14 +1248,6 @@ if (!config) {
       }
       if (controller.getState().dirty && !(await controller.saveAnswers())) return;
     }
-    if (type === "RESPOND_DOCUMENT" && state.openPanels.includes("upload-failure")) {
-      // The simulated failure never reaches the server, so there is nothing to
-      // duplicate: the request stays open and the same button retries.
-      if (!state.openPanels.includes("upload-failed"))
-        controller.togglePanel("upload-failed");
-      else render();
-      return;
-    }
     // A control on the work board names the case it belongs to. Opening it
     // first is what gives the action its case id and its expected revision.
     const boardCaseId = target.dataset.caseId;
@@ -1294,8 +1310,6 @@ if (!config) {
       return;
     }
     if (type === "RESPOND_DOCUMENT") {
-      if (controller.getState().openPanels.includes("upload-failed"))
-        controller.togglePanel("upload-failed");
       notify("success", t("toast.document_sent", {}, screenLang()), by);
       return;
     }
@@ -1430,6 +1444,102 @@ if (!config) {
       formDrafts.delete("site-check-name");
       formDrafts.delete("site-check-sidn");
     }
+  }
+
+  // My profile's Save (change add-my-profile, D9). A landed save shows the
+  // toast and drops the drafts, which the re-read page now holds; a CONFLICT
+  // drops them too, so the page shows what is stored now. Any other refusal
+  // keeps what was typed.
+  async function submitMyProfile(form, by) {
+    const values = new FormData(form);
+    const text = await controller.saveMyProfile({
+      name: String(values.get("name") ?? ""),
+      phone: String(values.get("phone") ?? ""),
+      works: String(values.get("works") ?? ""),
+      languages: values.getAll("languages").map(String),
+      otherLanguage: String(values.get("otherLanguage") ?? ""),
+      usualDays: values.getAll("usualDays").map(String),
+    });
+    if (text) {
+      clearFormDrafts(form);
+      notify("success", text, by);
+      return;
+    }
+    if (controller.getState().error?.code === "CONFLICT") {
+      clearFormDrafts(form);
+      render();
+    }
+  }
+
+  // Season settings' Save. A landed save draws what was stored; a conflict
+  // draws the settings as they are now, so what was typed goes; a refused
+  // link keeps what was typed and the field it names takes the keyboard.
+  async function submitSeasonSettings(form, by) {
+    const values = new FormData(form);
+    const text = await controller.saveSeasonSettings({
+      certificateUploadUrl: String(values.get("certificateUploadUrl") ?? ""),
+      clientDocumentsUrl: String(values.get("clientDocumentsUrl") ?? ""),
+    });
+    if (text) {
+      clearFormDrafts(form);
+      notify("success", text, by);
+      return;
+    }
+    const ui = controller.getState().seasonSettingsUi ?? {};
+    if (ui.notice) {
+      clearFormDrafts(form);
+      render();
+    }
+    root.querySelector('#season-settings-form [aria-invalid="true"]')?.focus();
+  }
+
+  // Change the SIDN. A landed save closes the dialog; a refusal keeps it,
+  // with its sentence beside the field.
+  async function submitSidn(form, by) {
+    const text = await controller.saveSidn(String(new FormData(form).get("sidn") ?? ""));
+    if (text) {
+      clearFormDrafts(form);
+      closeDialog("#sidn-status");
+      notify("success", text, by);
+      return;
+    }
+    root.querySelector("#sidn-input")?.focus();
+  }
+
+  // Start next season (change add-start-next-season, design D8). The typed
+  // year is a draft like any staff field: its confirm opens only for the
+  // next season's year, set here on every input and after every redraw (the
+  // view draws it disabled, since it never sees the draft), so typing never
+  // redraws the dialog.
+  function syncStartSeason() {
+    const form = root.querySelector("#start-season-form");
+    if (!form) return;
+    const state = controller.getState();
+    const typed = form.querySelector("#start-season-year")?.value ?? "";
+    const submit = form.querySelector("#start-season-submit");
+    const season = state.dialogContext?.expectedSeason ?? state.seasonSettings?.season;
+    if (submit) submit.disabled = !startSeasonReady(season, typed) || state.busy === true;
+  }
+
+  // A landed start leaves the dialog closed and the page redrawn (the setup
+  // screen, for a starter with no roles yet). A CONFLICT closes it too, with
+  // its sentence in the Next season card; any other refusal keeps it, with
+  // the lines to finish first.
+  async function submitStartSeason(form, by) {
+    const text = await controller.startNextSeason(String(new FormData(form).get("year") ?? ""));
+    if (text) {
+      formDrafts.delete("start-season-year");
+      focusBeforeDialog = null;
+      notify("success", text, by);
+      return;
+    }
+    if (!controller.getState().dialog) {
+      formDrafts.delete("start-season-year");
+      focusBeforeDialog = null;
+      root.querySelector('[data-action="open-start-season"]')?.focus();
+      return;
+    }
+    root.querySelector("#start-season-year")?.focus();
   }
 
   // Post an update (change add-posted-updates). The form as typed is held
@@ -1649,6 +1759,23 @@ if (!config) {
         "DRAFT",
       );
     }
+  }
+
+  // The Roster as shown, as a CSV file (change
+  // add-returning-volunteers-and-roster-csv): the rows that pass the filters.
+  function downloadRosterCsv() {
+    const state = controller.getState();
+    const rows = filterVolunteers(state.volunteers ?? [], state.volunteerFilters ?? {});
+    if (!rows.length) return;
+    const url = URL.createObjectURL(new Blob([rosterCsv(rows)], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = rosterCsvFilename(state.workspace?.currentSeason, new Date());
+    link.hidden = true;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 
   // A filled copy is read, then held for the preparer to check (change
@@ -1871,15 +1998,10 @@ if (!config) {
     try {
       const answers = state.draftAnswers ?? record.answers ?? {};
       const visible = visibleAnswers(2, answers);
-      const season = Number.isInteger(record.season)
-        ? record.season
-        : Number.isInteger(state.workspace?.currentSeason)
-          ? state.workspace.currentSeason
-          : 2025;
       const marks = exitFormMarks(
         source.questionnaire,
         {
-          taxYear: season,
+          taxYear: exitFormTaxYear(record, state.workspace),
           clientNumber: record.clientNumber ?? "",
           firstName: answers.tp_first_name,
           lastName: answers.tp_last_name,
@@ -1940,6 +2062,17 @@ if (!config) {
       controller.navigate("office-updates");
       void controller.loadPostedUpdates();
     },
+    // My profile (change add-my-profile): read when it opens.
+    "open-my-profile": () => {
+      formDrafts.clear();
+      void controller.navigate("my-profile");
+    },
+    // And Season settings (change add-season-settings).
+    "open-season-settings": () => {
+      formDrafts.clear();
+      controller.navigate("office-settings");
+      void controller.loadSeasonSettings();
+    },
     // Pressed again while on the page: a fresh draft, which is what it asks for.
     "open-add-case": async () => {
       formDrafts.clear();
@@ -1996,6 +2129,10 @@ if (!config) {
         if (leaveAddCaseFirst("open-cases", target)) break;
         EXITS["open-cases"]();
         break;
+      case "open-my-profile":
+        if (leaveAddCaseFirst("open-my-profile", target)) break;
+        EXITS["open-my-profile"]();
+        break;
       case "open-volunteers":
         if (leaveAddCaseFirst("open-volunteers", target)) break;
         EXITS["open-volunteers"]();
@@ -2004,6 +2141,36 @@ if (!config) {
         if (leaveAddCaseFirst("open-post-update", target)) break;
         EXITS["open-post-update"]();
         break;
+      case "open-season-settings":
+        if (leaveAddCaseFirst("open-season-settings", target)) break;
+        EXITS["open-season-settings"]();
+        break;
+      // ---- Season settings (change add-season-settings) ----
+      case "open-change-sidn":
+        // A fresh dialog: no earlier refusal, and no number typed before.
+        controller.dismissError();
+        formDrafts.delete("sidn-input");
+        openDialog("change-sidn", null, describeFocus(target));
+        break;
+      case "open-start-season":
+        // A fresh dialog: no earlier refusal, and no year typed before.
+        controller.dismissError();
+        formDrafts.delete("start-season-year");
+        openDialog("start-season", null, describeFocus(target));
+        break;
+      case "add-site-coordinator": {
+        const text = await controller.addSiteCoordinator(root.querySelector("#sc-pick")?.value ?? "");
+        if (text) {
+          formDrafts.delete("sc-pick");
+          notify("success", text, by);
+        }
+        break;
+      }
+      case "remove-site-coordinator": {
+        const text = await controller.removeSiteCoordinator(target.dataset.volunteerId ?? "");
+        if (text) notify("success", text, by);
+        break;
+      }
       // ---- posted updates (change add-posted-updates) ----
       case "open-notifications":
         // The panel opens at once; marking what it shows read follows.
@@ -2071,10 +2238,46 @@ if (!config) {
         openDialog("volunteer", id ? { volunteerId: id } : null, describeFocus(target));
         break;
       }
+      case "pick-returning-volunteer":
+      case "unpick-returning-volunteer": {
+        // The form is drawn again from the picked person (or empty again), so
+        // nothing typed before stays over it.
+        const pick = action === "pick-returning-volunteer";
+        controller.dismissError();
+        forgetVolunteerDrafts();
+        if (pick) controller.pickReturningVolunteer(target.dataset.id);
+        else controller.unpickReturningVolunteer();
+        root.querySelector(pick ? '[data-action="unpick-returning-volunteer"]' : "#returning-search")?.focus();
+        break;
+      }
+      case "export-roster-csv":
+        if (!target.disabled) downloadRosterCsv();
+        break;
       case "account-resend":
       case "account-reactivate":
         // Said in the drawer (a refusal) or thrown to the safety net.
         await controller[{ "account-resend": "resendAccount", "account-reactivate": "reactivateAccount" }[action]]();
+        break;
+      case "mark-upload-reviewed": {
+        // Opens the reason row; stays in the drawer and keeps what was typed
+        // (no forgetVolunteerDrafts).
+        controller.setReviewReasonFor(target.dataset.document);
+        root.querySelector(`.volunteer-review[data-document="${target.dataset.document}"] input`)?.focus();
+        break;
+      }
+      case "send-back": {
+        if (target.disabled) break;
+        const row = target.closest(".volunteer-review");
+        const note = String(row?.querySelector('[name="review-note"]')?.value ?? "").trim();
+        const pick = row?.querySelector('[name="review-reason"]:checked')?.value ?? "";
+        const reason = note || pick;
+        if (!reason) break;
+        const text = await controller.markUploadReviewed(target.dataset.document, reason);
+        if (text) notify("success", text, by);
+        break;
+      }
+      case "cancel-review":
+        controller.setReviewReasonFor(null);
         break;
       case "account-create":
         // Asks first (decision 5): nothing is sent until the question's Send.
@@ -2176,7 +2379,7 @@ if (!config) {
         // blank, and no draft left to put them back (design D7).
         const group = target.closest("details.q-exit-group");
         if (!group) break;
-        const fields = [...group.querySelectorAll("input")];
+        const fields = clearableFields(group.querySelectorAll("input"));
         for (const field of fields) {
           if (isCheckable(field)) field.checked = false;
           else field.value = "";
@@ -2536,14 +2739,6 @@ if (!config) {
       case "reconcile-server":
         await reconcile(false, by);
         break;
-      case "toggle-upload-failure": {
-        controller.togglePanel("upload-failure");
-        // The page is rebuilt around the checkbox, so give it back the focus —
-        // the box that was clicked, which is the one scoped to its own request.
-        const box = fieldId("simulate-upload-failure", target.dataset.requestId ?? "");
-        root.querySelector(`#${CSS.escape(box)}`)?.focus();
-        break;
-      }
       case "toggle-contact-edit": {
         const id = target.dataset.contactId ?? "";
         const panel = `contact-edit:${id}`;
@@ -2609,6 +2804,9 @@ if (!config) {
       case "check-clearance":
         await controller.checkClearance();
         break;
+      case "mark-upload-sent":
+        await controller.markUploadSent(target.dataset.document);
+        break;
       case "dismiss-error":
         controller.dismissError();
         break;
@@ -2672,8 +2870,19 @@ if (!config) {
     }
   }
 
+  // Send back is off until a pick or a note is there.
+  function syncSendBack(field) {
+    const row = field.closest?.(".volunteer-review");
+    if (!row) return;
+    const note = String(row.querySelector('[name="review-note"]')?.value ?? "").trim();
+    const picked = row.querySelector('[name="review-reason"]:checked') != null;
+    const send = row.querySelector('[data-action="send-back"]');
+    if (send) send.disabled = !(note || picked) || controller.getState().busy === true;
+  }
+
   root.addEventListener("input", (event) => {
     const field = event.target;
+    syncSendBack(field);
     if (field.closest?.("#update-form")) {
       syncUpdateForm(field.form);
       return;
@@ -2696,6 +2905,10 @@ if (!config) {
       if (ref.scope === "office") paintAddCase();
       else paintV2Rail();
       paintV2Count(ref);
+    } else if (field.name === "returningSearch") {
+      // The Add drawer's returning-volunteer search filters as it is typed,
+      // like the Roster's box.
+      keepTyping(field, "#returning-search", () => controller.setReturningSearch(field.value));
     } else if (field.closest(".staff-form") && field.id) {
       // Held in the wiring layer, not in the controller: this text is not part
       // of any record until the action that carries it is sent.
@@ -2706,6 +2919,7 @@ if (!config) {
       else if (!field.matches("[data-action], #field-confirmed"))
         for (const [id, draft] of checkDrafts(field)) keepDraft(id, draft);
       if (field.closest("#volunteer-form")) syncCreateAccount();
+      if (field.closest("#start-season-form")) syncStartSeason();
     } else if (field.name === "volunteerSearch") {
       // The Roster filters as it is typed; the redraw replaces the box, so
       // the keyboard and the caret go back into it. Mid-composition the
@@ -2734,12 +2948,17 @@ if (!config) {
 
   root.addEventListener("change", (event) => {
     const field = event.target;
+    syncSendBack(field);
     if (field.closest?.("#update-form")) {
       syncUpdateForm(field.form);
       return;
     }
     if (field.matches?.('input[type="file"][data-action="upload-shaded-copy"]')) {
       void uploadShadedCopy(field, signedInUserId());
+      return;
+    }
+    if (field.id === "sc-pick") {
+      syncSiteCoordinatorAdd();
       return;
     }
     if (field.matches?.("select[data-board-filter]")) {
@@ -2755,6 +2974,10 @@ if (!config) {
     if (field.closest?.("#volunteer-form") && field.name === "certificate") {
       syncVolunteerRoles(field.form, field.value);
       syncCreateAccount();
+      return;
+    }
+    if (field.closest?.("#my-profile-form") && field.name === "languages" && field.value === "other") {
+      syncProfileOther();
       return;
     }
     if (field.closest?.("#volunteer-form") && field.name === "language" && field.value === "other") {
@@ -2824,10 +3047,18 @@ if (!config) {
       );
       if (form.matches(".contact-form")) {
         await submitContact(form, by);
+      } else if (form.id === "my-profile-form") {
+        await submitMyProfile(form, by);
       } else if (form.id === "volunteer-form") {
         await submitVolunteer(form, by);
       } else if (form.id === "update-form") {
         await submitUpdate(form, event.submitter, by);
+      } else if (form.id === "season-settings-form") {
+        await submitSeasonSettings(form, by);
+      } else if (form.id === "sidn-form") {
+        await submitSidn(form, by);
+      } else if (form.id === "start-season-form") {
+        await submitStartSeason(form, by);
       } else if (caseControl) {
         await runCaseAction(caseControl, form, by);
       } else if (assistControl) {
@@ -2860,6 +3091,16 @@ if (!config) {
   // The summary's print mode lasts for one print only.
   window.addEventListener("afterprint", () => {
     document.body.classList.remove("print-summary");
+  });
+
+  // Enter in the reason note is Send back (when it is on), never the drawer's
+  // Save: the note sits inside #volunteer-form, so the default would submit it.
+  root.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || !event.target.matches?.('[name="review-note"]')) return;
+    if (event.isComposing || event.keyCode === 229) return;
+    event.preventDefault();
+    const send = event.target.closest(".volunteer-review")?.querySelector('[data-action="send-back"]');
+    if (send && !send.disabled) send.click();
   });
 
   // The case page's tabs follow the ARIA tab pattern: arrows, Home and End move

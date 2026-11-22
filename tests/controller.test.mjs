@@ -5,7 +5,8 @@ import { SHADED_EDITOR, SHADED_UPLOAD } from "../src/contracts.mjs";
 import { POOL_FILTER_KEYS } from "../src/pool-views.mjs";
 import { saveStatus } from "../src/client-views.mjs";
 import { closeUnsignedDialogBody, closeUnsignedListKey } from "../src/office-views.mjs";
-import { dialog, staffScreen } from "../src/views.mjs";
+import { dialog, showsNoAccess, staffScreen } from "../src/views.mjs";
+import { staffEligibility } from "../src/staff-views.mjs";
 import { CONTACT_FIELDS, findQuestion, isMemberId } from "../src/intake-catalogue.mjs";
 import { newMemberId, renderQuestion, reviewAlerts, valuesFromControls, withholdInvalid } from "../src/intake-form.mjs";
 import { fictionalAnswers, fillBlankAnswers, makeSampleAnswers } from "../src/sample-data.mjs";
@@ -99,6 +100,14 @@ function fakeStore({
       const answer = typeof next === "function" ? await next() : next;
       if (answer instanceof Error) throw answer;
       return answer;
+    },
+    // The sidebar's uploads count (change add-clearance-uploads, D8).
+    uploadsCount: 0,
+    failCount: false,
+    async countUploadsToReview() {
+      store.calls.push("countUploadsToReview");
+      if (store.failCount) throw Object.assign(new Error("offline"), { code: "OFFLINE" });
+      return store.uploadsCount;
     },
     async listPeople() {
       store.calls.push("listPeople");
@@ -384,6 +393,7 @@ function build(options = {}) {
   // the rebuilt page takes the keyboard back to the top.
   const renders = { count: 0, focus: [] };
   const events = options.windowEvents ?? fakeEvents();
+  const documents = options.documentEvents ?? Object.assign(fakeEvents(), { visibilityState: "visible" });
   const sessionStorage = options.sessionStorage ?? fakeSession();
   const controller = createController({
     store: options.store,
@@ -394,6 +404,7 @@ function build(options = {}) {
     },
     sessionStorage,
     windowEvents: events,
+    documentEvents: documents,
     clock: options.clock,
     newActionId: options.newActionId,
     cooldownSeconds: options.cooldownSeconds,
@@ -401,7 +412,7 @@ function build(options = {}) {
     languages: options.languages,
     demoTools: options.demoTools,
   });
-  return { controller, events, sessionStorage, renders };
+  return { controller, events, documents, sessionStorage, renders };
 }
 
 test("the controller carries the demo-tools switch it was given", () => {
@@ -694,6 +705,46 @@ test("only a screen change asks the page to take the keyboard back", async () =>
     [],
     "a rebuild of the same screen never moves the keyboard",
   );
+  controller.stop();
+});
+
+test("the client documents link is read on load and wake, not on every realtime refresh (#157)", async () => {
+  const store = fakeStore({
+    cases: [{ id: "case-a", reference: "VT-AAAA-BBBB", stage: "preparing", revision: 1, answers: {} }],
+  });
+  let reads = 0;
+  store.getClientDocumentsUrl = async () => {
+    reads += 1;
+    return "https://example.org/client-documents";
+  };
+  const { controller, events } = build({ store });
+  await controller.start();
+  assert.ok(reads >= 1, "read when the window loads");
+  assert.equal(controller.getState().clientDocumentsUrl, "https://example.org/client-documents");
+  const loaded = reads;
+  await store.handlers.onChange({ table: "cases", eventType: "UPDATE", id: "case-a", caseId: "case-a" });
+  await controller.refresh();
+  assert.equal(reads, loaded, "a realtime change or plain refresh does not re-read it");
+  await events.emit("focus");
+  assert.equal(reads, loaded + 1, "a wake re-reads it");
+  controller.stop();
+});
+
+test("a staff window never reads the client documents link (#245 review)", async () => {
+  const store = fakeStore({
+    principal: { userId: "user-s", workspaceId: "w1", access: "staff", personId: "person-sam" },
+    people: [{ id: "person-sam", name: "Sam", capabilities: ["admin", "assist", "followup", "receive_documents"], userId: "user-s" }],
+  });
+  let reads = 0;
+  store.getClientDocumentsUrl = async () => {
+    reads += 1;
+    return "https://example.org/client-documents";
+  };
+  const { controller, events } = build({ store });
+  await controller.start();
+  await events.emit("focus");
+  assert.equal(reads, 0);
+  assert.equal(controller.getState().clientDocumentsUrl, null);
   controller.stop();
 });
 
@@ -5247,13 +5298,16 @@ test("an applicant's help-request list counts as loaded, and sign-out starts ove
   await controller.start();
   // The Roster's list is a staff admin's, read only on its screen: an
   // applicant never reads it. Nor the posted-update feed and table, which
-  // are staff's.
+  // are staff's, nor Season settings, a workspace admin's, nor My
+  // profile, a cleared staff window's.
   assert.deepEqual(controller.getState().lists, {
     cases: "ready",
     assistance: "ready",
     volunteers: "loading",
     updates: "loading",
     postedUpdates: "loading",
+    seasonSettings: "loading",
+    myProfile: "loading",
   });
   await controller.signOut();
   assert.deepEqual(controller.getState().lists, {
@@ -5262,6 +5316,8 @@ test("an applicant's help-request list counts as loaded, and sign-out starts ove
     volunteers: "loading",
     updates: "loading",
     postedUpdates: "loading",
+    seasonSettings: "loading",
+    myProfile: "loading",
   });
   controller.stop();
 });
@@ -5571,6 +5627,23 @@ test("a reload on the case page starts screening", async () => {
   await tick();
   assert.equal(controller.getState().screen, "staff-case");
   assert.equal(startWrites(store).length, 1);
+  controller.stop();
+});
+
+test("a restored staff window on a past-season case goes home", async () => {
+  // The store answers a past-season case as absent (NOT_FOUND, from VT002),
+  // so the restore takes the same path as any gone case: home, no error.
+  const store = adminStaffStore({ cases: [RECEIVED], people: adminPeople });
+  const sessionStorage = fakeSession({
+    "vitally:client:v1:p1": JSON.stringify({ screen: "staff-case", selectedCaseId: "case-2025" }),
+  });
+  const { controller } = build({ store, sessionStorage });
+  await controller.start();
+  const state = controller.getState();
+  assert.ok(store.calls.includes("getCase:case-2025"), "the saved id was read");
+  assert.equal(state.screen, "staff");
+  assert.equal(state.selectedCaseId, null);
+  assert.equal(state.error, null, "no error toast");
   controller.stop();
 });
 
@@ -6618,6 +6691,11 @@ const rosterStore = (overrides = {}) => {
       throw error;
     }
     return store.volunteers.map((entry) => ({ ...entry }));
+  };
+  store.earlier = [];
+  store.listEarlierVolunteers = async () => {
+    store.calls.push("listEarlierVolunteers");
+    return store.earlier.map((entry) => ({ ...entry }));
   };
   store.saveVolunteer = async (request) => {
     store.calls.push("saveVolunteer");
@@ -8071,6 +8149,127 @@ test("a refreshed clearance with narrower capabilities narrows the person's own 
   controller.stop();
 });
 
+test("focus, visibility and a refusal while a check is out send one request, then one follow-up", async () => {
+  const store = staffStore({ cases: [{ ...SETUP_CASE }] });
+  const { controller, events, documents } = build({ store });
+  await controller.start();
+  await controller.selectCase("case-a");
+  const before = clearanceCalls(store);
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  store.nextClearance = () => gate;
+  const focus = events.emit("focus");
+  const visible = documents.emit("visibilitychange");
+  store.failNext = Object.assign(new Error("Not yours."), { code: "FORBIDDEN" });
+  const refused = controller.runAction("CLAIM_PREPARATION", { caseId: "case-a" }).catch(() => {});
+  await tick();
+  assert.equal(clearanceCalls(store) - before, 1, "no second request until the first is answered");
+  release({ ...RILEY_CLEARED });
+  await Promise.all([focus, visible, refused]);
+  await tick();
+  await tick();
+  assert.equal(clearanceCalls(store) - before, 2, "the refusal asks once more after the first answered");
+  controller.stop();
+});
+
+test("an unchanged answer does not redraw", async () => {
+  const store = staffStore({ cases: [{ ...SETUP_CASE }] });
+  const { controller, renders } = build({ store });
+  await controller.start();
+  store.nextClearance = { ...RILEY_CLEARED };
+  const drawn = renders.count;
+  const reads = callCount(store, "getUpdates");
+  await controller.checkClearance();
+  assert.equal(renders.count, drawn);
+  assert.equal(callCount(store, "getUpdates"), reads);
+  controller.stop();
+});
+
+const losingAdmin = async (setup = async () => {}) => {
+  const store = staffStore({
+    cases: [{ ...SETUP_CASE }],
+    clearance: { ...RILEY_CLEARED },
+  });
+  const built = build({ store });
+  await built.controller.start();
+  await setup(built.controller);
+  store.nextClearance = { ...RILEY_CLEARED, capabilities: ["prepare"], isAdmin: true };
+  const lists = store.calls.filter((entry) => entry.startsWith("list")).length;
+  await built.controller.checkClearance();
+  assert.equal(store.calls.filter((entry) => entry.startsWith("list")).length, lists, "no list reload");
+  return { ...built, store };
+};
+
+test("losing Admin on Follow-ups keeps the screen, now the Work board", async () => {
+  const { controller } = await losingAdmin();
+  const state = controller.getState();
+  assert.equal(state.screen, "staff");
+  assert.match(staffScreen(state), /Work board/);
+  assert.doesNotMatch(staffScreen(state), /All cases/);
+  controller.stop();
+});
+
+test("losing Admin on All cases moves to the Work board, and regaining Admin does not move back", async () => {
+  const { controller, store, renders } = await losingAdmin((c) => c.navigate("office-cases"));
+  assert.equal(controller.getState().screen, "staff");
+  assert.equal(renders.focus.at(-1), true);
+  store.nextClearance = { ...RILEY_CLEARED };
+  await controller.checkClearance();
+  assert.equal(controller.getState().screen, "staff");
+  controller.stop();
+});
+
+test("losing Admin on an office case page keeps the case", async () => {
+  const { controller } = await losingAdmin((c) => c.selectCase("case-a"));
+  const state = controller.getState();
+  assert.equal(state.screen, "staff-case");
+  assert.equal(state.selectedCaseId, "case-a");
+  assert.match(staffScreen(state), /Back to the work board/);
+  controller.stop();
+});
+
+test("losing Admin on Add a case keeps the page and its answers", async () => {
+  const { controller } = await losingAdmin(async (c) => {
+    await c.openAddCase();
+    c.editAnswers({ tp_first_name: "Avery" });
+  });
+  const state = controller.getState();
+  assert.equal(state.screen, "office-add-case");
+  assert.equal(state.draftAnswers.tp_first_name, "Avery");
+  controller.stop();
+});
+
+test("a case-page draft survives losing Preparer and shows again when it returns", async () => {
+  const mine = { ...SETUP_CASE, preparerId: "person-riley", participants: ["person-riley"] };
+  const store = staffStore({
+    cases: [mine],
+    clearance: { ...RILEY_CLEARED, capabilities: ["prepare"], isAdmin: false },
+  });
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.selectCase("case-a");
+  controller.editAnswers({ tp_first_name: "Avery" });
+  const rights = () => {
+    const state = controller.getState();
+    const own = state.people.find((person) => person.id === "person-riley");
+    return staffEligibility(state.savedCase, own).preparationWork.allowed;
+  };
+  assert.equal(rights(), true);
+  store.nextClearance = { ...RILEY_CLEARED, capabilities: ["receive_documents", "assist"], isAdmin: false };
+  await controller.checkClearance();
+  assert.equal(controller.getState().dirty, true);
+  assert.equal(controller.getState().draftAnswers.tp_first_name, "Avery");
+  assert.equal(rights(), false);
+  store.nextClearance = { ...RILEY_CLEARED, capabilities: ["prepare"], isAdmin: false };
+  await controller.checkClearance();
+  assert.equal(controller.getState().dirty, true);
+  assert.equal(controller.getState().draftAnswers.tp_first_name, "Avery");
+  assert.equal(rights(), true);
+  controller.stop();
+});
+
 test("a check that fails, or answers nothing, is a failure with Try again, never a clearance", async () => {
   const store = staffStore({ clearance: { ...UNCLEARED } });
   const { controller } = build({ store });
@@ -8212,7 +8411,7 @@ test("an uncleared admin can open the Roster and is read no case", async () => {
   controller.stop();
 });
 
-test("the window's focus re-checks the clearance only while the setup screen shows", async () => {
+test("the window's focus re-checks the clearance in the setup screen and, with the work, re-reads it too", async () => {
   const store = staffStore({ clearance: { ...UNCLEARED }, cases: [{ ...SETUP_CASE }] });
   const { controller, events } = build({ store });
   await controller.start();
@@ -8226,10 +8425,10 @@ test("the window's focus re-checks the clearance only while the setup screen sho
   assert.equal(state.principal.clearance.cleared, true);
   assert.equal(state.cases.length, 1);
   assert.doesNotMatch(staffScreen(state), /Finish your setup/);
-  // A cleared window's focus re-reads the work as before, not the clearance.
+  // A cleared window's focus re-reads the clearance first, then the work.
   const caseReads = store.calls.filter((entry) => entry === "listCases").length;
   await events.emit("focus");
-  assert.equal(clearanceCalls(store) - before, 1);
+  assert.equal(clearanceCalls(store) - before, 2);
   assert.equal(store.calls.filter((entry) => entry === "listCases").length, caseReads + 1);
   state = controller.getState();
   assert.equal(state.error, null);
@@ -9216,29 +9415,202 @@ test("an uncleared admin's own save that leaves them uncleared keeps the setup h
   controller.stop();
 });
 
-test("saving someone else's row, or one's own while cleared, asks for no clearance", async () => {
+test("saving someone else's row asks for no clearance", async () => {
   const uncleared = selfRosterStore(UNCLEARED_ADMIN);
-  let { controller } = build({ store: uncleared });
+  const { controller } = build({ store: uncleared });
   await controller.start();
   controller.navigate("office-volunteers");
   await controller.loadVolunteers();
   controller.openDialog("volunteer", { volunteerId: "v-1" });
-  let checks = callCount(uncleared, "getClearance");
+  const checks = callCount(uncleared, "getClearance");
   assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(callCount(uncleared, "getClearance"), checks, "another person's row");
   controller.stop();
+});
 
-  const clearedStore = selfRosterStore({ ...UNCLEARED_ADMIN, cleared: true, missing: [], capabilities: ["admin"] });
-  ({ controller } = build({ store: clearedStore }));
+const CLEARED_ADMIN_ONLY = Object.freeze({ ...UNCLEARED_ADMIN, cleared: true, missing: [], capabilities: ["admin"] });
+
+const openOwnRow = async (store) => {
+  const { controller } = build({ store });
   await controller.start();
   controller.navigate("office-volunteers");
   await controller.loadVolunteers();
   controller.openDialog("volunteer", { volunteerId: "person-sam" });
-  checks = callCount(clearedStore, "getClearance");
+  return controller;
+};
+
+test("saving one's own row while cleared asks for the clearance once", async () => {
+  const clearedStore = selfRosterStore({ ...CLEARED_ADMIN_ONLY });
+  const controller = await openOwnRow(clearedStore);
+  const checks = callCount(clearedStore, "getClearance");
   assert.equal(await controller.saveVolunteer(SELF_PAYLOAD), true);
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(callCount(clearedStore, "getClearance"), checks, "one's own row while cleared");
+  assert.equal(callCount(clearedStore, "getClearance"), checks + 1, "one's own row while cleared");
+  controller.stop();
+});
+
+test("saving one's own row while cleared drops a removed role's buttons", async () => {
+  const store = selfRosterStore({ ...CLEARED_ADMIN_ONLY, capabilities: ["admin", "prepare"] });
+  const controller = await openOwnRow(store);
+  assert.ok(controller.getState().people.find((p) => p.id === "person-sam").capabilities.includes("prepare"));
+  store.nextClearance = { ...CLEARED_ADMIN_ONLY, capabilities: ["admin"] };
+  assert.equal(await controller.saveVolunteer(SELF_PAYLOAD), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  const own = controller.getState().people.find((p) => p.id === "person-sam");
+  assert.equal(own.capabilities.includes("prepare"), false);
+  controller.stop();
+});
+
+test("saving one's own row with no roles shows the setup screen and stays on the Roster", async () => {
+  const store = selfRosterStore({ ...CLEARED_ADMIN_ONLY });
+  const controller = await openOwnRow(store);
+  store.nextClearance = { ...UNCLEARED_ADMIN };
+  assert.equal(await controller.saveVolunteer({ ...SELF_PAYLOAD, roles: [] }), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  const state = controller.getState();
+  assert.equal(state.principal.clearance.cleared, false);
+  assert.equal(state.screen, "office-volunteers");
+  controller.stop();
+});
+
+test("a narrowed role is noticed on an INELIGIBLE claim, and the refusal stays", async () => {
+  const store = fakeStore({
+    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "morgan" },
+    people: [
+      { id: "alex", name: "Alex", capabilities: ["prepare"] },
+      { id: "morgan", name: "Morgan", capabilities: ["prepare", "review"] },
+    ],
+    cases: [
+      { id: "case-a", reference: "VT-AAAA-BBBB", stage: "review_ready", revision: 4, answers: {}, preparerId: "alex", reviewerId: null, participants: ["alex"] },
+    ],
+  });
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.selectCase("case-a");
+  const before = clearanceCalls(store);
+  // Held, so the refusal's check is still pending when it is asked for.
+  let release;
+  store.nextClearance = () => new Promise((resolve) => (release = resolve));
+  store.failNext = Object.assign(new Error("Needs review eligibility."), { code: "INELIGIBLE" });
+  await assert.rejects(controller.runAction("CLAIM_REVIEW", {}));
+  assert.equal(clearanceCalls(store) - before, 1, "the refusal started the check");
+  const pending = controller.checkClearance();
+  release({ cleared: true, missing: [], capabilities: ["prepare"], isAdmin: false, siteCoordinatorName: null });
+  await pending;
+  const state = controller.getState();
+  assert.equal(clearanceCalls(store) - before, 1);
+  assert.equal(state.error.code, "INELIGIBLE");
+  const own = state.people.find((p) => p.id === "morgan");
+  assert.deepEqual(own.capabilities, ["prepare"]);
+  assert.equal(staffEligibility(state.savedCase, own).claimReview.allowed, false);
+  controller.stop();
+});
+
+const reviewStore = () =>
+  fakeStore({
+    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: "morgan" },
+    people: [
+      { id: "alex", name: "Alex", capabilities: ["prepare"] },
+      { id: "morgan", name: "Morgan", capabilities: ["prepare", "review"] },
+    ],
+    cases: [
+      { id: "case-a", reference: "VT-AAAA-BBBB", stage: "review_ready", revision: 4, answers: {}, preparerId: "alex", reviewerId: null, participants: ["alex"] },
+    ],
+  });
+
+test("a FORBIDDEN action refusal alone starts a clearance check in a cleared window", async () => {
+  const store = reviewStore();
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.selectCase("case-a");
+  const before = clearanceCalls(store);
+  store.failNext = Object.assign(new Error("Not allowed."), { code: "FORBIDDEN" });
+  await assert.rejects(controller.runAction("CLAIM_REVIEW", {}));
+  assert.equal(clearanceCalls(store) - before, 1, "the refusal started the check");
+  assert.equal(controller.getState().error.code, "FORBIDDEN");
+  controller.stop();
+});
+
+test("an isAdmin-only flip is a change: it redraws and stores the new isAdmin", async () => {
+  const store = reviewStore();
+  const { controller, renders } = build({ store });
+  await controller.start();
+  store.nextClearance = { cleared: true, missing: [], capabilities: ["prepare", "review"], isAdmin: true, siteCoordinatorName: null };
+  await controller.checkClearance();
+  assert.equal(controller.getState().principal.clearance.isAdmin, true);
+  const drawn = renders.count;
+  store.nextClearance = { cleared: true, missing: [], capabilities: ["prepare", "review"], isAdmin: false, siteCoordinatorName: null };
+  await controller.checkClearance();
+  assert.ok(renders.count > drawn, "redrawn");
+  assert.equal(controller.getState().principal.clearance.isAdmin, false);
+  controller.stop();
+});
+
+test("a clearance answer without capabilities is a failed check: the window stays cleared with its work", async () => {
+  const store = reviewStore();
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.selectCase("case-a");
+  store.nextClearance = { cleared: true, missing: [], isAdmin: false };
+  await controller.checkClearance();
+  const state = controller.getState();
+  assert.equal(state.principal.clearance.cleared, true);
+  assert.ok(Array.isArray(state.principal.clearance.capabilities));
+  assert.equal(state.savedCase?.id, "case-a");
+  assert.equal(state.error.code, "SERVER_ERROR");
+  controller.stop();
+});
+
+test("assigning someone uncleared re-reads once and changes nothing", async () => {
+  const store = workloadStore();
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.setVolunteerTab("workload");
+  controller.openAssign("case-w2", "preparer");
+  const before = clearanceCalls(store);
+  const ownBefore = controller.getState().people.find((p) => p.id === "person-sam").capabilities;
+  // Held, so the refusal's check is still pending when it is asked for. The
+  // answer is unchanged.
+  let release;
+  const unchanged = store.nextClearance;
+  store.nextClearance = () => new Promise((resolve) => (release = resolve));
+  store.failNext = Object.assign(new Error("INELIGIBLE"), { code: "INELIGIBLE" });
+  await assert.rejects(controller.assignCase("v-1"), (error) => error.code === "INELIGIBLE");
+  assert.equal(clearanceCalls(store) - before, 1, "the refusal started the check");
+  const pending = controller.checkClearance();
+  release(unchanged ?? { cleared: true, missing: [], capabilities: ["admin"], isAdmin: true, siteCoordinatorName: null });
+  await pending;
+  const state = controller.getState();
+  assert.equal(clearanceCalls(store) - before, 1);
+  assert.equal(state.error.code, "INELIGIBLE");
+  assert.deepEqual(state.people.find((p) => p.id === "person-sam").capabilities, ownBefore);
+  controller.stop();
+});
+
+test("a FORBIDDEN in an uncleared window starts no extra check", async () => {
+  const store = selfRosterStore(UNCLEARED_ADMIN);
+  const controller = await openOwnRow(store);
+  const before = callCount(store, "getClearance");
+  store.failSave = Object.assign(new Error("no"), { code: "FORBIDDEN" });
+  await controller.saveVolunteer(SELF_PAYLOAD).catch(() => {});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(callCount(store, "getClearance"), before);
+  controller.stop();
+});
+
+test("a FORBIDDEN answer to the clearance read itself in a cleared window starts no second check", async () => {
+  const store = staffStore({ clearance: { ...RILEY_CLEARED, capabilities: ["prepare"] } });
+  const { controller } = build({ store });
+  await controller.start();
+  const before = clearanceCalls(store);
+  store.nextClearance = Object.assign(new Error("no"), { code: "FORBIDDEN" });
+  await controller.checkClearance();
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(clearanceCalls(store) - before, 1);
+  assert.equal(controller.getState().error.code, "FORBIDDEN");
   controller.stop();
 });
 
@@ -9281,7 +9653,7 @@ test("a check already out when the own-row save lands is followed by one more", 
   controller.stop();
 });
 
-test("an early check that already finds them cleared needs no second one", async () => {
+test("an early check that already finds them cleared is still followed by one more", async () => {
   const store = selfRosterStore(UNCLEARED_ADMIN);
   const { controller } = build({ store });
   await controller.start();
@@ -9296,7 +9668,7 @@ test("an early check that already finds them cleared needs no second one", async
   release({ ...UNCLEARED_ADMIN, cleared: true, missing: [], capabilities: ["admin"] });
   await early;
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(callCount(store, "getClearance"), checks, "no second check");
+  assert.equal(callCount(store, "getClearance"), checks + 1, "one more, cleared or not (#190)");
   assert.equal(controller.getState().principal.clearance.cleared, true);
   controller.stop();
 });
@@ -9491,5 +9863,1848 @@ test("the label menu closes when the screen or the selected case changes", async
   controller.openLabelMenu("case-a");
   await controller.selectCase("case-a");
   assert.equal(controller.getState().labelMenu, null);
+  controller.stop();
+});
+
+test("a cleared window re-reads its clearance on focus, and shows an added role", async () => {
+  const store = staffStore({ clearance: { ...RILEY_CLEARED, capabilities: ["prepare"], isAdmin: true } });
+  const { controller, events } = build({ store });
+  await controller.start();
+  const before = clearanceCalls(store);
+  store.nextClearance = { ...RILEY_CLEARED, capabilities: ["prepare", "review"] };
+  await events.emit("focus");
+  assert.equal(clearanceCalls(store) - before, 1);
+  const own = controller.getState().people.find((p) => p.id === "person-riley");
+  assert.deepEqual(own.capabilities, ["prepare", "review"]);
+  controller.stop();
+});
+
+test("a tab that becomes visible re-reads the clearance; one that is hidden does not", async () => {
+  const store = staffStore();
+  const { controller, documents } = build({ store });
+  await controller.start();
+  const before = clearanceCalls(store);
+  documents.visibilityState = "hidden";
+  await documents.emit("visibilitychange");
+  assert.equal(clearanceCalls(store) - before, 0);
+  documents.visibilityState = "visible";
+  await documents.emit("visibilitychange");
+  assert.equal(clearanceCalls(store) - before, 1);
+  controller.stop();
+  assert.equal(documents.count("visibilitychange"), 0);
+});
+
+test("every role removed: focus shows the setup screen and reads no case list", async () => {
+  const store = staffStore({ cases: [{ ...SETUP_CASE }] });
+  const { controller, events } = build({ store });
+  await controller.start();
+  const lists = store.calls.filter((c) => c === "listCases").length;
+  store.nextClearance = { ...UNCLEARED };
+  await events.emit("focus");
+  assert.equal(controller.getState().principal.clearance.cleared, false);
+  assert.match(staffScreen(controller.getState()), /Finish your setup for this season/);
+  assert.equal(store.calls.filter((c) => c === "listCases").length, lists);
+  controller.stop();
+});
+
+test("the refresh after a successful action reads no clearance", async () => {
+  const store = staffStore({
+    assistance: [{ id: "item-1", title: "Help with the forms", status: "open", revision: 1, assigneeId: null }],
+  });
+  const { controller } = build({ store });
+  await controller.start();
+  const before = clearanceCalls(store);
+  await controller.runAssistanceAction("CLAIM", "item-1");
+  assert.equal(clearanceCalls(store) - before, 0);
+  controller.stop();
+});
+
+test("a wake check that fails keeps the work and still re-reads the lists", async () => {
+  const store = staffStore({ cases: [{ ...SETUP_CASE }] });
+  const { controller, events } = build({ store });
+  await controller.start();
+  const lists = store.calls.filter((c) => c === "listCases").length;
+  store.nextClearance = Object.assign(new Error("offline"), { code: "OFFLINE" });
+  await events.emit("focus");
+  const state = controller.getState();
+  assert.equal(state.principal.clearance.cleared, true);
+  assert.equal(state.cases.length, 1);
+  assert.ok(store.calls.filter((c) => c === "listCases").length > lists);
+  controller.stop();
+});
+
+// A deactivated account (Deactivate, or Start next season; add-start-next-season
+// R10): a deactivated member gets no realtime, so its window learns on a wake.
+// The clearance re-read is refused FORBIDDEN; the principal is read once more,
+// and with no active staff membership the window becomes the no-access
+// window the first load shows, with nothing of the work left.
+test("a wake check refused because the membership is gone shows no-access and drops the work", async () => {
+  const store = staffStore({ cases: [{ ...SETUP_CASE }] });
+  const { controller, events } = build({ store });
+  await controller.start();
+  assert.equal(store.subscriptions, 1);
+  const refused = () => Object.assign(new Error("no access"), { code: "FORBIDDEN" });
+  store.nextClearance = refused();
+  store.getPrincipal = async () => {
+    store.calls.push("getPrincipal");
+    throw refused();
+  };
+  const from = store.calls.length;
+  const released = store.handlers;
+  await events.emit("focus");
+  // The released channel then reports itself closed, as removeChannel does:
+  // it is not a lost connection, so no offline notice joins the screen.
+  released.onConnection("offline");
+  const state = controller.getState();
+  assert.notEqual(state.connection, "offline", "the released channel's close reads as a lost connection");
+  assert.equal(state.screen, "no-access");
+  assert.equal(state.principal, null);
+  assert.ok(showsNoAccess(state), "the no-access screen is drawn");
+  assert.equal(state.retryable, false, "a retryable banner is shown");
+  assert.equal(store.released, 1, "realtime is still subscribed");
+  assert.deepEqual(state.cases, []);
+  assert.deepEqual(state.people, []);
+  assert.deepEqual(state.assistance, []);
+  assert.equal(state.workspace, null);
+  assert.equal(state.selectedCaseId, null);
+  // Once: the clearance read, the principal read, and nothing after them.
+  assert.deepEqual(store.calls.slice(from), ["getClearance", "getPrincipal"]);
+  // Later wakes ask only for the principal, as the first load's window does.
+  const after = store.calls.length;
+  await events.emit("focus");
+  assert.ok(store.calls.slice(after).every((call) => call === "getPrincipal"), store.calls.slice(after).join());
+  assert.equal(controller.getState().screen, "no-access");
+  controller.stop();
+});
+
+test("a wake check refused FORBIDDEN for a member still active keeps the window and its work", async () => {
+  const store = staffStore({ cases: [{ ...SETUP_CASE }] });
+  const { controller, events } = build({ store });
+  await controller.start();
+  store.nextClearance = Object.assign(new Error("no access"), { code: "FORBIDDEN" });
+  const from = store.calls.length;
+  await events.emit("focus");
+  const state = controller.getState();
+  assert.equal(store.calls.slice(from).filter((call) => call === "getPrincipal").length, 1, "the principal is read once");
+  assert.ok(state.principal, "the principal was dropped");
+  assert.notEqual(state.screen, "no-access");
+  assert.equal(state.cases.length, 1);
+  assert.equal(store.released, 0);
+  assert.equal(state.error?.code, "FORBIDDEN");
+  assert.equal(state.retryable, true, "the refusal keeps its Try again");
+  controller.stop();
+});
+
+test("signing out while a wake check is out applies nothing to the next window state", async () => {
+  const store = staffStore();
+  const { controller, events } = build({ store });
+  await controller.start();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  store.nextClearance = () => gate;
+  const wake = events.emit("focus");
+  await controller.signOut();
+  const lists = store.calls.filter((c) => c === "listCases").length;
+  release({ ...UNCLEARED });
+  await wake;
+  assert.equal(controller.getState().principal, null);
+  assert.equal(store.calls.filter((c) => c === "listCases").length, lists, "no list read after the release");
+  assert.equal(controller.getState().error, null);
+  controller.stop();
+});
+
+const callsOf = (store, name) => store.calls.filter((entry) => entry === name).length;
+const WAKE_LISTS = ["listCases", "listLabels", "listAssistance", "getUpdates", "getCase:case-a"];
+
+test("focus and visibilitychange together run one wake refresh", async () => {
+  const store = staffStore({
+    cases: [{ ...SETUP_CASE }],
+    assistance: [{ id: "item-1", title: "Help with the forms", status: "open", revision: 1, assigneeId: null }],
+  });
+  const { controller, events, documents } = build({ store });
+  await controller.start();
+  await controller.selectCase("case-a");
+  // What one plain focus reads, so nothing is hard-coded.
+  let mark = Object.fromEntries(WAKE_LISTS.map((name) => [name, callsOf(store, name)]));
+  const clearance = clearanceCalls(store);
+  await events.emit("focus");
+  const one = Object.fromEntries(WAKE_LISTS.map((name) => [name, callsOf(store, name) - mark[name]]));
+  assert.equal(clearanceCalls(store) - clearance, 1);
+  assert.ok(one.listCases >= 1 && one.listAssistance >= 1 && one["getCase:case-a"] >= 1, "the plain focus reads the lists");
+  mark = Object.fromEntries(WAKE_LISTS.map((name) => [name, callsOf(store, name)]));
+  const before = clearanceCalls(store);
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  store.nextClearance = () => gate;
+  const focus = events.emit("focus");
+  const visible = documents.emit("visibilitychange");
+  await tick();
+  release({ ...RILEY_CLEARED });
+  await Promise.all([focus, visible]);
+  await tick();
+  assert.equal(clearanceCalls(store) - before, 1);
+  for (const name of WAKE_LISTS) assert.equal(callsOf(store, name) - mark[name], one[name], name);
+  controller.stop();
+});
+
+test("a wake after the first has finished runs again", async () => {
+  const store = staffStore();
+  const { controller, events } = build({ store });
+  await controller.start();
+  const before = clearanceCalls(store);
+  await events.emit("focus");
+  await events.emit("focus");
+  assert.equal(clearanceCalls(store) - before, 2);
+  controller.stop();
+});
+
+test("signing out forgets a pending wake refresh, so the next user's wake runs", async () => {
+  const store = staffStore();
+  const auth = { ...idleAuth(), verifyCode: async () => {} };
+  const { controller, events } = build({ store, auth });
+  await controller.start();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  store.nextClearance = () => gate;
+  const first = events.emit("focus");
+  await tick();
+  await controller.signOut();
+  store.getPrincipal = async () => ({
+    ...STAFF_PRINCIPAL,
+    userId: "user-quinn",
+    personId: "person-quinn",
+    personName: "Quinn Harper",
+    clearance: { ...RILEY_CLEARED },
+  });
+  await controller.verifyCode("123456");
+  assert.equal(controller.getState().principal.userId, "user-quinn");
+  store.nextClearance = { ...RILEY_CLEARED };
+  const before = clearanceCalls(store);
+  await events.emit("focus");
+  assert.equal(clearanceCalls(store) - before, 1, "the new user's wake ran its own refresh");
+  release({ ...UNCLEARED });
+  await first;
+  assert.equal(controller.getState().principal.userId, "user-quinn");
+  assert.equal(controller.getState().principal.clearance.cleared, true);
+  controller.stop();
+});
+
+test("a refusal while a check is out asks again after it", async () => {
+  const store = reviewStore();
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.selectCase("case-a");
+  const before = clearanceCalls(store);
+  let release;
+  store.nextClearance = () => new Promise((resolve) => (release = resolve));
+  const early = controller.checkClearance();
+  await tick();
+  store.failNext = Object.assign(new Error("Needs review eligibility."), { code: "INELIGIBLE" });
+  await assert.rejects(controller.runAction("CLAIM_REVIEW", {}));
+  assert.equal(clearanceCalls(store) - before, 1, "no second request while the first is out");
+  store.nextClearance = { cleared: true, missing: [], capabilities: ["prepare"], isAdmin: false, siteCoordinatorName: null };
+  release({ cleared: true, missing: [], capabilities: ["prepare", "review"], isAdmin: false, siteCoordinatorName: null });
+  await early;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(clearanceCalls(store) - before, 2, "one more after the first answered");
+  const own = controller.getState().people.find((p) => p.id === "morgan");
+  assert.deepEqual(own.capabilities, ["prepare"]);
+  controller.stop();
+});
+
+test("two refusals while a check is out make one follow-up check", async () => {
+  const store = reviewStore();
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.selectCase("case-a");
+  const before = clearanceCalls(store);
+  let release;
+  store.nextClearance = () => new Promise((resolve) => (release = resolve));
+  const early = controller.checkClearance();
+  await tick();
+  for (let i = 0; i < 2; i += 1) {
+    store.failNext = Object.assign(new Error("Needs review eligibility."), { code: "INELIGIBLE" });
+    await assert.rejects(controller.runAction("CLAIM_REVIEW", {}));
+  }
+  store.nextClearance = { cleared: true, missing: [], capabilities: ["prepare"], isAdmin: false, siteCoordinatorName: null };
+  release({ cleared: true, missing: [], capabilities: ["prepare", "review"], isAdmin: false, siteCoordinatorName: null });
+  await early;
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(clearanceCalls(store) - before, 2);
+  controller.stop();
+});
+
+test("an added Preparer role and an assignment show the preparation form after focus", async () => {
+  const other = { ...SETUP_CASE, reviews: [], preparerId: "person-sam", participants: ["person-sam"] };
+  const store = staffStore({
+    cases: [other],
+    clearance: { ...RILEY_CLEARED, capabilities: ["receive_documents", "assist"], isAdmin: false },
+  });
+  const { controller, events } = build({ store });
+  await controller.start();
+  await controller.selectCase("case-a");
+  assert.doesNotMatch(staffScreen(controller.getState()), /Record that preparation is complete in TaxSlayer/);
+  store.records.set("case-a", { ...other, preparerId: "person-riley", participants: ["person-riley"], revision: 2 });
+  store.nextClearance = { ...RILEY_CLEARED, capabilities: ["receive_documents", "assist", "prepare"], isAdmin: false };
+  await events.emit("focus");
+  assert.match(staffScreen(controller.getState()), /Record that preparation is complete in TaxSlayer/);
+  controller.stop();
+});
+
+test("an ADMIN_ROLE refusal says only site coordinators change the Admin role, in the form", async () => {
+  const store = rosterStore();
+  const { controller } = build({ store });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", { volunteerId: "v-1" });
+  store.failSave = Object.assign(new Error("Not allowed."), {
+    code: "FORBIDDEN",
+    cause: { code: "VT001", message: "ADMIN_ROLE" },
+  });
+  const reads = volunteerReads(store);
+  assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), false);
+  const state = controller.getState();
+  assert.equal(state.volunteerFormError, "Only site coordinators change the Admin role.");
+  assert.equal(state.error, null);
+  assert.equal(state.busy, false);
+  assert.equal(state.dialog, "volunteer");
+  assert.equal(volunteerReads(store), reads + 1);
+  controller.stop();
+});
+
+test("LAST_SITE_COORDINATOR on deactivate says one must remain, in the drawer", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "active", revision: 3 } }];
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("deactivate-account", { volunteerId: "v-1" });
+  store.failAccount = accountRefusal("INVALID_TRANSITION", "LAST_SITE_COORDINATOR", null);
+  assert.equal(await controller.deactivateAccount(), false);
+  const state = controller.getState();
+  assert.deepEqual(state.volunteerAccountNotice, {
+    kind: "error",
+    text: "At least one site coordinator must remain. Make someone else a site coordinator first.",
+  });
+  assert.equal(state.dialog, "volunteer", "back in the drawer, which says it");
+  assert.equal(state.error, null);
+  controller.stop();
+});
+
+// Review fix: deactivating a site coordinator needs a site coordinator. The
+// drawer offers no Deactivate to anyone else; a refusal that still arrives
+// (for example from a window drawn before a change) says why, in the drawer.
+test("FORBIDDEN on deactivating a site coordinator says only site coordinators can", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "active", revision: 3 }, isSiteCoordinator: true }];
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("deactivate-account", { volunteerId: "v-1" });
+  store.failAccount = accountRefusal("FORBIDDEN", "FORBIDDEN", null);
+  assert.equal(await controller.deactivateAccount(), false);
+  const state = controller.getState();
+  assert.deepEqual(state.volunteerAccountNotice, {
+    kind: "error",
+    text: "Only site coordinators deactivate a site coordinator's account.",
+  });
+  assert.equal(state.dialog, "volunteer", "back in the drawer, which says it");
+  assert.equal(state.error, null);
+  controller.stop();
+});
+
+// ---------------------------------------------------------------------------
+// Season settings (change add-season-settings, Task 10)
+// ---------------------------------------------------------------------------
+
+const SC_CLEARED = Object.freeze({
+  cleared: true,
+  missing: [],
+  capabilities: ["admin"],
+  isAdmin: true,
+  isSiteCoordinator: true,
+  siteCoordinatorName: null,
+});
+const SC_UNCLEARED = Object.freeze({
+  cleared: false,
+  missing: [{ kind: "form13615" }],
+  capabilities: [],
+  isAdmin: true,
+  isSiteCoordinator: true,
+  siteCoordinatorName: "Sam",
+});
+const PREPARER_CLEARED = Object.freeze({
+  cleared: true,
+  missing: [],
+  capabilities: ["prepare"],
+  isAdmin: false,
+  isSiteCoordinator: false,
+  siteCoordinatorName: null,
+});
+const settingsAnswer = () => ({
+  season: 2027,
+  certificateUploadUrl: "https://example.org/certificates",
+  clientDocumentsUrl: null,
+  revision: 3,
+  siteNumber: { set: false, updatedAt: null },
+  canEdit: true,
+  siteCoordinators: [
+    { volunteerId: "person-sam", name: "Sam", email: "sam@example.org", since: "2026-11-02T15:00:00Z", onRoster: true, accountRevision: 4 },
+    { volunteerId: "person-dana", name: "Dana Wu", email: "dana@example.org", since: "2026-11-03T15:00:00Z", onRoster: false, accountRevision: 2 },
+  ],
+  candidates: [{ volunteerId: "person-ana", name: "Ana Ortiz", accountRevision: 1 }],
+  history: [],
+});
+// An admin staff store with the four Season settings calls. `failNextSettings`
+// makes the next write reject.
+const settingsStore = (overrides = {}) => {
+  const store = adminStaffStore({ clearance: { ...SC_CLEARED }, ...overrides });
+  store.settings = settingsAnswer();
+  store.failNextSettings = null;
+  const fail = () => {
+    const error = store.failNextSettings;
+    store.failNextSettings = null;
+    if (error) throw error;
+  };
+  store.getSeasonSettings = async () => {
+    store.calls.push("getSeasonSettings");
+    return structuredClone(store.settings);
+  };
+  store.saveSeasonSettings = async (request) => {
+    store.calls.push("saveSeasonSettings");
+    store.writes.push({ type: "saveSeasonSettings", ...request });
+    fail();
+    store.settings = { ...store.settings, ...request.settings, revision: store.settings.revision + 1 };
+    return { ...store.settings };
+  };
+  store.setSiteNumber = async (request) => {
+    store.calls.push("setSiteNumber");
+    store.writes.push({ type: "setSiteNumber", ...request });
+    fail();
+    store.settings.siteNumber = { set: true, updatedAt: "2026-11-19T15:00:00Z" };
+    return { set: true, updatedAt: "2026-11-19T15:00:00Z" };
+  };
+  store.setSiteCoordinator = async (request) => {
+    store.calls.push("setSiteCoordinator");
+    store.writes.push({ type: "setSiteCoordinator", ...request });
+    fail();
+    return { actionId: request.actionId, volunteerId: request.volunteerId, isSiteCoordinator: request.granted, accountRevision: request.expectedRevision + 1 };
+  };
+  return store;
+};
+const settingsReads = (store) => store.calls.filter((entry) => entry === "getSeasonSettings").length;
+const settingsRefusal = (code, message, details) =>
+  Object.assign(new Error(code), { code, cause: { message: message ?? code, details: details ?? null } });
+
+async function onSettingsScreen(overrides = {}) {
+  const store = settingsStore(overrides);
+  const built = build({ store });
+  await built.controller.start();
+  built.controller.navigate("office-settings");
+  await built.controller.loadSeasonSettings();
+  return { store, ...built };
+}
+
+test("season settings: the link is offered to a workspace admin, cleared or not, and not to a preparer", async () => {
+  for (const clearance of [SC_CLEARED, SC_UNCLEARED, { ...SC_CLEARED, isSiteCoordinator: false }]) {
+    const { controller } = build({ store: settingsStore({ clearance: { ...clearance } }) });
+    await controller.start();
+    assert.match(staffScreen(controller.getState()), /data-action="open-season-settings"/, JSON.stringify(clearance));
+    controller.stop();
+  }
+  const { controller } = build({ store: settingsStore({ clearance: { ...PREPARER_CLEARED } }) });
+  await controller.start();
+  assert.doesNotMatch(staffScreen(controller.getState()), /open-season-settings/);
+  controller.stop();
+});
+
+test("season settings: opening reads the page and shows it", async () => {
+  const { store, controller } = await onSettingsScreen();
+  const state = controller.getState();
+  assert.equal(state.screen, "office-settings");
+  assert.equal(state.lists.seasonSettings, "ready");
+  assert.equal(state.seasonSettings.revision, 3);
+  assert.equal(settingsReads(store), 1);
+  assert.match(staffScreen(state), /<h1>Season settings<\/h1>[\s\S]*2027 for TY 2026/);
+  controller.stop();
+});
+
+test("season settings: a restored window for a preparer goes home and reads nothing", async () => {
+  const sessionStorage = fakeSession();
+  const seed = build({ store: settingsStore(), sessionStorage });
+  await seed.controller.start();
+  seed.controller.navigate("office-settings");
+  seed.controller.stop();
+  const store = settingsStore({ clearance: { ...PREPARER_CLEARED } });
+  const { controller } = build({ store, sessionStorage });
+  await controller.start();
+  assert.equal(controller.getState().screen, "staff");
+  controller.navigate("office-settings");
+  await controller.loadSeasonSettings();
+  assert.equal(controller.getState().screen, "staff");
+  assert.equal(settingsReads(store), 0);
+  controller.stop();
+});
+
+test("season settings: an admin window restored on the page reads it", async () => {
+  const sessionStorage = fakeSession();
+  const seed = build({ store: settingsStore(), sessionStorage });
+  await seed.controller.start();
+  seed.controller.navigate("office-settings");
+  seed.controller.stop();
+  const store = settingsStore();
+  const { controller } = build({ store, sessionStorage });
+  await controller.start();
+  assert.equal(controller.getState().screen, "office-settings");
+  assert.equal(controller.getState().lists.seasonSettings, "ready");
+  assert.equal(settingsReads(store), 1);
+  controller.stop();
+});
+
+test("season settings: an uncleared site coordinator keeps the page, restored and re-read on focus", async () => {
+  const sessionStorage = fakeSession();
+  const seed = build({ store: settingsStore({ clearance: { ...SC_UNCLEARED } }), sessionStorage });
+  await seed.controller.start();
+  seed.controller.navigate("office-settings");
+  seed.controller.stop();
+  const store = settingsStore({ clearance: { ...SC_UNCLEARED } });
+  const { controller, events } = build({ store, sessionStorage });
+  await controller.start();
+  const state = controller.getState();
+  assert.equal(state.screen, "office-settings");
+  assert.equal(state.lists.seasonSettings, "ready");
+  assert.equal(store.calls.includes("listCases"), false);
+  assert.match(staffScreen(state), /<h1>Season settings<\/h1>/);
+  const reads = settingsReads(store);
+  await events.emit("focus");
+  assert.equal(settingsReads(store), reads + 1);
+  controller.stop();
+});
+
+test("season settings: a failed first read says so, and Try again reads again", async () => {
+  const store = settingsStore();
+  const { controller } = build({ store });
+  await controller.start();
+  const read = store.getSeasonSettings;
+  store.getSeasonSettings = async () => {
+    store.calls.push("getSeasonSettings");
+    throw Object.assign(new Error("Network error."), { code: "OFFLINE" });
+  };
+  controller.navigate("office-settings");
+  await controller.loadSeasonSettings();
+  let state = controller.getState();
+  assert.equal(state.lists.seasonSettings, "failed");
+  assert.equal(state.retryable, true);
+  assert.match(staffScreen(state), /Season settings couldn&#39;t load\./);
+  store.getSeasonSettings = read;
+  await controller.retryLast();
+  state = controller.getState();
+  assert.equal(state.lists.seasonSettings, "ready");
+  controller.stop();
+});
+
+test("season settings: Save sends both links at the revision read, and re-reads", async () => {
+  const { store, controller } = await onSettingsScreen();
+  const text = await controller.saveSeasonSettings({
+    certificateUploadUrl: " https://example.org/certificates ",
+    clientDocumentsUrl: "https://example.org/client-documents",
+  });
+  assert.equal(text, "Season settings saved");
+  const write = store.writes.find((entry) => entry.type === "saveSeasonSettings");
+  assert.equal(write.expectedRevision, 3);
+  assert.ok(write.actionId);
+  assert.deepEqual(write.settings, {
+    certificateUploadUrl: "https://example.org/certificates",
+    clientDocumentsUrl: "https://example.org/client-documents",
+  });
+  assert.equal(settingsReads(store), 2);
+  assert.equal(controller.getState().seasonSettings.revision, 4);
+  assert.equal(controller.getState().busy, false);
+  controller.stop();
+});
+
+test("season settings: a refused link is said beside its field", async () => {
+  const { store, controller } = await onSettingsScreen();
+  store.failNextSettings = settingsRefusal("VALIDATION", "VALIDATION", "certificateUploadUrl");
+  assert.equal(await controller.saveSeasonSettings({ certificateUploadUrl: "http://example.org", clientDocumentsUrl: "" }), null);
+  const state = controller.getState();
+  assert.deepEqual(state.seasonSettingsUi.fieldErrors, { certificateUploadUrl: "Enter a link that starts with https://." });
+  assert.equal(state.error, null);
+  assert.equal(state.busy, false);
+  controller.stop();
+});
+
+test("season settings: CONFLICT re-reads and asks to check and save again", async () => {
+  const { store, controller } = await onSettingsScreen();
+  store.failNextSettings = settingsRefusal("CONFLICT");
+  store.settings.revision = 5;
+  assert.equal(await controller.saveSeasonSettings({ certificateUploadUrl: "", clientDocumentsUrl: "" }), null);
+  const state = controller.getState();
+  assert.deepEqual(state.seasonSettingsUi.notice, {
+    place: "links",
+    text: "Someone else changed these settings. Check them and save again.",
+  });
+  assert.equal(state.seasonSettings.revision, 5);
+  assert.equal(settingsReads(store), 2);
+  assert.match(staffScreen(state), /Someone else changed these settings\. Check them and save again\./);
+  controller.stop();
+});
+
+test("season settings: Change the SIDN sends the number, re-reads and says SIDN updated", async () => {
+  const { store, controller } = await onSettingsScreen();
+  controller.openDialog("change-sidn");
+  assert.match(dialog(controller.getState()), /Change the SIDN/);
+  assert.equal(await controller.saveSidn("s1234-5678"), "SIDN updated");
+  const write = store.writes.find((entry) => entry.type === "setSiteNumber");
+  assert.equal(write.sidn, "s1234-5678");
+  assert.ok(write.actionId);
+  assert.equal(settingsReads(store), 2);
+  assert.equal(controller.getState().seasonSettings.siteNumber.set, true);
+  controller.stop();
+});
+
+test("season settings: a malformed SIDN is said in the dialog, before or after sending", async () => {
+  const { store, controller } = await onSettingsScreen();
+  controller.openDialog("change-sidn");
+  const sentence = "Enter the site's SIDN: S followed by eight digits.";
+  assert.equal(await controller.saveSidn("S1234"), null);
+  assert.equal(controller.getState().seasonSettingsUi.sidnError, sentence);
+  assert.equal(store.writes.some((entry) => entry.type === "setSiteNumber"), false, "nothing sent");
+  store.failNextSettings = settingsRefusal("VALIDATION", "VALIDATION", "SIDN_FORMAT");
+  assert.equal(await controller.saveSidn("S12345678"), null);
+  const state = controller.getState();
+  assert.equal(state.seasonSettingsUi.sidnError, sentence);
+  assert.equal(state.dialog, "change-sidn");
+  assert.match(dialog(state), /Enter the site&#39;s SIDN: S followed by eight digits\./);
+  // Closing and opening again starts clean.
+  controller.closeDialog();
+  controller.openDialog("change-sidn");
+  assert.equal(controller.getState().seasonSettingsUi.sidnError, null);
+  controller.stop();
+});
+
+test("season settings: Add grants the picked person at their account revision and re-reads", async () => {
+  const { store, controller } = await onSettingsScreen();
+  assert.equal(await controller.addSiteCoordinator("person-ana"), "Ana Ortiz is now a site coordinator");
+  const write = store.writes.find((entry) => entry.type === "setSiteCoordinator");
+  assert.equal(write.volunteerId, "person-ana");
+  assert.equal(write.granted, true);
+  assert.equal(write.expectedRevision, 1);
+  assert.ok(write.actionId);
+  assert.equal(settingsReads(store), 2);
+  // No pick sends nothing.
+  assert.equal(await controller.addSiteCoordinator(""), null);
+  assert.equal(store.writes.filter((entry) => entry.type === "setSiteCoordinator").length, 1);
+  controller.stop();
+});
+
+test("season settings: Remove takes it away at the account revision and re-reads", async () => {
+  const { store, controller } = await onSettingsScreen();
+  assert.equal(await controller.removeSiteCoordinator("person-dana"), "Dana Wu is no longer a site coordinator");
+  const write = store.writes.find((entry) => entry.type === "setSiteCoordinator");
+  assert.deepEqual(
+    { volunteerId: write.volunteerId, granted: write.granted, expectedRevision: write.expectedRevision },
+    { volunteerId: "person-dana", granted: false, expectedRevision: 2 },
+  );
+  assert.equal(settingsReads(store), 2);
+  controller.stop();
+});
+
+test("season settings: removing yourself asks the clearance again", async () => {
+  const { store, controller } = await onSettingsScreen();
+  const checks = clearanceCalls(store);
+  assert.equal(await controller.removeSiteCoordinator("person-sam"), "Sam is no longer a site coordinator");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(clearanceCalls(store) > checks);
+  controller.stop();
+});
+
+test("season settings: LAST_SITE_COORDINATOR and DEFAULT_FOLLOWUP are said in the card", async () => {
+  const { store, controller } = await onSettingsScreen();
+  store.failNextSettings = settingsRefusal("INVALID_TRANSITION", "LAST_SITE_COORDINATOR");
+  assert.equal(await controller.removeSiteCoordinator("person-sam"), null);
+  assert.deepEqual(controller.getState().seasonSettingsUi.notice, {
+    place: "coordinators",
+    text: "At least one site coordinator must remain. Make someone else a site coordinator first.",
+  });
+  assert.equal(controller.getState().error, null);
+  store.failNextSettings = settingsRefusal("INVALID_TRANSITION", "DEFAULT_FOLLOWUP");
+  assert.equal(await controller.removeSiteCoordinator("person-dana"), null);
+  const state = controller.getState();
+  assert.deepEqual(state.seasonSettingsUi.notice, {
+    place: "coordinators",
+    text: "Dana Wu is the default follow-up person, so they stay a site coordinator.",
+  });
+  assert.equal(settingsReads(store), 3, "each refusal re-reads");
+  assert.match(staffScreen(state), /Dana Wu is the default follow-up person, so they stay a site coordinator\./);
+  controller.stop();
+});
+
+test("season settings: another refusal is the window's own error, and the page re-reads", async () => {
+  const { store, controller } = await onSettingsScreen();
+  store.failNextSettings = Object.assign(new Error("Network error."), { code: "OFFLINE" });
+  assert.equal(await controller.addSiteCoordinator("person-ana"), null);
+  const state = controller.getState();
+  assert.equal(state.error.code, "OFFLINE");
+  assert.equal(state.busy, false);
+  assert.equal(settingsReads(store), 2);
+  controller.stop();
+});
+
+// ---------------------------------------------------------------------------
+// Start next season (change add-start-next-season, design D8)
+// ---------------------------------------------------------------------------
+
+// The settings store at season 2026, with the start call. `failNextSettings`
+// makes it reject; a success moves the workspace and leaves the starter a
+// site coordinator with no roles (uncleared).
+async function onStartSeason(overrides = {}) {
+  const built = await onSettingsScreen(overrides);
+  const { store } = built;
+  store.settings.season = 2026;
+  store.workspace = { ...store.workspace, currentSeason: 2026 };
+  store.startNextSeason = async (request) => {
+    store.calls.push("startNextSeason");
+    store.writes.push({ type: "startNextSeason", ...request });
+    const error = store.failNextSettings;
+    store.failNextSettings = null;
+    if (error) throw error;
+    store.settings.season = 2027;
+    store.workspace = { ...store.workspace, currentSeason: 2027 };
+    store.nextClearance = { ...SC_UNCLEARED, missing: [{ kind: "form13615" }, { kind: "photoId" }] };
+    return { actionId: request.actionId, season: 2027, deactivated: 3, defaultFollowupMoved: false };
+  };
+  await built.controller.loadSeasonSettings();
+  built.controller.openDialog("start-season");
+  return built;
+}
+
+test("start next season: sends the action id, the season read and the typed year", async () => {
+  const { store, controller } = await onStartSeason();
+  assert.match(dialog(controller.getState()), /Start the 2027 season/);
+  await controller.startNextSeason("2027");
+  const write = store.writes.find((entry) => entry.type === "startNextSeason");
+  assert.ok(write.actionId);
+  assert.equal(write.expectedSeason, 2026);
+  assert.equal(write.typedYear, 2027);
+  controller.stop();
+});
+
+test("start next season: a year that is not the next one sends nothing", async () => {
+  const { store, controller } = await onStartSeason();
+  assert.equal(await controller.startNextSeason("2028"), null);
+  assert.equal(await controller.startNextSeason(""), null);
+  assert.equal(store.calls.includes("startNextSeason"), false);
+  assert.equal(controller.getState().dialog, "start-season");
+  controller.stop();
+});
+
+test("start next season: SEASON_NOT_FINISHED keeps the dialog open with the lines", async () => {
+  const { store, controller } = await onStartSeason();
+  const counts = { openCases: 2, openFollowups: 1, claimedHelp: 0, unclaimedHelpOnCases: 1 };
+  store.failNextSettings = settingsRefusal("INVALID_TRANSITION", "SEASON_NOT_FINISHED", JSON.stringify(counts));
+  assert.equal(await controller.startNextSeason("2027"), null);
+  const state = controller.getState();
+  assert.equal(state.dialog, "start-season");
+  assert.deepEqual(state.seasonSettingsUi.startRefusal, counts);
+  assert.equal(state.error, null);
+  assert.equal(state.busy, false);
+  const html = dialog(state);
+  assert.match(html, /Finish these first:/);
+  assert.match(html, /<li>2 open cases<\/li><li>1 open follow-up<\/li><li>1 unclaimed help request on cases<\/li>/);
+  // Opening it again starts without the lines.
+  controller.closeDialog();
+  controller.openDialog("start-season");
+  assert.equal(controller.getState().seasonSettingsUi.startRefusal ?? null, null);
+  controller.stop();
+});
+
+test("start next season: CONFLICT re-reads settings, closes the dialog and says The season has already moved.", async () => {
+  const { store, controller } = await onStartSeason();
+  const reads = settingsReads(store);
+  store.failNextSettings = settingsRefusal("CONFLICT");
+  store.settings.season = 2027;
+  assert.equal(await controller.startNextSeason("2027"), null);
+  const state = controller.getState();
+  assert.equal(state.dialog, null);
+  assert.equal(settingsReads(store), reads + 1);
+  assert.equal(state.seasonSettings.season, 2027);
+  assert.deepEqual(state.seasonSettingsUi.notice, { place: "next-season", text: "The season has already moved." });
+  assert.equal(state.error, null);
+  assert.match(staffScreen(state), /The season has already moved\./);
+  controller.stop();
+});
+
+test("start next season: a lost answer sends the same action id again; a new press a new one", async () => {
+  const { store, controller } = await onStartSeason();
+  store.failNextSettings = Object.assign(new Error("Network error."), { code: "OFFLINE" });
+  assert.equal(await controller.startNextSeason("2027"), null);
+  assert.equal(controller.getState().error.code, "OFFLINE");
+  assert.equal(controller.getState().dialog, "start-season");
+  store.failNextSettings = settingsRefusal("INVALID_TRANSITION", "SEASON_NOT_FINISHED", JSON.stringify({ openCases: 1 }));
+  await controller.startNextSeason("2027");
+  await controller.startNextSeason("2027");
+  const ids = store.writes.filter((entry) => entry.type === "startNextSeason").map((entry) => entry.actionId);
+  assert.equal(ids.length, 3);
+  assert.equal(ids[0], ids[1], "the retry after a lost answer replays its action id");
+  assert.notEqual(ids[1], ids[2], "a press after a refusal is a new action");
+  controller.stop();
+});
+
+test("start next season: a lost answer whose start landed closes the dialog and routes the starter", async () => {
+  const { store, controller } = await onStartSeason();
+  const send = store.startNextSeason;
+  store.startNextSeason = async (request) => {
+    await send(request);
+    throw Object.assign(new Error("Network error."), { code: "OFFLINE" });
+  };
+  const checks = clearanceCalls(store);
+  await controller.startNextSeason("2027");
+  const state = controller.getState();
+  assert.equal(state.seasonSettings.season, 2027);
+  assert.equal(state.dialog, null, "the dialog never asks for 2028");
+  assert.ok(clearanceCalls(store) > checks, "the clearance is read again");
+  assert.equal(state.principal.clearance.cleared, false);
+  assert.equal(state.screen, "staff");
+  assert.match(staffScreen(state), /Finish your setup for this season/);
+  assert.equal(store.writes.filter((entry) => entry.type === "startNextSeason").length, 1, "nothing more is sent");
+  controller.stop();
+});
+
+test("start next season: a realtime workspace change to the next season closes the open dialog", async () => {
+  const { store, controller } = await onStartSeason();
+  // Another site coordinator started 2027.
+  store.workspace = { ...store.workspace, currentSeason: 2027 };
+  store.settings.season = 2027;
+  store.nextClearance = { ...SC_UNCLEARED };
+  await store.handlers.onChange({ table: "workspaces" });
+  await new Promise((resolve) => setImmediate(resolve));
+  const state = controller.getState();
+  assert.equal(state.dialog, null);
+  assert.equal(state.screen, "staff");
+  assert.equal(store.calls.includes("startNextSeason"), false);
+  controller.stop();
+});
+
+test("start next season: a season moved to any other value closes the dialog", async () => {
+  const { store, controller } = await onStartSeason();
+  store.workspace = { ...store.workspace, currentSeason: 2029 };
+  await store.handlers.onChange({ table: "workspaces" });
+  assert.equal(controller.getState().dialog, null);
+  controller.stop();
+});
+
+test("start next season: SEASON_NOT_FINISHED with no lines to show is the window's own error", async () => {
+  const { store, controller } = await onStartSeason();
+  store.failNextSettings = settingsRefusal(
+    "INVALID_TRANSITION",
+    "SEASON_NOT_FINISHED",
+    JSON.stringify({ openCases: 0, openFollowups: 0, somethingElse: 4 }),
+  );
+  assert.equal(await controller.startNextSeason("2027"), null);
+  const state = controller.getState();
+  assert.equal(state.seasonSettingsUi.startRefusal, null);
+  assert.equal(state.error.code, "INVALID_TRANSITION");
+  controller.stop();
+});
+
+test("start next season: success re-reads the workspace, clearance and lists", async () => {
+  const { store, controller } = await onStartSeason();
+  const workspaceReads = callCount(store, "getWorkspace");
+  const checks = clearanceCalls(store);
+  const text = await controller.startNextSeason("2027");
+  assert.equal(text, "The 2027 season has started");
+  const state = controller.getState();
+  assert.ok(callCount(store, "getWorkspace") > workspaceReads, "the workspace is read again");
+  assert.ok(clearanceCalls(store) > checks, "the clearance is read again");
+  assert.equal(state.workspace.currentSeason, 2027);
+  assert.equal(state.dialog, null);
+  assert.equal(state.busy, false);
+  // The starter has no roles in the new season: the existing clearance
+  // routing gives them the setup screen.
+  assert.equal(state.principal.clearance.cleared, false);
+  assert.equal(state.screen, "staff");
+  assert.match(staffScreen(state), /Finish your setup for this season/);
+  controller.stop();
+});
+
+test("start next season: a starter still cleared reads the lists again", async () => {
+  const { store, controller } = await onStartSeason();
+  const send = store.startNextSeason;
+  store.startNextSeason = async (request) => {
+    const answer = await send(request);
+    store.nextClearance = { ...SC_CLEARED };
+    return answer;
+  };
+  const lists = callCount(store, "listCases");
+  assert.equal(await controller.startNextSeason("2027"), "The 2027 season has started");
+  assert.ok(callCount(store, "listCases") > lists, "the cases are read again");
+  assert.equal(controller.getState().screen, "office-settings");
+  controller.stop();
+});
+
+// ---------------------------------------------------------------------------
+// Setup screen uploads (change add-clearance-uploads, design D6)
+// ---------------------------------------------------------------------------
+
+const uploadStore = () => {
+  const store = staffStore({ clearance: { ...UNCLEARED_VOLUNTEER, uploadUrl: null } });
+  store.sends = [];
+  store.failSend = null;
+  store.markUploadSent = async (request) => {
+    store.calls.push("markUploadSent");
+    store.sends.push(request);
+    if (store.failSend) {
+      const error = store.failSend;
+      store.failSend = null;
+      throw error;
+    }
+    return { actionId: request.actionId, document: request.document, sentAt: "2026-11-20T15:00:00Z" };
+  };
+  return store;
+};
+
+test("markUploadSent sends and re-checks the clearance", async () => {
+  const store = uploadStore();
+  const { controller } = build({ store, newActionId: () => "action-up" });
+  await controller.start();
+  const before = callCount(store, "getClearance");
+  await controller.markUploadSent("form13615");
+  assert.deepEqual(store.sends, [{ document: "form13615", actionId: "action-up" }]);
+  assert.equal(callCount(store, "getClearance"), before + 1);
+  assert.equal(controller.getState().busy, false);
+  assert.equal(controller.getState().error, null);
+  controller.stop();
+});
+
+test("markUploadSent retries a lost send with the same action id", async () => {
+  const store = uploadStore();
+  let next = 0;
+  const { controller } = build({ store, newActionId: () => `action-${(next += 1)}` });
+  await controller.start();
+  store.failSend = domainError("OFFLINE");
+  await controller.markUploadSent("form13615");
+  await controller.markUploadSent("form13615");
+  assert.equal(store.sends.length, 2);
+  assert.equal(store.sends[1].actionId, store.sends[0].actionId);
+  // A send that was answered is not repeated: the next press is new.
+  await controller.markUploadSent("form13615");
+  assert.notEqual(store.sends[2].actionId, store.sends[0].actionId);
+  controller.stop();
+});
+
+test("markUploadSent says a refusal in plain words", async () => {
+  const store = uploadStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.failSend = Object.assign(domainError("VALIDATION"), { cause: { message: "VALIDATION", details: "PHOTO_ID_NOT_NEEDED" } });
+  await controller.markUploadSent("photoId");
+  assert.equal(controller.getState().error.message, "Your photo ID doesn't need sending any more.");
+  assert.equal(controller.getState().busy, false);
+  store.failSend = Object.assign(domainError("VALIDATION"), { cause: { message: "VALIDATION", details: "NO_ROSTER_ENTRY" } });
+  await controller.markUploadSent("form13615");
+  assert.equal(
+    controller.getState().error.message,
+    "You're not on this season's roster yet. Ask your site coordinator.",
+  );
+  store.failSend = domainError("SERVER_ERROR");
+  await controller.markUploadSent("form13615");
+  assert.equal(controller.getState().error.message, "Something went wrong.");
+  controller.stop();
+});
+
+test("markUploadSent: a VALIDATION refusal re-reads the clearance, so a stale item goes", async () => {
+  const store = uploadStore();
+  store.nextClearance = { ...UNCLEARED_VOLUNTEER, missing: [{ kind: "form13615" }, { kind: "photoId", sentAt: null }] };
+  const { controller } = build({ store });
+  await controller.start();
+  const before = callCount(store, "getClearance");
+  // Someone ticked Photo ID checked meanwhile: the send is refused, and the
+  // re-read answer no longer lists the photo ID.
+  store.nextClearance = { ...UNCLEARED_VOLUNTEER, missing: [{ kind: "form13615" }] };
+  store.failSend = Object.assign(domainError("VALIDATION"), {
+    cause: { message: "VALIDATION", details: "PHOTO_ID_NOT_NEEDED" },
+  });
+  assert.equal(await controller.markUploadSent("photoId"), false);
+  await new Promise((resolve) => setImmediate(resolve));
+  const state = controller.getState();
+  assert.equal(callCount(store, "getClearance"), before + 1, "the refusal asks for the clearance again");
+  assert.deepEqual(
+    state.principal.clearance.missing.map((item) => item.kind),
+    ["form13615"],
+  );
+  assert.equal(state.error.message, "Your photo ID doesn't need sending any more.", "the refusal stays said");
+  controller.stop();
+});
+
+test("markUploadSent: a check already out when the send lands is followed by one more", async () => {
+  const store = uploadStore();
+  const { controller } = build({ store });
+  await controller.start();
+  const before = callCount(store, "getClearance");
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  const sentAt = "2026-11-20T15:00:00Z";
+  let asked = 0;
+  store.nextClearance = () => {
+    asked += 1;
+    // The first (a focus, say) was asked before the send; the next one after it.
+    return asked === 1 ? gate : { ...UNCLEARED_VOLUNTEER, missing: [{ kind: "form13615", sentAt }] };
+  };
+  const focus = controller.checkClearance();
+  const sent = controller.markUploadSent("form13615");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(store.calls.includes("markUploadSent"), "the send went out");
+  release({ ...UNCLEARED_VOLUNTEER, missing: [{ kind: "form13615", sentAt: null }] });
+  assert.equal(await sent, true);
+  await focus;
+  const state = controller.getState();
+  assert.equal(callCount(store, "getClearance"), before + 2, "the held check, then one more");
+  assert.ok(
+    store.calls.lastIndexOf("getClearance") > store.calls.indexOf("markUploadSent"),
+    "a clearance read after the send",
+  );
+  assert.equal(state.principal.clearance.missing[0].sentAt, sentAt, "the later answer is shown");
+  controller.stop();
+});
+
+test("markUploadSent: busy blocks a second press", async () => {
+  const store = uploadStore();
+  const { controller } = build({ store });
+  await controller.start();
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  const send = store.markUploadSent;
+  store.markUploadSent = async (request) => {
+    await gate;
+    return send(request);
+  };
+  const first = controller.markUploadSent("form13615");
+  assert.equal(controller.getState().busy, true);
+  assert.equal(await controller.markUploadSent("form13615"), false);
+  release();
+  await first;
+  assert.equal(store.sends.length, 1);
+  controller.stop();
+});
+
+test("markUploadSent: a refusal drops an earlier action's Try again", async () => {
+  const store = uploadStore();
+  store.records.set("case-a", { id: "case-a", reference: "VT-AAAA-BBBB", stage: "preparation_ready", revision: 2, answers: {} });
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.selectCase("case-a");
+  // A store action lost to an unknown outcome keeps its own Try again.
+  store.failNext = domainError("OFFLINE");
+  await assert.rejects(controller.runAction("CLAIM_PREPARATION", {}));
+  assert.equal(controller.getState().retryable, true);
+  store.failSend = Object.assign(domainError("VALIDATION"), { cause: { message: "VALIDATION", details: "PHOTO_ID_NOT_NEEDED" } });
+  await controller.markUploadSent("photoId");
+  assert.equal(controller.getState().retryable, false);
+  controller.stop();
+});
+
+// ---- Mark reviewed (change add-clearance-uploads, design D7) ----
+
+const uploadReviewStore = () => {
+  const store = rosterStore();
+  store.failReview = null;
+  store.markUploadReviewed = async (request) => {
+    store.calls.push("markUploadReviewed");
+    store.writes.push({ type: "markUploadReviewed", ...request });
+    if (store.failReview) {
+      const error = store.failReview;
+      store.failReview = null;
+      throw error;
+    }
+    // The review bumps the row's revision, as the database does.
+    store.volunteers = store.volunteers.map((entry) =>
+      entry.id === request.volunteerId ? { ...entry, revision: entry.revision + 1 } : entry,
+    );
+    return { actionId: request.actionId, personId: request.volunteerId, revision: 5 };
+  };
+  return store;
+};
+
+const openReviewDrawer = async (store, ids = ["action-1", "action-2"]) => {
+  const built = build({ store, newActionId: () => ids.shift() });
+  await built.controller.start();
+  built.controller.navigate("office-volunteers");
+  await built.controller.loadVolunteers();
+  built.controller.openDialog("volunteer", { volunteerId: "v-1" });
+  return built;
+};
+
+test("markUploadReviewed sends the reason", async () => {
+  const store = uploadReviewStore();
+  const { controller } = await openReviewDrawer(store);
+  const text = await controller.markUploadReviewed("form13615", "Wrong form");
+  assert.equal(text, "Marked reviewed");
+  assert.deepEqual(store.writes.at(-1), {
+    type: "markUploadReviewed",
+    actionId: "action-1",
+    volunteerId: "v-1",
+    expectedRevision: 4,
+    document: "form13615",
+    reason: "Wrong form",
+  });
+  assert.equal(controller.getState().busy, false);
+  controller.stop();
+});
+
+test("Mark reviewed re-reads the Roster", async () => {
+  const store = uploadReviewStore();
+  const { controller } = await openReviewDrawer(store);
+  const reads = volunteerReads(store);
+  await controller.markUploadReviewed("photoId", "Can't read it");
+  assert.equal(volunteerReads(store), reads + 1);
+  assert.equal(controller.getState().volunteers.find((entry) => entry.id === "v-1").revision, 5);
+  controller.stop();
+});
+
+test("Mark reviewed keeps the drawer open and the next Save sends the new revision", async () => {
+  const store = uploadReviewStore();
+  const { controller } = await openReviewDrawer(store);
+  // The typed values live in the page (app.mjs drafts). Their survival is checked by the browser test (Task 8): it types into the drawer, presses Mark reviewed and saves.
+  const before = controller.getState();
+  const { dialog, dialogContext } = before;
+  await controller.markUploadReviewed("form13615", "Wrong form");
+  const after = controller.getState();
+  assert.equal(after.dialog, dialog);
+  assert.deepEqual(after.dialogContext, dialogContext);
+  assert.equal(after.volunteerFormError, before.volunteerFormError);
+  assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
+  assert.equal(store.writes.at(-1).type, "saveVolunteer");
+  assert.equal(store.writes.at(-1).expectedRevision, 5);
+  controller.stop();
+});
+
+test("a CONFLICT on Mark reviewed says VOLUNTEER_CONFLICT_MESSAGE and re-reads", async () => {
+  const store = uploadReviewStore();
+  const { controller } = await openReviewDrawer(store);
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, revision: 9 }];
+  store.failReview = Object.assign(new Error("stale"), { code: "CONFLICT" });
+  const reads = volunteerReads(store);
+  assert.equal(await controller.markUploadReviewed("form13615", "Wrong form"), null);
+  const state = controller.getState();
+  assert.equal(state.error.code, "CONFLICT");
+  assert.equal(state.error.message, VOLUNTEER_CONFLICT_MESSAGE);
+  assert.equal(state.retryable, false);
+  assert.equal(state.busy, false);
+  assert.equal(state.dialog, "volunteer");
+  assert.equal(volunteerReads(store), reads + 1);
+  assert.equal(state.volunteers[0].revision, 9);
+  controller.stop();
+});
+
+test("Mark reviewed does nothing while another action is busy", async () => {
+  const store = uploadReviewStore();
+  const { controller } = await openReviewDrawer(store);
+  let release;
+  const held = new Promise((resolve) => (release = resolve));
+  const send = store.markUploadReviewed;
+  store.markUploadReviewed = async (request) => {
+    await held;
+    return send(request);
+  };
+  const first = controller.markUploadReviewed("form13615", "Wrong form");
+  assert.equal(controller.getState().busy, true);
+  assert.equal(await controller.markUploadReviewed("photoId", "Can't read it"), null);
+  release();
+  assert.equal(await first, "Marked reviewed");
+  assert.equal(store.writes.filter((w) => w.type === "markUploadReviewed").length, 1);
+  controller.stop();
+});
+
+test("Mark reviewed says NOT_FOUND when the drawer's volunteer is gone", async () => {
+  const store = uploadReviewStore();
+  const { controller } = await openReviewDrawer(store);
+  store.volunteers = [];
+  await controller.loadVolunteers();
+  await assert.rejects(() => controller.markUploadReviewed("form13615", "Wrong form"), (error) => error.code === "NOT_FOUND");
+  assert.equal(store.calls.includes("markUploadReviewed"), false);
+  controller.stop();
+});
+
+test("Mark reviewed does nothing outside the volunteer dialog", async () => {
+  const store = uploadReviewStore();
+  const { controller } = await openReviewDrawer(store);
+  controller.closeDialog();
+  assert.equal(await controller.markUploadReviewed("form13615", "Wrong form"), null);
+  assert.equal(store.calls.includes("markUploadReviewed"), false);
+  controller.stop();
+});
+
+// ---- The sidebar count (change add-clearance-uploads, design D8) ----
+
+const settled = () => new Promise((resolve) => setTimeout(resolve, 5));
+const countReads = (store) => store.calls.filter((entry) => entry === "countUploadsToReview").length;
+
+test("an admin window reads the count with its data", async () => {
+  const store = adminStaffStore();
+  store.uploadsCount = 3;
+  const { controller } = build({ store });
+  assert.equal(controller.getState().uploadsToReview, 0, "the count starts at zero");
+  await controller.start();
+  assert.equal(controller.getState().uploadsToReview, 3);
+  controller.stop();
+});
+
+test("a non-admin window never reads the count", async () => {
+  const store = fakeStore({
+    principal: { userId: "p2", workspaceId: "w1", access: "staff", personId: "person-alex" },
+    people: [{ id: "person-alex", name: "Alex", capabilities: ["prepare"] }],
+    clearance: { cleared: true, missing: [], capabilities: ["prepare"], isAdmin: false },
+  });
+  store.uploadsCount = 5;
+  const { controller, events } = build({ store });
+  await controller.start();
+  await events.emit("focus");
+  assert.equal(countReads(store), 0);
+  assert.equal(controller.getState().uploadsToReview, 0);
+  controller.stop();
+});
+
+test("the clearance check re-reads the count for a cleared admin", async () => {
+  const store = adminStaffStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.uploadsCount = 2;
+  const reads = countReads(store);
+  await controller.checkClearance();
+  assert.equal(countReads(store), reads + 1);
+  assert.equal(controller.getState().uploadsToReview, 2);
+  controller.stop();
+});
+
+test("a cleared check with the same standing still redraws when the count changed", async () => {
+  const store = adminStaffStore();
+  const { controller, renders } = build({ store });
+  await controller.start();
+  const quiet = renders.count;
+  await controller.checkClearance();
+  assert.equal(renders.count, quiet, "same standing, same count: no redraw");
+  store.uploadsCount = 3;
+  await controller.checkClearance();
+  assert.equal(renders.count, quiet + 1, "the new count is drawn");
+  controller.stop();
+});
+
+test("an uncleared admin's clearance check re-reads the count", async () => {
+  const store = adminStaffStore({ clearance: { ...UNCLEARED_ADMIN } });
+  store.uploadsCount = 1;
+  const { controller, events, renders } = build({ store });
+  await controller.start();
+  assert.equal(controller.getState().principal.clearance.cleared, false);
+  assert.equal(controller.getState().uploadsToReview, 0, "no data load while uncleared: the first check reads it");
+  store.uploadsCount = 4;
+  const drawn = renders.count;
+  await events.emit("focus");
+  assert.equal(controller.getState().uploadsToReview, 4);
+  assert.ok(renders.count > drawn);
+  controller.stop();
+});
+
+test("a cleared window's wake refresh re-reads the count", async () => {
+  const store = adminStaffStore();
+  const { controller, events } = build({ store });
+  await controller.start();
+  store.uploadsCount = 6;
+  await events.emit("focus");
+  assert.equal(controller.getState().uploadsToReview, 6);
+  controller.stop();
+});
+
+test("a failed count read keeps the last count and fails nothing else", async () => {
+  const store = adminStaffStore({ cases: [sampleCase()] });
+  store.uploadsCount = 2;
+  const { controller, events } = build({ store });
+  await controller.start();
+  assert.equal(controller.getState().uploadsToReview, 2);
+  store.failCount = true;
+  await events.emit("focus");
+  const state = controller.getState();
+  assert.equal(state.uploadsToReview, 2);
+  assert.equal(state.error, null);
+  assert.equal(state.cases.length, 1);
+  controller.stop();
+});
+
+test("a hanging count read never holds back the clearance outcome", async () => {
+  const store = adminStaffStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.countUploadsToReview = () => new Promise(() => {});
+  store.nextClearance = { ...UNCLEARED_ADMIN };
+  void controller.checkClearance();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(controller.getState().principal.clearance.cleared, false, "the check's outcome is applied");
+  controller.stop();
+});
+
+test("Save and Mark reviewed re-read the count", async () => {
+  const store = uploadReviewStore();
+  store.uploadsCount = 2;
+  const { controller } = await openReviewDrawer(store);
+  assert.equal(controller.getState().uploadsToReview, 2);
+  store.uploadsCount = 1;
+  await controller.markUploadReviewed("form13615");
+  await settled();
+  assert.equal(controller.getState().uploadsToReview, 1);
+  store.uploadsCount = 0;
+  assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
+  await settled();
+  assert.equal(controller.getState().uploadsToReview, 0);
+  controller.stop();
+});
+
+test("reading the Roster's list re-reads the count", async () => {
+  const store = rosterStore();
+  const { controller } = build({ store });
+  await controller.start();
+  store.uploadsCount = 7;
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  await settled();
+  assert.equal(controller.getState().uploadsToReview, 7);
+  controller.stop();
+});
+
+test("the Roster's list does not wait for the count, and a late count redraws", async () => {
+  const store = rosterStore();
+  const { controller, renders } = build({ store });
+  await controller.start();
+  let release;
+  store.countUploadsToReview = () => new Promise((resolve) => (release = () => resolve(9)));
+  controller.navigate("office-volunteers");
+  await controller.loadVolunteers();
+  assert.equal(controller.getState().lists.volunteers, "ready", "the list finished with the count still out");
+  const drawn = renders.count;
+  release();
+  await settled();
+  assert.equal(controller.getState().uploadsToReview, 9);
+  assert.ok(renders.count > drawn);
+  controller.stop();
+});
+
+test("signing out forgets the count", async () => {
+  const store = adminStaffStore();
+  store.uploadsCount = 3;
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(controller.getState().uploadsToReview, 3);
+  await controller.signOut();
+  assert.equal(controller.getState().uploadsToReview, 0);
+  controller.stop();
+});
+
+test("losing the workspace admin standing resets the count", async () => {
+  const store = adminStaffStore();
+  store.uploadsCount = 3;
+  const { controller } = build({ store });
+  await controller.start();
+  assert.equal(controller.getState().uploadsToReview, 3);
+  store.nextClearance = { cleared: true, missing: [], capabilities: ["prepare"], isAdmin: false };
+  await controller.checkClearance();
+  assert.equal(controller.getState().uploadsToReview, 0);
+  store.nextClearance = { cleared: true, missing: [], capabilities: ["admin"], isAdmin: true };
+  store.uploadsCount = 3;
+  await controller.checkClearance();
+  assert.equal(controller.getState().uploadsToReview, 3);
+  controller.stop();
+});
+
+// ---------------------------------------------------------------------------
+// My profile (change add-my-profile, design D9)
+// ---------------------------------------------------------------------------
+
+const MY_PROFILE_CONFLICT = "Someone else changed these details. Here they are now.";
+const profileAnswer = () => ({
+  personId: "person-riley",
+  name: "Riley Park",
+  email: "riley.park@example.test",
+  phone: "215-555-0110",
+  works: "in_person",
+  languages: ["english"],
+  otherLanguage: null,
+  usualDays: ["tue"],
+  revision: 6,
+  accountStatus: "active",
+  roles: ["preparer"],
+  certificates: ["vsc", "basic"],
+  form13615: null,
+  uploadUrl: "https://example.org/upload",
+  siteCoordinatorName: "Sam",
+});
+const PROFILE_VALUES = Object.freeze({
+  name: "Riley Vale",
+  phone: "215-555-0142",
+  works: "remote",
+  languages: ["english", "other"],
+  otherLanguage: "Tagalog",
+  usualDays: ["mon", "sat"],
+});
+// A cleared Preparer's staff store with the two My profile calls and the
+// upload send. `failNextProfile` makes the next save reject; `loseNextProfile`
+// lands it and then rejects OFFLINE, as a reply lost on the way back would.
+// A repeat of a landed action id answers from its receipt.
+const profileStore = (overrides = {}) => {
+  const people = [{ id: "person-riley", name: "Riley Park", capabilities: ["prepare"] }];
+  const store = staffStore({ people, clearance: { ...PREPARER_CLEARED }, ...overrides });
+  store.profile = profileAnswer();
+  store.failNextProfile = null;
+  store.loseNextProfile = false;
+  store.profileReceipts = new Map();
+  store.getMyProfile = async () => {
+    store.calls.push("getMyProfile");
+    return structuredClone(store.profile);
+  };
+  store.saveMyProfile = async (request) => {
+    store.calls.push("saveMyProfile");
+    store.writes.push({ type: "saveMyProfile", ...request });
+    if (store.profileReceipts.has(request.actionId)) return store.profileReceipts.get(request.actionId);
+    if (store.failNextProfile) {
+      const error = store.failNextProfile;
+      store.failNextProfile = null;
+      throw error;
+    }
+    store.profile = { ...store.profile, ...request.profile, revision: store.profile.revision + 1 };
+    people[0] = { ...people[0], name: request.profile.name };
+    const answer = { actionId: request.actionId, personId: "person-riley", revision: store.profile.revision };
+    store.profileReceipts.set(request.actionId, answer);
+    if (store.loseNextProfile) {
+      store.loseNextProfile = false;
+      throw Object.assign(new Error("offline"), { code: "OFFLINE" });
+    }
+    return answer;
+  };
+  store.markUploadSent = async (request) => {
+    store.calls.push("markUploadSent");
+    store.writes.push({ type: "markUploadSent", ...request });
+    store.profile = { ...store.profile, form13615: { sentAt: "2026-11-20T15:00:00Z", reviewedAt: null, reviewReason: null } };
+    return { actionId: request.actionId, document: request.document, sentAt: "2026-11-20T15:00:00Z" };
+  };
+  return store;
+};
+const profileReads = (store) => callCount(store, "getMyProfile");
+
+async function onMyProfile(overrides = {}, options = {}) {
+  const store = profileStore(overrides);
+  const built = build({ store, ...options });
+  await built.controller.start();
+  await built.controller.navigate("my-profile");
+  return { store, ...built };
+}
+
+test("navigate to my-profile reads the profile", async () => {
+  const { store, controller } = await onMyProfile();
+  const state = controller.getState();
+  assert.equal(state.screen, "my-profile");
+  assert.equal(state.lists.myProfile, "ready");
+  assert.equal(state.myProfile.revision, 6);
+  assert.equal(state.myProfile.name, "Riley Park");
+  assert.equal(profileReads(store), 1);
+  controller.stop();
+});
+
+test("my-profile: a failed first read marks it failed", async () => {
+  const store = profileStore();
+  store.getMyProfile = async () => {
+    store.calls.push("getMyProfile");
+    throw Object.assign(new Error("offline"), { code: "OFFLINE" });
+  };
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.navigate("my-profile");
+  const state = controller.getState();
+  assert.equal(state.lists.myProfile, "failed");
+  assert.equal(state.myProfile, null);
+  assert.equal(state.error.code, "OFFLINE");
+  controller.stop();
+});
+
+test("an uncleared window cannot open my-profile", async () => {
+  const store = profileStore({ clearance: { ...UNCLEARED_VOLUNTEER } });
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.navigate("my-profile");
+  assert.equal(controller.getState().screen, "staff");
+  assert.equal(profileReads(store), 0);
+  controller.stop();
+});
+
+test("an uncleared window restored on my-profile lands on its home", async () => {
+  const sessionStorage = fakeSession();
+  const seed = build({ store: profileStore(), sessionStorage });
+  await seed.controller.start();
+  await seed.controller.navigate("my-profile");
+  seed.controller.stop();
+  const store = profileStore({ clearance: { ...UNCLEARED_VOLUNTEER } });
+  const { controller } = build({ store, sessionStorage });
+  await controller.start();
+  assert.equal(controller.getState().screen, "staff");
+  assert.equal(profileReads(store), 0);
+  controller.stop();
+});
+
+test("a cleared window restored on my-profile reads it", async () => {
+  const sessionStorage = fakeSession();
+  const seed = build({ store: profileStore(), sessionStorage });
+  await seed.controller.start();
+  await seed.controller.navigate("my-profile");
+  seed.controller.stop();
+  const store = profileStore();
+  const { controller } = build({ store, sessionStorage });
+  await controller.start();
+  assert.equal(controller.getState().screen, "my-profile");
+  assert.equal(controller.getState().lists.myProfile, "ready");
+  assert.equal(profileReads(store), 1);
+  controller.stop();
+});
+
+test("saveMyProfile sends the read's revision and re-reads the profile and people", async () => {
+  const { store, controller } = await onMyProfile({}, { newActionId: () => "action-profile" });
+  const reads = profileReads(store);
+  const people = callCount(store, "listPeople");
+  const checks = callCount(store, "getClearance");
+  const text = await controller.saveMyProfile({ ...PROFILE_VALUES, name: "  Riley Vale ", extra: "dropped" });
+  assert.equal(text, "Profile saved");
+  assert.deepEqual(store.writes.at(-1), {
+    type: "saveMyProfile",
+    actionId: "action-profile",
+    expectedRevision: 6,
+    profile: { ...PROFILE_VALUES },
+  });
+  const state = controller.getState();
+  assert.equal(profileReads(store), reads + 1);
+  assert.equal(state.myProfile.revision, 7);
+  assert.equal(callCount(store, "listPeople"), people + 1);
+  assert.equal(state.people.find((person) => person.id === "person-riley").name, "Riley Vale");
+  assert.ok(callCount(store, "getClearance") > checks, "the clearance is asked again");
+  assert.equal(state.busy, false);
+  assert.equal(state.error, null);
+  controller.stop();
+});
+
+test("saveMyProfile sends no other-language name unless Other is among the languages", async () => {
+  const { store, controller } = await onMyProfile();
+  await controller.saveMyProfile({ ...PROFILE_VALUES, languages: ["english"], otherLanguage: "Tagalog" });
+  assert.equal(store.writes.at(-1).profile.otherLanguage, null);
+  assert.deepEqual(store.writes.at(-1).profile.languages, ["english"]);
+  controller.stop();
+});
+
+test("saveMyProfile sends an empty phone and other language as null", async () => {
+  const { store, controller } = await onMyProfile();
+  await controller.saveMyProfile({ ...PROFILE_VALUES, phone: "  ", languages: ["english"], otherLanguage: "" });
+  const { profile } = store.writes.at(-1);
+  assert.equal(profile.phone, null);
+  assert.equal(profile.otherLanguage, null);
+  assert.deepEqual(Object.keys(profile).sort(), ["languages", "name", "otherLanguage", "phone", "usualDays", "works"]);
+  controller.stop();
+});
+
+test("saveMyProfile retries a lost save with the same action id", async () => {
+  let next = 0;
+  const { store, controller } = await onMyProfile({}, { newActionId: () => `action-${(next += 1)}` });
+  store.loseNextProfile = true;
+  assert.equal(await controller.saveMyProfile(PROFILE_VALUES), null);
+  assert.equal(controller.getState().error.code, "OFFLINE");
+  const first = store.writes.at(-1);
+  assert.equal(await controller.saveMyProfile(PROFILE_VALUES), "Profile saved");
+  const again = store.writes.at(-1);
+  assert.equal(again.actionId, first.actionId);
+  assert.equal(again.expectedRevision, first.expectedRevision);
+  assert.deepEqual(again.profile, first.profile);
+  // Changed values are a new save, with a new action id.
+  await controller.saveMyProfile({ ...PROFILE_VALUES, phone: "215-555-0177" });
+  assert.notEqual(store.writes.at(-1).actionId, first.actionId);
+  assert.equal(store.writes.at(-1).expectedRevision, 7);
+  controller.stop();
+});
+
+test("a CONFLICT re-reads and says so", async () => {
+  const { store, controller } = await onMyProfile();
+  store.profile = { ...store.profile, name: "Riley Q. Park", revision: 9 };
+  store.failNextProfile = Object.assign(new Error("stale"), { code: "CONFLICT" });
+  const reads = profileReads(store);
+  assert.equal(await controller.saveMyProfile(PROFILE_VALUES), null);
+  const state = controller.getState();
+  assert.equal(state.error.code, "CONFLICT");
+  assert.equal(state.error.message, MY_PROFILE_CONFLICT);
+  assert.equal(profileReads(store), reads + 1);
+  assert.equal(state.myProfile.revision, 9);
+  assert.equal(state.myProfile.name, "Riley Q. Park");
+  assert.equal(state.busy, false);
+  // The next save sends the revision just read.
+  await controller.saveMyProfile(PROFILE_VALUES);
+  assert.equal(store.writes.at(-1).expectedRevision, 9);
+  controller.stop();
+});
+
+test("an admin's edit between the form and Save is a CONFLICT even after a refresh", async () => {
+  const { store, controller } = await onMyProfile();
+  assert.equal(controller.getState().myProfile.revision, 6);
+  // An admin saves the volunteer in the Roster: 7.
+  store.profile = { ...store.profile, name: "Riley Q. Park", phone: "215-555-0199", revision: 7 };
+  store.saveMyProfile = (save => async (request) => {
+    if (request.expectedRevision !== store.profile.revision) {
+      store.writes.push({ type: "saveMyProfile", ...request });
+      throw Object.assign(new Error("stale"), { code: "CONFLICT" });
+    }
+    return save(request);
+  })(store.saveMyProfile);
+  // The page refreshes on focus, then the volunteer presses Save.
+  await controller.refresh();
+  assert.equal(controller.getState().myProfile.revision, 7);
+  assert.equal(await controller.saveMyProfile(PROFILE_VALUES), null);
+  assert.equal(store.writes.at(-1).expectedRevision, 6);
+  const state = controller.getState();
+  assert.equal(state.error.code, "CONFLICT");
+  assert.equal(state.error.message, MY_PROFILE_CONFLICT);
+  assert.equal(store.profile.name, "Riley Q. Park");
+  assert.equal(store.profile.phone, "215-555-0199");
+  // The page now shows the admin's values; a save from them lands.
+  assert.equal(await controller.saveMyProfile(PROFILE_VALUES), "Profile saved");
+  assert.equal(store.writes.at(-1).expectedRevision, 7);
+  controller.stop();
+});
+
+test("the re-read after I've uploaded it does not move the revision Save sends", async () => {
+  const { store, controller } = await onMyProfile();
+  store.profile = { ...store.profile, revision: 7 };
+  await controller.markUploadSent("form13615");
+  assert.equal(controller.getState().myProfile.revision, 7);
+  await controller.saveMyProfile(PROFILE_VALUES);
+  assert.equal(store.writes.filter((write) => write.type === "saveMyProfile").at(-1).expectedRevision, 6);
+  controller.stop();
+});
+
+test("a landed save moves the revision Save sends next", async () => {
+  const { store, controller } = await onMyProfile();
+  assert.equal(await controller.saveMyProfile(PROFILE_VALUES), "Profile saved");
+  await controller.refresh();
+  assert.equal(await controller.saveMyProfile({ ...PROFILE_VALUES, phone: "215-555-0177" }), "Profile saved");
+  assert.equal(store.writes.at(-1).expectedRevision, 7);
+  controller.stop();
+});
+
+test("a refused save keeps the typed values", async () => {
+  const { store, controller } = await onMyProfile();
+  const shown = controller.getState().myProfile;
+  store.failNextProfile = Object.assign(new Error("bad"), {
+    code: "VALIDATION",
+    cause: { message: "VALIDATION", details: "name" },
+  });
+  const reads = profileReads(store);
+  assert.equal(await controller.saveMyProfile(PROFILE_VALUES), null);
+  const state = controller.getState();
+  assert.equal(state.error.code, "VALIDATION");
+  assert.equal(state.busy, false);
+  // What the page drew stays: the form keeps what was typed (app.mjs drafts).
+  assert.equal(profileReads(store), reads);
+  assert.deepEqual(state.myProfile, shown);
+  assert.equal(state.screen, "my-profile");
+  controller.stop();
+});
+
+test("an empty name is said with the drawer's sentence and nothing is sent", async () => {
+  const { store, controller } = await onMyProfile();
+  const shown = controller.getState().myProfile;
+  const writes = store.writes.length;
+  assert.equal(await controller.saveMyProfile({ ...PROFILE_VALUES, name: "   " }), null);
+  const state = controller.getState();
+  assert.equal(state.error.code, "VALIDATION");
+  assert.equal(state.error.message, "Enter a name.");
+  assert.equal(store.writes.length, writes);
+  assert.equal(state.busy, false);
+  assert.deepEqual(state.myProfile, shown);
+  // A corrected form saves, and the sentence goes.
+  assert.equal(await controller.saveMyProfile(PROFILE_VALUES), "Profile saved");
+  assert.equal(controller.getState().error, null);
+  controller.stop();
+});
+
+test("Other ticked with no language named is said and nothing is sent", async () => {
+  const { store, controller } = await onMyProfile();
+  const writes = store.writes.length;
+  assert.equal(
+    await controller.saveMyProfile({ ...PROFILE_VALUES, languages: ["english", "other"], otherLanguage: " " }),
+    null,
+  );
+  assert.equal(controller.getState().error.message, "Name the other language.");
+  assert.equal(
+    await controller.saveMyProfile({ ...PROFILE_VALUES, languages: ["other"], otherLanguage: "x".repeat(41) }),
+    null,
+  );
+  assert.equal(controller.getState().error.message, "Name the other language in 40 characters or fewer.");
+  assert.equal(
+    await controller.saveMyProfile({ ...PROFILE_VALUES, phone: "5".repeat(31) }),
+    null,
+  );
+  assert.equal(controller.getState().error.message, "Enter a phone number of 30 characters or fewer.");
+  assert.equal(store.writes.length, writes);
+  controller.stop();
+});
+
+test("losing clearance on my-profile shows the setup screen", async () => {
+  const { store, controller } = await onMyProfile();
+  store.nextClearance = { ...UNCLEARED_VOLUNTEER };
+  await controller.checkClearance();
+  const state = controller.getState();
+  assert.equal(state.principal.clearance.cleared, false);
+  assert.equal(state.screen, "staff");
+  assert.match(staffScreen(state), /Finish your setup for this season/);
+  controller.stop();
+});
+
+test("markUploadSent on my-profile re-reads the profile", async () => {
+  const { store, controller } = await onMyProfile();
+  const reads = profileReads(store);
+  assert.equal(await controller.markUploadSent("form13615"), true);
+  assert.equal(profileReads(store), reads + 1);
+  assert.equal(controller.getState().myProfile.form13615.sentAt, "2026-11-20T15:00:00Z");
+  controller.stop();
+});
+
+test("markUploadSent elsewhere does not read the profile", async () => {
+  const store = profileStore();
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.markUploadSent("form13615");
+  assert.equal(profileReads(store), 0);
+  controller.stop();
+});
+
+test("the profile is re-read on focus while on my-profile", async () => {
+  const { store, controller, events } = await onMyProfile();
+  const reads = profileReads(store);
+  await events.emit("focus");
+  assert.equal(profileReads(store), reads + 1);
+  controller.navigate("staff");
+  await events.emit("focus");
+  assert.equal(profileReads(store), reads + 1);
+  controller.stop();
+});
+
+test("signing out forgets the profile", async () => {
+  const { controller } = await onMyProfile();
+  await controller.signOut();
+  const state = controller.getState();
+  assert.equal(state.myProfile, null);
+  assert.equal(state.lists.myProfile, "loading");
+  controller.stop();
+});
+
+test("saveVolunteer sends usualDays when the values carry them", async () => {
+  const store = rosterStore();
+  const built = build({ store });
+  await built.controller.start();
+  built.controller.navigate("office-volunteers");
+  await built.controller.loadVolunteers();
+  built.controller.openDialog("volunteer", { volunteerId: "v-1" });
+  assert.equal(await built.controller.saveVolunteer({ ...VOLUNTEER_PAYLOAD, usualDays: ["mon", "fri"] }), true);
+  assert.deepEqual(store.writes.at(-1).volunteer.usualDays, ["mon", "fri"]);
+  assert.equal(await built.controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
+  assert.equal("usualDays" in store.writes.at(-1).volunteer, false);
+  built.controller.stop();
+});
+
+// Returning volunteers (change add-returning-volunteers-and-roster-csv)
+const EARLIER_NADIA = Object.freeze({
+  id: "e-1", name: "Nadia Kerr", email: "nadia@example.org", phone: null, works: "remote",
+  languages: ["english"], otherLanguage: null, usualDays: ["tue"], revision: "7", hasSignIn: false, lastSeason: true,
+});
+const earlierRoster = async (store) => {
+  store.earlier = [{ ...EARLIER_NADIA }];
+  const ids = ["action-1", "action-2"];
+  const built = build({ store, newActionId: () => ids.shift() });
+  await built.controller.start();
+  built.controller.navigate("office-volunteers");
+  await built.controller.loadVolunteers();
+  return built.controller;
+};
+const earlierReads = (store) => store.calls.filter((entry) => entry === "listEarlierVolunteers").length;
+
+test("readVolunteers also reads the earlier volunteers", async () => {
+  const store = rosterStore();
+  const controller = await earlierRoster(store);
+  assert.deepEqual(controller.getState().earlierVolunteers.map((e) => e.id), ["e-1"]);
+  assert.deepEqual(controller.getState().volunteers.map((e) => e.id), ["v-1"]);
+  controller.stop();
+});
+
+test("a picked earlier volunteer is saved as an Edit on their profile revision", async () => {
+  const store = rosterStore();
+  const controller = await earlierRoster(store);
+  controller.openDialog("volunteer", null);
+  controller.pickReturningVolunteer("e-1");
+  assert.deepEqual(controller.getState().dialogContext, { volunteerId: "e-1", returning: true });
+  const values = { ...VOLUNTEER_PAYLOAD, email: "nadia@example.org", name: "Nadia Kerr" };
+  assert.equal(await controller.saveVolunteer(values), true);
+  assert.deepEqual(store.writes.at(-1), {
+    type: "saveVolunteer", actionId: "action-1", volunteerId: "e-1", expectedRevision: 7, volunteer: values,
+  });
+  controller.stop();
+});
+
+test("a conflict on a picked save says so and re-reads both lists", async () => {
+  const store = rosterStore();
+  const controller = await earlierRoster(store);
+  controller.openDialog("volunteer", null);
+  controller.pickReturningVolunteer("e-1");
+  store.failSave = Object.assign(new Error("stale"), { code: "CONFLICT" });
+  const reads = volunteerReads(store);
+  const before = earlierReads(store);
+  await assert.rejects(() => controller.saveVolunteer({ ...VOLUNTEER_PAYLOAD, email: "nadia@example.org" }));
+  assert.equal(controller.getState().error.message, VOLUNTEER_CONFLICT_MESSAGE);
+  assert.equal(volunteerReads(store), reads + 1);
+  assert.equal(earlierReads(store), before + 1);
+  controller.stop();
+});
+
+test("unpicking returns to a plain add, and opening the drawer clears the pick and the search", async () => {
+  const store = rosterStore();
+  const controller = await earlierRoster(store);
+  controller.openDialog("volunteer", null);
+  controller.setReturningSearch("nad");
+  assert.equal(controller.getState().returningSearch, "nad");
+  controller.pickReturningVolunteer("e-1");
+  controller.unpickReturningVolunteer();
+  assert.equal(controller.getState().dialogContext, null);
+  assert.equal(await controller.saveVolunteer({ ...VOLUNTEER_PAYLOAD, email: "noor@example.test", name: "Noor Haddad" }), true);
+  assert.equal(store.writes.at(-1).volunteerId, null);
+  controller.pickReturningVolunteer("e-1");
+  controller.openDialog("volunteer", null);
+  assert.equal(controller.getState().dialogContext, null);
+  assert.equal(controller.getState().returningSearch, "");
+  controller.stop();
+});
+
+test("an unpicked add with an earlier volunteer's email is not sent", async () => {
+  const store = rosterStore();
+  const controller = await earlierRoster(store);
+  controller.openDialog("volunteer", null);
+  assert.equal(await controller.saveVolunteer({ ...VOLUNTEER_PAYLOAD, email: "Nadia@example.org" }), false);
+  assert.equal(
+    controller.getState().volunteerFormError,
+    "That email belongs to an earlier volunteer. Pick them above.",
+  );
+  assert.equal(store.calls.includes("saveVolunteer"), false);
+  controller.stop();
+});
+
+test("an Edit of a current volunteer to an earlier volunteer's email does not get the earlier-volunteer sentence", async () => {
+  const store = rosterStore();
+  const controller = await earlierRoster(store);
+  controller.openDialog("volunteer", { volunteerId: "v-1" });
+  assert.equal(await controller.saveVolunteer({ ...VOLUNTEER_PAYLOAD, email: "Nadia@example.org" }), true);
+  assert.equal(controller.getState().volunteerFormError ?? null, null);
+  assert.equal(store.writes.at(-1).type, "saveVolunteer");
+  assert.equal(store.writes.at(-1).volunteerId, "v-1");
   controller.stop();
 });
