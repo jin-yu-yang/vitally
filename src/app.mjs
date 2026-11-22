@@ -314,6 +314,7 @@ if (!config) {
     syncCloseUnsigned();
     syncStartSeason();
     syncVolunteerOther();
+    syncProfileOther();
     syncCreateAccount();
     showDraftLink();
     markPressed(state);
@@ -471,6 +472,14 @@ if (!config) {
   function syncVolunteerOther() {
     const box = root.querySelector("#volunteer-language-other");
     const field = root.querySelector("#volunteer-other-language");
+    if (box && field) field.hidden = !box.checked;
+  }
+
+  // My profile shows its Other language box only while Other is ticked (change
+  // add-my-profile), at once on a tick and after a redraw that put a tick back.
+  function syncProfileOther() {
+    const box = root.querySelector("#my-profile-languages-other");
+    const field = root.querySelector("#my-profile-other-language");
     if (box && field) field.hidden = !box.checked;
   }
 
@@ -1447,6 +1456,31 @@ if (!config) {
     }
   }
 
+  // My profile's Save (change add-my-profile, D9). A landed save shows the
+  // toast and drops the drafts, which the re-read page now holds; a CONFLICT
+  // drops them too, so the page shows what is stored now. Any other refusal
+  // keeps what was typed.
+  async function submitMyProfile(form, by) {
+    const values = new FormData(form);
+    const text = await controller.saveMyProfile({
+      name: String(values.get("name") ?? ""),
+      phone: String(values.get("phone") ?? ""),
+      works: String(values.get("works") ?? ""),
+      languages: values.getAll("languages").map(String),
+      otherLanguage: String(values.get("otherLanguage") ?? ""),
+      usualDays: values.getAll("usualDays").map(String),
+    });
+    if (text) {
+      clearFormDrafts(form);
+      notify("success", text, by);
+      return;
+    }
+    if (controller.getState().error?.code === "CONFLICT") {
+      clearFormDrafts(form);
+      render();
+    }
+  }
+
   // Season settings' Save. A landed save draws what was stored; a conflict
   // draws the settings as they are now, so what was typed goes; a refused
   // link keeps what was typed and the field it names takes the keyboard.
@@ -2021,6 +2055,11 @@ if (!config) {
       controller.navigate("office-updates");
       void controller.loadPostedUpdates();
     },
+    // My profile (change add-my-profile): read when it opens.
+    "open-my-profile": () => {
+      formDrafts.clear();
+      void controller.navigate("my-profile");
+    },
     // And Season settings (change add-season-settings).
     "open-season-settings": () => {
       formDrafts.clear();
@@ -2082,6 +2121,10 @@ if (!config) {
       case "open-cases":
         if (leaveAddCaseFirst("open-cases", target)) break;
         EXITS["open-cases"]();
+        break;
+      case "open-my-profile":
+        if (leaveAddCaseFirst("open-my-profile", target)) break;
+        EXITS["open-my-profile"]();
         break;
       case "open-volunteers":
         if (leaveAddCaseFirst("open-volunteers", target)) break;
@@ -2915,6 +2958,10 @@ if (!config) {
       syncCreateAccount();
       return;
     }
+    if (field.closest?.("#my-profile-form") && field.name === "languages" && field.value === "other") {
+      syncProfileOther();
+      return;
+    }
     if (field.closest?.("#volunteer-form") && field.name === "language" && field.value === "other") {
       syncVolunteerOther();
       return;
@@ -2982,6 +3029,8 @@ if (!config) {
       );
       if (form.matches(".contact-form")) {
         await submitContact(form, by);
+      } else if (form.id === "my-profile-form") {
+        await submitMyProfile(form, by);
       } else if (form.id === "volunteer-form") {
         await submitVolunteer(form, by);
       } else if (form.id === "update-form") {

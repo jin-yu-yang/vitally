@@ -41,7 +41,7 @@ const ACCOUNT_LABELS = Object.freeze({
   active: "Active",
   deactivated: "Deactivated",
 });
-const accountLabel = (volunteer) => ACCOUNT_LABELS[volunteer?.account?.status ?? "none"] ?? "Not created";
+export const accountLabel = (volunteer) => ACCOUNT_LABELS[volunteer?.account?.status ?? "none"] ?? "Not created";
 
 // The name the volunteer gave at their site check, under the account status.
 const signedInAs = (volunteer, className) =>

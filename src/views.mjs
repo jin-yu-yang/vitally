@@ -42,6 +42,7 @@ import { volunteerTabs, renderWorkload, assignDrawerBody, assignDrawerTitle, DEF
 import { workloadRows, unassignedCases, candidates } from "./volunteer-workload.mjs";
 import { awaitingClearance, ceilingAdmin, siteCoordinator } from "./clearance.mjs";
 import { setupScreen, siteCheckScreen } from "./setup-views.mjs";
+import { myProfilePage } from "./profile-views.mjs";
 import {
   renderNotificationsPanel,
   renderPostUpdatePage,
@@ -215,8 +216,19 @@ const isAdmin = (person) =>
 // cases, Follow-ups); `volunteers` is the workspace admin (the Roster), and
 // `board` is false on the setup screen, which has no work board.
 export function staffSidebar(state, person, office, { volunteers = office, board = true } = {}) {
-  // A staff account is its own person: "Signed in as".
-  const accountRow = `<small>Signed in as</small> <strong>${esc(person?.name ?? state.principal?.personName ?? "")}</strong>`;
+  // A staff account is its own person. A cleared window's row is the link to
+  // My profile (change add-my-profile, D9); on the setup screen it stays the
+  // plain "Signed in as".
+  const accountName = person?.name ?? state.principal?.personName ?? "";
+  const onProfile = state?.screen === "my-profile";
+  const accountRow = board
+    ? button(
+        `<span>My profile</span><small class="account-name">${esc(accountName)}</small>`,
+        "open-my-profile",
+        `nav-link account-link${onProfile ? " current" : ""}`,
+        onProfile ? 'aria-current="page"' : "",
+      )
+    : `<small>Signed in as</small> <strong>${esc(accountName)}</strong>`;
   const onBoard = state?.screen === "staff";
   const onPool = state?.screen === "office-cases";
   const onRoster = state?.screen === "office-volunteers";
@@ -491,6 +503,7 @@ export function staffScreen(state) {
         addCasePage(state, person, people),
       );
     // Past the setup screen above, so cleared: the Workload follows the effective admin.
+    if (screen === "my-profile") return myProfilePage(state);
     if (screen === "office-volunteers") return rosterPage(state, { workload: office });
     if (screen === "office-updates") return postUpdatePage(state);
     if (screen === "office-settings") return seasonSettingsPage(state);
