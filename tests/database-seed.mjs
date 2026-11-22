@@ -22,6 +22,7 @@ import {
   seedWorkspace,
 } from "../tools/admin/seed-cases.mjs";
 import * as SEED_VALUES from "../tools/admin/seed-values.mjs";
+import { addDays, coverageRows, weekBounds } from "../src/volunteer-schedule.mjs";
 
 // The fixture's role account (f.roleAccounts) for each person key.
 const ROLE_BY_KEY = Object.freeze({
@@ -335,6 +336,7 @@ test("seed command against real Supabase", async (t) => {
           workspaceId,
           caseIds: [],
           assistanceIds: [],
+          shifts: [],
         });
         assert.equal(
           runFilePath(workspaceId, runDir),
@@ -353,6 +355,7 @@ test("seed command against real Supabase", async (t) => {
           workspaceId: randomUUID(),
           caseIds: [randomUUID(), randomUUID()],
           assistanceIds: [randomUUID()],
+          shifts: [{ id: randomUUID(), revision: 1 }],
         };
         await recordRun(run, runDir);
         assert.deepEqual(await readRun(run.workspaceId, runDir), run);
@@ -373,6 +376,7 @@ test("seed command against real Supabase", async (t) => {
           workspaceId,
           caseIds: [],
           assistanceIds: [],
+          shifts: [],
         });
       } finally {
         await rm(runDir, { recursive: true, force: true });
@@ -936,6 +940,136 @@ test("seed command against real Supabase", async (t) => {
       assert.equal(rows.length, 8);
       assert.ok(rows.every((r) => r.n === 1));
       assert.ok(rows.find((r) => r.email === emails[0]).user_id);
+    });
+
+    // Change add-volunteer-schedule (spec local-seed-data, "The local seed
+    // fills a week of the schedule"). Every test puts the schedule back.
+    const resetSchedule = async () => {
+      await f.sql("delete from public.shifts where workspace_id=$1", [f.workspaceId]);
+      await f.sql("delete from public.schedule_settings where workspace_id=$1", [f.workspaceId]);
+    };
+    const liveShifts = async () =>
+      (
+        await f.sql(
+          `select s.id, s.revision, s.shift_date::text as date, s.start_hour, s.end_hour, s.role,
+                  p.user_id is null as no_sign_in
+             from public.shifts s join public.people p on p.id=s.person_id
+            where s.workspace_id=$1 and s.removed_at is null order by s.shift_date, s.start_hour, s.id`,
+          [f.workspaceId],
+        )
+      ).rows;
+    const isoDay = (date) => new Date(`${date}T12:00:00Z`).getUTCDay() || 7;
+
+    await t.test("seeds site hours, usual days and a week of shifts, and a re-run keeps an admin's shift", async () => {
+      const runDir = await tempRunDir();
+      const args = { workspaceId: f.workspaceId, clientAEmail: f.applicantAEmail, runDir };
+      const today = (await f.sql("select (now() at time zone 'America/New_York')::date::text as d")).rows[0].d;
+      const { monday, sunday } = weekBounds(today);
+      const saturday = addDays(monday, 5);
+      try {
+        await resetSchedule();
+        await seedWorkspace(args);
+        const settings = (
+          await f.sql("select site_hours, preparers_needed, reviewers_needed, on_site_needed from public.schedule_settings where workspace_id=$1", [f.workspaceId])
+        ).rows[0];
+        assert.deepEqual(settings.site_hours, {
+          2: { open: 17, close: 20 },
+          4: { open: 17, close: 20 },
+          6: { open: 10, close: 16 },
+        });
+        assert.deepEqual([settings.preparers_needed, settings.reviewers_needed, settings.on_site_needed], [2, 1, 1]);
+
+        const days = (
+          await f.sql(
+            "select v.usual_days from public.volunteer_profiles v where v.workspace_id=$1 and v.email=any($2)",
+            [f.workspaceId, SEED_VALUES.SEED_VOLUNTEERS.map((v) => v.email)],
+          )
+        ).rows.map((r) => r.usual_days);
+        assert.ok(days.filter((d) => d.length > 0).length >= 4, "four volunteers have usual days");
+        assert.ok(days.filter((d) => d.includes(6)).length >= 2, "two usually come on Saturdays");
+
+        const first = await liveShifts();
+        assert.ok(first.length >= 5 && first.length <= 8, `about six shifts, got ${first.length}`);
+        for (const shift of first) {
+          assert.ok(shift.date >= monday && shift.date <= sunday, `${shift.date} is outside this week`);
+          const hours = settings.site_hours[isoDay(shift.date)];
+          assert.ok(hours && shift.start_hour >= hours.open && shift.end_hour <= hours.close, "inside site hours");
+        }
+        assert.ok(first.some((s) => s.no_sign_in), "one shift is a volunteer with no sign-in");
+        assert.ok(first.some((s) => !s.no_sign_in), "role accounts have shifts");
+        const run = await readRunFile(f.workspaceId, runDir);
+        assert.deepEqual(run.shifts.map((s) => s.id).sort(), first.map((s) => s.id).sort());
+        assert.ok(run.shifts.every((s) => Number.isInteger(s.revision)));
+
+        // This week's Saturday, read by the site coordinator, has a gap.
+        const { data: day, error } = await f.siteCoordinator.rpc("vitally_schedule_day", { p_date: saturday });
+        assert.equal(error, null);
+        assert.ok(day.shifts.length > 0);
+        const rows = coverageRows({ hours: day.hours, targets: day.targets, shifts: day.shifts });
+        assert.ok(rows.some((r) => r.text !== "OK"), "a Saturday hour has a gap");
+
+        // An admin adds a shift of their own; a re-run keeps it and one seeded set.
+        const maya = (await f.sql("select person_id from public.volunteer_profiles where workspace_id=$1 and email=$2", [f.workspaceId, SEED_VALUES.SEED_VOLUNTEERS[0].email])).rows[0].person_id;
+        const { data: own, error: ownError } = await f.siteCoordinator.rpc("vitally_save_shift", {
+          p_action_id: randomUUID(),
+          p_shift_id: null,
+          p_expected_revision: null,
+          p_shift: { volunteerId: maya, date: saturday, startHour: 15, endHour: 16, role: "preparer" },
+        });
+        assert.equal(ownError, null);
+        await seedWorkspace(args);
+        const second = await liveShifts();
+        assert.equal(second.length, first.length + 1);
+        assert.ok(second.some((s) => s.id === own.shiftId), "the admin's shift is kept");
+        assert.ok(first.every((s) => !second.some((x) => x.id === s.id)), "the first seeded set is gone");
+        const run2 = await readRunFile(f.workspaceId, runDir);
+        assert.equal(run2.shifts.length, first.length);
+        assert.ok(run2.shifts.every((s) => second.some((x) => x.id === s.id)));
+      } finally {
+        await deletePreviousRun(client, await readRun(f.workspaceId, runDir));
+        await resetSchedule();
+        await rm(runDir, { recursive: true, force: true });
+      }
+    });
+
+    await t.test("saved site hours are kept and the seeded shifts fit inside them", async () => {
+      const runDir = await tempRunDir();
+      const args = { workspaceId: f.workspaceId, clientAEmail: f.applicantAEmail, runDir };
+      try {
+        await resetSchedule();
+        await f.sql(
+          "insert into public.schedule_settings(workspace_id,site_hours) values($1,$2)",
+          [f.workspaceId, JSON.stringify({ 6: { open: 9, close: 13 } })],
+        );
+        await seedWorkspace(args);
+        const settings = (await f.sql("select site_hours, revision from public.schedule_settings where workspace_id=$1", [f.workspaceId])).rows[0];
+        assert.deepEqual(settings.site_hours, { 6: { open: 9, close: 13 } });
+        assert.equal(Number(settings.revision), 1);
+        const shifts = await liveShifts();
+        assert.ok(shifts.length > 0, "shifts are placed on the open day");
+        for (const s of shifts) {
+          assert.equal(isoDay(s.date), 6);
+          assert.ok(s.start_hour >= 9 && s.end_hour <= 13);
+        }
+      } finally {
+        await deletePreviousRun(client, await readRun(f.workspaceId, runDir));
+        await resetSchedule();
+        await rm(runDir, { recursive: true, force: true });
+      }
+    });
+
+    await t.test("the story's seedCases adds no site hours, usual days or shifts", async () => {
+      const runDir = await tempRunDir();
+      try {
+        await resetSchedule();
+        await seedCases(client, await targetsFor(), { runDir });
+        assert.equal((await f.sql("select count(*)::int n from public.schedule_settings where workspace_id=$1", [f.workspaceId])).rows[0].n, 0);
+        assert.equal((await liveShifts()).length, 0);
+        assert.equal((await readRunFile(f.workspaceId, runDir)).shifts, undefined);
+      } finally {
+        await deletePreviousRun(client, await readRun(f.workspaceId, runDir));
+        await rm(runDir, { recursive: true, force: true });
+      }
     });
 
   } finally {
