@@ -6,7 +6,7 @@ import { createDatabaseFixture } from "./support/database-fixture.mjs";
 // OpenSpec change add-volunteer-schedule (design D1, D3, D10), migration 056
 // sections 1 to 4: the shifts and schedule_settings tables, the usual days on
 // the volunteer profile, the site hours validator, who reads which rows
-// directly (for realtime), and the publication, and the site hours and targets save. The other RPCs come in later tasks.
+// directly (for realtime), and the publication, the site hours and targets save, and (section 5) saving and removing shifts. The other RPCs come in later tasks.
 // One shared fixture; fictional people only.
 
 const one = async (f, text, values) => (await f.sql(text, values)).rows[0];
@@ -249,6 +249,176 @@ test("Volunteer schedule against real Supabase", async (t) => {
         assert.equal((await one(f, "select count(*)::int n from public.shifts where id=$1", [own.id])).n, 1);
       } finally {
         await f.sql("delete from public.shifts where id=$1", [own.id]);
+      }
+    });
+
+    await t.test("saving and removing shifts", async () => {
+      const sc = f.siteCoordinator;
+      const { saturday } = await one(
+        f,
+        `select to_char(d,'YYYY-MM-DD') as saturday from (
+           select (now() at time zone 'America/New_York')::date + ((6 - extract(isodow from (now() at time zone 'America/New_York')::date)::int + 7) % 7 + 7) as d) x`,
+      );
+      const monday = (await one(f, "select to_char($1::date + 2,'YYYY-MM-DD') as d", [saturday])).d;
+      assert.equal((await one(f, "select extract(isodow from $1::date)::int as n", [saturday])).n, 6);
+      const body = (volunteerId, start, end, role, date = saturday) => ({
+        volunteerId,
+        date,
+        startHour: start,
+        endHour: end,
+        role,
+      });
+      const save = (shiftId, revision, shift, actionId = randomUUID()) => ({
+        p_action_id: actionId,
+        p_shift_id: shiftId,
+        p_expected_revision: revision,
+        p_shift: shift,
+      });
+      const refused = async (client, fn, input, code, detail, label) => {
+        const { error } = await client.rpc(fn, input);
+        assert.equal(error?.code, code, `${label}: ${error?.code} ${error?.message}`);
+        if (detail !== undefined) assert.equal(error.details, detail, `${label} detail`);
+        assert.equal(await f.receiptsFor(input.p_action_id), 0, `${label} receipt`);
+      };
+      const refusedSave = (client, shift, code, detail, label, ids = [null, null]) =>
+        refused(client, "vitally_save_shift", save(ids[0], ids[1], shift), code, detail, label);
+      const removal = (shiftId, revision) => ({
+        p_action_id: randomUUID(),
+        p_shift_id: shiftId,
+        p_expected_revision: revision,
+      });
+      const liveShifts = async () =>
+        (await f.sql("select id from public.shifts where workspace_id=$1 and removed_at is null", [f.workspaceId])).rows.length;
+
+      await rpc(sc, "vitally_save_schedule_settings", {
+        p_action_id: randomUUID(),
+        p_expected_revision: 0,
+        p_settings: {
+          siteHours: { 6: { open: 10, close: 16 } },
+          targets: { preparersNeeded: 2, reviewersNeeded: 1, onSiteNeeded: 1 },
+        },
+      });
+      const ada = await f.staff({ key: "ada_shift_admin", name: "Ada Fenwick", capabilities: ["admin"] });
+      const ben = await f.staff({ key: "ben_shift_admin", name: "Ben Hollis", capabilities: ["admin"] });
+      const gone = await f.staff({ key: "gail_gone", name: "Gail Ormond", capabilities: ["prepare"] });
+      try {
+        // A valid add, for a volunteer with no sign-in.
+        const casey = await rpc(sc, "vitally_save_shift", save(null, null, body(noSignInId, 10, 13, "greeter")));
+        assert.equal(casey.revision, 1);
+        const row = await one(f, "select * from public.shifts where id=$1", [casey.shiftId]);
+        assert.equal(row.season, season);
+        assert.equal(row.removed_at, null);
+
+        // Domain refusals, each with its reason and no receipt.
+        await refusedSave(sc, body(f.preparerId, 10, 13, "reviewer"), "VT007", "ROLE_NOT_HELD", "role not held");
+        await refusedSave(sc, body(f.preparerId, 9, 12, "preparer"), "VT007", "OUTSIDE_SITE_HOURS", "starts before opening");
+        await refusedSave(sc, body(f.preparerId, 14, 17, "preparer"), "VT007", "OUTSIDE_SITE_HOURS", "ends after closing");
+        await refusedSave(sc, body(f.preparerId, 10, 13, "preparer", monday), "VT007", "SITE_CLOSED", "a Monday");
+        await refusedSave(sc, body(nora.personId, 10, 13, "preparer"), "VT007", "NOT_ON_ROSTER", "not on the roster");
+        await refusedSave(sc, body(randomUUID(), 10, 13, "preparer"), "VT007", "NOT_ON_ROSTER", "unknown person");
+        await refusedSave(sc, body(noSignInId, 12, 15, "greeter"), "VT007", "OVERLAP", "overlaps 10-13");
+        assert.equal(await liveShifts(), 1);
+        const adjacent = await rpc(sc, "vitally_save_shift", save(null, null, body(noSignInId, 13, 15, "greeter")));
+        assert.equal(adjacent.revision, 1);
+
+        // Deactivated.
+        const account = await one(f, "select revision from public.accounts where workspace_id=$1 and person_id=$2", [
+          f.workspaceId,
+          gone.personId,
+        ]);
+        await rpc(sc, "vitally_deactivate_account", {
+          p_action_id: randomUUID(),
+          p_volunteer_id: gone.personId,
+          p_expected_revision: account.revision,
+        });
+        await refusedSave(sc, body(gone.personId, 10, 13, "preparer"), "VT007", "DEACTIVATED", "deactivated");
+
+        // Shape validation.
+        await refusedSave(sc, body(f.preparerId, 10, 13, "host"), "VT007", "role", "unknown role");
+        await refusedSave(sc, body(f.preparerId, 13, 10, "preparer"), "VT007", "endHour", "end before start");
+        await refusedSave(sc, body(f.preparerId, 10, 25, "preparer"), "VT007", "endHour", "end after 24");
+        await refusedSave(sc, body(f.preparerId, 10.5, 13, "preparer"), "VT007", "startHour", "fractional hour");
+        await refusedSave(sc, body(f.preparerId, "10", 13, "preparer"), "VT007", "startHour", "string hour");
+        await refusedSave(sc, body(f.preparerId, 10, 13, "preparer", "2027-02-30"), "VT007", "date", "impossible date");
+        await refusedSave(sc, body(f.preparerId, 10, 13, "preparer", "next saturday"), "VT007", "date", "malformed date");
+        await refusedSave(sc, { ...body(f.preparerId, 10, 13, "preparer"), volunteerId: "x" }, "VT007", "volunteerId", "bad id");
+        await refusedSave(sc, [], "VT007", undefined, "not an object");
+        await refused(sc, "vitally_save_shift", save(casey.shiftId, null, body(noSignInId, 10, 13, "greeter")), "VT007", undefined, "edit without revision");
+        await refused(sc, "vitally_save_shift", save(null, 1, body(noSignInId, 10, 13, "greeter")), "VT007", undefined, "add with revision");
+        assert.equal(await liveShifts(), 2);
+
+        // Only a workspace admin, cleared or not; a bad shape never reaches a non-admin's validation.
+        await refusedSave(f.preparer, body(f.preparerId, 10, 13, "preparer"), "VT001", undefined, "a preparer");
+        await refusedSave(f.preparer, body(f.preparerId, 10, 13, "host"), "VT001", undefined, "a preparer, bad shape");
+        await refused(f.preparer, "vitally_remove_shift", removal(casey.shiftId, 1), "VT001", undefined, "a preparer removing");
+        await refusedSave(f.applicantA, body(f.preparerId, 10, 13, "preparer"), "VT001", undefined, "a client");
+        const uncleared = await f.staff({
+          key: "uma_uncleared_sc",
+          name: "Uma Finch",
+          capabilities: ["admin"],
+          cleared: false,
+          siteCoordinator: true,
+        });
+        const byUncleared = await rpc(uncleared.client, "vitally_save_shift", save(null, null, body(f.preparerId, 10, 13, "preparer")));
+        assert.equal(byUncleared.revision, 1);
+
+        // Edit, and a second admin at the old revision is refused.
+        const edited = await rpc(ada.client, "vitally_save_shift", save(byUncleared.shiftId, 1, body(f.preparerId, 11, 14, "preparer")));
+        assert.equal(edited.revision, 2);
+        assert.equal(edited.shiftId, byUncleared.shiftId);
+        const editedRow = await one(f, "select start_hour,end_hour from public.shifts where id=$1", [edited.shiftId]);
+        assert.deepEqual([editedRow.start_hour, editedRow.end_hour], [11, 14]);
+        await refusedSave(ben.client, body(f.preparerId, 12, 15, "preparer"), "VT003", undefined, "stale revision", [byUncleared.shiftId, 1]);
+        await refusedSave(ada.client, body(noSignInId, 11, 14, "greeter"), "VT007", "volunteerId", "edit names another person", [byUncleared.shiftId, 2]);
+        // A shift does not overlap itself when edited.
+        const same = await rpc(ada.client, "vitally_save_shift", save(byUncleared.shiftId, 2, body(f.preparerId, 12, 15, "preparer")));
+        assert.equal(same.revision, 3);
+
+        // A replay of the same action id leaves one row.
+        const replay = save(null, null, body(f.preparerId, 15, 16, "preparer"));
+        const r1 = await rpc(sc, "vitally_save_shift", replay);
+        const r2 = await rpc(sc, "vitally_save_shift", replay);
+        assert.deepEqual(r2, r1);
+        assert.equal(
+          (await one(f, "select count(*)::int n from public.shifts where person_id=$1 and start_hour=15", [f.preparerId])).n,
+          1,
+        );
+
+        // Unknown shift.
+        await refused(sc, "vitally_save_shift", save(randomUUID(), 1, body(noSignInId, 10, 13, "greeter")), "VT002", undefined, "unknown shift");
+        await refused(sc, "vitally_remove_shift", removal(randomUUID(), 1), "VT002", undefined, "removing an unknown shift");
+        await refused(sc, "vitally_remove_shift", removal(null, 1), "VT007", undefined, "remove without an id");
+
+        // Remove: removed_at set, revision up.
+        await refused(sc, "vitally_remove_shift", removal(r1.shiftId, 9), "VT003", undefined, "remove at a stale revision");
+        const removeArgs = removal(r1.shiftId, 1);
+        const removed = await rpc(sc, "vitally_remove_shift", removeArgs);
+        assert.deepEqual(removed, { shiftId: r1.shiftId, revision: 2, removed: true });
+        assert.deepEqual(await rpc(sc, "vitally_remove_shift", removeArgs), removed, "a replay answers the same");
+        const removedRow = await one(f, "select removed_at,revision::int as revision from public.shifts where id=$1", [r1.shiftId]);
+        assert.ok(removedRow.removed_at);
+        assert.equal(removedRow.revision, 2);
+
+        // M1.3: a removed row stays readable to a viewer who could read it before (design D2).
+        const { data: viewed, error: viewError } = await f.preparer
+          .from("shifts")
+          .select("id,removed_at,revision")
+          .eq("id", r1.shiftId);
+        assert.equal(viewError, null);
+        assert.equal(viewed.length, 1, "removed shift still read by a viewer");
+        assert.ok(viewed[0].removed_at);
+        assert.equal(viewed[0].revision, 2);
+
+        // Remove, then edit or remove the removed shift: NOT_FOUND, even with the old revision.
+        await refusedSave(sc, body(f.preparerId, 15, 16, "preparer"), "VT002", undefined, "edit a removed shift", [r1.shiftId, 1]);
+        await refusedSave(sc, body(f.preparerId, 15, 16, "preparer"), "VT002", undefined, "edit a removed shift, fresh revision", [r1.shiftId, 2]);
+        await refused(sc, "vitally_remove_shift", removal(r1.shiftId, 2), "VT002", undefined, "remove again");
+        // Its hours are free again.
+        const reuse = await rpc(sc, "vitally_save_shift", save(null, null, body(f.preparerId, 15, 16, "preparer")));
+        assert.equal(reuse.revision, 1);
+      } finally {
+        await f.sql("delete from public.shifts where workspace_id=$1", [f.workspaceId]);
+        await f.sql("delete from public.schedule_settings where workspace_id=$1", [f.workspaceId]);
       }
     });
 

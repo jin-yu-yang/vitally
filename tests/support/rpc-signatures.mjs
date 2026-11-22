@@ -1,5 +1,28 @@
 import { TEST_SITE_NUMBER } from "./database-fixture.mjs";
 
+// Next Saturday in New York, open 10 to 16, and a preparer shift at 12 to 13
+// on it, for the schedule entry points below.
+async function scheduleContext(f) {
+  const { rows } = await f.sql(
+    `select to_char((now() at time zone 'America/New_York')::date
+        + ((6 - extract(isodow from (now() at time zone 'America/New_York')::date)::int + 7) % 7 + 7),'YYYY-MM-DD') as d,
+       w.current_season as season
+      from public.workspaces w where w.id=$1`,
+    [f.workspaceId],
+  );
+  await f.sql(
+    `insert into public.schedule_settings(workspace_id,site_hours) values($1,'{"6":{"open":10,"close":16}}')
+      on conflict (workspace_id) do update set site_hours=excluded.site_hours,revision=public.schedule_settings.revision+1`,
+    [f.workspaceId],
+  );
+  const shift = await f.sql(
+    `insert into public.shifts(workspace_id,season,person_id,shift_date,start_hour,end_hour,role)
+      values($1,$2,$3,$4,12,13,'preparer') returning id`,
+    [f.workspaceId, rows[0].season, f.preparerId, rows[0].d],
+  );
+  return { scheduleVolunteerId: f.preparerId, scheduleSaturday: rows[0].d, scheduleShiftId: shift.rows[0].id };
+}
+
 // Every public application entry point installed so far, with a valid argument
 // shape, the exact receipt it answers with, and the member allowed to call it.
 // The database suite asserts this list matches exactly what the database
@@ -302,6 +325,41 @@ export const RPC_SIGNATURES = Object.freeze([
         siteHours: { 6: { open: 10, close: 16 } },
         targets: { preparersNeeded: 2, reviewersNeeded: 1, onSiteNeeded: 1 },
       },
+    }),
+  }),
+  // Saving and removing shifts (add-volunteer-schedule, design D2, D4). The
+  // context opens next Saturday 10 to 16 in the site hours and gives each call
+  // its own target: save adds a preparer shift for the fixture's preparer at
+  // 10 to 11, remove takes a shift at 12 to 13 that it inserts.
+  Object.freeze({
+    name: "vitally_save_shift",
+    signature: "vitally_save_shift(uuid,uuid,bigint,jsonb)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["revision", "shiftId"]),
+    context: async (f) => scheduleContext(f),
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_shift_id: null,
+      p_expected_revision: null,
+      p_shift: {
+        volunteerId: context.scheduleVolunteerId,
+        date: context.scheduleSaturday,
+        startHour: 10,
+        endHour: 11,
+        role: "preparer",
+      },
+    }),
+  }),
+  Object.freeze({
+    name: "vitally_remove_shift",
+    signature: "vitally_remove_shift(uuid,uuid,bigint)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["removed", "revision", "shiftId"]),
+    context: async (f) => scheduleContext(f),
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_shift_id: context.scheduleShiftId,
+      p_expected_revision: 1,
     }),
   }),
   // Setting the site's SIDN (design D5): the answer says only that it is set.

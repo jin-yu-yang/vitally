@@ -10,7 +10,8 @@
 --      granted SELECT for realtime only, and no write grant; the RPCs of
 --      later sections are the only writers;
 --   §3 realtime (design D10): both tables join the publication;
---   §4 the site hours and targets save, and the Season settings read.
+--   §4 the site hours and targets save, and the Season settings read;
+--   §5 saving and removing shifts (design D2, D4).
 -- Later sections add the other RPCs, the seed and the Workload read.
 -- Nothing existing changes except volunteer_profiles gaining one column and
 -- the publication.
@@ -331,3 +332,200 @@ end;
 $$;
 revoke all on function public.vitally_save_schedule_settings(uuid,bigint,jsonb) from public,anon,authenticated,service_role;
 grant execute on function public.vitally_save_schedule_settings(uuid,bigint,jsonb) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- §5. Saving and removing shifts (design D2, D4).
+
+-- Adds a shift (p_shift_id and p_expected_revision both null) or edits one
+-- (both present), for a workspace admin only, cleared or not. p_shift is
+-- {volunteerId, date, startHour, endHour, role}; on an edit volunteerId must be
+-- the stored person. Order: FORBIDDEN (nothing written, no receipt);
+-- VALIDATION of the shape, which needs no stored state (a missing argument, a
+-- p_shift that is not an object, then volunteerId, date, startHour, endHour,
+-- role as detail); then under the workspace lock the receipt (a replay returns
+-- the stored answer); NOT_FOUND (VT002) for an unknown or removed shift, which
+-- comes before CONFLICT so that editing a removed shift with its old revision
+-- says it is gone; CONFLICT (a stale revision); then the VALIDATION reasons
+-- that read stored state, as the detail, in this order: volunteerId (an edit
+-- names another person), NOT_ON_ROSTER, DEACTIVATED, ROLE_NOT_HELD,
+-- SITE_CLOSED, OUTSIDE_SITE_HOURS, OVERLAP. Holding the role means the role is
+-- on the person's current-season roster entry; a person with no sign-in can be
+-- scheduled. A new shift takes the current season. Answers {shiftId, revision}.
+create function public.vitally_save_shift(p_action_id uuid,p_shift_id uuid,p_expected_revision bigint,p_shift jsonb)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_workspace public.workspaces;
+ v_shift public.shifts;
+ v_receipt public.action_receipts;
+ v_volunteer uuid;
+ v_date date;
+ v_start smallint;
+ v_end smallint;
+ v_role text;
+ v_roles text[];
+ v_hours jsonb;
+ v_open int;
+ v_close int;
+ v_digest text;
+ v_result jsonb;
+begin
+ v_member=vitally_private.require_membership();
+ v_person=vitally_private.acting_person(v_member);
+ if v_member.access<>'staff' or v_person.id is null
+  or not vitally_policy.is_workspace_admin(v_member.workspace_id) then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ if p_action_id is null or p_shift is null or jsonb_typeof(p_shift)<>'object'
+  or (p_shift_id is null)<>(p_expected_revision is null) then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ if jsonb_typeof(p_shift->'volunteerId') is distinct from 'string'
+  or (p_shift->>'volunteerId') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='volunteerId';
+ end if;
+ v_volunteer=(p_shift->>'volunteerId')::uuid;
+ if jsonb_typeof(p_shift->'date') is distinct from 'string'
+  or (p_shift->>'date') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='date';
+ end if;
+ begin
+  v_date=(p_shift->>'date')::date;
+ exception when others then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='date';
+ end;
+ if to_char(v_date,'YYYY-MM-DD')<>(p_shift->>'date') then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='date';
+ end if;
+ if jsonb_typeof(p_shift->'startHour') is distinct from 'number'
+  or (p_shift->>'startHour') !~ '^[0-9]{1,2}$' or (p_shift->>'startHour')::int>23 then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='startHour';
+ end if;
+ v_start=(p_shift->>'startHour')::int;
+ if jsonb_typeof(p_shift->'endHour') is distinct from 'number'
+  or (p_shift->>'endHour') !~ '^[0-9]{1,2}$' or (p_shift->>'endHour')::int>24
+  or (p_shift->>'endHour')::int<=v_start then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='endHour';
+ end if;
+ v_end=(p_shift->>'endHour')::int;
+ if jsonb_typeof(p_shift->'role') is distinct from 'string'
+  or (p_shift->>'role') not in ('greeter','intaker','preparer','reviewer','admin') then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='role';
+ end if;
+ v_role=p_shift->>'role';
+ perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_member.workspace_id::text,0));
+ v_digest=encode(extensions.digest(jsonb_build_object('operation','SAVE_SHIFT','shiftId',p_shift_id,
+  'expectedRevision',p_expected_revision,'volunteerId',v_volunteer,'date',v_date,'startHour',v_start,
+  'endHour',v_end,'role',v_role,'personId',v_person.id)::text,'sha256'),'hex');
+ v_receipt=vitally_private.reserve_receipt(v_member,p_action_id,'SAVE_SHIFT',v_digest,v_person.id);
+ if v_receipt.receipt is not null then
+  return v_receipt.receipt;
+ end if;
+ if p_shift_id is not null then
+  select * into v_shift from public.shifts
+   where id=p_shift_id and workspace_id=v_member.workspace_id and removed_at is null for update;
+  if not found then
+   raise sqlstate 'VT002' using message='NOT_FOUND';
+  end if;
+  if v_shift.revision<>p_expected_revision then
+   raise sqlstate 'VT003' using message='CONFLICT';
+  end if;
+  if v_shift.person_id<>v_volunteer then
+   raise sqlstate 'VT007' using message='VALIDATION',detail='volunteerId';
+  end if;
+ end if;
+ select * into v_workspace from public.workspaces where id=v_member.workspace_id;
+ select r.roles into v_roles from public.roster_entries r
+  where r.workspace_id=v_member.workspace_id and r.person_id=v_volunteer and r.season=v_workspace.current_season;
+ if v_roles is null then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='NOT_ON_ROSTER';
+ end if;
+ if exists(select 1 from public.accounts a
+  where a.workspace_id=v_member.workspace_id and a.person_id=v_volunteer and a.status='deactivated') then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='DEACTIVATED';
+ end if;
+ if not v_role=any(v_roles) then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='ROLE_NOT_HELD';
+ end if;
+ select s.site_hours->(extract(isodow from v_date)::int)::text into v_hours
+  from public.schedule_settings s where s.workspace_id=v_member.workspace_id;
+ if v_hours is null then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='SITE_CLOSED';
+ end if;
+ v_open=(v_hours->>'open')::int;
+ v_close=(v_hours->>'close')::int;
+ if v_start<v_open or v_end>v_close then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='OUTSIDE_SITE_HOURS';
+ end if;
+ if exists(select 1 from public.shifts x
+  where x.workspace_id=v_member.workspace_id and x.person_id=v_volunteer and x.shift_date=v_date
+   and x.removed_at is null and x.id is distinct from p_shift_id
+   and x.start_hour<v_end and x.end_hour>v_start) then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='OVERLAP';
+ end if;
+ if p_shift_id is null then
+  insert into public.shifts(workspace_id,season,person_id,shift_date,start_hour,end_hour,role,
+    created_by_person_id,updated_by_person_id)
+   values(v_member.workspace_id,v_workspace.current_season,v_volunteer,v_date,v_start,v_end,v_role,
+    v_person.id,v_person.id)
+   returning * into v_shift;
+ else
+  update public.shifts set shift_date=v_date,start_hour=v_start,end_hour=v_end,role=v_role,
+   revision=revision+1,updated_at=now(),updated_by_person_id=v_person.id
+   where id=p_shift_id returning * into v_shift;
+ end if;
+ v_result=jsonb_build_object('shiftId',v_shift.id,'revision',v_shift.revision);
+ update public.action_receipts set target_id=v_shift.id,receipt=v_result where id=v_receipt.id;
+ return v_result;
+end;
+$$;
+revoke all on function public.vitally_save_shift(uuid,uuid,bigint,jsonb) from public,anon,authenticated,service_role;
+grant execute on function public.vitally_save_shift(uuid,uuid,bigint,jsonb) to authenticated;
+
+-- Removes a shift for a workspace admin only: removed_at is set and the
+-- revision goes up, which is the UPDATE realtime delivers (design D2). Order:
+-- FORBIDDEN, VALIDATION (a missing argument), the lock and receipt, NOT_FOUND
+-- (unknown or already removed), CONFLICT (a stale revision). Answers
+-- {shiftId, revision, removed: true}.
+create function public.vitally_remove_shift(p_action_id uuid,p_shift_id uuid,p_expected_revision bigint)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_shift public.shifts;
+ v_receipt public.action_receipts;
+ v_digest text;
+ v_result jsonb;
+begin
+ v_member=vitally_private.require_membership();
+ v_person=vitally_private.acting_person(v_member);
+ if v_member.access<>'staff' or v_person.id is null
+  or not vitally_policy.is_workspace_admin(v_member.workspace_id) then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ if p_action_id is null or p_shift_id is null or p_expected_revision is null then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_member.workspace_id::text,0));
+ v_digest=encode(extensions.digest(jsonb_build_object('operation','REMOVE_SHIFT','shiftId',p_shift_id,
+  'expectedRevision',p_expected_revision,'personId',v_person.id)::text,'sha256'),'hex');
+ v_receipt=vitally_private.reserve_receipt(v_member,p_action_id,'REMOVE_SHIFT',v_digest,v_person.id);
+ if v_receipt.receipt is not null then
+  return v_receipt.receipt;
+ end if;
+ select * into v_shift from public.shifts
+  where id=p_shift_id and workspace_id=v_member.workspace_id and removed_at is null for update;
+ if not found then
+  raise sqlstate 'VT002' using message='NOT_FOUND';
+ end if;
+ if v_shift.revision<>p_expected_revision then
+  raise sqlstate 'VT003' using message='CONFLICT';
+ end if;
+ update public.shifts set removed_at=now(),revision=revision+1,updated_at=now(),updated_by_person_id=v_person.id
+  where id=p_shift_id returning * into v_shift;
+ v_result=jsonb_build_object('shiftId',v_shift.id,'revision',v_shift.revision,'removed',true);
+ update public.action_receipts set target_id=v_shift.id,receipt=v_result where id=v_receipt.id;
+ return v_result;
+end;
+$$;
+revoke all on function public.vitally_remove_shift(uuid,uuid,bigint) from public,anon,authenticated,service_role;
+grant execute on function public.vitally_remove_shift(uuid,uuid,bigint) to authenticated;

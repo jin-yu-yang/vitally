@@ -83,6 +83,8 @@ const RPCS = Object.freeze([
   "vitally_season_settings()",
   "vitally_save_season_settings(p_action_id uuid, p_expected_revision bigint, p_settings jsonb)",
   "vitally_save_schedule_settings(p_action_id uuid, p_expected_revision bigint, p_settings jsonb)",
+  "vitally_save_shift(p_action_id uuid, p_shift_id uuid, p_expected_revision bigint, p_shift jsonb)",
+  "vitally_remove_shift(p_action_id uuid, p_shift_id uuid, p_expected_revision bigint)",
   "vitally_set_site_number(p_action_id uuid, p_sidn text)",
   "vitally_mark_upload_sent(p_action_id uuid, p_document text)",
   "vitally_mark_upload_reviewed(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_document text)",
