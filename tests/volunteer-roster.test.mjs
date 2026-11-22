@@ -516,7 +516,7 @@ test("rosterCsv leaves roles and certificates empty, labels accounts and guards 
     csvVolunteer({ phone: "+1 555 0100", account: { status: "invited" } }),
     csvVolunteer({ name: "Zed Tran", account: { status: "deactivated" } })
   ]);
-  assert.equal(lines[1], "Ana Lopez,ana@x.org,'+1 555 0100,,,—,Invited,No");
-  assert.equal(lines[2], "Zed Tran,ana@x.org,,,,—,Deactivated,No");
+  assert.equal(lines[1], "Ana Lopez,ana@x.org,'+1 555 0100,,,,Invited,No");
+  assert.equal(lines[2], "Zed Tran,ana@x.org,,,,,Deactivated,No");
   assert.match(csvLines([csvVolunteer()])[1], /,Not created,No$/);
 });

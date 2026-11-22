@@ -52,7 +52,7 @@ export const languagesText = (volunteer) => {
   return names.length ? names.join(", ") : "—";
 };
 
-const ACCOUNT_LABELS = Object.freeze({
+export const ACCOUNT_LABELS = Object.freeze({
   none: "Not created",
   invited: "Invited",
   active: "Active",
@@ -378,7 +378,7 @@ export function rosterCsv(volunteers) {
       v.phone,
       (v.roles ?? []).map(roleLabel).join("; "),
       certificateText(v),
-      languagesText(v),
+      (v.languages ?? []).length ? languagesText(v) : "",
       accountLabel(v),
       v.cleared ? "Yes" : "No"
     ])

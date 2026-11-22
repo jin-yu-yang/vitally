@@ -3,7 +3,7 @@
 // row says whether the volunteer is cleared (change add-volunteer-clearance).
 import { esc, button, icon, SENT_DAY, loadingLine, unloadedLine, emptyLine, confirmBody } from "./ui.mjs";
 import { drawerError } from "./office-views.mjs";
-import { ROLES, CERTIFICATES, WORKS, LANGUAGES, SHOW_VIEWS, filterVolunteers, languagesText, accountLabel } from "./volunteer-roster.mjs";
+import { ROLES, CERTIFICATES, WORKS, LANGUAGES, SHOW_VIEWS, filterVolunteers, languagesText, accountLabel, ACCOUNT_LABELS } from "./volunteer-roster.mjs";
 
 export { languagesText, accountLabel };
 
@@ -27,13 +27,6 @@ const MISSING_TEXT = Object.freeze({
   noAccount: "No account yet",
   notSignedIn: "Hasn't signed in yet",
   deactivated: "Account deactivated",
-});
-
-const ACCOUNT_LABELS = Object.freeze({
-  none: "Not created",
-  invited: "Invited",
-  active: "Active",
-  deactivated: "Deactivated",
 });
 
 // The name the volunteer gave at their site check, under the account status.
