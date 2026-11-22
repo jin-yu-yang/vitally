@@ -18,6 +18,7 @@ import {
   runFilePath,
   SEED_SCENARIOS,
   seedCases,
+  seedPastSeason,
   seedVolunteers,
   seedWorkspace,
 } from "../tools/admin/seed-cases.mjs";
