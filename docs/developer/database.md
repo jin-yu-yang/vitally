@@ -25,7 +25,7 @@ it. Run everything described here against the local stack from [`docs/setup.md`]
 
 ## Migrations
 
-The schema is fifty-seven plain SQL files (001 to 057) in [`supabase/migrations/`](../../supabase/migrations/), applied
+The schema is fifty-eight plain SQL files (001 to 058) in [`supabase/migrations/`](../../supabase/migrations/), applied
 in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 
 | File | Adds |
@@ -87,6 +87,7 @@ in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 | `055_start_next_season.sql` | Hand-written: Start next season (change `add-start-next-season`; [below](#start-next-season)). `lock_case` and `vitally_assistance_action` refuse a write to a past-season case (`VT004` `INVALID_TRANSITION`, detail `PAST_SEASON`); `open_work` counts only current-season cases; drops `vitally_private.capabilities_before_052`; the table `season_starts`; the RPC `vitally_start_next_season` |
 | `056_onedrive_client_documents.sql` | Hand-written: client documents through the OneDrive link (change `add-client-documents-onedrive`, #157). The RPC `vitally_client_documents_link` returns only the workspace's client documents upload link to a signed-in member (never the certificate / photo ID link); a client may report a document as sent only when that link is set, and only staff can mark it received or verified; `check_payload`, `receive_document`, `act_respond_document`, `act_set_document_card` and `act_record_document_response` re-created from their latest definitions |
 | `057_my_profile.sql` | Hand-written: My profile (change `add-my-profile`; [below](#my-profile)). `roster_entries.form_13615_reviewed_at`, `form_13615_review_reason`, `photo_id_reviewed_at` and `photo_id_review_reason` (each pair both null or both set, a reason of 1 to 120 characters), and `volunteer_profiles.usual_days`; `vitally_my_clearance` re-created from 053 with `reviewedAt` and `reviewReason` on the two document items and `uploadUrl` null while the site check is owed; `vitally_mark_upload_sent` re-created (sending again clears the reviewed pair); `vitally_save_volunteer` re-created to accept `usualDays` and clear the reviewed pairs with the sent dates; `vitally_mark_upload_reviewed` now takes a required reason (the four-argument version is dropped); the new RPCs `vitally_my_profile` and `vitally_save_my_profile` |
+| `058_remove_from_roster.sql` | Hand-written: removing a volunteer from this season's Roster (change `add-remove-from-roster`; [below](#removing-a-volunteer-from-the-roster)). The audit table `roster_removals` and the RPC `vitally_remove_from_roster`. No existing function or row changes |
 **Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
 never edit an applied one.** The build writes a file only when the hash differs from the newest
 catalogue migration's. The hash covers the catalogue and `LOADER_VERSION` in
@@ -137,6 +138,7 @@ do not copy them from older files:
 | `vitally_private.household_rows`, `act_save_preparer_fields` | `050_hidden_household_rows.sql` |
 | `vitally_private.check_preparer_fields` | `039_preparer_shaded_fields.sql` |
 | `vitally_private.lock_case`, `open_work`, and the RPCs `public.vitally_assistance_action`, `vitally_start_next_season` | `055_start_next_season.sql` |
+| `public.vitally_remove_from_roster` and the table `public.roster_removals` | `058_remove_from_roster.sql` |
 | `vitally_private.acting_person`, `contact_person`, `require_cleared`, the role helpers, `role_certificates_check`, `vitally_policy.cleared_workspace_id`, and the RPCs `public.vitally_create_case`, `vitally_log_contact`, `vitally_edit_contact` | `045_volunteer_clearance.sql` |
 | `vitally_private.audience_member`, `vitally_policy.in_update_audience`, `vitally_policy.unpublished_read_window`, and the RPCs `public.vitally_save_update`, `vitally_update_action`, `vitally_mark_updates`, `vitally_my_updates`, `vitally_posted_updates` | `049_posted_updates.sql` |
 | `public.vitally_save_volunteer`, `vitally_my_clearance`, `vitally_mark_upload_sent`, `vitally_mark_upload_reviewed` (five arguments), and the RPCs `vitally_my_profile`, `vitally_save_my_profile` | `057_my_profile.sql` (053 introduced the first four; see [My profile](#my-profile)) |
@@ -243,6 +245,7 @@ erDiagram
 | `vitally_private.intake_substeps` | The version-2 sub-steps, in order | Private; one row per catalogue sub-step (id, step, position), loaded with the catalogue through 015's `load_intake_catalogue`; read by SAVE_ANSWERS' `visited` check |
 | `assistance_items` | Requests for help with forms, beside the tax workflow | Own `revision`; `status`: `open` → `assigned` → `resolved`; optional `case_id`; `language`, `contact_preference` |
 | `season_starts` | One row per Start next season (055) | `from_season`, `to_season` (always `from_season` + 1), `started_by_person_id`, `started_at`, `default_followup_from` and `default_followup_to` (both null when the default follow-up person was kept), `deactivated_count`. Row security on, no policy, no grant to signed-in users and none for `service_role` (as on 049's, 051's and 054's tables); written only by `vitally_start_next_season`; not published |
+| `roster_removals` | One row per removal from the Roster (058) | `season`, `person_id` and `removed_by_person_id` (historical scalars, no key), `removed_at`, `account_deactivated`. Row security on with no policy, and no grant to any browser role or `service_role`; only `vitally_remove_from_roster` writes it, and no screen reads it |
 | `vitally_private.schema_migrations` | Migration ledger | `name`, `digest` (SHA-256 of the file) |
 | `vitally_private.test_workspaces` | Workspaces created by test runs | Test only |
 
@@ -326,6 +329,7 @@ they belong.
 | `vitally_mark_upload_reviewed(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_document text, p_reason text)` | A workspace admin clears a volunteer's sent date and records why (053; 057 adds the required reason; [below](#clearance-uploads)) | `{actionId, personId, revision}` |
 | `vitally_my_profile()` | The caller's own profile (057; any staff member with a person and profile row, cleared or not, once the site check is passed: `FORBIDDEN` while the account is `invited`; [below](#my-profile)) | `{personId, name, email, phone, works, languages, otherLanguage, usualDays, revision, accountStatus, roles, certificates, form13615, uploadUrl, siteCoordinatorName}` |
 | `vitally_save_my_profile(p_action_id uuid, p_expected_revision bigint, p_profile jsonb)` | The caller saves their own name, phone, works, languages, other language and usual days (057; `FORBIDDEN` while the account is `invited`; [below](#my-profile)) | `{actionId, personId, revision}` |
+| `vitally_remove_from_roster(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)` | A workspace admin takes a volunteer off this season's Roster and deactivates their account unless it is a site coordinator's (058; [below](#removing-a-volunteer-from-the-roster)) | `{actionId, volunteerId, revision, accountDeactivated}` |
 | `vitally_save_update(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_update jsonb)` | Save a draft, post it, or edit a draft, a posted update or an unpublished one (049; workspace admins). An unpublished update stays unpublished, with its reads and `unpublished_at`; `post` changes nothing there and `askAgain` is refused (`VT007`, detail `askAgain`). `askAgain` on a posted update clears every read and confirmation | `{actionId, updateId, revision, status}` |
 | `vitally_update_action(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_type text)` | `POST` a draft, `UNPUBLISH` a posted update, or `DELETE` a draft (049; workspace admins). A replayed delete answers `deleted` | `{actionId, updateId, revision, status}` |
 | `vitally_mark_updates(p_update_ids uuid[], p_confirm boolean)` | Record that the caller read up to 200 updates in their feed, and with `p_confirm` that they confirmed them (049; any staff member). No receipt: a repeat changes nothing | `{marked}` |
@@ -537,6 +541,53 @@ a document came back.
   date or a reason, never both. Only workspace admins read the new columns (the 044 policy).
 - **`volunteer_profiles.usual_days`** is a text array of `mon` to `sun`, no repeats; it is a habit, not
   seasonal, so it is not on the roster entry.
+
+### Removing a volunteer from the roster
+
+Migration 058 (change `add-remove-from-roster`; the behaviour is in the change's specs, and in
+`openspec/specs/` once archived) lets a workspace admin take a person off this season's Roster in one
+confirmed step.
+
+- **`vitally_remove_from_roster(p_action_id, p_volunteer_id, p_expected_revision)`** deletes the
+  person's current-season `roster_entries` row, and with it their certificates (`on delete cascade`)
+  and the sent and reviewed fields. The mirror trigger (052) empties `people.capabilities`. The person
+  and their `volunteer_profiles` row, usual days included, stay, so the returning-volunteer picker can
+  add them back. Earlier seasons' entries are never touched. The receipt is `REMOVE_FROM_ROSTER`:
+  `{actionId, volunteerId, revision, accountDeactivated}`. No email is sent.
+- **Order of checks:**
+  1. Not a workspace admin (a site coordinator, or the Admin role this season; cleared or not) is
+     `FORBIDDEN`, with no receipt.
+  2. A null argument is `VALIDATION`. The caller's own row is `VALIDATION` with detail `SELF`. It comes
+     before `ADMIN_ROLE`: every admin who isn't a site coordinator holds the Admin role, so after it
+     they would never see `SELF`.
+  3. The workspace advisory lock.
+  4. A person who holds the Admin role this season, removed by a caller who isn't a site coordinator, is
+     `FORBIDDEN` with message `ADMIN_ROLE` (052 rule 3), before the receipt, as Save does.
+  5. The receipt is reserved, so a repeated action id returns the stored answer although its revision is
+     now stale.
+  6. Invitations past their expiry are cancelled.
+  7. The profile, `for update`: `NOT_FOUND` if there is none in the workspace, `CONFLICT` if its revision
+     differs from `p_expected_revision`.
+  8. The current-season entry, `for update`: `NOT_FOUND` if there is none.
+  9. A site coordinator, removed by a caller who isn't one, is `FORBIDDEN`.
+  10. Open work: `VT004` `OPEN_WORK` with the labels as JSON in the detail, from the whole `open_work`
+      list. Unlike Save, a site coordinator who is the default follow-up person is not excused.
+- **Locks, in order:** the workspace advisory lock, the profile, the entry, the account. That is Save's
+  order, and Save, Deactivate, Start next season and Remove all take the workspace lock first, so none
+  of them can deadlock with another.
+- **The account.** When it is `invited` or `active` and not a site coordinator's, the same transaction
+  calls `deactivate_account` (never `cancel_invitation`, so adding the person back means Reactivate).
+  With no account, or one already `deactivated`, only the entry is deleted, so a Remove racing a
+  Deactivate never answers `INVALID_TRANSITION`: if Deactivate ran first, Remove succeeds and skips it;
+  if Remove ran first, the account revision moved and Deactivate gets `CONFLICT`. A site coordinator's
+  account is never passed to `deactivate_account`: they stay one, with no roles this season, so
+  `LAST_SITE_COORDINATOR` cannot be reached from here.
+- **The profile revision goes up.** Save inserts or updates the current-season entry, so without this a
+  second admin's open drawer could save afterwards and quietly put the person back. With it, that Save
+  gets `CONFLICT`.
+- **`roster_removals`** records who removed whom, and when, because the removal destroys the season's
+  certificates and dates and receipts carry no time. Nothing reads it. A person removed in their first
+  season is offered by the picker only when their full email is typed.
 
 ### Posted updates
 
