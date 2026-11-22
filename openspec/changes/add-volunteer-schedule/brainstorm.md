@@ -205,3 +205,6 @@ This change had built overlapping versions of all of these.
 → **Follow main: cleared only** (user, 2026-11-22). Uncleared rostered volunteers keep the read-only Schedule. This narrows the original Q5 answer for My profile only; the Schedule still goes to every rostered viewer.
 
 **Unchanged:** the Schedule, coverage, site hours and targets, drag, the Workload column, and live updates on the Schedule.
+
+**Q13. What re-reads on a site-hours change?** The final review found the spec saying a change to shifts or schedule settings re-reads My profile's shifts and the Workload hours, while the code re-reads those two only on shift changes (and a new season). Options: narrow the spec; change the code to match.
+→ **Narrow the spec** (user, 2026-11-22). Site hours and targets can't change the caller's shifts or anyone's hours, so the extra reads would be wasted. A change to shifts or schedule settings re-reads the open Schedule. A change to shifts re-reads My profile's shifts and the Workload hours. No code change.

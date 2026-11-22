@@ -249,10 +249,7 @@ The section SHALL be read through `vitally_my_shifts()`. That read SHALL take no
 - **THEN** it is refused with `FORBIDDEN`
 
 ### Requirement: Schedule screens follow changes live and on focus
-Shifts and the schedule settings SHALL be delivered by realtime to schedule viewers, under the reading rules above. A change SHALL make:
-- an open Schedule re-read the day on screen;
-- an open My profile re-read its shifts this week;
-- an open Workload re-read its hours.
+Shifts and the schedule settings SHALL be delivered by realtime to schedule viewers, under the reading rules above. A change to shifts or the schedule settings SHALL make an open Schedule re-read the day on screen. A change to shifts SHALL make an open My profile re-read its shifts this week and an open Workload re-read its hours.
 
 An uncleared window SHALL hold a realtime connection only while it is on the Schedule, and SHALL read nothing but the schedule day from it. The screens SHALL also re-read when the window regains focus. A change refused with `CONFLICT` SHALL re-read the day, and say "Someone changed this shift. The schedule has been refreshed." Usual days SHALL NOT be published to realtime.
 

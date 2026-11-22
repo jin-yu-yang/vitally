@@ -208,7 +208,7 @@ By the user's decision, this change adopts all of that. It drops its own usual-d
 ### D10: Realtime and re-reads
 - **Choice:**
   - `shifts` and `schedule_settings` join `supabase_realtime` with 049's DO block, and join `STAFF_TABLES` in the store.
-  - A change on either table makes an open Schedule re-read its day, an open My profile re-read its shifts this week (cleared windows; D8), and a Workload re-read its shifts.
+  - A change on either table makes an open Schedule re-read its day. A change to `shifts` (or a new season) makes an open My profile re-read its shifts this week (cleared windows; D8) and a Workload re-read its shifts. A `schedule_settings` change does not re-read those two, because site hours and targets can't change either list (user decision 2026-11-22).
   - An uncleared window holds the realtime channel only while it is on the Schedule, and routes only `shifts` and `schedule_settings` to the day read.
   - Season settings re-reads on a `schedule_settings` change (cleared windows; ruling R11).
   - Focus re-reads these screens as it does the Roster.
