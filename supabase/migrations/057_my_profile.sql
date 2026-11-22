@@ -20,10 +20,10 @@ alter table public.roster_entries
  add column photo_id_review_reason text,
  add constraint roster_entries_13615_review_pair check (
   (form_13615_reviewed_at is null and form_13615_review_reason is null)
-  or (form_13615_reviewed_at is not null and form_13615_review_reason is not null and char_length(btrim(form_13615_review_reason)) between 1 and 120)),
+  or (form_13615_reviewed_at is not null and form_13615_review_reason=btrim(form_13615_review_reason,E' \t\n\r') and char_length(form_13615_review_reason) between 1 and 120)),
  add constraint roster_entries_photo_review_pair check (
   (photo_id_reviewed_at is null and photo_id_review_reason is null)
-  or (photo_id_reviewed_at is not null and photo_id_review_reason is not null and char_length(btrim(photo_id_review_reason)) between 1 and 120));
+  or (photo_id_reviewed_at is not null and photo_id_review_reason=btrim(photo_id_review_reason,E' \t\n\r') and char_length(photo_id_review_reason) between 1 and 120));
 alter table public.volunteer_profiles
  add column usual_days text[] not null default '{}',
  add constraint volunteer_profiles_usual_days check (
@@ -282,7 +282,7 @@ begin
    raise sqlstate 'VT007' using message='VALIDATION';
   end if;
  end loop;
- v_name=btrim(p_volunteer->>'name');
+ v_name=btrim(p_volunteer->>'name',E' \t\n\r'); -- 057
  v_email=lower(btrim(p_volunteer->>'email'));
  v_phone=nullif(btrim(p_volunteer->>'phone'),'');
  v_works=p_volunteer->>'works';
@@ -451,11 +451,11 @@ begin
   or p_document is null or p_document not in ('form13615','photoId') then
   raise sqlstate 'VT007' using message='VALIDATION';
  end if;
- if p_reason is null or char_length(btrim(p_reason)) not between 1 and 120 then -- 057
+ if p_reason is null or char_length(btrim(p_reason,E' \t\n\r')) not between 1 and 120 then -- 057
   raise sqlstate 'VT007' using message='VALIDATION'; -- 057
  end if; -- 057
  v_digest=encode(extensions.digest(jsonb_build_object('operation','MARK_UPLOAD_REVIEWED','volunteerId',p_volunteer_id,
-  'expectedRevision',p_expected_revision,'document',p_document,'reason',btrim(p_reason),'personId',v_person.id)::text,'sha256'),'hex'); -- 057
+  'expectedRevision',p_expected_revision,'document',p_document,'reason',btrim(p_reason,E' \t\n\r'),'personId',v_person.id)::text,'sha256'),'hex'); -- 057
  v_receipt=vitally_private.reserve_receipt(v_member,p_action_id,'MARK_UPLOAD_REVIEWED',v_digest,v_person.id);
  if v_receipt.receipt is not null then
   return v_receipt.receipt;
@@ -471,10 +471,10 @@ begin
  v_revision=v_profile.revision;
  select current_season into v_season from public.workspaces where id=v_member.workspace_id;
  if p_document='form13615' then
-  update public.roster_entries set form_13615_sent_at=null,form_13615_reviewed_at=now(),form_13615_review_reason=btrim(p_reason) -- 057
+  update public.roster_entries set form_13615_sent_at=null,form_13615_reviewed_at=now(),form_13615_review_reason=btrim(p_reason,E' \t\n\r') -- 057
    where workspace_id=v_member.workspace_id and person_id=p_volunteer_id and season=v_season and form_13615_sent_at is not null;
  else
-  update public.roster_entries set photo_id_sent_at=null,photo_id_reviewed_at=now(),photo_id_review_reason=btrim(p_reason) -- 057
+  update public.roster_entries set photo_id_sent_at=null,photo_id_reviewed_at=now(),photo_id_review_reason=btrim(p_reason,E' \t\n\r') -- 057
    where workspace_id=v_member.workspace_id and person_id=p_volunteer_id and season=v_season and photo_id_sent_at is not null;
  end if;
  v_waiting=found;
@@ -609,7 +609,7 @@ begin
   or exists(select 1 from jsonb_array_elements(p_profile->'usualDays') e where jsonb_typeof(e)<>'string') then
   raise sqlstate 'VT007' using message='VALIDATION';
  end if;
- v_name=btrim(p_profile->>'name');
+ v_name=btrim(p_profile->>'name',E' \t\n\r');
  v_phone=nullif(btrim(p_profile->>'phone'),'');
  v_works=p_profile->>'works';
  v_other=nullif(btrim(p_profile->>'otherLanguage'),'');

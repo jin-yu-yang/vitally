@@ -305,6 +305,19 @@ test("usual days on the admin save", async (t) => {
       assert.equal(String(after.revision), String(before.revision));
     });
 
+    await t.test("a name of only a line break is refused, and a padded one is trimmed", async () => {
+      const m = await f.staff({ key: "ud_blank", name: "Tove Marchetti", capabilities: ["prepare"] });
+      const before = await profileOf(m);
+      for (const name of ["\n", "\t\r\n "]) {
+        const { error } = await save(m, { name });
+        assert.equal(error?.code, "VT007", JSON.stringify(name));
+      }
+      assert.equal(String((await profileOf(m)).revision), String(before.revision));
+      await savedOk(m, { name: "\tTove Marchetti\n" });
+      const { rows } = await f.sql("select name from public.people where id=$1", [m.personId]);
+      assert.equal(rows[0].name, "Tove Marchetti");
+    });
+
     await t.test("an eleventh unknown key is still refused", async () => {
       const m = await f.staff({ key: "ud_key", name: "Xena Fairbanks", capabilities: ["prepare"] });
       const { error } = await save(m, { colour: "x" });
@@ -608,6 +621,9 @@ test("my profile RPCs against real Supabase", async (t) => {
         const cases = [
           { name: "x".repeat(81) },
           { name: "   " },
+          // Tabs and line breaks are blanks too, as in 049.
+          { name: "\n" },
+          { name: "\t\r\n" },
           { works: "sometimes" },
           { otherLanguage: "Welsh" },
           { languages: ["other"], otherLanguage: null },

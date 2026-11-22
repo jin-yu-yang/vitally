@@ -569,12 +569,16 @@ test("reviewing sent uploads against real Supabase", async (t) => {
       await send(m, "form13615");
       await reviewed(m, "form13615", { reason: "  Wrong form  " });
       assert.equal((await entryOf(m)).form_13615_review_reason, "Wrong form");
+      await send(m, "form13615");
+      await reviewed(m, "form13615", { reason: "\n\tNot signed\r\n" });
+      assert.equal((await entryOf(m)).form_13615_review_reason, "Not signed");
     });
 
     await t.test("Mark reviewed with no reason is refused VALIDATION with no receipt", async () => {
       const m = await uncleared("rev_noreason", "Emil Strand");
       await send(m, "form13615");
-      for (const reason of [null, "   "]) {
+      // Tabs and line breaks are blanks too, as in 049.
+      for (const reason of [null, "   ", "\n\t"]) {
         const actionId = randomUUID();
         const { error } = await review(m, "form13615", { actionId, revision: await revisionOf(m), reason });
         assert.equal(error?.code, "VT007", `reason ${JSON.stringify(reason)}`);
