@@ -6,15 +6,15 @@
 ## 2. Roster data
 
 - [x] 2.1 `combineVolunteers` carries each confirmed certificate's confirmation date; unit test
-- [ ] 2.2 New store method `listEarlierVolunteers()`: the profiles of people with no current-season roster entry, each with `lastSeason` (on the `current_season - 1` roster); `readVolunteers` reads it alongside `listVolunteers()` into `state.earlierVolunteers` (design D5); store and controller unit tests
-- [ ] 2.3 Pure helpers in `src/volunteer-roster.mjs`: the picker's candidates (last season's people not on this roster, filtered by name or email; full-email match on any other profile, labelled "Earlier volunteer") and the form values a pick fills (person fields and usual days; not new, photo ID unticked, no roles, no certificates); unit tests
-- [ ] 2.4 Form validation: an email belonging to a profile not on the current roster gives "That email belongs to an earlier volunteer. Pick them above."; an email on the current Roster keeps "That email is already on the Roster."; unit tests
+- [x] 2.2 New store method `listEarlierVolunteers()`: the profiles of people with no current-season roster entry, each with `lastSeason` (on the `current_season - 1` roster); `readVolunteers` reads it alongside `listVolunteers()` into `state.earlierVolunteers` (design D5); store and controller unit tests
+- [x] 2.3 Pure helpers in `src/volunteer-roster.mjs`: the picker's candidates (last season's people not on this roster, filtered by name or email; full-email match on any other profile, labelled "Earlier volunteer") and the form values a pick fills (person fields and usual days; not new, photo ID unticked, no roles, no certificates); unit tests
+- [x] 2.4 Form validation: an email belonging to a profile not on the current roster gives "That email belongs to an earlier volunteer. Pick them above."; an email on the current Roster keeps "That email is already on the Roster."; unit tests
 
 ## 3. Picker in Add a volunteer
 
 - [ ] 3.1 Render the search box "Returning volunteer? Search last season's roster" and its list at the top of the Add drawer, with "Earlier volunteer" labels; view unit tests
 - [ ] 3.2 Pick and "Not this person" actions: a pick fills the form, locks the email and carries the person id and profile revision; "Not this person" restores a blank Add with New ticked
-- [ ] 3.3 Save of a picked person sends `vitally_save_volunteer` with that person id and profile revision (the Edit call); conflicts handled as for Edit; controller unit tests
+- [x] 3.3 Save of a picked person sends `vitally_save_volunteer` with that person id and profile revision (the Edit call); conflicts handled as for Edit; controller unit tests
 
 ## 4. Roster CSV export
 
