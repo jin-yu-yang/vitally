@@ -51,12 +51,12 @@
 
 ## 4. Store, clearance and controller
 
-- [ ] 4.1 `src/supabase-store.mjs`:
+- [x] 4.1 `src/supabase-store.mjs`:
   - `markUploadReviewed` sends `p_reason`;
   - add `getMyProfile()` and `saveMyProfile(request)`;
   - `listVolunteers` and `src/volunteer-roster.mjs` carry `usualDays` and the four review fields;
   - `saveVolunteer` sends `usualDays`.
-- [ ] 4.2 `src/clearance.mjs`: `uploadItems` carries `reviewedAt` and `reviewReason`. Add a shared helper that gives the D8 line for an item: the already-on-file line only for a 13615 whose reason is exactly "Already on file"; every photo ID reason gets the generic line. Unit tests.
+- [x] 4.2 `src/clearance.mjs`: `uploadItems` carries `reviewedAt` and `reviewReason`. Add a shared helper that gives the D8 line for an item: the already-on-file line only for a 13615 whose reason is exactly "Already on file"; every photo ID reason gets the generic line. Unit tests.
 - [ ] 4.3 `src/controller.mjs`:
   - `markUploadReviewed(document, reason)`;
   - a `my-profile` screen with its read state;
