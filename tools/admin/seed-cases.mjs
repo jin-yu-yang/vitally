@@ -714,12 +714,14 @@ export async function seedSchedule(
 // the 8 volunteers (kept if already there, so a repeat call is safe). This is the spec's one exception to going through
 // `vitally_save_volunteer`, which writes only the current season: these rows
 // are written directly with SQL, in one transaction. A re-run first deletes
-// the earlier three (no sign-in only; the foreign keys remove their rows), so
-// a person an admin has since added to the current season is replaced too. A
-// person with a sign-in, or one who holds a live shift (an admin added it;
-// the seeded ones are already removed), is left alone, so no shift is deleted
-// with them (change add-volunteer-schedule). Only `seedWorkspace` calls this, like
-// `seedVolunteers`. Local only. Returns the number of people added.
+// the earlier three (the foreign keys remove their rows), so a person an
+// admin has since added to the current season is replaced too. The exception
+// is a person with a sign-in, or one who holds a live shift (an admin gave it;
+// the seeded ones are already removed): they are neither deleted nor
+// re-created, so no shift goes with them (change add-volunteer-schedule). The
+// previous-season entry for one of the 8 volunteers only adds a row, so only
+// a sign-in stops it. Only `seedWorkspace` calls this, like `seedVolunteers`.
+// Local only. Returns the number of people added.
 export async function seedPastSeason(client, { workspaceId, actorPersonId }) {
   const { rows } = await client.query(
     "select current_season from public.workspaces where id=$1",
@@ -742,20 +744,23 @@ export async function seedPastSeason(client, { workspaceId, actorPersonId }) {
                              and s.removed_at is null)`,
       [workspaceId, past.map((v) => v.email)],
     );
-    const withSignIn = new Set(
-      (
-        await client.query(
-          `select lower(v.email) as email
-             from public.people p join public.volunteer_profiles v
-               on v.person_id = p.id and v.workspace_id = p.workspace_id
-            where p.workspace_id = $1
-              and (p.user_id is not null
-                   or exists (select 1 from public.shifts s
-                               where s.person_id = p.id and s.workspace_id = p.workspace_id
-                                 and s.removed_at is null))`,
-          [workspaceId],
-        )
-      ).rows.map((row) => row.email),
+    const emailsWhere = async (condition) =>
+      new Set(
+        (
+          await client.query(
+            `select lower(v.email) as email
+               from public.people p join public.volunteer_profiles v
+                 on v.person_id = p.id and v.workspace_id = p.workspace_id
+              where p.workspace_id = $1 and ${condition}`,
+            [workspaceId],
+          )
+        ).rows.map((row) => row.email),
+      );
+    const withSignIn = await emailsWhere("p.user_id is not null");
+    const withShift = await emailsWhere(
+      `exists (select 1 from public.shifts s
+                where s.person_id = p.id and s.workspace_id = p.workspace_id
+                  and s.removed_at is null)`,
     );
     const entry = async (personId, roles, certificates) => {
       await client.query(
@@ -777,7 +782,8 @@ export async function seedPastSeason(client, { workspaceId, actorPersonId }) {
     };
     let added = 0;
     for (const v of past) {
-      if (withSignIn.has(v.email.toLowerCase())) continue;
+      const key = v.email.toLowerCase();
+      if (withSignIn.has(key) || withShift.has(key)) continue;
       const { rows: created } = await client.query(
         `insert into public.people (workspace_id, person_key, name, capabilities)
          values ($1, 'v_' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 12), $2, '{}')

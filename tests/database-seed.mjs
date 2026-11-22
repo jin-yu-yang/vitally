@@ -1194,6 +1194,81 @@ test("seed command against real Supabase", async (t) => {
       }
     });
 
+    // Change add-volunteer-schedule (spec local-seed-data, "A picked person with a shift is kept").
+    await t.test("a re-run keeps a previous-season person an admin added and gave a shift", async () => {
+      const runDir = await tempRunDir();
+      const args = { workspaceId: f.workspaceId, clientAEmail: f.applicantAEmail, runDir };
+      const past = SEED_VALUES.SEED_PAST_VOLUNTEERS;
+      const today = (await f.sql("select (now() at time zone 'America/New_York')::date::text as d")).rows[0].d;
+      const saturday = addDays(weekBounds(today).monday, 5);
+      const personRows = async (email) =>
+        (
+          await f.sql(
+            `select p.id, array(select e.season::int from public.roster_entries e
+                                 where e.person_id=p.id order by e.season) as seasons
+               from public.people p join public.volunteer_profiles v on v.person_id=p.id
+              where p.workspace_id=$1 and v.email=$2`,
+            [f.workspaceId, email],
+          )
+        ).rows;
+      try {
+        await resetSchedule();
+        await seedWorkspace(args);
+        const picked = past[0];
+        const [before] = await personRows(picked.email);
+        const others = [];
+        for (const v of past.slice(1)) others.push((await personRows(v.email))[0].id);
+        // The admin adds the picked person to the current season and confirms the role's certificates.
+        await f.sql(
+          `insert into public.roster_entries(workspace_id,person_id,season,roles)
+           select p.workspace_id,p.id,w.current_season,'{}'
+             from public.people p join public.workspaces w on w.id=p.workspace_id
+            where p.id=$1 and p.workspace_id=$2`,
+          [before.id, f.workspaceId],
+        );
+        for (const certificate of picked.certificates)
+          await f.sql(
+            `insert into public.certificates(workspace_id,person_id,season,certificate,status,confirmed_at,confirmed_by_person_id)
+             select $1,$2,w.current_season,$3,'confirmed',now(),$4 from public.workspaces w where w.id=$1
+             on conflict do nothing`,
+            [f.workspaceId, before.id, certificate, f.siteCoordinatorId],
+          );
+        await f.sql(
+          `update public.roster_entries e set roles=$3::text[]
+             from public.workspaces w
+            where e.workspace_id=w.id and w.id=$1 and e.person_id=$2 and e.season=w.current_season`,
+          [f.workspaceId, before.id, picked.roles],
+        );
+        const { data: own, error } = await f.siteCoordinator.rpc("vitally_save_shift", {
+          p_action_id: randomUUID(),
+          p_shift_id: null,
+          p_expected_revision: null,
+          p_shift: { volunteerId: before.id, date: saturday, startHour: 11, endHour: 12, role: picked.roles[0] },
+        });
+        assert.equal(error, null);
+
+        await seedWorkspace(args);
+
+        const after = await personRows(picked.email);
+        assert.equal(after.length, 1);
+        assert.equal(after[0].id, before.id, "the same person");
+        assert.equal(after[0].seasons.length, 2, "both roster entries are still there");
+        const mine = (await f.sql("select removed_at from public.shifts where id=$1", [own.shiftId])).rows;
+        assert.equal(mine.length, 1, "the admin's shift row is still there");
+        assert.equal(mine[0].removed_at, null, "and still live");
+        for (const [i, v] of past.slice(1).entries()) {
+          const rows = await personRows(v.email);
+          assert.equal(rows.length, 1);
+          assert.notEqual(rows[0].id, others[i], "the other previous-season people are re-seeded");
+          assert.equal(rows[0].seasons.length, 1);
+        }
+      } finally {
+        await deletePreviousRun(client, await readRun(f.workspaceId, runDir));
+        await resetSchedule();
+        await rm(runDir, { recursive: true, force: true });
+      }
+    });
+
     await t.test("a plain re-run leaves one seeded set and the same eight volunteers", async () => {
       const runDir = await tempRunDir();
       const args = { workspaceId: f.workspaceId, clientAEmail: f.applicantAEmail, runDir };
