@@ -544,6 +544,13 @@ export function createController({
   let pendingShiftWrite = null;
   // My profile's usual-days save whose answer never came, kept the same way.
   let pendingProfileWrite = null;
+  // The revision a draft of the site hours card, or of My profile's usual
+  // days, started from (ruling R13): set at the person's first change since
+  // the last save, CONFLICT re-read or page open, and sent by Save, so a
+  // live or focus re-read that moves the page never lets an unsent draft
+  // overwrite a change it never saw. null while there is no draft.
+  let siteHoursBaseRevision = null;
+  let usualDaysBaseRevision = null;
   let pendingUpdateAction = null;
   // The screening start for the open case, if one is due or held:
   // `{ action, inFlight, gaveUp }` (`startScreeningIfDue`).
@@ -1915,6 +1922,7 @@ export function createController({
     state.myProfile = null;
     state.myProfileUi = freshProfileUi();
     pendingProfileWrite = null;
+    usualDaysBaseRevision = null;
     state.screen = homeScreen();
   }
 
@@ -1953,12 +1961,23 @@ export function createController({
     if (state.screen !== "my-profile") return;
     state.myProfile = null;
     state.myProfileUi = freshProfileUi();
+    usualDaysBaseRevision = null;
     state.lists = { ...state.lists, myProfile: "loading" };
     show();
     await loadMyProfile();
   }
 
-  // Save the usual days: sorted, each once, at the profile revision read.
+  // The person's first change to the usual days since the last save,
+  // CONFLICT re-read or page open: the draft starts from the revision on
+  // screen (ruling R13).
+  function beginUsualDaysEdit() {
+    if (usualDaysBaseRevision !== null || state.screen !== "my-profile") return;
+    const revision = state.myProfile?.profileRevision;
+    if (revision != null) usualDaysBaseRevision = Number(revision);
+  }
+
+  // Save the usual days: sorted, each once, at the revision the draft
+  // started from (or, with no draft begun, the one read).
   // A CONFLICT reads the profile again and says so on the page; a lost answer
   // is kept and sent again for the same days. Resolves to the toast's text,
   // or null.
@@ -1966,7 +1985,7 @@ export function createController({
     const profile = state.myProfile;
     if (state.busy || !staffWindow() || state.screen !== "my-profile" || !profile || profile.profileRevision == null) return null;
     const sorted = [...new Set((days ?? []).map(Number).filter((day) => Number.isInteger(day)))].sort((a, b) => a - b);
-    const revision = Number(profile.profileRevision);
+    const revision = usualDaysBaseRevision ?? Number(profile.profileRevision);
     const key = JSON.stringify({ days: sorted, revision });
     let request = pendingProfileWrite?.key === key ? pendingProfileWrite.request : null;
     pendingProfileWrite = null;
@@ -1982,8 +2001,11 @@ export function createController({
     } catch (error) {
       state.busy = false;
       if (UNKNOWN_OUTCOME.includes(error?.code)) pendingProfileWrite = { key, request };
-      if (error?.code === "CONFLICT") state.myProfileUi = { notice: STAFF_USUAL_DAYS_CONFLICT_MESSAGE };
-      else noteFailure(error);
+      if (error?.code === "CONFLICT") {
+        state.myProfileUi = { notice: STAFF_USUAL_DAYS_CONFLICT_MESSAGE };
+        // The re-read below is what the next draft starts from.
+        usualDaysBaseRevision = null;
+      } else noteFailure(error);
       // What the save did, or what changed under it: the profile as it is now.
       await readMyProfile().catch(() => {});
       show();
@@ -1991,6 +2013,7 @@ export function createController({
     }
     state.busy = false;
     noteConnected();
+    usualDaysBaseRevision = null;
     if (state.myProfile && answer && Array.isArray(answer.usualDays))
       state.myProfile = { ...state.myProfile, usualDays: answer.usualDays, profileRevision: answer.profileRevision };
     try {
@@ -2106,7 +2129,7 @@ export function createController({
   // beside it; a CONFLICT is said in the card, which the re-read redraws.
   // Resolves to the toast's text, or null.
   async function saveScheduleSettings(settings) {
-    const revision = Number(state.seasonSettings?.schedule?.revision ?? 0);
+    const revision = siteHoursBaseRevision ?? Number(state.seasonSettings?.schedule?.revision ?? 0);
     const answer = await settingsWrite(
       JSON.stringify({ type: "site-hours", settings, revision }),
       () => ({ actionId: newActionId(), revision, settings }),
@@ -2126,12 +2149,23 @@ export function createController({
             ...state.seasonSettingsUi,
             notice: { place: "site-hours", text: STAFF_SETTINGS_CONFLICT_MESSAGE },
           };
+          // The re-read is what the next draft starts from.
+          siteHoursBaseRevision = null;
           return true;
         }
         return false;
       },
     );
+    if (answer) siteHoursBaseRevision = null;
     return answer ? STAFF_SITE_HOURS_SAVED : null;
+  }
+
+  // The person's first change to the site hours card since the last save,
+  // CONFLICT re-read or page open: the draft starts from the revision on
+  // screen (ruling R13).
+  function beginSiteHoursEdit() {
+    if (siteHoursBaseRevision !== null || state.screen !== "office-settings" || !state.seasonSettings) return;
+    siteHoursBaseRevision = Number(state.seasonSettings.schedule?.revision ?? 0);
   }
 
   // Change the SIDN. Spaces, hyphens and case are ignored here as they are
@@ -3022,11 +3056,13 @@ export function createController({
     state.seasonSettings = null;
     state.seasonSettingsUi = freshSettingsUi();
     pendingSettingsWrite = null;
+    siteHoursBaseRevision = null;
     state.schedule = freshSchedule();
     pendingShiftWrite = null;
     state.myProfile = null;
     state.myProfileUi = freshProfileUi();
     pendingProfileWrite = null;
+    usualDaysBaseRevision = null;
     state.assistance = [];
     state.workspace = null;
     state.openPanels = [];
@@ -3077,6 +3113,9 @@ export function createController({
     if (screen !== "schedule") state.schedule = { ...state.schedule, drawer: null };
     // Season settings starts without an earlier visit's sentences.
     if (screen === "office-settings") state.seasonSettingsUi = freshSettingsUi();
+    // Leaving or opening a page ends its draft, and the revision it began at.
+    siteHoursBaseRevision = null;
+    usualDaysBaseRevision = null;
     // A new office draft belongs to the Add a case page: leaving drops it.
     if (screen !== "office-add-case") {
       state.officeDraft = false;
@@ -5481,6 +5520,8 @@ export function createController({
     loadMyProfile,
     saveMyUsualDays,
     saveScheduleSettings,
+    beginUsualDaysEdit,
+    beginSiteHoursEdit,
     openShiftDrawer,
     editShiftDraft,
     saveShift,

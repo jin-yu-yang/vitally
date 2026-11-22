@@ -490,6 +490,8 @@ if (!config) {
     const days = [...group.querySelectorAll('[data-day][aria-pressed="true"]')].map((day) => day.dataset.day).join(",");
     field.value = days;
     keepDraft(field.id, days === (group.dataset.saved ?? "") ? null : { value: days });
+    // My profile's draft keeps the revision it began at (ruling R13).
+    if (field.closest("#my-profile-form")) controller.beginUsualDaysEdit();
     if (field.closest("#volunteer-form")) syncCreateAccount();
   }
 
@@ -3099,6 +3101,8 @@ if (!config) {
         for (const [id, draft] of checkDrafts(field)) keepDraft(id, draft);
       if (field.closest("#volunteer-form")) syncCreateAccount();
       if (field.closest("#start-season-form")) syncStartSeason();
+      // The site hours card's draft keeps the revision it began at (ruling R13).
+      if (field.closest("#site-hours-form")) controller.beginSiteHoursEdit();
     } else if (field.name === "volunteerSearch") {
       // The Roster filters as it is typed; the redraw replaces the box, so
       // the keyboard and the caret go back into it. Mid-composition the

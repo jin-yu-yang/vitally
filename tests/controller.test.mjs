@@ -12056,3 +12056,84 @@ test("site hours: a schedule_settings change re-reads an open Season settings", 
   assert.equal(settingsReads(store), reads + 1);
   controller.stop();
 });
+
+// ---- Drafts keep their base revision (ruling R13) ----
+
+test("site hours: an edit begun at revision N saves at N after a live re-read moved the page to N+1, and the CONFLICT re-reads", async () => {
+  const { store, controller } = await onHours();
+  controller.beginSiteHoursEdit();
+  // Another coordinator saved: the live change moves this page to 6.
+  store.settings = { ...store.settings, schedule: { ...siteSchedule(), revision: 6 } };
+  await store.handlers.onChange({ table: "schedule_settings", eventType: "UPDATE", id: "w1" });
+  assert.equal(controller.getState().seasonSettings.schedule.revision, 6);
+  store.failNextHours = settingsRefusal("CONFLICT");
+  const reads = settingsReads(store);
+  assert.equal(await controller.saveScheduleSettings(structuredClone(WHOLE_SETTINGS)), null);
+  assert.equal(store.writes.at(-1).revision, 5);
+  assert.equal(settingsReads(store), reads + 1);
+  assert.equal(controller.getState().seasonSettingsUi.notice?.place, "site-hours");
+  // The CONFLICT cleared the base: the next edit starts at the revision on screen.
+  controller.beginSiteHoursEdit();
+  await controller.saveScheduleSettings(structuredClone(WHOLE_SETTINGS));
+  assert.equal(store.writes.at(-1).revision, 6);
+  controller.stop();
+});
+
+test("site hours: with no concurrent change a save sends the current revision; the base clears after a save and on leaving", async () => {
+  const { store, controller } = await onHours();
+  controller.beginSiteHoursEdit();
+  assert.equal(await controller.saveScheduleSettings(structuredClone(WHOLE_SETTINGS)), "Site hours saved");
+  assert.equal(store.writes.at(-1).revision, 5);
+  // Saved: the next edit starts at the revision now read.
+  controller.beginSiteHoursEdit();
+  await controller.saveScheduleSettings(structuredClone(WHOLE_SETTINGS));
+  assert.equal(store.writes.at(-1).revision, 6);
+  // An edit left behind on another screen is forgotten.
+  controller.beginSiteHoursEdit();
+  store.settings = { ...store.settings, schedule: { ...store.settings.schedule, revision: 9 } };
+  controller.navigate("staff");
+  controller.navigate("office-settings");
+  await controller.loadSeasonSettings();
+  await controller.saveScheduleSettings(structuredClone(WHOLE_SETTINGS));
+  assert.equal(store.writes.at(-1).revision, 9);
+  controller.stop();
+});
+
+test("my profile: an edit begun at profileRevision N saves at N after a focus or shifts re-read moved it, and the CONFLICT re-reads", async () => {
+  for (const reread of ["focus", "shifts"]) {
+    const { store, controller, events } = await onMyProfile({ clearance: PREPARER_VIEWER });
+    controller.beginUsualDaysEdit();
+    // An admin saved the Roster drawer: the profile is at 5 now.
+    store.profile = { ...store.profile, usualDays: [3], profileRevision: 5 };
+    if (reread === "focus") await events.emit("focus");
+    else await store.handlers.onChange({ table: "shifts", eventType: "INSERT", id: "s-new" });
+    assert.equal(controller.getState().myProfile.profileRevision, 5, reread);
+    store.failNextProfile = shiftRefusal("CONFLICT");
+    const reads = profileReads(store);
+    assert.equal(await controller.saveMyUsualDays([2, 6]), null, reread);
+    assert.equal(store.writes.at(-1).revision, 4, reread);
+    assert.equal(profileReads(store), reads + 1, reread);
+    assert.equal(controller.getState().myProfileUi.notice, "Someone changed your usual days. They have been refreshed.");
+    // Cleared by the CONFLICT: the next save is at the revision on screen.
+    controller.beginUsualDaysEdit();
+    await controller.saveMyUsualDays([2]);
+    assert.equal(store.writes.at(-1).revision, 5, reread);
+    controller.stop();
+  }
+});
+
+test("my profile: with no concurrent change a save sends the current revision; the base clears after a save and on reopening", async () => {
+  const { store, controller } = await onMyProfile({ clearance: PREPARER_VIEWER });
+  controller.beginUsualDaysEdit();
+  assert.equal(await controller.saveMyUsualDays([6]), "Usual days saved");
+  assert.equal(store.writes.at(-1).revision, 4);
+  controller.beginUsualDaysEdit();
+  await controller.saveMyUsualDays([2, 6]);
+  assert.equal(store.writes.at(-1).revision, 5);
+  controller.beginUsualDaysEdit();
+  store.profile = { ...store.profile, profileRevision: 8 };
+  await controller.openMyProfile();
+  await controller.saveMyUsualDays([1]);
+  assert.equal(store.writes.at(-1).revision, 8);
+  controller.stop();
+});
