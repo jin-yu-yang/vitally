@@ -73,12 +73,12 @@
   - "Last returned: <reason> · <date>" in a document's place when a review reason is stored;
   - the Usual days checkboxes in the drawer.
   `src/app.mjs` wiring keeps the unsaved drawer edits. Unit tests.
-- [ ] 5.3 New `src/profile-views.mjs`: the My profile screen (design D9).
+- [x] 5.3 New `src/profile-views.mjs`: the My profile screen (design D9).
   - Your details (editable, with a locked email and the read-only account status);
   - This season (read-only, "Managed by the office" and the site coordinator);
   - the 13615 section (Upload or the ask text, I've uploaded it or "Waiting for review · sent <date>", the D8 line).
   English only. Unit tests.
-- [ ] 5.4 `src/views.mjs`: the account row becomes a link reading "My profile", with the signed-in name as a smaller second line, for a cleared staff window only; route the `my-profile` screen. `src/app.mjs` handles the open, save and send actions. `src/styles.css` for the new screen and reason row. Unit tests.
+- [x] 5.4 `src/views.mjs`: the account row becomes a link reading "My profile", with the signed-in name as a smaller second line, for a cleared staff window only; route the `my-profile` screen. `src/app.mjs` handles the open, save and send actions. `src/styles.css` for the new screen and reason row. Unit tests.
 
 ## 6. Browser test and docs
 
