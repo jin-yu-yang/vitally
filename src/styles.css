@@ -4659,7 +4659,7 @@ textarea::placeholder {
   background: var(--vt-stage-prep-bg);
   color: var(--vt-stage-prep);
 }
-/* #157: the client's report waits for staff; staff's confirmation is done. */
+/* Issue 157: the client's report waits for staff; staff's confirmation is done. */
 .doc-status.is-sent {
   background: var(--vt-stage-intake-bg);
   color: var(--vt-stage-intake);
