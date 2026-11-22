@@ -22,6 +22,9 @@ grant execute on function public.vitally_client_documents_link() to authenticate
 
 -- The cards are a record of the client's report and office's decision;
 -- this table never stores any taxpayer document itself.
+-- When the client last reported the upload. changed_at moves with every mark,
+-- so a staff undo back to "sent" would otherwise show the undo's time.
+alter table public.case_document_cards add column if not exists reported_at timestamptz;
 alter table public.case_document_cards drop constraint if exists case_document_cards_status_check;
 alter table public.case_document_cards add constraint case_document_cards_status_check
  check (status is null or status in ('later','none','sent','received','verified'));
@@ -289,7 +292,8 @@ begin
  -- Only staff actually working on this case may confirm receipt or verification.
  -- Clients may report an upload, but must not make a claim of staff verification.
  -- Reporting an upload is possible only when the site configured its client link.
- if p_payload->>'status'='sent' and not exists (
+ -- Staff are not reporting an upload: their "sent" is Undo received.
+ if p_payload->>'status'='sent' and p_member.access<>'staff' and not exists (
   select 1 from public.season_settings s where s.workspace_id=p_case.workspace_id
    and s.client_documents_url is not null
  ) then
@@ -305,10 +309,17 @@ begin
  ) then
   raise sqlstate 'VT004' using message='INVALID_TRANSITION';
  end if;
- insert into public.case_document_cards as d (workspace_id, case_id, slot_id, status, changed_at)
+ insert into public.case_document_cards as d (workspace_id, case_id, slot_id, status, changed_at, reported_at)
  values (p_case.workspace_id, p_case.id, p_payload->>'slotId',
-  case when p_payload->>'status'='not_done' then null else p_payload->>'status' end, now())
- on conflict (case_id, slot_id) do update set status=excluded.status, changed_at=now();
+  case when p_payload->>'status'='not_done' then null else p_payload->>'status' end, now(),
+  case when p_payload->>'status'='sent' and p_member.access='applicant' then now() end)
+ on conflict (case_id, slot_id) do update set status=excluded.status, changed_at=now(),
+  -- A client's "sent" is a new report; staff marks and undos keep the report's
+  -- time; any other status ends the report.
+  reported_at=case
+   when excluded.status='sent' and p_member.access='applicant' then now()
+   when excluded.status in ('sent','received','verified') then d.reported_at
+   else null end;
  return jsonb_build_object('detail',jsonb_build_object('slotId',p_payload->>'slotId','status',p_payload->>'status'));
 end;
 $$;

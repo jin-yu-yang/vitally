@@ -730,6 +730,24 @@ test("the client documents link is read on load and wake, not on every realtime 
   controller.stop();
 });
 
+test("a staff window never reads the client documents link (#245 review)", async () => {
+  const store = fakeStore({
+    principal: { userId: "user-s", workspaceId: "w1", access: "staff", personId: "person-sam" },
+    people: [{ id: "person-sam", name: "Sam", capabilities: ["admin", "assist", "followup", "receive_documents"], userId: "user-s" }],
+  });
+  let reads = 0;
+  store.getClientDocumentsUrl = async () => {
+    reads += 1;
+    return "https://example.org/client-documents";
+  };
+  const { controller, events } = build({ store });
+  await controller.start();
+  await events.emit("focus");
+  assert.equal(reads, 0);
+  assert.equal(controller.getState().clientDocumentsUrl, null);
+  controller.stop();
+});
+
 test("focus and online events refresh, and stop removes the listeners", async () => {
   const store = fakeStore({
     cases: [{ id: "case-a", reference: "VT-AAAA-BBBB", stage: "draft", revision: 1, answers: {} }],

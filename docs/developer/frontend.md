@@ -1166,9 +1166,10 @@ there is no configured URL, the client is told to bring documents to PCDC and no
 upload control appears. The application never reads OneDrive or checks whether a
 file arrived.
 
-The controller reads the link (`readClientDocumentsUrl`) when the window loads its
-data, on each wake (focus, tab visible, `online`), and after a Season settings
-save; not on every realtime refresh.
+A client window reads the link (`readClientDocumentsUrl`) when it loads its data and
+on each wake (focus, tab visible, `online`), not on every realtime refresh. Staff
+windows don't read it. The staff note "Client reported it <date>" uses the card's
+`reported_at`, so an undo doesn't change the date.
 
 Migration `056_onedrive_client_documents.sql` adds an applicant-safe URL read
 RPC and expands card statuses; *clients cannot set* `received` or `verified`.

@@ -1184,7 +1184,12 @@ export function createController({
   // `dataLoaded` is true once one whole pass has succeeded; until then a
   // refresh reads everything, not only the lists.
   let dataLoaded = false;
+  // Client windows only: staff screens no longer link to it (#245 review).
   async function readClientDocumentsUrl() {
+    if (staffWindow()) {
+      state.clientDocumentsUrl = null;
+      return;
+    }
     try {
       state.clientDocumentsUrl = (await store.getClientDocumentsUrl?.()) ?? null;
     } catch {
@@ -1646,7 +1651,6 @@ export function createController({
         return false;
       },
     );
-    if (answer) await readClientDocumentsUrl();
     return answer ? STAFF_SETTINGS_SAVED : null;
   }
 

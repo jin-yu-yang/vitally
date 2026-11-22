@@ -105,6 +105,8 @@ The database SHALL refuse a client's report of an upload, both a document card m
 
 The office's recorded receipt (`RECORD_DOCUMENT_RESPONSE`) SHALL NOT require the link.
 
+A staff member's `sent` (Undo received) SHALL NOT require the link: it is not a report of an upload.
+
 #### Scenario: No link, client reports a request response
 - **WHEN** the workspace has no client documents link and a client responds to an open document request
 - **THEN** the action is refused with `INVALID_TRANSITION` and the request stays open
@@ -122,6 +124,14 @@ Staff SHALL be offered **Undo received** on a `received` card (back to `sent`) a
 #### Scenario: Client takes back a reported upload
 - **WHEN** a client's card is `sent` and staff have not confirmed it
 - **THEN** the card offers Later, Don't have and Mark as not done, and choosing one replaces `sent`
+
+#### Scenario: Undo received without a link
+- **WHEN** the workspace has no client documents link and a staff member who may mark the card selects Undo received
+- **THEN** the card becomes `sent`
+
+#### Scenario: The reported date survives an undo
+- **WHEN** a client reported a card, staff marked it received, and staff then select Undo received
+- **THEN** the staff screen's "Client reported it" date is still the client's report
 
 #### Scenario: Staff undo a verification
 - **WHEN** a staff member who may mark the card selects Undo verified
@@ -145,11 +155,15 @@ The upload instructions SHALL tell the client to name the file with the case's `
 
 ### Requirement: The client documents link is read on load and wake
 
-The browser SHALL read the client documents link when the window loads its data, on each wake (focus, tab visible, `online`), and after a Season settings save, and SHALL NOT read it again on every realtime refresh.
+A client window SHALL read the client documents link when it loads its data and on each wake (focus, tab visible, `online`), and SHALL NOT read it again on every realtime refresh. A staff window SHALL NOT read it.
 
 #### Scenario: A realtime change
 - **WHEN** a realtime change makes the window refresh without a wake
 - **THEN** the link is not read again
+
+#### Scenario: A staff window
+- **WHEN** a staff window loads or wakes
+- **THEN** it does not call `vitally_client_documents_link`
 
 ### Requirement: Existing application workflows remain compatible
 

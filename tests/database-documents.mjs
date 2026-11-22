@@ -402,6 +402,46 @@ test("document requests, receipts and verification keep the preparer in charge",
       },
     );
     await t.test(
+      "the client's report time survives staff marks and undos, and staff undo needs no link",
+      async () => {
+        const caseId = await preparingCase(f);
+        const slotId = "photo_id.tp";
+        const row = async () =>
+          (
+            await f.sql(
+              "select status,reported_at,changed_at from public.case_document_cards where case_id=$1 and slot_id=$2",
+              [caseId, slotId],
+            )
+          ).rows[0];
+        const mark = (client, value) => f.act(client, caseId, "SET_DOCUMENT_CARD", { slotId, status: value });
+        await mark(f.applicantA, "sent");
+        const reported = (await row()).reported_at;
+        assert.ok(reported, "a client's sent records the report time");
+        await mark(f.preparer, "received");
+        await f.setClientDocumentsLink(null);
+        try {
+          // Undo received is staff's "sent": allowed without the link.
+          await mark(f.preparer, "sent");
+          assert.equal((await row()).status, "sent");
+          // A client's own "sent" still needs it.
+          await assert.rejects(() => mark(f.applicantA, "sent"), rejected("INVALID_TRANSITION"));
+        } finally {
+          await f.setClientDocumentsLink();
+        }
+        await mark(f.preparer, "verified");
+        await mark(f.preparer, "received");
+        const after = await row();
+        assert.equal(after.reported_at.getTime(), reported.getTime(), "staff marks keep the client's time");
+        assert.ok(after.changed_at.getTime() >= reported.getTime());
+        // Leaving sent / received / verified ends the report.
+        await mark(f.preparer, "later");
+        assert.equal((await row()).reported_at, null);
+        // Staff marking a card received that the client never reported: no report time.
+        await mark(f.preparer, "received");
+        assert.equal((await row()).reported_at, null);
+      },
+    );
+    await t.test(
       "receipts reject the wrong actor and the wrong case",
       async () => {
         const owned = await requestedCase(f);

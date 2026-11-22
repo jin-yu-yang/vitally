@@ -21,7 +21,7 @@ test("Document response payload accepts only requestId, no client-supplied filen
 });
 
 test("An upload claim requires the workspace's client link", () => {
-  assert.match(sql, /p_payload->>'status'='sent' and not exists/);
+  assert.match(sql, /p_payload->>'status'='sent' and p_member.access<>'staff' and not exists/);
   assert.match(sql, /s.workspace_id=p_case.workspace_id/);
   assert.match(sql, /s.client_documents_url is not null/);
 });

@@ -78,7 +78,7 @@ test("a client can take back an upload they reported, until staff confirm it", (
 test("staff can undo a mark one step, and get no upload-folder link", () => {
   const checklist = (status) =>
     documentChecklist(
-      { answers: makeSampleAnswers(), documentCards: [{ slotId: card.slotId, status, changedAt: "2026-02-10T15:00:00Z" }] },
+      { answers: makeSampleAnswers(), documentCards: [{ slotId: card.slotId, status, changedAt: "2026-02-12T15:00:00Z", reportedAt: "2026-02-10T15:00:00Z" }] },
       { markDocumentCard: { allowed: true } },
       { clientDocumentsUrl: link },
     );
@@ -92,6 +92,13 @@ test("staff can undo a mark one step, and get no upload-folder link", () => {
   assert.match(row("received"), /data-status="verified"[^>]*>Mark verified/);
   assert.match(row("verified"), /data-status="received"[^>]*>Undo verified/);
   assert.doesNotMatch(row("verified"), /Mark verified/);
+  // The note dates the client's report, not the last mark (Feb 12).
+  for (const status of ["sent", "received", "verified"]) assert.match(row(status), /Client reported it Feb 10/);
+  const unreported = documentChecklist(
+    { answers: makeSampleAnswers(), documentCards: [{ slotId: card.slotId, status: "received", changedAt: "2026-02-12T15:00:00Z", reportedAt: null }] },
+    { markDocumentCard: { allowed: true } },
+  );
+  assert.doesNotMatch(unreported, /Client reported it/);
   for (const status of ["sent", "received", "verified"]) {
     const html = checklist(status);
     assert.doesNotMatch(html, /Open upload folder/);

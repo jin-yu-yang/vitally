@@ -1367,7 +1367,7 @@ function checklistRow(card, { variant, markable, movable, off, answers }) {
         ? button("Move to Needed", "move-card", "secondary", `data-slot="${slot}" data-group="needed"${off}`)
         : button("Move to Maybe needed", "move-card", "secondary", `data-slot="${slot}" data-group="maybe"${off}`)
       : "";
-  return `<article class="doc-row" id="${id}" data-slot="${slot}" tabindex="-1"><div class="doc-row-head"><strong class="doc-label">${esc(card.label?.en)}</strong><span class="doc-group ${group.className}">${icon(group.icon)} ${esc(group.word)}</span></div><p class="doc-owner">${esc(card.ownerLine?.office ?? card.ownerLine?.en)}</p>${why}${statusLine}${when(card.status === "sent", `<p class="field-note">Client reported it ${esc(card.changedAt ? formatTime(card.changedAt) : "")}</p>`)}${when(marks || move, `<div class="doc-marks">${marks}${move}</div>`)}</article>`;
+  return `<article class="doc-row" id="${id}" data-slot="${slot}" tabindex="-1"><div class="doc-row-head"><strong class="doc-label">${esc(card.label?.en)}</strong><span class="doc-group ${group.className}">${icon(group.icon)} ${esc(group.word)}</span></div><p class="doc-owner">${esc(card.ownerLine?.office ?? card.ownerLine?.en)}</p>${why}${statusLine}${when(["sent", "received", "verified"].includes(card.status) && card.reportedAt, `<p class="field-note">Client reported it ${esc(formatTime(card.reportedAt))}</p>`)}${when(marks || move, `<div class="doc-marks">${marks}${move}</div>`)}</article>`;
 }
 
 /**
@@ -1377,7 +1377,10 @@ function checklistRow(card, { variant, markable, movable, off, answers }) {
  */
 export function documentChecklist(record, rights, ui = {}) {
   const answers = serverAnswersV2(record);
-  const cards = cardsFor(answers, record.documentCards ?? []).map((card) => ({ ...card, changedAt: (record.documentCards ?? []).find((item) => item.slotId === card.slotId)?.changedAt }));
+  const cards = cardsFor(answers, record.documentCards ?? []).map((card) => ({
+    ...card,
+    reportedAt: (record.documentCards ?? []).find((item) => item.slotId === card.slotId)?.reportedAt ?? null,
+  }));
   const variant = variantOf(answers);
   const markable = Boolean(rights?.markDocumentCard?.allowed);
   const movable = Boolean(rights?.moveDocumentCard?.allowed);
