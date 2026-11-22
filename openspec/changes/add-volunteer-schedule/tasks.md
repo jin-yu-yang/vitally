@@ -16,12 +16,12 @@
 
 ## 2. Migration 056: RPCs
 
-- [ ] 2.1 `vitally_save_schedule_settings` and the replaced `vitally_season_settings` (adds `schedule: {siteHours, targets, revision}`). Site coordinator only, in the 052 order: FORBIDDEN → VALIDATION → lock → receipt → CONFLICT (D4, D5).
-- [ ] 2.2 `vitally_save_shift`:
+- [x] 2.1 `vitally_save_schedule_settings` and the replaced `vitally_season_settings` (adds `schedule: {siteHours, targets, revision}`). Site coordinator only, in the 052 order: FORBIDDEN → VALIDATION → lock → receipt → CONFLICT (D4, D5).
+- [x] 2.2 `vitally_save_shift`:
   - add or edit, workspace admin only, with receipt and CONFLICT;
   - the refusals `NOT_ON_ROSTER`, `DEACTIVATED`, `ROLE_NOT_HELD`, `SITE_CLOSED`, `OUTSIDE_SITE_HOURS`, `OVERLAP` (adjacent shifts allowed);
   - an edit keeps the person (D4).
-- [ ] 2.3 `vitally_remove_shift`: soft delete, raises the revision; a later change is refused (D2).
+- [x] 2.3 `vitally_remove_shift`: soft delete, raises the revision; a later change is refused (D2).
 - [ ] 2.4 `vitally_schedule_day(p_date)` (D5):
   - for viewers: hours, targets, `canEdit`, and shifts with name, role, hours and revision, with no-sign-in shifts left out for non-admins;
   - for admins only: `flags`, `counts` (the D6 rule in SQL) and `candidates` with roles, usual days, cleared and works.
