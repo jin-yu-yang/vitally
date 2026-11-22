@@ -100,7 +100,7 @@
 Decided by the user on 2026-11-22: adopt main's merged My profile (`add-my-profile`) and its usual days, and keep My profile cleared-only. Group 8 supersedes tasks 2.5, 2.6, 4.5 and 4.7 and the My profile half of 7.1.
 
 - [x] 8.1 Merge `origin/main` into the branch. Resolve every conflict in favour of main's My profile: its page, `vitally_my_profile`, `vitally_save_my_profile`, its usual-days column and drawer checkboxes, and its account-row link. Stop if a conflict lands under `openspec/specs/`.
-- [ ] 8.2 Migration 058:
+- [x] 8.2 Migration 058:
   - rename `057_volunteer_schedule.sql` to `058_volunteer_schedule.sql`, with `-- 058` markers;
   - remove this change's `usual_days` column, `valid_usual_days`, `vitally_my_profile`, `ny_week` if nothing else uses it, `vitally_save_my_usual_days`, and the `vitally_save_volunteer` replacement;
   - rebuild `vitally_my_clearance` from main's `057_my_profile.sql` body, adding only `scheduleViewer`;
