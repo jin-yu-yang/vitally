@@ -23,7 +23,7 @@
 
 ## 5. Browser test
 
-- [ ] 5.1 Add a separate `test(...)` block in `tests/browser.mjs` with its own workspace (not the story): an admin removes a volunteer through the confirmation, the removed volunteer's window shows "This account has no access" on its next wake, the admin re-adds them by email and sees the Reactivate notice, then the note on reopening
+- [x] 5.1 Add a separate `test(...)` block in `tests/browser.mjs` with its own workspace (not the story): an admin removes a volunteer through the confirmation, the removed volunteer's window shows "This account has no access" on its next wake, the admin re-adds them by email and sees the Reactivate notice, then the note on reopening
 
 ## 6. Docs and checks
 
