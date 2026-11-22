@@ -364,6 +364,7 @@ export const RPC_SIGNATURES = Object.freeze([
       "usualDays",
       "works",
     ]),
+    args: () => ({}),
   }),
   Object.freeze({
     name: "vitally_save_my_profile",
