@@ -183,7 +183,8 @@ The check SHALL be the no-argument `vitally_policy.cleared_workspace_id()`, used
 - whether they are a site coordinator (`isSiteCoordinator`);
 - the display name of the workspace's default follow-up person;
 - whether they still owe the first-sign-in site check (`siteCheck`: their account is `invited`);
-- `uploadUrl`: the workspace's certificate and photo ID upload link (capability `season-settings`) when they have a roster entry for the current season, the link is set, and `siteCheck` is false; null otherwise.
+- `uploadUrl`: the workspace's certificate and photo ID upload link (capability `season-settings`) when they have a roster entry for the current season, the link is set, and `siteCheck` is false; null otherwise;
+- `scheduleViewer`: whether they are a schedule viewer (capability `volunteer-schedule`), whether or not they are cleared.
 
 It SHALL return no email, phone or other profile data. A client or an anonymous caller SHALL be refused with `FORBIDDEN`. Execute SHALL be granted to `authenticated` only.
 
@@ -227,6 +228,14 @@ It SHALL return no email, phone or other profile data. A client or an anonymous 
 - **WHEN** a site coordinator with no current-season roles calls it
 - **THEN** it says they are an admin and a site coordinator, with empty effective capabilities
 
+#### Scenario: A schedule viewer
+- **WHEN** a staff member with an active account and a current-season roster entry but no roles calls it
+- **THEN** `scheduleViewer` is true, and they are not cleared
+
+#### Scenario: Not a schedule viewer
+- **WHEN** a staff member with an active account, no current-season roster entry and no site coordinator mark calls it
+- **THEN** `scheduleViewer` is false
+
 #### Scenario: A client
 - **WHEN** a client calls it
 - **THEN** it is refused with `FORBIDDEN`
@@ -244,7 +253,7 @@ The Form 13615 and photo ID items SHALL each offer:
 
 Once the item has a sent date, I've uploaded it SHALL be replaced by "Waiting for review · sent <date>", and Upload, or the text in its place, SHALL stay. A refused or failed send SHALL be said on the setup screen. The text SHALL be English only.
 
-It SHALL have a "Check again" button. The screen SHALL re-check when Check again is pressed and when the window regains focus, and SHALL show the normal staff screens once the person is cleared. The setup screen's sidebar SHALL offer Notifications, with its unread badge, and the panel SHALL show the updates addressed to them (capability `posted-updates`). The feed and badge SHALL re-read together with the clearance check. An uncleared workspace admin SHALL also have the Volunteers link and the Roster, the Post an update link and screen, and the Season settings link and screen (capability `season-settings`), and no client data. When any action returns `NOT_CLEARED`, the window SHALL switch to the setup screen.
+It SHALL have a "Check again" button. The screen SHALL re-check when Check again is pressed and when the window regains focus, and SHALL show the normal staff screens once the person is cleared. The setup screen's sidebar SHALL offer Notifications, with its unread badge, and the panel SHALL show the updates addressed to them (capability `posted-updates`). The feed and badge SHALL re-read together with the clearance check. An uncleared schedule viewer (capability `volunteer-schedule`) SHALL also have the Schedule link and the Schedule screen, read-only unless they are a workspace admin. An uncleared workspace admin SHALL also have the Volunteers link and the Roster, the Post an update link and screen, and the Season settings link and screen (capability `season-settings`), and no client data. When any action returns `NOT_CLEARED`, the window SHALL switch to the setup screen.
 
 #### Scenario: Signing in uncleared
 - **WHEN** a staff member with no roles signs in
@@ -272,7 +281,11 @@ It SHALL have a "Check again" button. The screen SHALL re-check when Check again
 
 #### Scenario: An uncleared admin
 - **WHEN** a site coordinator with no roles signs in
-- **THEN** they see the setup screen, the Volunteers, Post an update and Season settings links, can open the Roster, Post an update and Season settings, and see no case
+- **THEN** they see the setup screen, the Volunteers, Schedule, Post an update and Season settings links, can open the Roster, the Schedule with its editing controls, Post an update and Season settings, and see no case
+
+#### Scenario: An uncleared volunteer on the roster
+- **WHEN** a staff member with a current-season roster entry and no roles signs in
+- **THEN** the setup screen's sidebar shows Schedule, and the Schedule opens read-only
 
 #### Scenario: A site coordinator waiting for SC
 - **WHEN** a site coordinator with the Admin role and its certificates, and no SC, signs in
