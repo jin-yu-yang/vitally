@@ -60,11 +60,15 @@ Each delta was compared with `openspec/specs/<capability>/spec.md` at HEAD. Arch
 | D7: drag | Create across empty cells takes the role of the volunteer's earliest shift; resize by an edge; saves at once; every drag has a button alternative | "Admins edit by drag or by buttons" | None. The final review added that a drag is tied to the day it started on. |
 | D9: Workload hours | Every role and flagged shifts count, removed shifts don't; NY Monday–Sunday | "The Workload shows the hours scheduled this week" | None. Hours also re-read on wake and focus (T10 fix). |
 | D11: sidebar | Schedule after Volunteers (admins) or Work board (others); My profile after Schedule; on the setup screen too | "Rostered staff open the Schedule and My profile" | None |
-| D2: soft delete | "Nothing deletes a shift row" | local-seed-data: "A re-run SHALL first remove exactly those shifts through the shift removal RPC, and SHALL leave every other shift alone." | **Drift (warning 1)** |
+| D2: soft delete | "Nothing deletes a shift row" | local-seed-data: "A re-run SHALL first remove exactly those shifts through the shift removal RPC, and SHALL leave every other shift alone." | Was drift (warning 1); **fixed in c3bd2eb** — see warning 1 |
 
 **Drift warnings** (non-blocking):
 
-1. **A seed re-run hard-deletes the shifts of the fictional no-sign-in volunteers.** `seedWorkspace` runs `seedVolunteers` before `seedSchedule` (`tools/admin/seed-cases.mjs:709-713`). `seedVolunteers` deletes the no-sign-in seed volunteers and adds them again (existing behaviour). `shifts.person_id` cascades on delete (`057_volunteer_schedule.sql:80`), so those volunteers' shifts are hard-deleted before the RPC removal runs. This includes any shift an admin added for one of them. It contradicts design D2 and the spec's "leave every other shift alone". The deletion is also not announced through realtime. **Scope:** the local seed tool and fictional volunteers only, with no effect on the app. Suggested follow-up: run the schedule removal before `seedVolunteers`, and exclude people who hold an admin-added shift from deletion; or narrow the spec to say a re-run replaces the fictional volunteers together with their shifts. Owner: the user decides.
+1. **Resolved: a seed re-run hard-deleted the shifts of the fictional no-sign-in volunteers.**
+   - *Found:* `seedWorkspace` ran `seedVolunteers` before `seedSchedule`. `seedVolunteers` deletes and re-adds the no-sign-in seed volunteers, and `shifts.person_id` cascades on delete (`057_volunteer_schedule.sql:80`). So those volunteers' shifts, including shifts an admin added, were hard-deleted before the RPC removal ran, and the deletion was not announced. That contradicted design D2 and the spec's "leave every other shift alone".
+   - *Fixed:* the user chose to fix the seed, done in **c3bd2eb**. `removeSeededShifts` now removes the run file's shifts through `vitally_remove_shift` before `seedVolunteers` runs (`tools/admin/seed-cases.mjs:739`, `:744`). `seedVolunteers` keeps any no-sign-in seed volunteer who holds a live shift, and does not re-add them.
+   - *Tests:* `tests/database-seed.mjs` shows an admin-added shift for a fictional volunteer survives a re-run (same id, live, same person), and a plain re-run leaves one seeded set and 8 volunteers. Seed suite 30/30 and `npm test` 2390/2390. The scoped re-review found no new breakage.
+   - *Accepted remainder (ruling R16):* when a fictional volunteer *is* re-created, the cascade still hard-deletes that volunteer's own seeded shift rows that the RPC already soft-removed. No live or admin-added shift is touched, and the removal is announced first. Avoiding it would need a different foreign-key action. Seed tool only.
 2. **Live Season settings for an uncleared admin.** Design D10 says Season settings re-reads on a `schedule_settings` change. An uncleared admin has no live channel there and re-reads on focus (ruling R11). The spec's live-update requirement does not name Season settings.
 3. **Base revisions (ruling R13) are not in design.md.** Drafts of the site-hours card and of My profile's usual days keep the revision they started from, so a concurrent change gets CONFLICT. This meets the spec's CONFLICT scenarios; design D8 and D10 do not describe the mechanism.
 
@@ -75,7 +79,7 @@ Each delta was compared with `openspec/specs/<capability>/spec.md` at HEAD. Arch
 - [x] No unstaged files in the worktree (`git status --short` is empty).
 - [ ] Not all commits are pushed. The branch has no remote yet; it is pushed in step 9.
 
-**Commit range**: `4ab301e..72751db` (34 commits; merge base with origin/main is 4ab301e). It includes two merges of main: `d56e8b3` (055 Start next season) and `74350e8` (056 OneDrive). The schedule migration is `supabase/migrations/057_volunteer_schedule.sql`.
+**Commit range**: `4ab301e..c3bd2eb` (36 commits, including this report and the seed fix; merge base with origin/main is 4ab301e). It includes two merges of main: `d56e8b3` (055 Start next season) and `74350e8` (056 OneDrive). The schedule migration is `supabase/migrations/057_volunteer_schedule.sql`.
 
 **Checks run** (project rules: Verification):
 
@@ -123,8 +127,8 @@ plan.md has no `[~]` deferred rows, so this section is empty. That counts as PAS
 ## Overall Decision
 
 - [ ] ✅ PASS
-- [x] ⚠️ PASS WITH WARNINGS. Four warnings:
-  1. A seed re-run hard-deletes the shifts of the fictional no-sign-in volunteers (seed tool only; it contradicts D2 and a seed-spec clause).
+- [x] ⚠️ PASS WITH WARNINGS. Three open warnings (warning 1 resolved in c3bd2eb):
+  1. *(Resolved.)* A seed re-run hard-deleted admin-added shifts of fictional volunteers. Fixed. The only remainder is ruling R16 (the seed's own already-removed rows of a re-created fictional volunteer).
   2. Uncleared admins get Season settings on focus, not live.
   3. Base revisions are not described in design.md.
   4. The browser story's Chrome-client/Firefox-staff leg fails locally, as it does on main. It needs a passing CI run before merge.
