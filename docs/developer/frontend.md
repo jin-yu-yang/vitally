@@ -125,7 +125,7 @@ sign-in (`sendCode`, `verifyCode`, `editAuthEmail`, `editAuthCode`, `restartSign
 **`staffWindow()`** is everything a staff screen does (its reads, its eligibility rules and its
 actions), true only for a `staff` account (`isStaffWindow` in [`src/contracts.mjs`](../../src/contracts.mjs)
 says the same for the views). The person acting is always the account's own `principal.personId`; a
-client sends none. None of the thirty-eight RPCs takes the acting person, so the browser never claims an identity (`vitally_save_volunteer` takes a volunteer's person id, but as the record to change, not as who is acting); the
+client sends none. None of the thirty-nine RPCs takes the acting person, so the browser never claims an identity (`vitally_save_volunteer` takes a volunteer's person id, but as the record to change, not as who is acting); the
 database resolves it ([Database: who is acting](database.md#who-is-acting)). An account with any
 other access (a former presenter) gets the "This account has no access" screen and nothing is
 loaded for it.
@@ -151,7 +151,7 @@ Three rules the controller keeps:
 | Applicant | `applications` (list and lookup by Application ID), `reference` (new ID to keep), `intake` (the sub-step form, built by `src/intake-views.mjs`), `progress` (status, client number, requests, send document) |
 | Staff window, volunteer account | `staff`: the work board; `staff-case`: the case page with its tabs ([`staff-views.mjs`](../../src/staff-views.mjs)) |
 | Staff window, `admin` account | `staff`: the Follow-ups queue ([`office-views.mjs`](../../src/office-views.mjs)); `office-cases`: the case pool ([`pool-views.mjs`](../../src/pool-views.mjs)); `office-add-case`: Add a case for a walk-in client ([`office-views.mjs`](../../src/office-views.mjs)); `staff-case`: the office's case page ([`admin-views.mjs`](../../src/admin-views.mjs)); `office-volunteers`: the Volunteers Roster and its Add / Edit drawer ([`volunteer-views.mjs`](../../src/volunteer-views.mjs), rules in [`volunteer-roster.mjs`](../../src/volunteer-roster.mjs)); the same page's **Workload** tab for cleared admins, with the Unassigned lists, tagged rows for anyone holding a case without the role, and the Assign / Reassign drawer, which sends `ASSIGN_CASE` with the revision and holder it was opened on ([`workload-views.mjs`](../../src/workload-views.mjs), counts and candidates in [`volunteer-workload.mjs`](../../src/volunteer-workload.mjs)). The Workload is built from the staff case list, `volunteers` and `people` already in the window, so it adds no table or subscription; its tab, sort, search and open rows are window-local and never saved; `office-updates`: Post an update ([`update-views.mjs`](../../src/update-views.mjs)), for a workspace admin only (a site coordinator, or the Admin role this season), cleared or not; `office-settings`: Season settings ([`season-settings-views.mjs`](../../src/season-settings-views.mjs)), for the same admins, with the current season's links and SIDN and the **Next season** card, whose Start next season… dialog (site coordinators only) asks for the next year typed and lists what to finish first when `vitally_start_next_season` refuses ([Start next season](database.md#start-next-season)) |
-| Staff window, schedule viewer (a workspace admin, or anyone on the roster with an active account; cleared or not) | `schedule` and `my-profile` ([below](#the-schedule-and-my-profile)), in the sidebar as Schedule and My profile |
+| Staff window, schedule viewer (a workspace admin, or anyone on the roster with an active account; cleared or not) | `schedule` ([below](#the-schedule-and-my-profile)), in the sidebar as Schedule. My profile (`my-profile`, main's) is a cleared window's, opened from the sidebar account row; its "Your shifts this week" is described below |
 | Staff account | The staff screens: the sidebar and the case page header say "Signed in as <name>", and the person is the account's own (`staffScreen` in `views.mjs` picks the office screens when that person has `admin`, and the volunteer work board otherwise). Always English |
 
 **Fill tools.** They follow the demo-tools switch. Three controls exist: the staff "Auto-fill fictional data" button, the client intake's fiction toolbar and the office's Add a case "Fill fictional details" pill. With the switch on, an "Auto-fill fictional data" button appears at the top of each questionnaire, the review-contact form and the filing dialogs (Mark ready to e-file, Mark e-filed, Record filing result, Return to signing). [`src/demo-fill.mjs`](../../src/demo-fill.mjs) fills the form with fictional values that the form's own payload builder accepts. It never overwrites typed text or a defaulted choice, and it sends nothing: the form's own button still submits. `demoFillButton(enabled)` renders nothing when the switch (`state.demoTools`) is off, and the `demo-fill` handler in `app.mjs` checks `demoToolsOn` again. The switch is on only when `/public-config.json` sends `demoTools: true` (`server.mjs` does so only with `VITALLY_DEMO_TOOLS=1` and a loopback `SUPABASE_URL`) and the config's `supabaseUrl` is loopback. When on, these controls show to whoever is on that screen; when off, to no one
@@ -836,7 +836,7 @@ re-reads it:
 - an `assistance_items` event: the assistance list;
 - a `workspaces` event (a change to the workspace row, such as its intake
   version): everything, with a notice if the open case vanished;
-- a `shifts` or `schedule_settings` event: the Schedule's open day, My profile's week and, on Season settings, the site hours card (an uncleared viewer's window follows only these two tables, and only while it is on the Schedule or My profile);
+- a `shifts` or `schedule_settings` event: the Schedule's open day, My profile's "Your shifts this week" (a `shifts` event) and, on Season settings, the site hours card (an uncleared viewer's window follows only these two tables, and only while it is on the Schedule);
 - a `posted_updates` event: the Notifications feed, and the admin's table when Post an update is
   open. `update_reads` is not published, so the table re-reads on opening and on focus instead.
 
@@ -964,7 +964,7 @@ them. The database side is in [Database: posted updates](database.md#posted-upda
   is `state.updatesUnread`, the RPC's own count; the view never recounts it.
 - **The feed** (`loadFeed`) is read with the work, on every refresh (focus, `online`), on a
   `posted_updates` or `workspaces` event, and with every clearance check. An uncleared window has
-  no Realtime channel (apart from the Schedule and My profile, [below](#the-schedule-and-my-profile)), so its feed re-reads on focus and Check again. A failed read keeps the items
+  no Realtime channel (apart from the Schedule, [below](#the-schedule-and-my-profile)), so its feed re-reads on focus and Check again. A failed read keeps the items
   it had and never blocks the rest.
 - **Opening the panel** marks the unread items it shows read in one `vitally_mark_updates` call,
   then re-reads. While it stays open, each later read marks what is new. I've read this confirms.
@@ -982,17 +982,18 @@ them. The database side is in [Database: posted updates](database.md#posted-upda
 
 ## The Schedule and My profile
 
-The Schedule is who works when, one day at a time. My profile is a volunteer's own usual days and
-shifts. Both are for a schedule viewer, cleared or not (a workspace admin, or anyone on the current
-roster with an active staff account); the database side is in
+The Schedule is who works when, one day at a time. It is for a schedule viewer, cleared or not (a
+workspace admin, or anyone on the current roster with an active staff account). A volunteer's own
+shifts are a section, "Your shifts this week", on main's My profile page (change `add-my-profile`),
+which a cleared staff member opens from the sidebar account row. The database side is in
 [Database: the volunteer schedule](database.md#the-volunteer-schedule). Staff screens, so English only.
 
 - **Modules.** [`volunteer-schedule.mjs`](../../src/volunteer-schedule.mjs) is pure: the role and
   weekday words, hour labels ("10 am"), the New York date arithmetic, the coverage row
   (`coverageRows`, `gapHeader`), the order of the Add shift candidates and the sentences for the
   database's shift refusals. [`schedule-views.mjs`](../../src/schedule-views.mjs) draws the day
-  picker, the grid and the shift drawer. [`profile-views.mjs`](../../src/profile-views.mjs) draws My
-  profile and the usual-day toggles the Roster's drawer shares. The site hours card is in
+  picker, the grid and the shift drawer. [`profile-views.mjs`](../../src/profile-views.mjs) draws the My
+  profile page, including the shifts section (`shiftsSection`). The site hours card is in
   [`season-settings-views.mjs`](../../src/season-settings-views.mjs), and its form is read whole by
   `scheduleSettingsFromForm`, because the save sends every day and target.
 - **The day.** `state.schedule` is `{date, day, drawer}`: the day on screen (today in New York when
@@ -1012,20 +1013,27 @@ roster with an active staff account); the database side is in
   The page is not redrawn during a drag (the cells are highlighted with a class), a redraw that
   replaces the row cancels the drag and saves nothing, and a drag that moved suppresses the click that
   follows, so it does not open the drawer.
-- **Drafts keep their base revision.** The site hours card and the usual days start a draft from the
-  revision on screen at the first change (`beginSiteHoursEdit`, `beginUsualDaysEdit`) and save at that
-  revision, not at whatever a later read brought in. A change from another window therefore ends in
+- **Drafts keep their base revision.** The site hours card starts a draft from the revision on screen
+  at the first change (`beginSiteHoursEdit`) and saves at that revision, not at whatever a later read brought in. A change from another window therefore ends in
   `CONFLICT` and a re-read that says so, instead of silently overwriting. A save that lost its answer
   is kept and sent again with the same action id.
-- **Live.** A change to `shifts` or `schedule_settings` re-reads the open day (and My profile's
-  week). A cleared window's channel is `loadWork`'s. An uncleared schedule viewer has no case
-  access, so the controller holds a channel for them only while they are on the Schedule or My
-  profile (`syncScheduleChannel`), and `handleChange` ignores every table but those two for them.
-  Anywhere else, and on focus or `online`, they re-read as before.
-- **My profile** shows the name, the roles this season, the usual-day toggles with their own Save, and
-  "Your shifts this week". The toggles are seven `aria-pressed` buttons and one hidden field that
-  holds the pressed days ("2,6"), which is what a form sends. A viewer with no volunteer profile row
-  has nothing to save to, so Save is off.
+- **Live.** A change to `shifts` or `schedule_settings` re-reads the open day, and a `shifts` change
+  re-reads My profile's shifts. A cleared window's channel is `loadWork`'s. An uncleared schedule
+  viewer has no case access and no My profile, so the controller holds a channel for them only while
+  they are on the Schedule (`syncScheduleChannel`), and `handleChange` ignores every table but those
+  two for them: their channel is Schedule-only. Anywhere else, and on focus or `online`, they re-read
+  as before.
+- **Your shifts this week** is a section of main's My profile page, for cleared windows only (the page
+  is `CLEARED_ONLY_SCREENS`). `state.myShifts` is the `vitally_my_shifts` answer
+  (`{weekStart, weekEnd, shifts}`), read by `readMyShifts` when the page opens, on focus and on a
+  `shifts` change. It is read apart from the profile: a failed first read says "Your shifts couldn't
+  load." in that section and the rest of the page still draws, a read that loaded once keeps what it
+  shows, and the window never gets a banner for it. Each line is `shiftLine` (day, hours and role,
+  for example "Sat, Nov 28 · 10 am – 1 pm · Preparer"); no shift in the New York Monday-to-Sunday week says
+  "No shifts this week."
+- **Usual days** are main's (057): the toggles on My profile and in the Roster's drawer save through
+  `vitally_save_my_profile` and `vitally_save_volunteer`. The Schedule only reads them, to put a
+  rostered volunteer whose usual days include the day first among Add shift's candidates.
 
 ## Sign-in
 

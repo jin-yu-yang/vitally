@@ -9760,8 +9760,6 @@ test(
   },
 );
 
-// TODO(Task 15): the walk's last step saves usual days on this change's own
-// My profile, which the merge with main's My profile (#262) dropped; retarget it.
 // The volunteer schedule (change add-volunteer-schedule) has its own walk,
 // outside the story and its time limit, like Season settings': it adds no
 // phase to either order. Chrome only, on a fixture of its own, so the shift it
@@ -9771,8 +9769,8 @@ test(
 // shift the Site Coordinator adds with "+ Add shift" arrive without a reload
 // (no tags, no coverage row). The Site Coordinator drags its end one cell to
 // the right with the pointer: the coverage row changes, the drag does not open
-// the drawer, and the next press on the shift does. The Preparer saves Tue and
-// Sat on My profile. Fictional people only.
+// the drawer, and the next press on the shift does. The Preparer opens My profile
+// and sees the shift under "Your shifts this week". Fictional people only.
 test(
   "A site coordinator schedules a volunteer, and the volunteer sees it",
   { timeout: 300_000 },
@@ -9952,20 +9950,29 @@ test(
       );
       await shootDay(admin, "schedule-day-admin");
 
-      // 6. The Preparer saves Tue and Sat on My profile.
+      // 6. The cleared Preparer opens main's My profile from the account row
+      // and sees the Saturday shift under "Your shifts this week". That list
+      // is the New York Monday-to-Sunday week, so on a Sunday the coming
+      // Saturday belongs to next week and the list says so instead.
       await clickAction(preparer, "open-my-profile");
-      await preparer.getByRole("heading", { name: "My profile", exact: true }).waitFor({ timeout: ARRIVAL_MS });
-      await preparer.locator('#my-profile-form [data-day="2"]').waitFor({ timeout: ARRIVAL_MS });
-      await waitForQuiet(preparer);
-      for (const day of [2, 6]) await preparer.locator(`#my-profile-form [data-day="${day}"]`).click({ timeout: CLICK_MS });
-      mark = await alertMark(preparer);
-      await pressControl(preparer, preparer.locator('#my-profile-form button[type="submit"]'), { selector: "button", what: "Save" });
-      await toastSince(preparer, "Usual days saved", mark);
-      const { rows: days } = await fixture.database.sql(
-        "select usual_days from public.volunteer_profiles where workspace_id=$1 and email=$2",
-        [fixture.database.workspaceId, fixture.actor("preparer").email],
-      );
-      assert.deepEqual(days.map((row) => row.usual_days), [[2, 6]], "the stored usual days");
+      await preparer.getByRole("heading", { name: "Your shifts this week", exact: true }).waitFor({ timeout: ARRIVAL_MS });
+      if (daysToSaturday < 6) {
+        await waitFor(
+          preparer,
+          "the Saturday shift under Your shifts this week",
+          () => [...document.querySelectorAll("#my-profile-shifts li")].some((li) => li.textContent.trim().endsWith("· Preparer")),
+          undefined,
+          ARRIVAL_MS,
+        );
+      } else {
+        await waitFor(
+          preparer,
+          "Your shifts this week to say there are none",
+          () => (document.querySelector("#my-profile-shifts")?.textContent ?? "").includes("No shifts this week."),
+          undefined,
+          ARRIVAL_MS,
+        );
+      }
       assertConsoleQuiet(adminWin, { name: "the Site Coordinator's Schedule window" });
       assertConsoleQuiet(preparerWin, { name: "the Preparer's Schedule window" });
       t.diagnostic(`schedule walk ${((Date.now() - started) / 1000).toFixed(1)} s`);

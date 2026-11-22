@@ -16,7 +16,7 @@
 --      (design D3, D5, D6);
 --   §7 the caller's own shifts this week, for My profile (design D5);
 --   §8 the clearance answer gains scheduleViewer (design D3, D11).
--- Later sections add the other RPCs, the seed and the Workload read.
+-- The seed and the Workload read are not in this file.
 -- Usual days are main's (057_my_profile: volunteer_profiles.usual_days text[],
 -- 'mon'..'sun', saved through vitally_save_volunteer and vitally_save_my_profile);
 -- this migration only reads them, for an admin's Add shift candidates.
