@@ -373,6 +373,8 @@ export function createController({
     volunteers: [],
     volunteerFilters: { search: "", role: "all" },
     volunteerFormError: null,
+    // The document whose Mark reviewed reason row is open in the drawer; window-local.
+    reviewReasonFor: null,
     // The last account action's result in the drawer: {kind: "ok" | "error", text}.
     volunteerAccountNotice: null,
     // The office screen's Invite a client panel (admin only): the client
@@ -1434,7 +1436,13 @@ export function createController({
     return { receipt, notice: `Assigned ${name} as ${slot}.` };
   }
 
+  function setReviewReasonFor(document) {
+    state.reviewReasonFor = document ?? null;
+    show();
+  }
+
   function clearVolunteerFormError() {
+    state.reviewReasonFor = null;
     state.volunteerFormError = null;
     state.volunteerAccountNotice = null;
   }
@@ -2605,6 +2613,7 @@ export function createController({
     state.volunteers = [];
     state.volunteerFilters = { search: "", role: "all" };
     state.volunteerFormError = null;
+    state.reviewReasonFor = null;
     state.volunteerAccountNotice = null;
     state.invitations = null;
     state.invitationsFailed = false;
@@ -4407,6 +4416,7 @@ export function createController({
       return null;
     }
     state.busy = false;
+    state.reviewReasonFor = null;
     noteConnected();
     try {
       await readVolunteers();
@@ -5059,6 +5069,7 @@ export function createController({
     setVolunteerFilter,
     saveVolunteer,
     markUploadReviewed,
+    setReviewReasonFor,
     createAccount,
     resendAccount,
     deactivateAccount,

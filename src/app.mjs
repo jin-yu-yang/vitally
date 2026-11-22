@@ -570,6 +570,8 @@ if (!config) {
     for (const [id, value] of formDrafts)
       restoreDraft(root.querySelector(`#${CSS.escape(id)}`), value);
     syncSiteCoordinatorAdd();
+    // An open reason row's Send back follows its restored pick or note.
+    for (const row of root.querySelectorAll(".volunteer-review")) syncSendBack(row);
     // A collapsed Exit Form group holding something typed is opened again, so
     // the field a refusal names is in view (design D7).
     const exitGroups = [...root.querySelectorAll("details.q-exit-group:not([open])")];
@@ -2192,11 +2194,26 @@ if (!config) {
         await controller[{ "account-resend": "resendAccount", "account-reactivate": "reactivateAccount" }[action]]();
         break;
       case "mark-upload-reviewed": {
-        // Stays in the drawer and keeps what was typed (no forgetVolunteerDrafts).
-        const text = await controller.markUploadReviewed(target.dataset.document);
+        // Opens the reason row; stays in the drawer and keeps what was typed
+        // (no forgetVolunteerDrafts).
+        controller.setReviewReasonFor(target.dataset.document);
+        root.querySelector(`.volunteer-review[data-document="${target.dataset.document}"] input`)?.focus();
+        break;
+      }
+      case "send-back": {
+        if (target.disabled) break;
+        const row = target.closest(".volunteer-review");
+        const note = String(row?.querySelector('[name="review-note"]')?.value ?? "").trim();
+        const pick = row?.querySelector('[name="review-reason"]:checked')?.value ?? "";
+        const reason = note || pick;
+        if (!reason) break;
+        const text = await controller.markUploadReviewed(target.dataset.document, reason);
         if (text) notify("success", text, by);
         break;
       }
+      case "cancel-review":
+        controller.setReviewReasonFor(null);
+        break;
       case "account-create":
         // Asks first (decision 5): nothing is sent until the question's Send.
         // The button is off while the form has unsaved changes.
@@ -2796,8 +2813,19 @@ if (!config) {
     }
   }
 
+  // Send back is off until a pick or a note is there.
+  function syncSendBack(field) {
+    const row = field.closest?.(".volunteer-review");
+    if (!row) return;
+    const note = String(row.querySelector('[name="review-note"]')?.value ?? "").trim();
+    const picked = row.querySelector('[name="review-reason"]:checked') != null;
+    const send = row.querySelector('[data-action="send-back"]');
+    if (send) send.disabled = !(note || picked) || controller.getState().busy === true;
+  }
+
   root.addEventListener("input", (event) => {
     const field = event.target;
+    syncSendBack(field);
     if (field.closest?.("#update-form")) {
       syncUpdateForm(field.form);
       return;
@@ -2859,6 +2887,7 @@ if (!config) {
 
   root.addEventListener("change", (event) => {
     const field = event.target;
+    syncSendBack(field);
     if (field.closest?.("#update-form")) {
       syncUpdateForm(field.form);
       return;

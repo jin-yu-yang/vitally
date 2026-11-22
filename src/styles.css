@@ -6884,3 +6884,11 @@ html:lang(zh-Hant) {
     flex: 1 1 auto;
   }
 }
+
+/* Volunteers: the Mark reviewed reason row and the setup screen's reason (change add-my-profile) */
+.volunteer-review {
+  margin: 0 0 12px;
+}
+.setup-reason {
+  margin: 4px 0 0;
+}

@@ -791,6 +791,7 @@ export function dialog(state) {
           ...ui,
           formError: state.volunteerFormError ?? null,
           accountNotice: state.volunteerAccountNotice ?? null,
+          reviewReasonFor: state.reviewReasonFor ?? null,
         },
       });
     } else if (state.dialog === "log-call") {

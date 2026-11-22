@@ -88,7 +88,7 @@ test("form reading trims, lower-cases and collects ticks", () => {
   assert.deepEqual(volunteerFromForm(fd), {
     name: "Ana", email: "a@b.org", phone: null, works: "on_site", languages: [],
     otherLanguage: null, roles: ["greeter", "admin"], certificates: ["vsc"],
-    isNew: false, photoIdChecked: false
+    isNew: false, photoIdChecked: false, usualDays: []
   });
   fd.set("isNew", "on");
   fd.set("photoIdChecked", "on");

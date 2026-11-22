@@ -164,7 +164,8 @@ export function volunteerFromForm(formData) {
     roles: formData.getAll("role").map(String),
     certificates: formData.getAll("certificate").map(String),
     isNew: formData.get("isNew") != null,
-    photoIdChecked: formData.get("photoIdChecked") != null
+    photoIdChecked: formData.get("photoIdChecked") != null,
+    usualDays: formData.getAll("usualDays").map(String)
   };
 }
 
@@ -184,7 +185,8 @@ export function volunteerFormChanged(volunteer, payload) {
     !same(payload.roles, volunteer.roles) ||
     !same(payload.certificates, volunteer.certificates) ||
     payload.isNew !== (volunteer.isNew === true) ||
-    payload.photoIdChecked !== (volunteer.photoIdChecked === true)
+    payload.photoIdChecked !== (volunteer.photoIdChecked === true) ||
+    !same(payload.usualDays, volunteer.usualDays)
   );
 }
 
