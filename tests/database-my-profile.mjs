@@ -363,10 +363,6 @@ test("my profile RPCs against real Supabase", async (t) => {
           )
         ).rows[0].n,
       );
-    const allReceipts = async () =>
-      Number(
-        (await f.sql("select count(*) as n from public.action_receipts where operation='SAVE_MY_PROFILE'")).rows[0].n,
-      );
     const preparer = (key, name) => f.staff({ key, name, capabilities: ["prepare"] });
     const read = async (m) => {
       const { data, error } = await m.client.rpc("vitally_my_profile");
@@ -489,7 +485,7 @@ test("my profile RPCs against real Supabase", async (t) => {
         const profile = await f.applicantA.rpc("vitally_my_profile");
         assert.equal(profile.error?.code, "VT001");
         assert.equal(profile.error?.message, "FORBIDDEN");
-        const before = await allReceipts();
+        const before = await receiptCount({ userId: f.applicantAUserId });
         const saved = await f.applicantA.rpc("vitally_save_my_profile", {
           p_action_id: randomUUID(),
           p_expected_revision: 1,
@@ -504,7 +500,7 @@ test("my profile RPCs against real Supabase", async (t) => {
         });
         assert.equal(saved.error?.code, "VT001");
         assert.equal(saved.error?.message, "FORBIDDEN");
-        assert.equal(await allReceipts(), before);
+        assert.equal(await receiptCount({ userId: f.applicantAUserId }), before);
       });
 
       await t.test("saving details writes only the caller", async () => {
