@@ -1,10 +1,10 @@
 # Verification Report
 
-> **Superseded 2026-11-22.** Main merged a separate My profile change (#262) after this report. The artifacts were revised with `/opsx:update` (tasks.md group 8, plan Tasks 13–17). This report describes the state at 2c79549, before that reconciliation. Verify is re-run, and this file overwritten, once group 8 is applied.
-
 **Change**: `add-volunteer-schedule`
-**Verified at**: `2026-11-22 07:16` (America/New_York)
-**Verifier**: Claude (controller session), after subagent-driven apply and a clean final whole-branch review
+**Verified at**: `2026-11-22 20:34` (America/New_York), at `a763639`
+**Verifier**: Claude (controller session), after round 2 (tasks.md group 8, plan Tasks 13–17) and a clean final whole-branch review
+
+> This run replaces the earlier report of 2026-11-22 07:16, which predated the reconciliation with main's My profile (#262). That report is in git history at 2c79549.
 
 ---
 
@@ -15,10 +15,10 @@
 **Result**:
 
 ```text
-23 items, 0 invalid (npx openspec validate --all --json, OpenSpec 1.17.0)
+24 items, 0 invalid (npx openspec validate --all --json, OpenSpec 1.17.0)
 ```
 
-Non-strict validation passes. `--strict` turns OpenSpec 1.17's "Requirement text is very long (>500 characters)" warnings into failures. The canonical specs on `main` raise the same warning, and CI runs the non-strict form (ruling R4). This is non-blocking.
+Non-strict validation passes. `--strict` would fail only on OpenSpec 1.17's "Requirement text is very long" warnings. The canonical specs on main carry the same warning, and CI runs the non-strict form (ruling R4).
 
 | Item | Type | Issues |
 |---|---|---|
@@ -28,9 +28,9 @@ Non-strict validation passes. `--strict` turns OpenSpec 1.17's "Requirement text
 
 ## 2. Task Completion (`tasks.md`)
 
-- [x] Every `- [ ]` is now `- [x]` (30 of 30)
+- [x] Every `- [ ]` is now `- [x]` (38 of 38, groups 1–8)
 
-**Unfinished tasks**: none.
+**Unfinished tasks**: none. Group 8 notes that it supersedes tasks 2.5, 2.6, 4.5 and 4.7, and the My profile half of 7.1. Those stay ticked because they were done and then reconciled.
 
 | Task | Why unfinished | Blocks archive? |
 |---|---|---|
@@ -40,16 +40,16 @@ Non-strict validation passes. `--strict` turns OpenSpec 1.17's "Requirement text
 
 ## 3. Delta Spec Sync State
 
-Each delta was compared with `openspec/specs/<capability>/spec.md` at HEAD. Archive merges them in step 8.
+Compared with `openspec/specs/<capability>/spec.md` at HEAD, which now includes main's merged changes through #262. Archive merges the deltas in step 8.
 
 | Capability | Sync state | Notes |
 |---|---|---|
-| `volunteer-schedule` | ✗ Needs sync | A new capability with 12 ADDED requirements. No canonical file yet. |
-| `season-settings` | ✗ Needs sync | 2 ADDED requirements, absent from the canonical spec. |
-| `volunteer-roster` | ✗ Needs sync | 1 ADDED requirement, absent. |
-| `volunteer-workload` | ✗ Needs sync | 1 ADDED requirement, absent. 1 MODIFIED requirement ("The Workload can be sorted and searched"); its canonical text is unchanged since the change was proposed, so archive overwrites nothing new. |
-| `volunteer-clearance` | ✗ Needs sync | 2 MODIFIED requirements ("A staff member can read their own clearance", "An uncleared staff member sees the setup screen"); their canonical text is unchanged since 7e06662, despite main merging #255 and #245. |
+| `volunteer-schedule` | ✗ Needs sync | New capability, 12 ADDED requirements, none in canonical yet. Usual days are main's (`volunteer-roster`). "Your shifts this week" sits on main's page (`my-profile`). |
+| `season-settings` | ✗ Needs sync | 2 ADDED requirements, absent from canonical. |
+| `volunteer-workload` | ✗ Needs sync | 1 ADDED requirement, absent. 1 MODIFIED requirement ("The Workload can be sorted and searched"): the only canonical line it rewrites is the column list, which gains "Hours this week", plus one new scenario. That canonical requirement is unchanged since the branch started. |
+| `volunteer-clearance` | ✗ Needs sync | 2 MODIFIED requirements, re-based on main's current text after #262. A line-by-line check shows main's lines kept verbatim. The only rewrites are the `uploadUrl` bullet's ending, the setup-screen paragraph that gains the Schedule sentence, and the "uncleared admin" scenario. The additions are `scheduleViewer` and its scenarios, and the Schedule link. |
 | `local-seed-data` | ✗ Needs sync | 1 ADDED requirement, absent. |
+| ~~`volunteer-roster`~~ | N/A | Delta removed in the 2026-11-22 update. Main's "An admin edits a volunteer's usual days" covers it. |
 
 ---
 
@@ -57,56 +57,48 @@ Each delta was compared with `openspec/specs/<capability>/spec.md` at HEAD. Arch
 
 | Sample | Design says | Specs say | Gap |
 |---|---|---|---|
-| D3: no-sign-in visibility | Non-admins never receive a no-sign-in volunteer's shift, by any read or realtime message | "Non-admins see names, roles and hours only" | None. The `viewer_shifts` policy and the day read both filter it; tested in `tests/database-schedule.mjs`. |
-| D6: coverage counting | Cleared only; Greeter or Intaker count on site only when Works includes on site; flagged and Admin shifts count toward nothing; the SQL decides `counts` | "Coverage counts cleared volunteers by role for each open hour" | None |
-| D7: drag | Create across empty cells takes the role of the volunteer's earliest shift; resize by an edge; saves at once; every drag has a button alternative | "Admins edit by drag or by buttons" | None. The final review added that a drag is tied to the day it started on. |
-| D9: Workload hours | Every role and flagged shifts count, removed shifts don't; NY Monday–Sunday | "The Workload shows the hours scheduled this week" | None. Hours also re-read on wake and focus (T10 fix). |
-| D11: sidebar | Schedule after Volunteers (admins) or Work board (others); My profile after Schedule; on the setup screen too | "Rostered staff open the Schedule and My profile" | None |
-| D2: soft delete | "Nothing deletes a shift row" | local-seed-data: "A re-run SHALL first remove exactly those shifts through the shift removal RPC, and SHALL leave every other shift alone." | Was drift (warning 1); **fixed in c3bd2eb** — see warning 1 |
+| D1/D5 usual days | Main's `text[]` `mon`…`sun`. Candidates carry the strings. No column of ours. | "Add shift offers…, usual days first" reads the profile's `mon`…`sun` days (capability `volunteer-roster`) | None |
+| D5/D8 `vitally_my_shifts` | Caller-only, current season, live shifts, New York week. Refused for client, anonymous, no person row and invited (ruling R19). | "My profile lists the volunteer's shifts this week" lists the same four refusals | None. Main's `vitally_my_profile` also refuses a caller with no volunteer profile row; `vitally_my_shifts` returns an empty week instead (R19). |
+| D10 live re-reads | Either table re-reads the Schedule. `shifts` re-reads My profile's shifts and the Workload. | "Schedule screens follow changes live and on focus", narrowed by the user on 2026-11-22 | None. The drift the final review found was resolved by narrowing the spec. |
+| D11 sidebar | Schedule after Volunteers or the Work board. My profile is main's account row, cleared windows only. | "Rostered staff open the Schedule"; volunteer-clearance setup screen | None |
+| D3 no-sign-in | Non-admins never get a no-sign-in volunteer's shifts | "Non-admins see names, roles and hours only" | None |
 
 **Drift warnings** (non-blocking):
 
-1. **Resolved: a seed re-run hard-deleted the shifts of the fictional no-sign-in volunteers.**
-   - *Found:* `seedWorkspace` ran `seedVolunteers` before `seedSchedule`. `seedVolunteers` deletes and re-adds the no-sign-in seed volunteers, and `shifts.person_id` cascades on delete (`057_volunteer_schedule.sql:80`). So those volunteers' shifts, including shifts an admin added, were hard-deleted before the RPC removal ran, and the deletion was not announced. That contradicted design D2 and the spec's "leave every other shift alone".
-   - *Fixed:* the user chose to fix the seed, done in **c3bd2eb**. `removeSeededShifts` now removes the run file's shifts through `vitally_remove_shift` before `seedVolunteers` runs (`tools/admin/seed-cases.mjs:739`, `:744`). `seedVolunteers` keeps any no-sign-in seed volunteer who holds a live shift, and does not re-add them.
-   - *Tests:* `tests/database-seed.mjs` shows an admin-added shift for a fictional volunteer survives a re-run (same id, live, same person), and a plain re-run leaves one seeded set and 8 volunteers. Seed suite 30/30 and `npm test` 2390/2390. The scoped re-review found no new breakage.
-   - *Accepted remainder (ruling R16):* when a fictional volunteer *is* re-created, the cascade still hard-deletes that volunteer's own seeded shift rows that the RPC already soft-removed. No live or admin-added shift is touched, and the removal is announced first. Avoiding it would need a different foreign-key action. Seed tool only.
-2. **Live Season settings for an uncleared admin.** Design D10 says Season settings re-reads on a `schedule_settings` change. An uncleared admin has no live channel there and re-reads on focus (ruling R11). The spec's live-update requirement does not name Season settings.
-3. **Base revisions (ruling R13) are not in design.md.** Drafts of the site-hours card and of My profile's usual days keep the revision they started from, so a concurrent change gets CONFLICT. This meets the spec's CONFLICT scenarios; design D8 and D10 do not describe the mechanism.
+1. **Uncleared admins get Season settings changes on focus, not live** (ruling R11). Design D10's live re-read applies to cleared windows. The spec's live-update requirement does not cover Season settings.
+2. **A re-created fictional seed volunteer's already-removed seeded shift rows are hard-deleted by the cascade** (ruling R16). The seed tool only, fixed for live and admin-added shifts in c3bd2eb.
 
 ---
 
 ## 5. Implementation Signal
 
-- [x] No unstaged files in the worktree (`git status --short` is empty).
-- [ ] Not all commits are pushed. The branch has no remote yet; it is pushed in step 9.
+- [x] No unstaged files in the worktree (`git status --short` is empty)
+- [ ] Not all commits are pushed. The branch has no remote yet; per the user, nothing is pushed until the PR step.
 
-**Commit range**: `4ab301e..c3bd2eb` (36 commits, including this report and the seed fix; merge base with origin/main is 4ab301e). It includes two merges of main: `d56e8b3` (055 Start next season) and `74350e8` (056 OneDrive). The schedule migration is `supabase/migrations/057_volunteer_schedule.sql`.
+**Commit range**: `086c473..a763639` (merge base with origin/main is 086c473; 52 commits). Migration: `supabase/migrations/058_volunteer_schedule.sql`.
 
-**Checks run** (project rules: Verification):
+**Checks run** (project rules: Verification), all at `a763639`:
 
 | Check | Why it applies | Result |
 |---|---|---|
-| `npm test` | Always | 2390 / 2390 pass (07:16, at 72751db) |
-| `npm run db:migrate:test` then `npm run test:database` | Migration 057, RPCs, RLS, realtime | Migrations applied 056 then 057. 880 / 881 pass. The single failure is `tests/database-accounts-function.mjs`: "VITALLY_TEST_MAIL_URL is required". The worktree's `.env.test` was copied from the main checkout and predates that variable, so this is env-only and unrelated (accounts Edge Function). Run during integration at ffd1cc8; no SQL changed after. |
-| `npm run test:browser` | Schedule, My profile, Season settings card, Roster drawer, Workload column, CSS | 55 / 57 pass (1232 s, at 72751db). "A site coordinator schedules a volunteer, and the volunteer sees it" passes (39.4 s) and "A site coordinator changes Season settings" passes (22.0 s). **2 failures, warning 4.** |
-| `npm run build:hant -- --check` | Shared text files touched by the merge | Clean, exit 0 |
-| `npx openspec validate --all` | Change artifacts | 23 / 23 |
+| `npm test` | Always | 2430 / 2430 pass |
+| `npm run db:migrate:test` then `npm run test:database` | Migration 058, RPCs, RLS, realtime, the replaced `vitally_my_clearance` | Migrations applied (057_my_profile, then 058). 924 / 925 pass. The single failure is `tests/database-accounts-function.mjs` ("VITALLY_TEST_MAIL_URL is required"): the worktree's `.env.test` was copied from the main checkout and predates that variable. It is env-only and unrelated. |
+| `npm run test:browser` | The Schedule, My profile section, Season settings card, Workload column, sidebar, CSS | **96 / 96 pass** (1989 s). Both story legs pass. The Chrome-client/Firefox-staff failures seen earlier on this local stack did not recur. "A site coordinator schedules a volunteer, and the volunteer sees it" passes (30.8 s), as do "A site coordinator changes Season settings" (24.9 s) and main's "A volunteer edits My profile and re-sends a Form 13615" (32.5 s). |
+| `npm run build:hant -- --check` | Shared text files came in through the merges | Clean, exit 0 |
+| `npx openspec validate --all` | Change artifacts | 24 / 24 |
 | `npm run test:auth-browser` | Not run: sign-in is untouched | — |
 
-4. **Browser story failures (warning).** "Chrome client and Firefox staff run the whole demonstration story", and its subtest "the seed builds its eleven cases in the story's workspace", time out in `waitForQuiet` on the Work board with about 43 `/rest/v1/reviews` requests in flight.
-   - During Task 12 this reproduced on a detached worktree of untouched main against the same local stack, before 057 existed on the branch. So it looks pre-existing or environmental, not caused by this change.
-   - It is not confirmed on a fresh stack. **Before the PR merges, a CI run on the branch must pass both story legs.** CI starts a fresh stack per job. The run must be linked in the PR body, and its story screenshots reviewed.
+**Coverage note.** The browser walk puts its shift on this week's Saturday, or on today on a Sunday. This run was on a Sunday, so the walk exercised the Sunday path with the exact line "Sun, Nov 22 · 10 am – 2 pm · Preparer". A review read the Saturday path, which any Monday-to-Saturday run takes, including CI on a weekday, and found it correct. It has not executed yet.
 
 ---
 
 ## 6. Front-Door Routing Leak Detector (warning, non-blocking)
 
 ```bash
-ls docs/superpowers/specs/*.md   # 8 files
+ls docs/superpowers/specs/*.md   # the historical documents only
 ```
 
-- [x] The files there predate the schema install and are legitimate. They were last touched in #47 (Part 4d), and CLAUDE.md names them as historical documents not to be moved. This change wrote nothing there.
+- [x] The files there predate the schema install, and CLAUDE.md names them as historical documents not to be moved. This change wrote nothing there.
 
 | File | Content captured in the change? | Suggested action |
 |---|---|---|
@@ -116,24 +108,23 @@ ls docs/superpowers/specs/*.md   # 8 files
 
 ## 7. Deferred Manual Dogfood vs Automated Test Equivalence
 
-plan.md has no `[~]` deferred rows, so this section is empty. That counts as PASS.
+plan.md has no `[~]` deferred rows, so this section is empty and counts as a pass.
 
-**Items from reviews accepted as documented behaviour** (not deferred tasks), recorded for the retrospective:
-
-- Dragging the start edge of a shift already tagged "Outside site hours" does nothing and shows no message, because the local gesture result is out of range. The "refused drag" scenario is covered by a controller test with a forced refusal (final review Minor 2; ruling R15).
-- A site that closes at midnight reads "… – 12 am" (`hourLabel(24)`), as the plan's Review Focus 4 requires.
-- **Copy the spec did not fix, chosen during implementation; the user should review it:** "Choose a volunteer.", "Shifts" (the grid's region label), "The shift must end after it starts.", "No shifts on this day.", "Keep shift" (remove confirmation), "Coverage" (row label), "VOLUNTEERS · SCHEDULE" (drawer overline), "On site needed (greeters or intakers)", "Every week · New York time", plus the loading and failed lines on the Schedule and My profile.
+**Accepted behaviour, for the record:**
+- Dragging the start edge of a shift already tagged "Outside site hours" does nothing and shows no message (round-1 ruling R15).
+- A site that closes at midnight reads "… – 12 am" (`hourLabel(24)`).
+- **Copy the spec did not fix, chosen during implementation; the user should review it:** "Choose a volunteer.", "Shifts" (the grid's region label), "The shift must end after it starts.", "No shifts on this day.", "Keep shift", "Coverage", "VOLUNTEERS · SCHEDULE", "On site needed (greeters or intakers)", "Every week · New York time", "Loading your shifts…", "Your shifts couldn't load.", plus the Schedule's loading and failed lines.
 
 ---
 
 ## Overall Decision
 
 - [ ] ✅ PASS
-- [x] ⚠️ PASS WITH WARNINGS. Three open warnings (warning 1 resolved in c3bd2eb):
-  1. *(Resolved.)* A seed re-run hard-deleted admin-added shifts of fictional volunteers. Fixed. The only remainder is ruling R16 (the seed's own already-removed rows of a re-created fictional volunteer).
-  2. Uncleared admins get Season settings on focus, not live.
-  3. Base revisions are not described in design.md.
-  4. The browser story's Chrome-client/Firefox-staff leg fails locally, as it does on main. It needs a passing CI run before merge.
+- [x] ⚠️ PASS WITH WARNINGS. Every required check passes. Two non-blocking warnings remain:
+  1. Uncleared admins get Season settings changes on focus, not live (R11).
+  2. The seed's own removed rows cascade away when a fictional volunteer is re-created (R16).
+
+  Also noted: the walk's Saturday path has not executed yet, and a weekday run or CI covers it.
 - [ ] ❌ FAIL
 
-**Next step**: write the retrospective (lifecycle step 7), recording warnings 1 and 4 as follow-ups. Then merge main and archive (step 8), and push and open the PR (step 9), with the CI run linked.
+**Next step**: add the round-2 follow-up to the retrospective (lifecycle step 7), summarising this round's ledger (R17–R20, deferred minors). Then merge main and archive (step 8), and push and open the PR with the CI run linked (step 9).
