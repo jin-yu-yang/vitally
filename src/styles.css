@@ -7016,6 +7016,40 @@ button.schedule-shift:focus-visible {
   margin: 0;
   font-weight: 400;
 }
+/* Drag (design D7): empty cells and a shift's edge handles take the pointer
+   and stop the page scrolling under it; the page still scrolls everywhere
+   else. The edges are small zones; keyboard users change hours in the drawer. */
+.schedule-cell,
+.schedule-edge {
+  touch-action: none;
+}
+.schedule-cell.drag-preview {
+  background: var(--vt-primary-soft);
+  outline: 1px dashed var(--vt-primary);
+  outline-offset: -2px;
+}
+.schedule-grid.dragging {
+  user-select: none;
+}
+button.schedule-shift {
+  position: relative;
+}
+.schedule-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  cursor: ew-resize;
+}
+.schedule-edge.start {
+  left: 0;
+}
+.schedule-edge.end {
+  right: 0;
+}
+.schedule-edge:hover {
+  background: var(--vt-primary-line);
+}
 .schedule-role {
   font-weight: 600;
 }

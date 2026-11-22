@@ -51,10 +51,18 @@ function shiftElement(shift, hours, admin, { placed = true } = {}) {
   const inner = `<span class="schedule-role">${esc(roleLabel(shift.role))}</span><span class="schedule-time">${esc(
     hoursText(shift.startHour, shift.endHour),
   )}</span>${tagList(tags)}`;
+  // The edge zones a pointer drags to change the hours (design D7); keyboard
+  // users change them in the drawer. Only on a shift drawn on the grid, and
+  // an edge only where the shift's own end is on screen.
+  const edges = placed
+    ? `${shift.startHour >= hours.open ? `<span class="schedule-edge start" data-edge="start" aria-hidden="true"></span>` : ""}${
+        shift.endHour <= hours.close ? `<span class="schedule-edge end" data-edge="end" aria-hidden="true"></span>` : ""
+      }`
+    : "";
   return admin
     ? `<button type="button" class="${cls}" data-action="open-shift" data-shift-id="${esc(shift.shiftId)}"${style} aria-label="${esc(
         shiftLabel(shift, tags),
-      )}">${inner}</button>`
+      )}">${inner}${edges}</button>`
     : `<span class="${cls}"${style}>${inner}</span>`;
 }
 

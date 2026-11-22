@@ -130,6 +130,17 @@ test("schedule: a non-admin day has no tags, no coverage, no Add shift, and shif
   assert.match(html, /<span class="schedule-shift role-preparer" style="grid-column: 2 \/ span 6">/);
 });
 
+test("schedule: an admin's shift carries edge handles for drag; a viewer's carries none", () => {
+  const html = scheduleScreen(state(adminDay()));
+  const button = (id) => html.split("<button").find((part) => part.includes(`data-action="open-shift" data-shift-id="${id}"`)).split("</button>")[0];
+  assert.match(button("s-hana"), /data-edge="start"[\s\S]*data-edge="end"/);
+  // A shift running past the close has no end handle: its end is not on screen.
+  assert.match(button("s-lia"), /data-edge="start"/);
+  assert.doesNotMatch(button("s-lia"), /data-edge="end"/);
+  assert.match(html, /class="schedule-cell" data-hour="10"/);
+  assert.doesNotMatch(scheduleScreen(state(viewerDay())), /data-edge/);
+});
+
 test("schedule: a closed day says so with no grid", () => {
   const html = scheduleScreen(state(adminDay({ date: "2027-02-08", weekday: 1, hours: null, shifts: [] })));
   assert.match(html, /The site is closed on Mondays\./);

@@ -1815,6 +1815,35 @@ export function createController({
     );
   }
 
+  // A drag on the grid (design D7): a draft from `schedule-drag.mjs`, saved
+  // through the same write as the drawer's Save, so a CONFLICT, a refusal and
+  // a lost answer are handled identically. There is no drawer: a refusal is
+  // the page's banner, and the day is read again either way. The draft's
+  // `actionId` is the gesture's.
+  async function saveShiftDrag(draft) {
+    if (state.busy || state.dialog || !staffWindow() || state.screen !== "schedule" || state.schedule.day?.canEdit !== true) return null;
+    if (!draft?.volunteerId || !(draft.endHour > draft.startHour)) return null;
+    const shift = {
+      volunteerId: draft.volunteerId,
+      date: state.schedule.date,
+      startHour: draft.startHour,
+      endHour: draft.endHour,
+      role: draft.role,
+    };
+    const edit = Boolean(draft.shiftId);
+    const key = JSON.stringify({ save: draft.shiftId ?? null, revision: draft.revision ?? null, shift });
+    return await shiftWrite(
+      key,
+      () => ({
+        actionId: draft.actionId ?? newActionId(),
+        shiftId: edit ? draft.shiftId : null,
+        revision: edit ? draft.revision : null,
+        shift,
+      }),
+      (request) => store.saveShift(request),
+    );
+  }
+
   // Remove shift, once its confirmation is pressed, at the revision read.
   async function removeShift(shiftId) {
     if (state.busy || !staffWindow() || !shiftId || state.schedule.day?.canEdit !== true) return null;
@@ -5275,6 +5304,7 @@ export function createController({
     openShiftDrawer,
     editShiftDraft,
     saveShift,
+    saveShiftDrag,
     removeShift,
     saveSidn,
     startNextSeason,

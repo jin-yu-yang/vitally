@@ -11490,6 +11490,56 @@ test("schedule: an end before the start is said without sending", async () => {
   controller.stop();
 });
 
+test("schedule: a drag-made shift saves like the drawer's, with the gesture's action id, and needs no drawer", async () => {
+  const { store, controller } = await onSchedule();
+  const draft = { volunteerId: "person-rowan", shiftId: null, revision: null, startHour: 14, endHour: 16, role: "preparer", actionId: "gesture-1" };
+  const reads = dayReads(store);
+  assert.deepEqual(await controller.saveShiftDrag(draft), { done: true, toast: null });
+  const write = store.writes.at(-1);
+  assert.equal(write.actionId, "gesture-1");
+  assert.equal(write.shiftId, null);
+  assert.deepEqual(write.shift, { volunteerId: "person-rowan", date: "2027-02-06", startHour: 14, endHour: 16, role: "preparer" });
+  assert.equal(dayReads(store), reads + 1);
+  controller.stop();
+});
+
+test("schedule: a drag resize sends the shift's id and revision", async () => {
+  const { store, controller } = await onSchedule();
+  await controller.saveShiftDrag({ volunteerId: "person-rowan", shiftId: "shift-rowan", revision: 3, startHour: 10, endHour: 15, role: "preparer", actionId: "gesture-2" });
+  const write = store.writes.at(-1);
+  assert.equal(write.shiftId, "shift-rowan");
+  assert.equal(write.revision, 3);
+  assert.equal(write.shift.endHour, 15);
+  controller.stop();
+});
+
+test("schedule: a refused drag shows the refusal and reads the day again; a CONFLICT says it was refreshed", async () => {
+  const { store, controller } = await onSchedule();
+  const draft = { volunteerId: "person-rowan", shiftId: "shift-rowan", revision: 3, startHour: 10, endHour: 17, role: "preparer", actionId: "gesture-3" };
+  store.failNextShift = shiftRefusal("VALIDATION", "OUTSIDE_SITE_HOURS");
+  const reads = dayReads(store);
+  assert.equal(await controller.saveShiftDrag(draft), null);
+  assert.equal(controller.getState().error.message, "The shift must stay inside site hours.");
+  assert.equal(dayReads(store), reads + 1);
+  store.failNextShift = shiftRefusal("CONFLICT");
+  const result = await controller.saveShiftDrag({ ...draft, endHour: 14, actionId: "gesture-4" });
+  assert.deepEqual(result, { done: true, toast: "Someone changed this shift. The schedule has been refreshed." });
+  controller.stop();
+});
+
+test("schedule: a drag is not sent on a non-admin day or while a drawer is open", async () => {
+  const viewer = await onSchedule({ clearance: PREPARER_VIEWER });
+  const draft = { volunteerId: "person-rowan", shiftId: null, revision: null, startHour: 14, endHour: 16, role: "preparer", actionId: "g" };
+  assert.equal(await viewer.controller.saveShiftDrag(draft), null);
+  assert.equal(viewer.store.writes.length, 0);
+  viewer.controller.stop();
+  const admin = await onSchedule();
+  admin.controller.openShiftDrawer(null);
+  assert.equal(await admin.controller.saveShiftDrag(draft), null);
+  assert.equal(admin.store.writes.length, 0);
+  admin.controller.stop();
+});
+
 test("schedule: a lost answer is sent again with the same action id", async () => {
   const { store, controller } = await onSchedule();
   controller.openShiftDrawer(null);

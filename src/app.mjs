@@ -60,6 +60,7 @@ import * as client from "./client-views.mjs";
 import { POOL_FILTER_KEYS } from "./pool-views.mjs";
 import { createSidebarPeek, peekZone, toggleLabel } from "./sidebar-peek.mjs";
 import { createRedrawHold } from "./redraw-hold.mjs";
+import { createGesture, dragResult } from "./schedule-drag.mjs";
 import { STORAGE_KEY, createLanguageRequests, isLang, loadHantWithin, viewLang } from "./language.mjs";
 import { createHantLoader, hantReady } from "./hant.mjs";
 import { t, SENTENCES } from "./client-text.mjs";
@@ -2817,6 +2818,122 @@ if (!config) {
         break;
     }
   }
+
+  // ---- drag on the Schedule (change add-volunteer-schedule, design D7) -----
+  //
+  // An admin's day only (the read's own `canEdit`). Drag across empty cells of
+  // a row to make a shift; drag a shift's edge handle to change its hours.
+  // The page is not redrawn mid-drag (the press hold above keeps realtime
+  // redraws back); the cells are highlighted with a class, and pointerup
+  // saves through the controller's shared write. One gesture, one action id.
+  let scheduleDrag = null; // { gesture, row, pointerId, toHour, moved }
+  let suppressShiftClick = false;
+
+  function dragHourAt(row, x) {
+    const cells = [...row.querySelectorAll(".schedule-cell")];
+    if (!cells.length) return null;
+    const hit = cells.find((cell) => {
+      const box = cell.getBoundingClientRect();
+      return x >= box.left && x < box.right;
+    });
+    const fallback = x < cells[0].getBoundingClientRect().left ? cells[0] : cells[cells.length - 1];
+    return Number((hit ?? fallback).dataset.hour);
+  }
+
+  const dragInput = (drag) => {
+    const day = controller.getState().schedule?.day;
+    return { kind: drag.gesture.kind, volunteerId: drag.gesture.volunteerId, shift: drag.gesture.shift, fromHour: drag.gesture.fromHour, toHour: drag.toHour, hours: day?.hours, shifts: day?.shifts ?? [] };
+  };
+
+  function paintDrag(drag) {
+    const draft = dragResult(dragInput(drag));
+    for (const cell of drag.row.querySelectorAll(".schedule-cell"))
+      cell.classList.toggle("drag-preview", Boolean(draft) && Number(cell.dataset.hour) >= draft.startHour && Number(cell.dataset.hour) < draft.endHour);
+  }
+
+  function endScheduleDrag(drag) {
+    scheduleDrag = null;
+    for (const cell of drag.row.querySelectorAll(".drag-preview")) cell.classList.remove("drag-preview");
+    drag.row.closest(".schedule-grid")?.classList.remove("dragging");
+  }
+
+  root.addEventListener("pointerdown", (event) => {
+    if (scheduleDrag || !event.isPrimary || event.button !== 0) return;
+    const state = controller.getState();
+    const day = state.schedule?.day;
+    if (state.screen !== "schedule" || day?.canEdit !== true || state.busy || state.dialog) return;
+    const row = event.target.closest?.(".schedule-grid .schedule-row[data-volunteer-id]");
+    if (!row) return;
+    const edge = event.target.closest("[data-edge]");
+    const shift = edge ? (day.shifts ?? []).find((entry) => entry.shiftId === edge.closest("[data-shift-id]")?.dataset.shiftId) : null;
+    if (edge && !shift) return;
+    if (!edge && !event.target.closest(".schedule-cell")) return;
+    const fromHour = dragHourAt(row, event.clientX);
+    if (!Number.isInteger(fromHour)) return;
+    event.preventDefault();
+    try {
+      event.target.setPointerCapture(event.pointerId);
+    } catch {
+      // A pointer that is already gone; the gesture ends on its own.
+    }
+    scheduleDrag = {
+      gesture: createGesture({ kind: edge ? edge.dataset.edge : "create", volunteerId: row.dataset.volunteerId, shift, fromHour, actionId: crypto.randomUUID() }),
+      row,
+      pointerId: event.pointerId,
+      toHour: fromHour,
+      moved: false,
+    };
+    row.closest(".schedule-grid").classList.add("dragging");
+  });
+
+  root.addEventListener("pointermove", (event) => {
+    const drag = scheduleDrag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const hour = dragHourAt(drag.row, event.clientX);
+    if (!Number.isInteger(hour) || hour === drag.toHour) return;
+    drag.toHour = hour;
+    drag.moved = true;
+    paintDrag(drag);
+  });
+
+  root.addEventListener("pointercancel", (event) => {
+    if (scheduleDrag && event.pointerId === scheduleDrag.pointerId) endScheduleDrag(scheduleDrag);
+  });
+
+  root.addEventListener("pointerup", async (event) => {
+    const drag = scheduleDrag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    endScheduleDrag(drag);
+    // A drag on a shift's edge is not a press on the shift: the click that
+    // follows must not open the drawer.
+    if (drag.moved) {
+      suppressShiftClick = true;
+      setTimeout(() => (suppressShiftClick = false), 100);
+    }
+    const day = controller.getState().schedule?.day;
+    // A press that never left its cell makes nothing (a tap is not a shift).
+    const draft = drag.moved || drag.gesture.kind !== "create" ? drag.gesture.finish({ toHour: drag.toHour, hours: day?.hours, shifts: day?.shifts ?? [] }) : null;
+    if (!draft) return;
+    const by = signedInUserId();
+    const shown = controller.getState().errorCount;
+    try {
+      const result = await controller.saveShiftDrag(draft);
+      if (result?.toast) notify("warning", result.toast, by);
+    } catch (error) {
+      safetyNet(error, by, shown);
+    }
+  });
+
+  root.addEventListener(
+    "click",
+    (event) => {
+      if (!suppressShiftClick) return;
+      suppressShiftClick = false;
+      event.stopImmediatePropagation();
+      event.preventDefault();
+    },
+    true,
+  );
 
   root.addEventListener("click", async (event) => {
     // Who pressed, before anything is awaited (see `notify`).
