@@ -61,14 +61,14 @@ Stakeholders: Hailey (owner), Zeye (reviewer, approves before hosted deploy), Ji
 ### D4: The RPC's order of checks and its lock order
 - **Choice:** `vitally_remove_from_roster(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)`, `security definer`, granted to `authenticated`. In this order:
   1. `require_membership`, `acting_person`, then `FORBIDDEN` unless the caller is staff with a person and is a workspace admin.
-  2. `VALIDATION` for a null argument.
+  2. `VALIDATION` for a null argument, then `VALIDATION` (`SELF`) for the caller's own row.
   3. The workspace advisory lock (`hashtextextended(workspace_id::text, 0)`).
   4. `ADMIN_ROLE` (from D3).
   5. `reserve_receipt` with operation `REMOVE_FROM_ROSTER` and a digest of the arguments and the caller. A replay returns the stored receipt.
   6. `expire_invitations`.
   7. Lock the profile `FOR UPDATE`. `NOT_FOUND` if there is none in the caller's workspace. `CONFLICT` if the revision differs.
   8. Lock the current-season entry `FOR UPDATE`. `NOT_FOUND` if there is none.
-  9. `SELF`, then the site coordinator rule from D3 (`FORBIDDEN`).
+  9. The site coordinator rule from D3 (`FORBIDDEN`).
   10. `OPEN_WORK` from the full `open_work` list, with the labels as detail. The SC exception that Save makes for the default follow-up person doesn't apply here.
   11. Delete the entry.
   12. Lock the account `FOR UPDATE`. If it is `invited` or `active` and not a site coordinator's, call `deactivate_account`.

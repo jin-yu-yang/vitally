@@ -331,9 +331,11 @@ test("removing a volunteer from this season's roster", async (t) => {
     });
 
     await t.test("refuses SELF", async () => {
-      // As a site coordinator. An admin who isn't one holds the Admin role, so
-      // removing themselves gets ADMIN_ROLE first (design D4 step 4).
+      // A site coordinator, and an admin who isn't one: SELF comes before
+      // ADMIN_ROLE (design D4 step 2), so the Admin role doesn't answer first.
       await refused(f, sc.client, sc.personId, { code: VALIDATION, message: "VALIDATION", details: "SELF" });
+      const own = await f.staff({ key: "sela_self", name: "Sela Brune", capabilities: ["admin", "followup"] });
+      await refused(f, own.client, own.personId, { code: VALIDATION, message: "VALIDATION", details: "SELF" });
     });
 
     await t.test("refuses a missing argument", async () => {

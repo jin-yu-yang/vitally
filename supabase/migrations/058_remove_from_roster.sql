@@ -34,13 +34,14 @@ revoke all on public.roster_removals from public,anon,authenticated,service_role
 -- §2. Remove a volunteer from this season's roster (design D1-D6), for a
 -- workspace admin, in one transaction under the workspace lock. Order of
 -- checks (design D4): FORBIDDEN (not a workspace admin: no receipt),
--- VALIDATION (a missing argument), the workspace lock, ADMIN_ROLE (the person
+-- VALIDATION (a missing argument), VALIDATION (SELF: the caller's own row, no
+-- receipt), the workspace lock, ADMIN_ROLE (the person
 -- holds the Admin role this season and the caller isn't a site coordinator: no
 -- receipt, as Save), the stored answer for a repeated action id (so a retry
 -- after a lost reply is not a CONFLICT), NOT_FOUND (no profile in the caller's
 -- workspace), CONFLICT (a stale profile revision), NOT_FOUND (no current-season
--- entry), VALIDATION (SELF), FORBIDDEN (a site coordinator, and the caller
--- isn't one), then OPEN_WORK with the labels. Then, in order: the entry is
+-- entry), FORBIDDEN (a site coordinator, and the caller isn't one), then
+-- OPEN_WORK with the labels. Then, in order: the entry is
 -- deleted, and its certificates with it; the account is deactivated as
 -- Deactivate does, unless there is nothing to deactivate or it is a site
 -- coordinator's; the profile revision is raised; the removal is recorded; the
@@ -71,9 +72,14 @@ begin
  if v_member.access<>'staff' or v_person.id is null or not vitally_policy.is_workspace_admin(v_member.workspace_id) then
   raise sqlstate 'VT001' using message='FORBIDDEN';
  end if;
- -- 2. A malformed envelope cannot be digested or reserved.
+ -- 2. A malformed envelope cannot be digested or reserved. Then the caller's
+ -- own row (design D3), before ADMIN_ROLE: every admin who isn't a site
+ -- coordinator holds the Admin role, so after it they would never see SELF.
  if p_action_id is null or p_volunteer_id is null or p_expected_revision is null then
   raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ if p_volunteer_id=v_person.id then
+  raise sqlstate 'VT007' using message='VALIDATION',detail='SELF';
  end if;
  -- 3. The workspace lock, which Save, the account RPCs and Start next season
  -- take first too.
@@ -116,11 +122,8 @@ begin
  if not found then
   raise sqlstate 'VT002' using message='NOT_FOUND';
  end if;
- -- 9. Not the caller's own row (design D3). Only a site coordinator removes a
- -- site coordinator, as only one deactivates one (052).
- if p_volunteer_id=v_person.id then
-  raise sqlstate 'VT007' using message='VALIDATION',detail='SELF';
- end if;
+ -- 9. Only a site coordinator removes a site coordinator, as only one
+ -- deactivates one (052, design D3).
  if vitally_private.is_site_coordinator(v_member.workspace_id,p_volunteer_id)
   and not vitally_private.is_site_coordinator(v_member.workspace_id,v_person.id) then
   raise sqlstate 'VT001' using message='FORBIDDEN';
