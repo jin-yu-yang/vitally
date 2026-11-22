@@ -11355,7 +11355,7 @@ test("saveMyProfile sends no other-language name unless Other is among the langu
 
 test("saveMyProfile sends an empty phone and other language as null", async () => {
   const { store, controller } = await onMyProfile();
-  await controller.saveMyProfile({ ...PROFILE_VALUES, phone: "  ", otherLanguage: "" });
+  await controller.saveMyProfile({ ...PROFILE_VALUES, phone: "  ", languages: ["english"], otherLanguage: "" });
   const { profile } = store.writes.at(-1);
   assert.equal(profile.phone, null);
   assert.equal(profile.otherLanguage, null);
@@ -11409,7 +11409,7 @@ test("a refused save keeps the typed values", async () => {
     cause: { message: "VALIDATION", details: "name" },
   });
   const reads = profileReads(store);
-  assert.equal(await controller.saveMyProfile({ ...PROFILE_VALUES, name: "" }), null);
+  assert.equal(await controller.saveMyProfile(PROFILE_VALUES), null);
   const state = controller.getState();
   assert.equal(state.error.code, "VALIDATION");
   assert.equal(state.busy, false);
@@ -11417,6 +11417,45 @@ test("a refused save keeps the typed values", async () => {
   assert.equal(profileReads(store), reads);
   assert.deepEqual(state.myProfile, shown);
   assert.equal(state.screen, "my-profile");
+  controller.stop();
+});
+
+test("an empty name is said with the drawer's sentence and nothing is sent", async () => {
+  const { store, controller } = await onMyProfile();
+  const shown = controller.getState().myProfile;
+  const writes = store.writes.length;
+  assert.equal(await controller.saveMyProfile({ ...PROFILE_VALUES, name: "   " }), null);
+  const state = controller.getState();
+  assert.equal(state.error.code, "VALIDATION");
+  assert.equal(state.error.message, "Enter a name.");
+  assert.equal(store.writes.length, writes);
+  assert.equal(state.busy, false);
+  assert.deepEqual(state.myProfile, shown);
+  // A corrected form saves, and the sentence goes.
+  assert.equal(await controller.saveMyProfile(PROFILE_VALUES), "Profile saved");
+  assert.equal(controller.getState().error, null);
+  controller.stop();
+});
+
+test("Other ticked with no language named is said and nothing is sent", async () => {
+  const { store, controller } = await onMyProfile();
+  const writes = store.writes.length;
+  assert.equal(
+    await controller.saveMyProfile({ ...PROFILE_VALUES, languages: ["english", "other"], otherLanguage: " " }),
+    null,
+  );
+  assert.equal(controller.getState().error.message, "Name the other language.");
+  assert.equal(
+    await controller.saveMyProfile({ ...PROFILE_VALUES, languages: ["other"], otherLanguage: "x".repeat(41) }),
+    null,
+  );
+  assert.equal(controller.getState().error.message, "Name the other language in 40 characters or fewer.");
+  assert.equal(
+    await controller.saveMyProfile({ ...PROFILE_VALUES, phone: "5".repeat(31) }),
+    null,
+  );
+  assert.equal(controller.getState().error.message, "Enter a phone number of 30 characters or fewer.");
+  assert.equal(store.writes.length, writes);
   controller.stop();
 });
 

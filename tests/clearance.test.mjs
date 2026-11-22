@@ -139,6 +139,22 @@ test("a photo ID is never already on file", () => {
   );
 });
 
+test("a note's own ending . ! or ? is not doubled", () => {
+  for (const mark of [".", "!", "?"])
+    assert.equal(
+      reviewLine({ document: "form13615", sentAt: null, reviewReason: `Please re-sign${mark}` }),
+      "Your site coordinator looked at this: Please re-sign. Please send it again or ask them.",
+    );
+  assert.equal(
+    reviewLine({ document: "form13615", sentAt: null, reviewReason: "Page 2 is missing. " }),
+    "Your site coordinator looked at this: Page 2 is missing. Please send it again or ask them.",
+  );
+  assert.equal(
+    reviewLine({ document: "form13615", sentAt: null, reviewReason: "Already on file" }),
+    "Your site coordinator says this is already on file. You don't need to send it again.",
+  );
+});
+
 test("a note is quoted in the generic line", () => {
   assert.equal(
     reviewLine({ document: "form13615", sentAt: null, reviewReason: "Page 2 is missing" }),

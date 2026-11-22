@@ -503,6 +503,40 @@ test("my profile RPCs against real Supabase", async (t) => {
         assert.equal(await receiptCount({ userId: f.applicantAUserId }), before);
       });
 
+      await t.test("a staff member with no volunteer profile is refused FORBIDDEN, and the save stores no receipt", async () => {
+        const m = await preparer("mp_noprofile", "Orla Hendry");
+        const row = (await f.sql("select to_jsonb(v) as r from public.volunteer_profiles v where person_id=$1", [m.personId]))
+          .rows[0].r;
+        const receiptsBefore = await receiptCount(m);
+        const profile = await f.sql("delete from public.volunteer_profiles where person_id=$1", [m.personId]);
+        assert.equal(profile.rowCount, 1);
+        try {
+          const read = await m.client.rpc("vitally_my_profile");
+          assert.equal(read.error?.code, "VT001");
+          assert.equal(read.error?.message, "FORBIDDEN");
+          const saved = await m.client.rpc("vitally_save_my_profile", {
+            p_action_id: randomUUID(),
+            p_expected_revision: 1,
+            p_profile: {
+              name: "Nobody Atall",
+              phone: null,
+              works: "remote",
+              languages: ["english"],
+              otherLanguage: null,
+              usualDays: [],
+            },
+          });
+          assert.equal(saved.error?.code, "VT001");
+          assert.equal(saved.error?.message, "FORBIDDEN");
+          assert.equal(await receiptCount(m), receiptsBefore);
+        } finally {
+          await f.sql("insert into public.volunteer_profiles select * from jsonb_populate_record(null::public.volunteer_profiles, $1::jsonb)", [
+            JSON.stringify(row),
+          ]);
+        }
+        assert.equal((await profileOf(m)).email, row.email);
+      });
+
       await t.test("saving details writes only the caller", async () => {
         const m = await preparer("mp_save", "Lowell Ashby");
         const other = await preparer("mp_save_other", "Maren Doyle");

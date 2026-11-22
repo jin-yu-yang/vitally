@@ -190,15 +190,33 @@ export function volunteerFormChanged(volunteer, payload) {
   );
 }
 
+// The field rules the Roster drawer and My profile share (change
+// add-my-profile): the same sentences, null when the fields are fine.
+const nameProblem = (payload) => (!payload.name || payload.name.length > NAME_MAX ? "Enter a name." : null);
+const phoneProblem = (payload) =>
+  payload.phone && payload.phone.length > PHONE_MAX ? "Enter a phone number of 30 characters or fewer." : null;
+const otherLanguageProblem = (payload) => {
+  if (!payload.languages?.includes("other")) return null;
+  if (!payload.otherLanguage) return "Name the other language.";
+  if (payload.otherLanguage.length > OTHER_LANGUAGE_MAX) return "Name the other language in 40 characters or fewer.";
+  return null;
+};
+
+// My profile's problem with its six fields, as a sentence, or null.
+export const profileProblem = (payload) =>
+  nameProblem(payload) ?? phoneProblem(payload) ?? otherLanguageProblem(payload);
+
 // Returns the first problem as a sentence, or null when the payload may be saved.
 export function volunteerProblem(payload, list, volunteerId) {
-  if (!payload.name || payload.name.length > NAME_MAX) return "Enter a name.";
+  const name = nameProblem(payload);
+  if (name) return name;
   const email = String(payload.email ?? "").trim().toLowerCase();
   if (!email || email.length > EMAIL_MAX || !EMAIL_PATTERN.test(email)) return "Enter a valid email.";
   if (list.some((v) => v.id !== volunteerId && String(v.email ?? "").toLowerCase() === email)) {
     return "That email is already on the Roster.";
   }
-  if (payload.phone && payload.phone.length > PHONE_MAX) return "Enter a phone number of 30 characters or fewer.";
+  const phone = phoneProblem(payload);
+  if (phone) return phone;
   // A role held before this edit is not refused here: the server drops it when
   // it lost a certificate (withoutLostRoles). Only a newly ticked one is.
   const held = heldRoles(list, volunteerId);
@@ -207,11 +225,7 @@ export function volunteerProblem(payload, list, volunteerId) {
     const missing = missingFor(role, payload.certificates);
     if (missing.length) return `${roleLabel(role)} needs ${missing.join(" and ")}.`;
   }
-  if (payload.languages?.includes("other")) {
-    if (!payload.otherLanguage) return "Name the other language.";
-    if (payload.otherLanguage.length > OTHER_LANGUAGE_MAX) return "Name the other language in 40 characters or fewer.";
-  }
-  return null;
+  return otherLanguageProblem(payload);
 }
 
 const heldRoles = (list, volunteerId) =>

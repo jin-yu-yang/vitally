@@ -36,7 +36,7 @@ import { LABEL_COLORS, labelNameTaken } from "./case-labels.mjs";
 import { createShadedSave } from "./shaded-editor.mjs";
 import { createWindowState } from "./window-state.mjs";
 import { isLang, readLanguage, writeLanguage } from "./language.mjs";
-import { volunteerProblem, withoutLostRoles, roleNeedsMessage, openWorkMessage, accountMessage } from "./volunteer-roster.mjs";
+import { volunteerProblem, profileProblem, withoutLostRoles, roleNeedsMessage, openWorkMessage, accountMessage } from "./volunteer-roster.mjs";
 import { emptyUpdateForm, toUpdateRequest, validateUpdate } from "./posted-updates.mjs";
 import { nowInput } from "./contact-log.mjs";
 import { seasonRefusalLines } from "./season-settings-views.mjs";
@@ -1633,6 +1633,17 @@ export function createController({
     const key = JSON.stringify(profile);
     let request = pendingProfileSave?.key === key ? pendingProfileSave.request : null;
     pendingProfileSave = null;
+    if (!request) {
+      // The drawer's own check and sentences: nothing is sent, and the form
+      // keeps what was typed.
+      const problem = profileProblem(profile);
+      if (problem) {
+        state.error = { code: "VALIDATION", message: problem };
+        state.retryable = false;
+        show();
+        return null;
+      }
+    }
     if (!request)
       request = { actionId: newActionId(), expectedRevision: Number(state.myProfile.revision ?? 0), profile };
     state.busy = true;

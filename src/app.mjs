@@ -3079,6 +3079,7 @@ if (!config) {
   // Save: the note sits inside #volunteer-form, so the default would submit it.
   root.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" || !event.target.matches?.('[name="review-note"]')) return;
+    if (event.isComposing || event.keyCode === 229) return;
     event.preventDefault();
     const send = event.target.closest(".volunteer-review")?.querySelector('[data-action="send-back"]');
     if (send && !send.disabled) send.click();

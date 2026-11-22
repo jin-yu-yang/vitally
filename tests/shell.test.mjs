@@ -1576,6 +1576,6 @@ test("app.mjs: Enter in the Mark reviewed note is Send back, never the drawer's 
   const app = readFileSync(fileURLToPath(new URL("../src/app.mjs", import.meta.url)), "utf8");
   assert.match(
     app,
-    /event\.key !== "Enter" \|\| !event\.target\.matches\?\.\('\[name="review-note"\]'\)\) return;\s*event\.preventDefault\(\);[^]*?send && !send\.disabled\) send\.click\(\)/,
+    /event\.key !== "Enter" \|\| !event\.target\.matches\?\.\('\[name="review-note"\]'\)\) return;\s*if \(event\.isComposing \|\| event\.keyCode === 229\) return;\s*event\.preventDefault\(\);[^]*?send && !send\.disabled\) send\.click\(\)/,
   );
 });

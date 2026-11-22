@@ -149,6 +149,7 @@
 ## Risks / Trade-offs
 
 - **[Risk] The front end and the database go out of step.** The front end goes live from `main` as soon as the PR merges, and it calls the new functions (the five-argument Mark reviewed, `vitally_my_profile` and `vitally_save_my_profile`). Until hosted runs 057, those calls fail. Admin tabs opened before the deploy still call the dropped four-argument Mark reviewed.
+  - Also in that window the Roster drawer always sends `usualDays`, and 053's `vitally_save_volunteer` refuses an eleventh key, so every Roster Save and Add a volunteer gets `VALIDATION` until 057 is applied, on top of the new functions failing.
   - Mitigation: deploy 057 to hosted right after merging, and after 056. An old tab gets a refusal in the drawer, and a reload fixes it. Note the order in the PR.
 - **[Risk] The story job gets longer.** The new block runs outside the story's own 20-minute limit, as the other screen tests do, but it still adds time to the job.
   - Mitigation: report the block's timing marks from the CI run in `verify.md`. If the job slows too much, stop and show the timings; never trim tests to fit.
