@@ -21,7 +21,8 @@ export const SHIFT_REFUSALS = Object.freeze({
   DEACTIVATED: "That volunteer's account is deactivated.",
 });
 
-const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+// Monday first: ISO weekday d is WEEKDAYS[d - 1].
+export const WEEKDAYS = Object.freeze(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]);
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",

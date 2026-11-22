@@ -4,6 +4,7 @@
 // buttons; any other workspace admin the same values as text. Staff text,
 // English only. Pure: `view` is the `vitally_season_settings()` answer.
 import { esc, button, loadingLine, unloadedLine } from "./ui.mjs";
+import { WEEKDAYS, hourLabel } from "./volunteer-schedule.mjs";
 
 export const LINK_MESSAGE = "Enter a link that starts with https://.";
 export const READ_ONLY_NOTE = "Only site coordinators can change these settings.";
@@ -81,6 +82,107 @@ function seasonCard(view, canEdit, ui) {
   return `<section class="panel settings-card" aria-labelledby="season-card-title"><div class="card-head"><h2 id="season-card-title">${esc(
     seasonLabel(view.season),
   )} <span class="badge neutral">Current</span></h2></div>${notice(ui, "links")}${links}${sidnRow(view, canEdit, busy)}</section>`;
+}
+
+// ---- Site hours and coverage (change add-volunteer-schedule) --------------
+//
+// One week of site hours, Monday to Sunday, each day closed or open from a
+// whole hour to a later one (America/New_York), and the three coverage
+// targets. A site coordinator gets a tile per day, the hour selects, the
+// number inputs and the card's own Save; any other workspace admin the same
+// values as text. `view.schedule` is `{siteHours: {"1".."7": {open, close}},
+// targets: {preparersNeeded, reviewersNeeded, onSiteNeeded}, revision}`.
+
+const TARGETS = Object.freeze([
+  { key: "preparersNeeded", id: "site-target-preparers", label: "Preparers needed", one: "preparer", many: "preparers" },
+  { key: "reviewersNeeded", id: "site-target-reviewers", label: "Reviewers needed", one: "reviewer", many: "reviewers" },
+  { key: "onSiteNeeded", id: "site-target-on-site", label: "On site needed (greeters or intakers)", one: "on site", many: "on site" },
+]);
+
+const DEFAULT_TARGETS = Object.freeze({ preparersNeeded: 2, reviewersNeeded: 1, onSiteNeeded: 1 });
+// The hours a closed day offers when it is opened.
+const DEFAULT_DAY = Object.freeze({ open: 10, close: 16 });
+
+const dayHours = (siteHours, day) => {
+  const hours = siteHours?.[day] ?? siteHours?.[String(day)];
+  return hours && Number.isInteger(hours.open) && Number.isInteger(hours.close) ? hours : null;
+};
+
+const hourChoices = (from, to, value) =>
+  Array.from({ length: to - from + 1 }, (_, i) => from + i)
+    .map((hour) => `<option value="${hour}"${hour === value ? " selected" : ""}>${esc(hourLabel(hour))}</option>`)
+    .join("");
+
+function dayTile(day, hours, error, busy) {
+  const name = WEEKDAYS[day - 1];
+  const shown = hours ?? DEFAULT_DAY;
+  const base = `site-day-${day}`;
+  const invalid = error ? ` aria-invalid="true" aria-describedby="${base}-error"` : "";
+  return `<fieldset class="site-day"><legend>${esc(name)}</legend><label class="checkbox-row small" for="${base}-open"><input type="checkbox" id="${base}-open" name="open-${day}" data-site-day="${day}"${
+    hours ? " checked" : ""
+  }${disabled(busy)}><span>Open</span></label><div class="site-day-hours" id="${base}-hours"${hours ? "" : " hidden"}><label class="field" for="${base}-from"><span>Opens</span><select id="${base}-from" name="from-${day}"${invalid}${disabled(
+    busy,
+  )}>${hourChoices(0, 23, shown.open)}</select></label><label class="field" for="${base}-to"><span>Closes</span><select id="${base}-to" name="to-${day}"${invalid}${disabled(
+    busy,
+  )}>${hourChoices(1, 24, shown.close)}</select></label></div>${error ? `<p class="field-error" id="${base}-error">${esc(error)}</p>` : ""}</fieldset>`;
+}
+
+function targetField(target, value, error, busy) {
+  const invalid = error ? ` aria-invalid="true" aria-describedby="${target.id}-error"` : "";
+  return `<label class="field" for="${target.id}"><span>${esc(target.label)}</span><input type="number" id="${target.id}" name="${target.key}" min="0" max="9" step="1" inputmode="numeric" value="${esc(
+    value ?? "",
+  )}"${invalid}${disabled(busy)}></label>${error ? `<p class="field-error" id="${target.id}-error">${esc(error)}</p>` : ""}`;
+}
+
+const dayLine = (day, hours) =>
+  `<li>${esc(`${WEEKDAYS[day - 1]} · ${hours ? `${hourLabel(hours.open)} – ${hourLabel(hours.close)}` : "Closed"}`)}</li>`;
+
+const targetLine = (target, value) => `<li>${esc(`${value} ${Number(value) === 1 ? target.one : target.many}`)}</li>`;
+
+const DAYS = Object.freeze([1, 2, 3, 4, 5, 6, 7]);
+
+function siteHoursCard(view, canEdit, ui) {
+  const schedule = view.schedule;
+  if (!schedule || typeof schedule !== "object") return "";
+  const busy = ui?.busy === true;
+  const errors = ui?.fieldErrors ?? {};
+  const targets = { ...DEFAULT_TARGETS, ...(schedule.targets ?? {}) };
+  const body = canEdit
+    ? `<form id="site-hours-form" class="staff-form site-hours-form" novalidate><div class="site-days">${DAYS.map((day) =>
+        dayTile(day, dayHours(schedule.siteHours, day), errors[`siteHours.${day}`], busy),
+      ).join("")}</div><fieldset class="site-targets"><legend>Needed each open hour</legend>${TARGETS.map((target) =>
+        targetField(target, targets[target.key], errors[target.key], busy),
+      ).join("")}</fieldset><div class="settings-actions"><button type="submit" class="btn primary"${disabled(busy)}>Save</button></div></form>`
+    : `<ul class="site-hours-list">${DAYS.map((day) => dayLine(day, dayHours(schedule.siteHours, day))).join(
+        "",
+      )}</ul><h3 class="site-targets-title">Needed each open hour</h3><ul class="site-hours-list">${TARGETS.map((target) =>
+        targetLine(target, targets[target.key]),
+      ).join("")}</ul>`;
+  return `<section class="panel settings-card" aria-labelledby="site-hours-title"><div class="card-head"><h2 id="site-hours-title">Site hours and coverage</h2><span class="muted small">Every week · New York time</span></div>${notice(
+    ui,
+    "site-hours",
+  )}${body}</section>`;
+}
+
+/**
+ * The site hours form read whole, for `vitally_save_schedule_settings`:
+ * every open day's hours (a closed day is left out of `siteHours`) and all
+ * three targets. A target left empty goes as null, for the database to name.
+ */
+export function scheduleSettingsFromForm(formData) {
+  const siteHours = {};
+  for (const day of DAYS) {
+    if (formData.get(`open-${day}`) == null) continue;
+    siteHours[day] = { open: Number(formData.get(`from-${day}`)), close: Number(formData.get(`to-${day}`)) };
+  }
+  const target = (key) => {
+    const text = String(formData.get(key) ?? "").trim();
+    return text === "" ? null : Number(text);
+  };
+  return {
+    siteHours,
+    targets: Object.fromEntries(TARGETS.map(({ key }) => [key, target(key)])),
+  };
 }
 
 // ---- Start next season (change add-start-next-season, design D8) --------
@@ -207,7 +309,7 @@ export function renderSeasonSettings(view, { canEdit = false, selfId = null, lis
     return loadingLine("Loading Season settings…");
   }
   const readOnly = canEdit ? "" : `<p class="notice settings-readonly" role="note">${esc(READ_ONLY_NOTE)}</p>`;
-  return `<div class="season-settings">${readOnly}${seasonCard(view, canEdit, ui)}${nextSeasonCard(view, canEdit, ui)}${coordinatorsCard(view, { canEdit, selfId, ui })}</div>`;
+  return `<div class="season-settings">${readOnly}${seasonCard(view, canEdit, ui)}${siteHoursCard(view, canEdit, ui)}${nextSeasonCard(view, canEdit, ui)}${coordinatorsCard(view, { canEdit, selfId, ui })}</div>`;
 }
 
 /** The Change the SIDN dialog's body: one field, Save and Cancel. */

@@ -9,6 +9,7 @@ import {
   startSeasonReady,
   seasonLabel,
   LINK_MESSAGE,
+  scheduleSettingsFromForm,
 } from "../src/season-settings-views.mjs";
 import { staffScreen, dialog } from "../src/views.mjs";
 import { cleared } from "./support/clearance.mjs";
@@ -337,4 +338,93 @@ test("app.mjs handles every Season settings action", () => {
 test("the stylesheet lays the cards out at phone width", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   for (const selector of [".settings-card", ".sc-list", ".sc-add"]) assert.ok(css.includes(selector), selector);
+});
+
+// ---- Site hours and coverage (change add-volunteer-schedule, Task 9) ----
+
+const schedule = (over = {}) => ({
+  siteHours: { 2: { open: 17, close: 20 }, 4: { open: 17, close: 20 }, 6: { open: 10, close: 16 } },
+  targets: { preparersNeeded: 2, reviewersNeeded: 1, onSiteNeeded: 1 },
+  revision: 5,
+  ...over,
+});
+
+test("site hours: a site coordinator gets seven tiles, hour selects, three 0–9 inputs and the card's own Save", () => {
+  const html = renderSeasonSettings(view({ schedule: schedule() }), { canEdit: true, ui: {} });
+  // After the season card, before Next season.
+  assert.ok(html.indexOf("2027 for TY 2026") < html.indexOf("Site hours and coverage"));
+  assert.ok(html.indexOf("Site hours and coverage") < html.indexOf("Next season"));
+  const card = html.match(/<form id="site-hours-form"[\s\S]*?<\/form>/)[0];
+  const legends = [...card.matchAll(/<legend>([A-Za-z]+day)<\/legend>/g)].map((m) => m[1]);
+  assert.deepEqual(legends, ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]);
+  // Open days are ticked, with their hours chosen; closed days are not.
+  assert.match(card, /<input type="checkbox" id="site-day-6-open" name="open-6" data-site-day="6" checked>/);
+  assert.match(card, /<input type="checkbox" id="site-day-1-open" name="open-1" data-site-day="1">/);
+  assert.match(card, /<select id="site-day-6-from" name="from-6"[^>]*>[\s\S]*?<option value="10" selected>10 am<\/option>/);
+  assert.match(card, /<select id="site-day-6-to" name="to-6"[^>]*>[\s\S]*?<option value="16" selected>4 pm<\/option>/);
+  assert.match(card, /<select id="site-day-6-to"[\s\S]*?<option value="24"/);
+  assert.doesNotMatch(card.match(/<select id="site-day-6-from"[\s\S]*?<\/select>/)[0], /value="24"/);
+  // The targets: each 0 to 9, a whole number.
+  for (const [name, value] of [["preparersNeeded", 2], ["reviewersNeeded", 1], ["onSiteNeeded", 1]])
+    assert.match(card, new RegExp(`<input type="number" id="[a-z-]+" name="${name}" min="0" max="9" step="1" inputmode="numeric" value="${value}"`), name);
+  assert.match(card, /Preparers needed[\s\S]*Reviewers needed[\s\S]*On site needed/);
+  assert.match(card, /<button type="submit" class="btn primary">Save<\/button>/);
+});
+
+test("site hours: another admin reads the hours and targets as text", () => {
+  const html = renderSeasonSettings(view({ canEdit: false, schedule: schedule() }), { canEdit: false, ui: {} });
+  assert.doesNotMatch(html, /<input|<select|<form|<button/);
+  assert.match(html, /Site hours and coverage/);
+  assert.match(html, /Monday · Closed[\s\S]*Tuesday · 5 pm – 8 pm[\s\S]*Saturday · 10 am – 4 pm[\s\S]*Sunday · Closed/);
+  assert.match(html, /Tuesday · 5 pm – 8 pm/);
+  assert.match(html, /2 preparers[\s\S]*1 reviewer[\s\S]*1 on site/);
+  // Never saved: every day closed, the defaults.
+  const fresh = renderSeasonSettings(
+    view({ canEdit: false, schedule: schedule({ siteHours: {}, revision: 0 }) }),
+    { canEdit: false, ui: {} },
+  );
+  assert.equal((fresh.match(/ · Closed/g) ?? []).length, 7);
+});
+
+test("site hours: a refused day and a refused target are named beside them; a conflict is said in the card", () => {
+  const html = renderSeasonSettings(view({ schedule: schedule() }), {
+    canEdit: true,
+    ui: { fieldErrors: { "siteHours.6": "Saturday must close after it opens.", onSiteNeeded: "Enter a whole number from 0 to 9." } },
+  });
+  assert.match(html, /<select id="site-day-6-from"[^>]* aria-invalid="true"/);
+  assert.match(html, /id="site-day-6-error"[^>]*>Saturday must close after it opens\./);
+  assert.match(html, /name="onSiteNeeded"[^>]* aria-invalid="true"/);
+  assert.doesNotMatch(html, /<select id="site-day-2-from"[^>]* aria-invalid/);
+  const conflict = renderSeasonSettings(view({ schedule: schedule() }), {
+    canEdit: true,
+    ui: { notice: { place: "site-hours", text: "Someone else changed these settings. Check them and save again." } },
+  });
+  assert.match(conflict, /Site hours and coverage[\s\S]*role="alert">Someone else changed these settings/);
+});
+
+test("site hours: the form is read whole, closed days left out of siteHours", () => {
+  const fd = new FormData();
+  fd.set("open-2", "on");
+  fd.set("from-2", "17");
+  fd.set("to-2", "20");
+  fd.set("from-3", "9");
+  fd.set("to-3", "12");
+  fd.set("open-6", "on");
+  fd.set("from-6", "16");
+  fd.set("to-6", "10");
+  fd.set("preparersNeeded", "3");
+  fd.set("reviewersNeeded", "0");
+  fd.set("onSiteNeeded", "");
+  assert.deepEqual(scheduleSettingsFromForm(fd), {
+    siteHours: { 2: { open: 17, close: 20 }, 6: { open: 16, close: 10 } },
+    targets: { preparersNeeded: 3, reviewersNeeded: 0, onSiteNeeded: null },
+  });
+});
+
+test("app.mjs handles the site hours form and the usual-day toggles", () => {
+  const app = readFileSync(new URL("../src/app.mjs", import.meta.url), "utf8");
+  assert.match(app, /form\.id === "site-hours-form"/);
+  assert.match(app, /form\.id === "my-profile-form"/);
+  assert.match(app, /case "toggle-usual-day"/);
+  assert.match(app, /case "open-my-profile"/);
 });

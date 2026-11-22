@@ -120,7 +120,10 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
       account,
       isSiteCoordinator,
       cleared,
-      missing
+      missing,
+      // Usual days (change add-volunteer-schedule), only when the row has
+      // them: a model without the field never sends them (volunteerFromForm).
+      ...(Array.isArray(profile.usual_days) ? { usualDays: readUsualDays(profile.usual_days.join(",")) } : {})
     });
   }
   return list.sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
@@ -143,7 +146,19 @@ export function filterVolunteers(list, { search = "", role = "all", show = "all"
   });
 }
 
-// Reads the drawer's FormData into the exact RPC payload.
+// The usual-day toggles' field ("2,6") as weekdays: whole days 1 (Monday) to
+// 7 (Sunday), each once, sorted. Anything else in it is dropped.
+export function readUsualDays(text) {
+  const days = String(text ?? "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => /^[1-7]$/.test(part))
+    .map(Number);
+  return [...new Set(days)].sort((a, b) => a - b);
+}
+
+// Reads the drawer's FormData into the exact RPC payload. `usualDays` goes
+// only when the drawer drew its field, so an older model never clears them.
 export function volunteerFromForm(formData) {
   const text = (key) => String(formData.get(key) ?? "").trim();
   const languages = formData.getAll("language").map(String);
@@ -158,7 +173,8 @@ export function volunteerFromForm(formData) {
     roles: formData.getAll("role").map(String),
     certificates: formData.getAll("certificate").map(String),
     isNew: formData.get("isNew") != null,
-    photoIdChecked: formData.get("photoIdChecked") != null
+    photoIdChecked: formData.get("photoIdChecked") != null,
+    ...(formData.has("usualDays") ? { usualDays: readUsualDays(formData.get("usualDays")) } : {})
   };
 }
 
@@ -178,7 +194,8 @@ export function volunteerFormChanged(volunteer, payload) {
     !same(payload.roles, volunteer.roles) ||
     !same(payload.certificates, volunteer.certificates) ||
     payload.isNew !== (volunteer.isNew === true) ||
-    payload.photoIdChecked !== (volunteer.photoIdChecked === true)
+    payload.photoIdChecked !== (volunteer.photoIdChecked === true) ||
+    (Object.hasOwn(payload, "usualDays") && !same(payload.usualDays, volunteer.usualDays))
   );
 }
 

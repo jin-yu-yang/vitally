@@ -5268,6 +5268,7 @@ test("an applicant's help-request list counts as loaded, and sign-out starts ove
     postedUpdates: "loading",
     seasonSettings: "loading",
     schedule: "loading",
+    myProfile: "loading",
   });
   await controller.signOut();
   assert.deepEqual(controller.getState().lists, {
@@ -5278,6 +5279,7 @@ test("an applicant's help-request list counts as loaded, and sign-out starts ove
     postedUpdates: "loading",
     seasonSettings: "loading",
     schedule: "loading",
+    myProfile: "loading",
   });
   controller.stop();
 });
@@ -11279,6 +11281,7 @@ const NAV_ACTIONS = Object.freeze([
   "open-cases",
   "open-volunteers",
   "open-schedule",
+  "open-my-profile",
   "open-post-update",
   "open-season-settings",
   "open-notifications",
@@ -11393,18 +11396,19 @@ test("schedule: the sidebar order for an admin and for a preparer", async () => 
     "open-cases",
     "open-volunteers",
     "open-schedule",
+    "open-my-profile",
     "open-post-update",
     "open-season-settings",
     "open-notifications",
   ]);
   assert.match(
     staffScreen(admin.controller.getState()),
-    /Follow-ups[\s\S]*All cases[\s\S]*Volunteers[\s\S]*Schedule[\s\S]*Post an update[\s\S]*Season settings/,
+    /Follow-ups[\s\S]*All cases[\s\S]*Volunteers[\s\S]*Schedule[\s\S]*My profile[\s\S]*Post an update[\s\S]*Season settings/,
   );
   admin.controller.stop();
   const preparer = build({ store: scheduleStore({ clearance: PREPARER_VIEWER }), clock: SCHEDULE_NOW });
   await preparer.controller.start();
-  assert.deepEqual(navOrder(staffScreen(preparer.controller.getState())), ["open-board", "open-schedule", "open-notifications"]);
+  assert.deepEqual(navOrder(staffScreen(preparer.controller.getState())), ["open-board", "open-schedule", "open-my-profile", "open-notifications"]);
   assert.match(staffScreen(preparer.controller.getState()), /Work board[\s\S]*Schedule/);
   preparer.controller.stop();
 });
@@ -11704,5 +11708,351 @@ test("schedule: signing out releases an uncleared viewer's Schedule channel", as
   await controller.signOut();
   assert.equal(store.handlers, null);
   assert.equal(store.released, 1);
+  controller.stop();
+});
+
+// ---------------------------------------------------------------------------
+// My profile and the site hours card (change add-volunteer-schedule, Task 9)
+// ---------------------------------------------------------------------------
+
+const profileAnswer = (over = {}) => ({
+  name: "Rowan Diaz",
+  roles: ["preparer"],
+  usualDays: [2],
+  profileRevision: 4,
+  weekStart: "2027-02-01",
+  weekEnd: "2027-02-07",
+  shiftsThisWeek: [{ shiftId: "s-1", date: "2027-02-02", startHour: 17, endHour: 20, role: "preparer" }],
+  ...over,
+});
+// A schedule store with the My profile calls. `failNextProfile` makes the next save reject.
+const profileStore = (options = {}) => {
+  const store = scheduleStore(options);
+  store.profile = profileAnswer();
+  store.failNextProfile = null;
+  store.myProfile = async () => {
+    store.calls.push("myProfile");
+    return structuredClone(store.profile);
+  };
+  store.saveMyUsualDays = async (request) => {
+    store.calls.push("saveMyUsualDays");
+    store.writes.push({ type: "saveMyUsualDays", ...request });
+    const error = store.failNextProfile;
+    store.failNextProfile = null;
+    if (error) throw error;
+    store.profile = { ...store.profile, usualDays: [...request.days], profileRevision: store.profile.profileRevision + 1 };
+    return { usualDays: store.profile.usualDays, profileRevision: store.profile.profileRevision };
+  };
+  return store;
+};
+const profileReads = (store) => store.calls.filter((entry) => entry === "myProfile").length;
+
+async function onMyProfile(options = {}) {
+  const store = profileStore(options);
+  const built = build({ store, clock: SCHEDULE_NOW });
+  await built.controller.start();
+  await built.controller.openMyProfile();
+  return { store, ...built };
+}
+
+test("my profile: opening reads it and shows it", async () => {
+  const { store, controller } = await onMyProfile({ clearance: PREPARER_VIEWER });
+  const state = controller.getState();
+  assert.equal(state.screen, "my-profile");
+  assert.equal(state.lists.myProfile, "ready");
+  assert.equal(profileReads(store), 1);
+  const html = staffScreen(state);
+  assert.match(html, /<h1>My profile<\/h1>[\s\S]*Rowan Diaz[\s\S]*Tue, Feb 2 · 5 pm – 8 pm · Preparer/);
+  assert.match(html, /data-action="open-my-profile"[^>]*aria-current="page"/);
+  controller.stop();
+});
+
+test("my profile: a window restored on it without scheduleViewer goes home and reads nothing", async () => {
+  const sessionStorage = fakeSession();
+  const seed = build({ store: profileStore({ clearance: PREPARER_VIEWER }), sessionStorage, clock: SCHEDULE_NOW });
+  await seed.controller.start();
+  await seed.controller.openMyProfile();
+  seed.controller.stop();
+  const store = profileStore({ clearance: { ...PREPARER_VIEWER, scheduleViewer: false } });
+  const { controller } = build({ store, sessionStorage, clock: SCHEDULE_NOW });
+  await controller.start();
+  assert.equal(controller.getState().screen, "staff");
+  assert.equal(profileReads(store), 0);
+  // Asking for it again goes home too.
+  await controller.openMyProfile();
+  assert.equal(controller.getState().screen, "staff");
+  assert.equal(profileReads(store), 0);
+  assert.doesNotMatch(staffScreen(controller.getState()), /open-my-profile/);
+  controller.stop();
+});
+
+test("my profile: a viewer's window restored on it reads it", async () => {
+  const sessionStorage = fakeSession();
+  const seed = build({ store: profileStore({ clearance: PREPARER_VIEWER }), sessionStorage, clock: SCHEDULE_NOW });
+  await seed.controller.start();
+  await seed.controller.openMyProfile();
+  seed.controller.stop();
+  const store = profileStore({ clearance: PREPARER_VIEWER });
+  const { controller } = build({ store, sessionStorage, clock: SCHEDULE_NOW });
+  await controller.start();
+  assert.equal(controller.getState().screen, "my-profile");
+  assert.equal(profileReads(store), 1);
+  controller.stop();
+});
+
+test("my profile: Save sends the sorted days at the profile revision and says so", async () => {
+  const { store, controller } = await onMyProfile({ clearance: PREPARER_VIEWER });
+  const text = await controller.saveMyUsualDays([6, 2]);
+  assert.equal(text, "Usual days saved");
+  const write = store.writes.find((entry) => entry.type === "saveMyUsualDays");
+  assert.deepEqual(write.days, [2, 6]);
+  assert.equal(write.revision, 4);
+  assert.ok(write.actionId);
+  assert.deepEqual(controller.getState().myProfile.usualDays, [2, 6]);
+  assert.equal(controller.getState().myProfile.profileRevision, 5);
+  controller.stop();
+});
+
+test("my profile: a CONFLICT re-reads and says the usual days were refreshed", async () => {
+  const { store, controller } = await onMyProfile({ clearance: PREPARER_VIEWER });
+  store.profile = { ...store.profile, usualDays: [4], profileRevision: 9 };
+  store.failNextProfile = shiftRefusal("CONFLICT");
+  const reads = profileReads(store);
+  const text = await controller.saveMyUsualDays([2, 6]);
+  assert.equal(text, null);
+  assert.equal(profileReads(store), reads + 1);
+  const state = controller.getState();
+  assert.deepEqual(state.myProfile.usualDays, [4]);
+  assert.equal(state.myProfileUi.notice, "Someone changed your usual days. They have been refreshed.");
+  assert.match(staffScreen(state), /role="alert"[^>]*>Someone changed your usual days\. They have been refreshed\./);
+  // The next save is at the revision read, and clears the notice.
+  await controller.saveMyUsualDays([2]);
+  assert.equal(store.writes.at(-1).revision, 9);
+  assert.equal(controller.getState().myProfileUi.notice, null);
+  controller.stop();
+});
+
+test("my profile: a lost answer is sent again with the same action id", async () => {
+  const { store, controller } = await onMyProfile({ clearance: PREPARER_VIEWER });
+  store.failNextProfile = shiftRefusal("OFFLINE");
+  await controller.saveMyUsualDays([3]);
+  await controller.saveMyUsualDays([3]);
+  const writes = store.writes.filter((entry) => entry.type === "saveMyUsualDays");
+  assert.equal(writes.length, 2);
+  assert.equal(writes[0].actionId, writes[1].actionId);
+  controller.stop();
+});
+
+test("my profile: a shifts change and focus re-read it; elsewhere a shift change does not", async () => {
+  const { store, controller, events } = await onMyProfile({ clearance: PREPARER_VIEWER });
+  let reads = profileReads(store);
+  await store.handlers.onChange({ table: "shifts", eventType: "INSERT", id: "s-new" });
+  assert.equal(profileReads(store), reads + 1);
+  reads = profileReads(store);
+  await events.emit("focus");
+  assert.equal(profileReads(store), reads + 1);
+  controller.navigate("staff");
+  reads = profileReads(store);
+  await store.handlers.onChange({ table: "shifts", eventType: "INSERT", id: "s-2" });
+  assert.equal(profileReads(store), reads);
+  controller.stop();
+});
+
+test("my profile: the uncleared viewer's setup sidebar has My profile, which opens, saves and re-reads on focus", async () => {
+  const store = profileStore({ clearance: UNCLEARED_VIEWER });
+  const { controller, events } = build({ store, clock: SCHEDULE_NOW });
+  await controller.start();
+  assert.match(staffScreen(controller.getState()), /data-action="open-my-profile"/);
+  await controller.openMyProfile();
+  assert.equal(controller.getState().screen, "my-profile");
+  assert.equal(store.calls.includes("listCases"), false);
+  assert.match(staffScreen(controller.getState()), /<h1>My profile<\/h1>/);
+  assert.equal(await controller.saveMyUsualDays([6]), "Usual days saved");
+  const reads = profileReads(store);
+  await events.emit("focus");
+  assert.equal(profileReads(store), reads + 1);
+  // Losing the roster entry sends the window back to the setup screen.
+  store.nextClearance = { ...UNCLEARED_VIEWER, scheduleViewer: false };
+  await events.emit("focus");
+  assert.equal(controller.getState().screen, "staff");
+  assert.equal(controller.getState().myProfile, null);
+  assert.match(staffScreen(controller.getState()), /Finish your setup for this season/);
+  controller.stop();
+});
+
+test("my profile: an uncleared viewer on it follows shift changes live, reads no case, and releases the channel on leaving", async () => {
+  const store = profileStore({ clearance: UNCLEARED_VIEWER });
+  const { controller } = build({ store, clock: SCHEDULE_NOW });
+  await controller.start();
+  assert.equal(store.subscriptions, 0);
+  await controller.openMyProfile();
+  assert.equal(store.subscriptions, 1);
+  const reads = profileReads(store);
+  await store.handlers.onChange({ table: "shifts", eventType: "INSERT", id: "s-new" });
+  assert.equal(profileReads(store), reads + 1);
+  const calls = store.calls.length;
+  for (const table of ["cases", "workspaces", "assistance_items", "posted_updates", "case_labels"])
+    await store.handlers.onChange({ table, eventType: "UPDATE", id: "x", caseId: "case-a" });
+  assert.deepEqual(store.calls.slice(calls), []);
+  // Moving to the Schedule keeps the one channel; leaving both releases it.
+  await controller.openSchedule();
+  assert.equal(store.subscriptions, 1);
+  assert.equal(store.released, 0);
+  controller.navigate("staff");
+  assert.equal(store.handlers, null);
+  assert.equal(store.released, 1);
+  controller.stop();
+});
+
+test("my profile: an uncleared viewer restored on it gets the channel; losing the viewer flag releases it", async () => {
+  const sessionStorage = fakeSession();
+  const seed = build({ store: profileStore({ clearance: UNCLEARED_VIEWER }), sessionStorage, clock: SCHEDULE_NOW });
+  await seed.controller.start();
+  await seed.controller.openMyProfile();
+  seed.controller.stop();
+  const store = profileStore({ clearance: UNCLEARED_VIEWER });
+  const { controller } = build({ store, sessionStorage, clock: SCHEDULE_NOW });
+  await controller.start();
+  assert.equal(controller.getState().screen, "my-profile");
+  assert.equal(profileReads(store), 1);
+  assert.equal(store.subscriptions, 1);
+  store.nextClearance = { ...UNCLEARED_VIEWER, scheduleViewer: false };
+  await controller.checkClearance();
+  assert.equal(controller.getState().screen, "staff");
+  assert.equal(store.handlers, null);
+  controller.stop();
+});
+
+test("my profile: an uncleared viewer who becomes cleared on it keeps one channel; signing out releases it", async () => {
+  const store = profileStore({ clearance: UNCLEARED_VIEWER });
+  const { controller } = build({ store, clock: SCHEDULE_NOW });
+  await controller.start();
+  await controller.openMyProfile();
+  store.nextClearance = { ...PREPARER_VIEWER };
+  await controller.checkClearance();
+  assert.equal(controller.getState().screen, "my-profile");
+  assert.equal(store.subscriptions, 1);
+  assert.equal(store.released, 0);
+  await controller.signOut();
+  assert.equal(store.handlers, null);
+  assert.equal(store.released, 1);
+  assert.equal(controller.getState().myProfile, null);
+  controller.stop();
+});
+
+test("my profile: the sidebar puts My profile after Schedule for an admin and for a preparer", async () => {
+  const admin = build({ store: profileStore(), clock: SCHEDULE_NOW });
+  await admin.controller.start();
+  assert.deepEqual(navOrder(staffScreen(admin.controller.getState())), [
+    "open-board",
+    "open-cases",
+    "open-volunteers",
+    "open-schedule",
+    "open-my-profile",
+    "open-post-update",
+    "open-season-settings",
+    "open-notifications",
+  ]);
+  admin.controller.stop();
+  const preparer = build({ store: profileStore({ clearance: PREPARER_VIEWER }), clock: SCHEDULE_NOW });
+  await preparer.controller.start();
+  assert.deepEqual(navOrder(staffScreen(preparer.controller.getState())), [
+    "open-board",
+    "open-schedule",
+    "open-my-profile",
+    "open-notifications",
+  ]);
+  assert.match(staffScreen(preparer.controller.getState()), /Work board[\s\S]*Schedule[\s\S]*My profile/);
+  preparer.controller.stop();
+});
+
+// ---- the site hours card ----
+
+const siteSchedule = () => ({
+  siteHours: { 6: { open: 10, close: 16 } },
+  targets: { preparersNeeded: 2, reviewersNeeded: 1, onSiteNeeded: 1 },
+  revision: 5,
+});
+const hoursStore = (overrides = {}) => {
+  const store = settingsStore(overrides);
+  store.settings = { ...store.settings, schedule: siteSchedule() };
+  store.failNextHours = null;
+  store.saveScheduleSettings = async (request) => {
+    store.calls.push("saveScheduleSettings");
+    store.writes.push({ type: "saveScheduleSettings", ...request });
+    const error = store.failNextHours;
+    store.failNextHours = null;
+    if (error) throw error;
+    const schedule = { ...request.settings, revision: store.settings.schedule.revision + 1 };
+    store.settings = { ...store.settings, schedule };
+    return schedule;
+  };
+  return store;
+};
+const WHOLE_SETTINGS = Object.freeze({
+  siteHours: { 2: { open: 17, close: 20 }, 6: { open: 10, close: 16 } },
+  targets: { preparersNeeded: 3, reviewersNeeded: 1, onSiteNeeded: 0 },
+});
+
+async function onHours(overrides = {}) {
+  const store = hoursStore(overrides);
+  const built = build({ store });
+  await built.controller.start();
+  built.controller.navigate("office-settings");
+  await built.controller.loadSeasonSettings();
+  return { store, ...built };
+}
+
+test("site hours: Save sends the whole settings at the revision read, and reads the page again", async () => {
+  const { store, controller } = await onHours();
+  const reads = settingsReads(store);
+  const text = await controller.saveScheduleSettings(structuredClone(WHOLE_SETTINGS));
+  assert.equal(text, "Site hours saved");
+  const write = store.writes.find((entry) => entry.type === "saveScheduleSettings");
+  assert.deepEqual(write.settings, WHOLE_SETTINGS);
+  assert.equal(write.revision, 5);
+  assert.ok(write.actionId);
+  assert.equal(settingsReads(store), reads + 1);
+  assert.equal(controller.getState().seasonSettings.schedule.revision, 6);
+  controller.stop();
+});
+
+test("site hours: a VT007 on a day names that weekday's hours; on a target, that target", async () => {
+  const { store, controller } = await onHours();
+  store.failNextHours = settingsRefusal("VALIDATION", "VALIDATION", "siteHours.6");
+  assert.equal(await controller.saveScheduleSettings(structuredClone(WHOLE_SETTINGS)), null);
+  assert.deepEqual(controller.getState().seasonSettingsUi.fieldErrors, { "siteHours.6": "Saturday must close after it opens." });
+  assert.equal(controller.getState().error, null);
+  assert.match(staffScreen(controller.getState()), /Saturday must close after it opens\./);
+  store.failNextHours = settingsRefusal("VALIDATION", "VALIDATION", "reviewersNeeded");
+  await controller.saveScheduleSettings(structuredClone(WHOLE_SETTINGS));
+  assert.deepEqual(controller.getState().seasonSettingsUi.fieldErrors, { reviewersNeeded: "Enter a whole number from 0 to 9." });
+  controller.stop();
+});
+
+test("site hours: a CONFLICT re-reads and says so in the card; the next save is at the new revision", async () => {
+  const { store, controller } = await onHours();
+  store.settings = { ...store.settings, schedule: { ...siteSchedule(), revision: 8 } };
+  store.failNextHours = settingsRefusal("CONFLICT");
+  const reads = settingsReads(store);
+  assert.equal(await controller.saveScheduleSettings(structuredClone(WHOLE_SETTINGS)), null);
+  assert.equal(settingsReads(store), reads + 1);
+  assert.deepEqual(controller.getState().seasonSettingsUi.notice, {
+    place: "site-hours",
+    text: "Someone else changed these settings. Check them and save again.",
+  });
+  await controller.saveScheduleSettings(structuredClone(WHOLE_SETTINGS));
+  assert.equal(store.writes.at(-1).revision, 8);
+  controller.stop();
+});
+
+test("site hours: a schedule_settings change re-reads an open Season settings", async () => {
+  const { store, controller } = await onHours();
+  const reads = settingsReads(store);
+  await store.handlers.onChange({ table: "schedule_settings", eventType: "UPDATE", id: "w1" });
+  assert.equal(settingsReads(store), reads + 1);
+  controller.navigate("staff");
+  await store.handlers.onChange({ table: "schedule_settings", eventType: "UPDATE", id: "w1" });
+  assert.equal(settingsReads(store), reads + 1);
   controller.stop();
 });

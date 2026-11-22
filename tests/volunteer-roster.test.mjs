@@ -4,8 +4,9 @@ import {
   ROLES, CERTIFICATES, WORKS, LANGUAGES,
   combineVolunteers, filterVolunteers, SHOW_VIEWS, volunteerFromForm, volunteerProblem,
   ROLE_NEEDS, missingFor, withoutLostRoles, roleNeedsMessage, openWorkMessage, rolesToUntick, untickedRolesMessage,
-  accountMessage, volunteerFormChanged, roleBoxesToUntick
+  accountMessage, volunteerFormChanged, roleBoxesToUntick, readUsualDays
 } from "../src/volunteer-roster.mjs";
+import { volunteerDrawerBody } from "../src/volunteer-views.mjs";
 
 const people = [
   { id: "p2", name: "Zed Tran", user_id: null },
@@ -476,4 +477,81 @@ test("an unknown show value keeps everyone", () => {
 
 test("SHOW_VIEWS lists Everyone then Uploads to review", () => {
   assert.deepEqual(SHOW_VIEWS.map((v) => [v.value, v.label]), [["all", "Everyone"], ["uploads", "Uploads to review"]]);
+});
+
+// ---- Usual days (change add-volunteer-schedule, Task 9) ----
+
+test("combineVolunteers carries the usual days only when the profile row has them", () => {
+  const withDays = combineVolunteers({
+    profiles: [profile("p1", { usual_days: [6, 2] })],
+    entries,
+    certificates,
+    people,
+    accounts,
+  });
+  assert.deepEqual(withDays[0].usualDays, [2, 6]);
+  const without = combineVolunteers({ profiles: [profile("p1")], entries, certificates, people, accounts });
+  assert.equal(Object.hasOwn(without[0], "usualDays"), false);
+});
+
+test("readUsualDays reads the toggles' field: sorted, whole days 1 to 7, once each", () => {
+  assert.deepEqual(readUsualDays("6,2"), [2, 6]);
+  assert.deepEqual(readUsualDays(""), []);
+  assert.deepEqual(readUsualDays("2,2,9,x,0,7"), [2, 7]);
+});
+
+test("form reading sends usualDays only when the drawer drew the field", () => {
+  const fd = new FormData();
+  fd.set("name", "Ana");
+  fd.set("email", "ana@x.org");
+  assert.equal(Object.hasOwn(volunteerFromForm(fd), "usualDays"), false);
+  fd.set("usualDays", "6,2");
+  assert.deepEqual(volunteerFromForm(fd).usualDays, [2, 6]);
+});
+
+test("volunteerFormChanged sees a usual-day edit", () => {
+  const saved = { ...sample.find((v) => v.id === "p1"), usualDays: [2] };
+  const payload = (days) => ({
+    name: saved.name,
+    email: saved.email,
+    phone: saved.phone,
+    works: saved.works,
+    languages: saved.languages,
+    otherLanguage: saved.otherLanguage,
+    roles: saved.roles,
+    certificates: saved.certificates,
+    isNew: false,
+    photoIdChecked: false,
+    ...(days ? { usualDays: days } : {}),
+  });
+  assert.equal(volunteerFormChanged(saved, payload([2])), false);
+  assert.equal(volunteerFormChanged(saved, payload([2, 6])), true);
+  assert.equal(volunteerFormChanged(saved, payload(null)), false, "no field, nothing to compare");
+});
+
+test("the drawer draws Usual days after Works, and its form sends usualDays [2, 6]", () => {
+  const v = { ...sample.find((entry) => entry.id === "p1"), usualDays: [2, 6] };
+  const html = volunteerDrawerBody({ volunteer: v, isNew: false, ui: {} });
+  assert.match(html, /<legend>Works<\/legend>[\s\S]*<legend>Usual days<\/legend>[\s\S]*<legend>Languages<\/legend>/);
+  const days = [...html.matchAll(/data-day="(\d)" aria-pressed="true"/g)].map((m) => Number(m[1]));
+  assert.deepEqual(days, [2, 6]);
+  const field = html.match(/<input type="hidden" id="volunteer-usual-days" name="usualDays" value="([^"]*)">/);
+  assert.ok(field);
+  const fd = new FormData();
+  fd.set("name", v.name);
+  fd.set("email", v.email);
+  fd.set("usualDays", field[1]);
+  assert.deepEqual(volunteerFromForm(fd).usualDays, [2, 6]);
+});
+
+test("the drawer for a model without usualDays draws no field, so the save sends no usualDays key", () => {
+  const v = sample.find((entry) => entry.id === "p1");
+  assert.equal(Object.hasOwn(v, "usualDays"), false);
+  const html = volunteerDrawerBody({ volunteer: v, isNew: false, ui: {} });
+  assert.doesNotMatch(html, /name="usualDays"/);
+  assert.doesNotMatch(html, /Usual days/);
+  // Add a volunteer: none ticked.
+  const add = volunteerDrawerBody({ volunteer: null, isNew: true, ui: {} });
+  assert.match(add, /<input type="hidden" id="volunteer-usual-days" name="usualDays" value="">/);
+  assert.equal([...add.matchAll(/aria-pressed="true"/g)].length, 0);
 });

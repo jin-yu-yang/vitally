@@ -67,9 +67,9 @@ import { t, SENTENCES } from "./client-text.mjs";
 import { createToastTimer } from "./toast.mjs";
 import { contactEntryFromForm, contactSummary, contactSummaries } from "./contact-log.mjs";
 import { decorateStaffCase, outcomeGroup, staffEligibility } from "./staff-views.mjs";
-import { volunteerFromForm, volunteerFormChanged, roleBoxesToUntick, untickedRolesMessage } from "./volunteer-roster.mjs";
+import { volunteerFromForm, volunteerFormChanged, roleBoxesToUntick, untickedRolesMessage, readUsualDays } from "./volunteer-roster.mjs";
 import { actionToast, renderUpdatePreview, saveToast, updateFormFromValues } from "./update-views.mjs";
-import { startSeasonReady } from "./season-settings-views.mjs";
+import { startSeasonReady, scheduleSettingsFromForm } from "./season-settings-views.mjs";
 
 // Bootstrap and DOM wiring, and nothing else. No state lives here (the
 // controller owns it), no HTML is written here (the view modules own it), and
@@ -312,6 +312,8 @@ if (!config) {
     const v2Place = wasV2 || v2OnPage();
     restoreFormDrafts();
     syncContactForms();
+    syncUsualDays();
+    syncSiteDays();
     syncCloseUnsigned();
     syncStartSeason();
     syncVolunteerOther();
@@ -473,6 +475,41 @@ if (!config) {
     const box = root.querySelector("#volunteer-language-other");
     const field = root.querySelector("#volunteer-other-language");
     if (box && field) field.hidden = !box.checked;
+  }
+
+  // The usual-day toggles (change add-volunteer-schedule): each group's
+  // hidden field holds the pressed days, and is what the form sends and what
+  // a draft keeps. A press flips the button and rewrites the field; a redraw
+  // presses the buttons from the field again, so an unsent choice survives a
+  // live re-read. A field back at the saved days keeps no draft.
+  function toggleUsualDay(target) {
+    const group = target.closest(".usual-days");
+    const field = group?.dataset.for ? root.querySelector(`#${CSS.escape(group.dataset.for)}`) : null;
+    if (!field || target.disabled) return;
+    target.setAttribute("aria-pressed", String(target.getAttribute("aria-pressed") !== "true"));
+    const days = [...group.querySelectorAll('[data-day][aria-pressed="true"]')].map((day) => day.dataset.day).join(",");
+    field.value = days;
+    keepDraft(field.id, days === (group.dataset.saved ?? "") ? null : { value: days });
+    if (field.closest("#volunteer-form")) syncCreateAccount();
+  }
+
+  function syncUsualDays() {
+    for (const group of root.querySelectorAll(".usual-days[data-for]")) {
+      const field = root.querySelector(`#${CSS.escape(group.dataset.for)}`);
+      if (!field) continue;
+      const on = readUsualDays(field.value);
+      for (const day of group.querySelectorAll("[data-day]"))
+        day.setAttribute("aria-pressed", String(on.includes(Number(day.dataset.day))));
+    }
+  }
+
+  // A site hours tile shows its hours only while Open is ticked: at once on
+  // a tick, and after a redraw that put an unsent tick back.
+  function syncSiteDays() {
+    for (const box of root.querySelectorAll("input[data-site-day]")) {
+      const hours = root.querySelector(`#site-day-${box.dataset.siteDay}-hours`);
+      if (hours) hours.hidden = !box.checked;
+    }
   }
 
   // Create account sends the saved profile (decision 5), so it waits while
@@ -1498,6 +1535,39 @@ if (!config) {
     root.querySelector('#season-settings-form [aria-invalid="true"]')?.focus();
   }
 
+  // The site hours card's Save: the whole form, every day and every target.
+  // A landed save draws what was stored; a conflict draws the settings as
+  // they are now; a refused field keeps what was typed and takes the keyboard.
+  async function submitSiteHours(form, by) {
+    const text = await controller.saveScheduleSettings(scheduleSettingsFromForm(new FormData(form)));
+    if (text) {
+      clearFormDrafts(form);
+      notify("success", text, by);
+      return;
+    }
+    const ui = controller.getState().seasonSettingsUi ?? {};
+    if (ui.notice?.place === "site-hours") {
+      clearFormDrafts(form);
+      render();
+    }
+    root.querySelector('#site-hours-form [aria-invalid="true"]')?.focus();
+  }
+
+  // My profile's Save: the pressed usual days. A conflict draws the days as
+  // they are now, so the unsent choice goes.
+  async function submitMyProfile(form, by) {
+    const text = await controller.saveMyUsualDays(readUsualDays(new FormData(form).get("usualDays")));
+    if (text) {
+      clearFormDrafts(form);
+      notify("success", text, by);
+      return;
+    }
+    if (controller.getState().myProfileUi?.notice) {
+      clearFormDrafts(form);
+      render();
+    }
+  }
+
   // Change the SIDN. A landed save closes the dialog; a refusal keeps it,
   // with its sentence beside the field.
   async function submitSidn(form, by) {
@@ -2061,6 +2131,11 @@ if (!config) {
       formDrafts.clear();
       void controller.openSchedule();
     },
+    // And My profile.
+    "open-my-profile": () => {
+      formDrafts.clear();
+      void controller.openMyProfile();
+    },
     // Pressed again while on the page: a fresh draft, which is what it asks for.
     "open-add-case": async () => {
       formDrafts.clear();
@@ -2133,6 +2208,14 @@ if (!config) {
       case "open-schedule":
         if (leaveAddCaseFirst("open-schedule", target)) break;
         EXITS["open-schedule"]();
+        break;
+      case "open-my-profile":
+        if (leaveAddCaseFirst("open-my-profile", target)) break;
+        EXITS["open-my-profile"]();
+        break;
+      // A usual-day toggle, on My profile or in the Roster's drawer.
+      case "toggle-usual-day":
+        toggleUsualDay(target);
         break;
       case "schedule-prev":
       case "schedule-next":
@@ -3056,6 +3139,10 @@ if (!config) {
       syncSiteCoordinatorAdd();
       return;
     }
+    if (field.matches?.("input[data-site-day]")) {
+      syncSiteDays();
+      return;
+    }
     if (field.matches?.("select[data-board-filter]")) {
       controller.setBoardFilter(field.dataset.boardFilter, field.value);
       root.querySelector(`#${field.id}`)?.focus();
@@ -3132,7 +3219,16 @@ if (!config) {
     // the drawer's own sentence (volunteerProblem).
     // The site check says its own "Enter your name." the same way, and Post
     // an update's sentences sit beside its fields.
-    if (form.id !== "volunteer-form" && form.id !== "site-check-form" && form.id !== "update-form" && !form.reportValidity()) return;
+    // The site hours card names a refused day or target beside it, as the
+    // database does.
+    if (
+      form.id !== "volunteer-form" &&
+      form.id !== "site-check-form" &&
+      form.id !== "update-form" &&
+      form.id !== "site-hours-form" &&
+      !form.reportValidity()
+    )
+      return;
     const values = new FormData(form);
     try {
       // A staff form carries its action on its own submit button and names its
@@ -3153,6 +3249,10 @@ if (!config) {
         await submitUpdate(form, event.submitter, by);
       } else if (form.id === "season-settings-form") {
         await submitSeasonSettings(form, by);
+      } else if (form.id === "site-hours-form") {
+        await submitSiteHours(form, by);
+      } else if (form.id === "my-profile-form") {
+        await submitMyProfile(form, by);
       } else if (form.id === "sidn-form") {
         await submitSidn(form, by);
       } else if (form.id === "start-season-form") {

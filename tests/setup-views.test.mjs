@@ -296,10 +296,10 @@ test("an uncleared schedule viewer opens the Schedule read-only from the setup s
   assert.doesNotMatch(not, /<h1>Schedule<\/h1>/);
 });
 
-test("an uncleared workspace admin's setup sidebar orders Volunteers, Schedule, Post an update, Season settings", () => {
+test("an uncleared workspace admin's setup sidebar orders Volunteers, Schedule, My profile, Post an update, Season settings", () => {
   const html = staffScreen(staffState({ isAdmin: true, scheduleViewer: true }));
   const order = [...html.matchAll(/data-action="(open-[a-z-]+)"/g)].map((m) => m[1]).filter((a) => a !== "open-help");
-  assert.deepEqual(order, ["open-board", "open-volunteers", "open-schedule", "open-post-update", "open-season-settings", "open-notifications"]);
+  assert.deepEqual(order, ["open-board", "open-volunteers", "open-schedule", "open-my-profile", "open-post-update", "open-season-settings", "open-notifications"]);
   // The admin gets the editing controls.
   const schedule = staffScreen(
     staffState(

@@ -4,6 +4,7 @@
 import { esc, button, icon, SENT_DAY, loadingLine, unloadedLine, emptyLine, confirmBody } from "./ui.mjs";
 import { drawerError } from "./office-views.mjs";
 import { ROLES, CERTIFICATES, WORKS, LANGUAGES, SHOW_VIEWS, filterVolunteers } from "./volunteer-roster.mjs";
+import { usualDayToggles } from "./profile-views.mjs";
 
 const when = (condition, html) => (condition ? html : "");
 const labelOf = (list, value) => list.find((entry) => entry.value === value)?.label ?? value;
@@ -285,7 +286,12 @@ export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {}, 
     `<p class="field-note" id="volunteer-email-note">This is their sign-in email.</p>`,
   )}<label class="field" for="volunteer-phone"><span>Phone (optional)</span><input id="volunteer-phone" name="phone" type="tel" value="${esc(
     v.phone ?? "",
-  )}" maxlength="30" autocomplete="off"></label><fieldset class="check-group"><legend>Works</legend>${worksRadios}</fieldset><fieldset class="check-group"><legend>Languages</legend>${ticks(
+  )}" maxlength="30" autocomplete="off"></label><fieldset class="check-group"><legend>Works</legend>${worksRadios}</fieldset>${when(
+    // Usual days (change add-volunteer-schedule): drawn, and so sent, only
+    // when the model has them, so an older model never clears them.
+    isNew || Array.isArray(v.usualDays),
+    `<fieldset class="check-group"><legend>Usual days</legend>${usualDayToggles({ id: "volunteer-usual-days", days: v.usualDays ?? [] })}</fieldset>`,
+  )}<fieldset class="check-group"><legend>Languages</legend>${ticks(
     "language",
     LANGUAGES,
     languages,
