@@ -322,3 +322,313 @@ test("usual days on the admin save", async (t) => {
     await f.close();
   }
 });
+
+// 057 §6-§7: the caller's own profile read and save (design D1, D2).
+test("my profile RPCs against real Supabase", async (t) => {
+  const f = await createDatabaseFixture();
+  try {
+    const { current_season: season } = (
+      await f.sql("select current_season from public.workspaces where id=$1", [f.workspaceId])
+    ).rows[0];
+    const admin = await f.staff({
+      key: "mp_admin",
+      name: "Rhea Valdez",
+      capabilities: ["admin"],
+      siteCoordinator: true,
+    });
+    const profileOf = async (m) =>
+      (await f.sql("select * from public.volunteer_profiles where person_id=$1", [m.personId])).rows[0];
+    const nameOf = async (m) => (await f.sql("select name from public.people where id=$1", [m.personId])).rows[0].name;
+    const entryOf = async (m) =>
+      (
+        await f.sql("select * from public.roster_entries where workspace_id=$1 and person_id=$2 and season=$3", [
+          f.workspaceId,
+          m.personId,
+          season,
+        ])
+      ).rows[0];
+    const certsOf = async (m) =>
+      (
+        await f.sql(
+          "select certificate from public.certificates where workspace_id=$1 and person_id=$2 and season=$3 and status='confirmed' order by 1",
+          [f.workspaceId, m.personId, season],
+        )
+      ).rows.map((r) => r.certificate);
+    const receiptCount = async (m) =>
+      Number(
+        (
+          await f.sql(
+            "select count(*) as n from public.action_receipts where workspace_id=$1 and actor_user_id=$2 and operation='SAVE_MY_PROFILE'",
+            [f.workspaceId, m.userId],
+          )
+        ).rows[0].n,
+      );
+    const allReceipts = async () =>
+      Number(
+        (await f.sql("select count(*) as n from public.action_receipts where operation='SAVE_MY_PROFILE'")).rows[0].n,
+      );
+    const preparer = (key, name) => f.staff({ key, name, capabilities: ["prepare"] });
+    const read = async (m) => {
+      const { data, error } = await m.client.rpc("vitally_my_profile");
+      assert.equal(error, null, `vitally_my_profile: ${error?.code} ${error?.message}`);
+      return data;
+    };
+    const profileFor = async (m, change = {}) => {
+      const p = await profileOf(m);
+      return {
+        name: await nameOf(m),
+        phone: p.phone,
+        works: p.works,
+        languages: p.languages,
+        otherLanguage: p.other_language,
+        usualDays: p.usual_days,
+        ...change,
+      };
+    };
+    const save = async (m, change = {}, { actionId = randomUUID(), revision } = {}) =>
+      m.client.rpc("vitally_save_my_profile", {
+        p_action_id: actionId,
+        p_expected_revision: revision ?? Number((await profileOf(m)).revision),
+        p_profile: await profileFor(m, change),
+      });
+    // The admin save of a volunteer, changing only the phone.
+    const adminSave = async (m, phone, revision) => {
+      const p = await profileOf(m);
+      const entry = await entryOf(m);
+      return admin.client.rpc("vitally_save_volunteer", {
+        p_action_id: randomUUID(),
+        p_volunteer_id: m.personId,
+        p_expected_revision: revision ?? Number(p.revision),
+        p_volunteer: {
+          name: await nameOf(m),
+          email: p.email,
+          phone,
+          works: p.works,
+          languages: p.languages,
+          otherLanguage: p.other_language,
+          roles: entry.roles,
+          certificates: await certsOf(m),
+          isNew: entry.is_new,
+          photoIdChecked: entry.photo_id_checked_at !== null,
+        },
+      });
+    };
+    const setLink = (url) =>
+      f.sql(
+        "insert into public.season_settings(workspace_id,certificate_upload_url) values($1,$2) on conflict(workspace_id) do update set certificate_upload_url=excluded.certificate_upload_url",
+        [f.workspaceId, url],
+      );
+
+    try {
+      await setLink(LINK);
+
+      await t.test("a cleared Preparer reads their own profile", async () => {
+        const m = await preparer("mp_read", "Ines Calloway");
+        const profile = await read(m);
+        assert.deepEqual(Object.keys(profile).sort(), [
+          "accountStatus",
+          "certificates",
+          "email",
+          "form13615",
+          "languages",
+          "name",
+          "otherLanguage",
+          "personId",
+          "phone",
+          "revision",
+          "roles",
+          "siteCoordinatorName",
+          "uploadUrl",
+          "usualDays",
+          "works",
+        ]);
+        const stored = await profileOf(m);
+        assert.equal(profile.personId, m.personId);
+        assert.equal(profile.name, "Ines Calloway");
+        assert.equal(profile.email, stored.email);
+        assert.deepEqual(profile.roles, ["preparer"]);
+        assert.deepEqual(profile.certificates, await certsOf(m));
+        assert.equal(profile.accountStatus, "active");
+        assert.deepEqual(profile.form13615, { sentAt: null, reviewedAt: null, reviewReason: null });
+        assert.equal(String(profile.revision), String(stored.revision));
+        assert.equal(profile.siteCoordinatorName, "Avery Lin");
+      });
+
+      await t.test("a came-back 13615 is reported", async () => {
+        const m = await preparer("mp_back", "Joss Whitaker");
+        await f.sql(
+          "update public.roster_entries set form_13615_reviewed_at='2026-11-18T15:30:00Z',form_13615_review_reason='Already on file' where workspace_id=$1 and person_id=$2 and season=$3",
+          [f.workspaceId, m.personId, season],
+        );
+        const { form13615 } = await read(m);
+        assert.equal(form13615.sentAt, null);
+        assert.equal(new Date(form13615.reviewedAt).getTime(), Date.parse("2026-11-18T15:30:00Z"));
+        assert.equal(form13615.reviewReason, "Already on file");
+      });
+
+      await t.test("uploadUrl follows the site check", async () => {
+        const m = await preparer("mp_site", "Kirra Beaumont");
+        const setStatus = (status) =>
+          f.sql("update public.accounts set status=$3 where workspace_id=$1 and user_id=$2", [
+            f.workspaceId,
+            m.userId,
+            status,
+          ]);
+        await setStatus("invited");
+        try {
+          const owed = await read(m);
+          assert.equal(owed.accountStatus, "invited");
+          assert.equal(owed.uploadUrl, null);
+        } finally {
+          await setStatus("active");
+        }
+        assert.equal((await read(m)).uploadUrl, LINK);
+      });
+
+      await t.test("a client is refused FORBIDDEN, and the save stores no receipt", async () => {
+        const profile = await f.applicantA.rpc("vitally_my_profile");
+        assert.equal(profile.error?.code, "VT001");
+        assert.equal(profile.error?.message, "FORBIDDEN");
+        const before = await allReceipts();
+        const saved = await f.applicantA.rpc("vitally_save_my_profile", {
+          p_action_id: randomUUID(),
+          p_expected_revision: 1,
+          p_profile: {
+            name: "Nobody Atall",
+            phone: null,
+            works: "remote",
+            languages: ["english"],
+            otherLanguage: null,
+            usualDays: [],
+          },
+        });
+        assert.equal(saved.error?.code, "VT001");
+        assert.equal(saved.error?.message, "FORBIDDEN");
+        assert.equal(await allReceipts(), before);
+      });
+
+      await t.test("saving details writes only the caller", async () => {
+        const m = await preparer("mp_save", "Lowell Ashby");
+        const other = await preparer("mp_save_other", "Maren Doyle");
+        const otherBefore = await profileOf(other);
+        const otherName = await nameOf(other);
+        const before = await profileOf(m);
+        const entryBefore = await entryOf(m);
+        const certsBefore = await certsOf(m);
+        const { data, error } = await save(m, {
+          name: "Fictional Preparer",
+          phone: "555-0142",
+          languages: ["english", "cantonese"],
+          usualDays: ["sat", "mon"],
+        });
+        assert.equal(error, null, `save: ${error?.code} ${error?.message} ${error?.details}`);
+        assert.equal(data.personId, m.personId);
+        assert.equal(String(data.revision), String(BigInt(before.revision) + 1n));
+        const profile = await read(m);
+        assert.equal(profile.name, "Fictional Preparer");
+        assert.equal(profile.phone, "555-0142");
+        assert.deepEqual(profile.languages, ["english", "cantonese"]);
+        assert.deepEqual(profile.usualDays, ["mon", "sat"]);
+        assert.equal(await nameOf(m), "Fictional Preparer");
+        assert.equal(String(profile.revision), String(data.revision));
+        assert.equal(profile.email, before.email);
+        assert.deepEqual(profile.roles, entryBefore.roles);
+        assert.deepEqual(await certsOf(m), certsBefore);
+        assert.deepEqual(await entryOf(m), entryBefore);
+        assert.deepEqual(await profileOf(other), otherBefore);
+        assert.equal(await nameOf(other), otherName);
+      });
+
+      await t.test("another key is refused", async () => {
+        const m = await preparer("mp_keys", "Neve Sorensen");
+        const before = await profileOf(m);
+        for (const extra of [{ email: "new@example.org" }, { roles: ["admin"] }]) {
+          const { error } = await save(m, extra);
+          assert.equal(error?.code, "VT007", JSON.stringify(extra));
+        }
+        const after = await profileOf(m);
+        assert.equal(String(after.revision), String(before.revision));
+        assert.equal(after.email, before.email);
+      });
+
+      await t.test("invalid fields are refused", async () => {
+        const m = await preparer("mp_bad", "Osei Brandt");
+        const before = await profileOf(m);
+        const cases = [
+          { name: "x".repeat(81) },
+          { name: "   " },
+          { works: "sometimes" },
+          { otherLanguage: "Welsh" },
+          { languages: ["other"], otherLanguage: null },
+          { languages: ["english", "english"] },
+          { phone: "5".repeat(31) },
+          { usualDays: ["monday"] },
+          { usualDays: ["mon", "mon"] },
+        ];
+        for (const change of cases) {
+          const { error } = await save(m, change);
+          assert.equal(error?.code, "VT007", JSON.stringify(change));
+        }
+        assert.equal(String((await profileOf(m)).revision), String(before.revision));
+        assert.equal(await receiptCount(m), 0);
+      });
+
+      await t.test("a volunteer's stale save is refused and the admin's phone stays", async () => {
+        const m = await preparer("mp_stale_v", "Pru Lindqvist");
+        const stale = Number((await profileOf(m)).revision);
+        const { error: adminError } = await adminSave(m, "555-0199");
+        assert.equal(adminError, null, `admin save: ${adminError?.code} ${adminError?.message} ${adminError?.details}`);
+        const { error } = await save(m, { phone: "555-0100" }, { revision: stale });
+        assert.equal(error?.code, "VT003");
+        assert.equal((await profileOf(m)).phone, "555-0199");
+      });
+
+      await t.test("an admin's stale save is refused", async () => {
+        const m = await preparer("mp_stale_a", "Quill Harrow");
+        const stale = Number((await profileOf(m)).revision);
+        const { error: saveError } = await save(m, { phone: "555-0123" });
+        assert.equal(saveError, null);
+        const { error } = await adminSave(m, "555-0188", stale);
+        assert.equal(error?.code, "VT003");
+        assert.equal((await profileOf(m)).phone, "555-0123");
+      });
+
+      await t.test("a repeated action id returns the same answer and raises the revision once", async () => {
+        const m = await preparer("mp_repeat", "Rafe Tolliver");
+        const before = Number((await profileOf(m)).revision);
+        const actionId = randomUUID();
+        const first = await save(m, { phone: "555-0155" }, { actionId, revision: before });
+        assert.equal(first.error, null);
+        const second = await save(m, { phone: "555-0155" }, { actionId, revision: before });
+        assert.equal(second.error, null, `repeat: ${second.error?.code} ${second.error?.message}`);
+        assert.deepEqual(second.data, first.data);
+        assert.equal(Number((await profileOf(m)).revision), before + 1);
+        assert.equal(await receiptCount(m), 1);
+      });
+
+      await t.test("no action id or no revision is refused VALIDATION", async () => {
+        const m = await preparer("mp_missing", "Sunniva Kerr");
+        const before = await profileOf(m);
+        const profile = await profileFor(m);
+        const noAction = await m.client.rpc("vitally_save_my_profile", {
+          p_action_id: null,
+          p_expected_revision: Number(before.revision),
+          p_profile: profile,
+        });
+        assert.equal(noAction.error?.code, "VT007");
+        const noRevision = await m.client.rpc("vitally_save_my_profile", {
+          p_action_id: randomUUID(),
+          p_expected_revision: null,
+          p_profile: profile,
+        });
+        assert.equal(noRevision.error?.code, "VT007");
+        assert.equal(String((await profileOf(m)).revision), String(before.revision));
+        assert.equal(await receiptCount(m), 0);
+      });
+    } finally {
+      await setLink(null);
+    }
+  } finally {
+    await f.close();
+  }
+});

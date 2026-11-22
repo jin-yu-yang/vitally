@@ -9,7 +9,8 @@
 --      with the sent dates;
 --   §5 vitally_mark_upload_reviewed(): a required reason, stored with the time
 --      (the four-argument version is dropped);
---   §6-§7 come in a later task of the same change (the profile read and save).
+--   §6 vitally_my_profile(): the caller's own profile read;
+--   §7 vitally_save_my_profile(): the caller's own details save.
 
 -- 057 §1
 alter table public.roster_entries
@@ -489,3 +490,158 @@ end;
 $$;
 revoke all on function public.vitally_mark_upload_reviewed(uuid,uuid,bigint,text,text) from public,anon,authenticated,service_role;
 grant execute on function public.vitally_mark_upload_reviewed(uuid,uuid,bigint,text,text) to authenticated;
+
+-- 057 §6
+-- The signed-in staff member's own profile (design D1). It answers for the
+-- caller alone, and is not gated by clearance. uploadUrl follows the rule of
+-- vitally_my_clearance: null while the site check is owed.
+create or replace function public.vitally_my_profile()
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_profile public.volunteer_profiles;
+ v_entry public.roster_entries;
+ v_status text;
+ v_coordinator text;
+ v_site_check boolean;
+begin
+ v_member=vitally_private.require_membership();
+ if v_member.access<>'staff' then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ select * into v_person from public.people
+  where workspace_id=v_member.workspace_id and user_id=v_member.user_id;
+ if v_person.id is null then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ select * into v_profile from public.volunteer_profiles
+  where workspace_id=v_person.workspace_id and person_id=v_person.id;
+ if v_profile.person_id is null then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ select a.status into v_status from public.accounts a
+  where a.workspace_id=v_person.workspace_id and a.user_id=v_member.user_id;
+ v_site_check=coalesce(v_status='invited',false);
+ select r.* into v_entry from public.roster_entries r
+  join public.workspaces w on w.id=r.workspace_id and w.current_season=r.season
+  where r.workspace_id=v_person.workspace_id and r.person_id=v_person.id;
+ select d.name into v_coordinator from public.workspaces w
+  join public.people d on d.workspace_id=w.id and d.id=w.default_followup_person_id
+  where w.id=v_person.workspace_id;
+ return jsonb_build_object(
+  'personId',v_person.id,
+  'name',v_person.name,
+  'email',v_profile.email,
+  'phone',v_profile.phone,
+  'works',v_profile.works,
+  'languages',to_jsonb(v_profile.languages),
+  'otherLanguage',v_profile.other_language,
+  'usualDays',to_jsonb(v_profile.usual_days),
+  'revision',v_profile.revision,
+  'accountStatus',v_status,
+  'roles',to_jsonb(coalesce(v_entry.roles,'{}'::text[])),
+  'certificates',to_jsonb(case when v_entry.person_id is not null
+   then vitally_private.confirmed_certificates(v_entry.workspace_id,v_entry.person_id,v_entry.season) else '{}'::text[] end),
+  'form13615',case when v_entry.person_id is not null then jsonb_build_object('sentAt',v_entry.form_13615_sent_at,
+   'reviewedAt',v_entry.form_13615_reviewed_at,'reviewReason',v_entry.form_13615_review_reason) end,
+  'uploadUrl',case when v_entry.person_id is not null and not v_site_check
+   then (select s.certificate_upload_url from public.season_settings s where s.workspace_id=v_person.workspace_id) end,
+  'siteCoordinatorName',to_jsonb(v_coordinator));
+end;
+$$;
+revoke all on function public.vitally_my_profile() from public,anon,authenticated,service_role;
+grant execute on function public.vitally_my_profile() to authenticated;
+
+-- 057 §7
+-- The signed-in staff member saves their own details (design D2): name, phone,
+-- works, languages, other language and usual days, under the field rules of
+-- vitally_save_volunteer. It writes only the caller's own people and profile
+-- rows, and shares the profile revision with the admin's save.
+create or replace function public.vitally_save_my_profile(p_action_id uuid, p_expected_revision bigint, p_profile jsonb)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_member public.memberships;
+ v_person public.people;
+ v_receipt public.action_receipts;
+ v_profile public.volunteer_profiles;
+ v_digest text;
+ v_name text;
+ v_phone text;
+ v_works text;
+ v_other text;
+ v_languages text[];
+ v_days text[];
+ v_revision bigint;
+ v_result jsonb;
+begin
+ v_member=vitally_private.require_membership();
+ if v_member.access<>'staff' then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ select * into v_person from public.people
+  where workspace_id=v_member.workspace_id and user_id=v_member.user_id;
+ if v_person.id is null or not exists(select 1 from public.volunteer_profiles
+  where workspace_id=v_person.workspace_id and person_id=v_person.id) then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ if p_action_id is null or p_expected_revision is null or p_profile is null or jsonb_typeof(p_profile)<>'object' then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ -- The payload: exactly these keys, each of its type.
+ if array(select k from jsonb_object_keys(p_profile) k order by k collate "C")
+   <> array['languages','name','otherLanguage','phone','usualDays','works']::text[]
+  or jsonb_typeof(p_profile->'name')<>'string'
+  or jsonb_typeof(p_profile->'works')<>'string'
+  or jsonb_typeof(p_profile->'phone') not in ('string','null')
+  or jsonb_typeof(p_profile->'otherLanguage') not in ('string','null')
+  or jsonb_typeof(p_profile->'languages')<>'array'
+  or jsonb_typeof(p_profile->'usualDays')<>'array' then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ if exists(select 1 from jsonb_array_elements(p_profile->'languages') e where jsonb_typeof(e)<>'string')
+  or exists(select 1 from jsonb_array_elements(p_profile->'usualDays') e where jsonb_typeof(e)<>'string') then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ v_name=btrim(p_profile->>'name');
+ v_phone=nullif(btrim(p_profile->>'phone'),'');
+ v_works=p_profile->>'works';
+ v_other=nullif(btrim(p_profile->>'otherLanguage'),'');
+ v_languages=array(select jsonb_array_elements_text(p_profile->'languages'));
+ v_days=array(select jsonb_array_elements_text(p_profile->'usualDays'));
+ if length(v_name) not between 1 and 80
+  or length(v_phone)>30
+  or v_works not in ('on_site','remote','on_site_and_remote')
+  or not (v_languages <@ array['english','mandarin','cantonese','other']::text[])
+  or cardinality(v_languages)<>(select count(distinct c) from unnest(v_languages) c)
+  or length(v_other)>40
+  or (v_other is not null)<>('other'=any(v_languages))
+  or not (v_days <@ array['mon','tue','wed','thu','fri','sat','sun']::text[])
+  or cardinality(v_days)<>(select count(distinct d) from unnest(v_days) d) then
+  raise sqlstate 'VT007' using message='VALIDATION';
+ end if;
+ v_days=array(select d from unnest(v_days) d order by array_position(array['mon','tue','wed','thu','fri','sat','sun'], d));
+ v_digest=encode(extensions.digest(jsonb_build_object('operation','SAVE_MY_PROFILE','expectedRevision',p_expected_revision,
+  'personId',v_person.id,'profile',p_profile)::text,'sha256'),'hex');
+ v_receipt=vitally_private.reserve_receipt(v_member,p_action_id,'SAVE_MY_PROFILE',v_digest,v_person.id);
+ if v_receipt.receipt is not null then
+  return v_receipt.receipt;
+ end if;
+ select * into v_profile from public.volunteer_profiles
+  where workspace_id=v_person.workspace_id and person_id=v_person.id for update;
+ if not found then
+  raise sqlstate 'VT002' using message='NOT_FOUND';
+ end if;
+ if v_profile.revision<>p_expected_revision then
+  raise sqlstate 'VT003' using message='CONFLICT';
+ end if;
+ v_revision=v_profile.revision+1;
+ update public.people set name=v_name where id=v_person.id;
+ update public.volunteer_profiles set phone=v_phone,works=v_works,languages=v_languages,other_language=v_other,
+   usual_days=v_days,revision=v_revision,updated_at=now()
+  where workspace_id=v_person.workspace_id and person_id=v_person.id;
+ v_result=jsonb_build_object('actionId',p_action_id,'personId',v_person.id,'revision',v_revision);
+ update public.action_receipts set target_id=v_person.id,receipt=v_result where id=v_receipt.id;
+ return v_result;
+end;
+$$;
+revoke all on function public.vitally_save_my_profile(uuid,bigint,jsonb) from public,anon,authenticated,service_role;
+grant execute on function public.vitally_save_my_profile(uuid,bigint,jsonb) to authenticated;
