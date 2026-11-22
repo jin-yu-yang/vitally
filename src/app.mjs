@@ -317,6 +317,7 @@ if (!config) {
     syncCloseUnsigned();
     syncStartSeason();
     syncVolunteerOther();
+    syncProfileOther();
     syncCreateAccount();
     showDraftLink();
     markPressed(state);
@@ -477,6 +478,9 @@ if (!config) {
     if (box && field) field.hidden = !box.checked;
   }
 
+  // TODO(Task 15): our usual-day toggles and R13 base revision duplicate main's
+  // My profile (usual days are main's check boxes); remove toggleUsualDay and
+  // syncUsualDays. syncSiteDays below is the Schedule's and stays.
   // The usual-day toggles (change add-volunteer-schedule): each group's
   // hidden field holds the pressed days, and is what the form sends and what
   // a draft keeps. A press flips the button and rewrites the field; a redraw
@@ -490,8 +494,6 @@ if (!config) {
     const days = [...group.querySelectorAll('[data-day][aria-pressed="true"]')].map((day) => day.dataset.day).join(",");
     field.value = days;
     keepDraft(field.id, days === (group.dataset.saved ?? "") ? null : { value: days });
-    // My profile's draft keeps the revision it began at (ruling R13).
-    if (field.closest("#my-profile-form")) controller.beginUsualDaysEdit();
     if (field.closest("#volunteer-form")) syncCreateAccount();
   }
 
@@ -512,6 +514,14 @@ if (!config) {
       const hours = root.querySelector(`#site-day-${box.dataset.siteDay}-hours`);
       if (hours) hours.hidden = !box.checked;
     }
+  }
+
+  // My profile shows its Other language box only while Other is ticked (change
+  // add-my-profile), at once on a tick and after a redraw that put a tick back.
+  function syncProfileOther() {
+    const box = root.querySelector("#my-profile-languages-other");
+    const field = root.querySelector("#my-profile-other-language");
+    if (box && field) field.hidden = !box.checked;
   }
 
   // Create account sends the saved profile (decision 5), so it waits while
@@ -610,6 +620,8 @@ if (!config) {
     for (const [id, value] of formDrafts)
       restoreDraft(root.querySelector(`#${CSS.escape(id)}`), value);
     syncSiteCoordinatorAdd();
+    // An open reason row's Send back follows its restored pick or note.
+    for (const row of root.querySelectorAll(".volunteer-review")) syncSendBack(row);
     // A collapsed Exit Form group holding something typed is opened again, so
     // the field a refusal names is in view (design D7).
     const exitGroups = [...root.querySelectorAll("details.q-exit-group:not([open])")];
@@ -1505,6 +1517,31 @@ if (!config) {
     }
   }
 
+  // My profile's Save (change add-my-profile, D9). A landed save shows the
+  // toast and drops the drafts, which the re-read page now holds; a CONFLICT
+  // drops them too, so the page shows what is stored now. Any other refusal
+  // keeps what was typed.
+  async function submitMyProfile(form, by) {
+    const values = new FormData(form);
+    const text = await controller.saveMyProfile({
+      name: String(values.get("name") ?? ""),
+      phone: String(values.get("phone") ?? ""),
+      works: String(values.get("works") ?? ""),
+      languages: values.getAll("languages").map(String),
+      otherLanguage: String(values.get("otherLanguage") ?? ""),
+      usualDays: values.getAll("usualDays").map(String),
+    });
+    if (text) {
+      clearFormDrafts(form);
+      notify("success", text, by);
+      return;
+    }
+    if (controller.getState().error?.code === "CONFLICT") {
+      clearFormDrafts(form);
+      render();
+    }
+  }
+
   // Season settings' Save. A landed save draws what was stored; a conflict
   // draws the settings as they are now, so what was typed goes; a refused
   // link keeps what was typed and the field it names takes the keyboard.
@@ -1543,21 +1580,6 @@ if (!config) {
       render();
     }
     root.querySelector('#site-hours-form [aria-invalid="true"]')?.focus();
-  }
-
-  // My profile's Save: the pressed usual days. A conflict draws the days as
-  // they are now, so the unsent choice goes.
-  async function submitMyProfile(form, by) {
-    const text = await controller.saveMyUsualDays(readUsualDays(new FormData(form).get("usualDays")));
-    if (text) {
-      clearFormDrafts(form);
-      notify("success", text, by);
-      return;
-    }
-    if (controller.getState().myProfileUi?.notice) {
-      clearFormDrafts(form);
-      render();
-    }
   }
 
   // Change the SIDN. A landed save closes the dialog; a refusal keeps it,
@@ -2112,6 +2134,11 @@ if (!config) {
       controller.navigate("office-updates");
       void controller.loadPostedUpdates();
     },
+    // My profile (change add-my-profile): read when it opens.
+    "open-my-profile": () => {
+      formDrafts.clear();
+      void controller.navigate("my-profile");
+    },
     // And Season settings (change add-season-settings).
     "open-season-settings": () => {
       formDrafts.clear();
@@ -2122,11 +2149,6 @@ if (!config) {
     "open-schedule": () => {
       formDrafts.clear();
       void controller.openSchedule();
-    },
-    // And My profile.
-    "open-my-profile": () => {
-      formDrafts.clear();
-      void controller.openMyProfile();
     },
     // Pressed again while on the page: a fresh draft, which is what it asks for.
     "open-add-case": async () => {
@@ -2184,6 +2206,10 @@ if (!config) {
         if (leaveAddCaseFirst("open-cases", target)) break;
         EXITS["open-cases"]();
         break;
+      case "open-my-profile":
+        if (leaveAddCaseFirst("open-my-profile", target)) break;
+        EXITS["open-my-profile"]();
+        break;
       case "open-volunteers":
         if (leaveAddCaseFirst("open-volunteers", target)) break;
         EXITS["open-volunteers"]();
@@ -2201,10 +2227,7 @@ if (!config) {
         if (leaveAddCaseFirst("open-schedule", target)) break;
         EXITS["open-schedule"]();
         break;
-      case "open-my-profile":
-        if (leaveAddCaseFirst("open-my-profile", target)) break;
-        EXITS["open-my-profile"]();
-        break;
+      // TODO(Task 15): our usual-day toggle; main's usual days are check boxes.
       // A usual-day toggle, on My profile or in the Roster's drawer.
       case "toggle-usual-day":
         toggleUsualDay(target);
@@ -2327,11 +2350,26 @@ if (!config) {
         await controller[{ "account-resend": "resendAccount", "account-reactivate": "reactivateAccount" }[action]]();
         break;
       case "mark-upload-reviewed": {
-        // Stays in the drawer and keeps what was typed (no forgetVolunteerDrafts).
-        const text = await controller.markUploadReviewed(target.dataset.document);
+        // Opens the reason row; stays in the drawer and keeps what was typed
+        // (no forgetVolunteerDrafts).
+        controller.setReviewReasonFor(target.dataset.document);
+        root.querySelector(`.volunteer-review[data-document="${target.dataset.document}"] input`)?.focus();
+        break;
+      }
+      case "send-back": {
+        if (target.disabled) break;
+        const row = target.closest(".volunteer-review");
+        const note = String(row?.querySelector('[name="review-note"]')?.value ?? "").trim();
+        const pick = row?.querySelector('[name="review-reason"]:checked')?.value ?? "";
+        const reason = note || pick;
+        if (!reason) break;
+        const text = await controller.markUploadReviewed(target.dataset.document, reason);
         if (text) notify("success", text, by);
         break;
       }
+      case "cancel-review":
+        controller.setReviewReasonFor(null);
+        break;
       case "account-create":
         // Asks first (decision 5): nothing is sent until the question's Send.
         // The button is off while the form has unsaved changes.
@@ -3055,8 +3093,19 @@ if (!config) {
     }
   }
 
+  // Send back is off until a pick or a note is there.
+  function syncSendBack(field) {
+    const row = field.closest?.(".volunteer-review");
+    if (!row) return;
+    const note = String(row.querySelector('[name="review-note"]')?.value ?? "").trim();
+    const picked = row.querySelector('[name="review-reason"]:checked') != null;
+    const send = row.querySelector('[data-action="send-back"]');
+    if (send) send.disabled = !(note || picked) || controller.getState().busy === true;
+  }
+
   root.addEventListener("input", (event) => {
     const field = event.target;
+    syncSendBack(field);
     if (field.closest?.("#update-form")) {
       syncUpdateForm(field.form);
       return;
@@ -3126,6 +3175,7 @@ if (!config) {
 
   root.addEventListener("change", (event) => {
     const field = event.target;
+    syncSendBack(field);
     if (field.closest?.("#update-form")) {
       syncUpdateForm(field.form);
       return;
@@ -3155,6 +3205,10 @@ if (!config) {
     if (field.closest?.("#volunteer-form") && field.name === "certificate") {
       syncVolunteerRoles(field.form, field.value);
       syncCreateAccount();
+      return;
+    }
+    if (field.closest?.("#my-profile-form") && field.name === "languages" && field.value === "other") {
+      syncProfileOther();
       return;
     }
     if (field.closest?.("#volunteer-form") && field.name === "language" && field.value === "other") {
@@ -3242,6 +3296,8 @@ if (!config) {
       );
       if (form.matches(".contact-form")) {
         await submitContact(form, by);
+      } else if (form.id === "my-profile-form") {
+        await submitMyProfile(form, by);
       } else if (form.id === "volunteer-form") {
         await submitVolunteer(form, by);
       } else if (form.id === "update-form") {
@@ -3250,8 +3306,6 @@ if (!config) {
         await submitSeasonSettings(form, by);
       } else if (form.id === "site-hours-form") {
         await submitSiteHours(form, by);
-      } else if (form.id === "my-profile-form") {
-        await submitMyProfile(form, by);
       } else if (form.id === "sidn-form") {
         await submitSidn(form, by);
       } else if (form.id === "start-season-form") {
@@ -3288,6 +3342,16 @@ if (!config) {
   // The summary's print mode lasts for one print only.
   window.addEventListener("afterprint", () => {
     document.body.classList.remove("print-summary");
+  });
+
+  // Enter in the reason note is Send back (when it is on), never the drawer's
+  // Save: the note sits inside #volunteer-form, so the default would submit it.
+  root.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || !event.target.matches?.('[name="review-note"]')) return;
+    if (event.isComposing || event.keyCode === 229) return;
+    event.preventDefault();
+    const send = event.target.closest(".volunteer-review")?.querySelector('[data-action="send-back"]');
+    if (send && !send.disabled) send.click();
   });
 
   // The case page's tabs follow the ARIA tab pattern: arrows, Home and End move

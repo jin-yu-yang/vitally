@@ -1,112 +1,153 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { myProfileScreen, usualDayToggles, PROFILE_PRIVACY_NOTE } from "../src/profile-views.mjs";
+import { myProfilePage } from "../src/profile-views.mjs";
 import { staffScreen } from "../src/views.mjs";
 import { cleared } from "./support/clearance.mjs";
 
-// Fictional people only. The week of Monday, February 1, 2027.
+// Fictional people and links only.
 const profile = (over = {}) => ({
-  name: "Rowan Diaz",
+  personId: "p-mira",
+  name: "Mira Patel",
+  email: "mira@example.org",
+  phone: "555-0100",
+  works: "on_site",
+  languages: ["english", "other"],
+  otherLanguage: "Tagalog",
+  usualDays: ["tue", "thu"],
+  revision: 4,
+  accountStatus: "active",
   roles: ["preparer"],
-  usualDays: [2, 6],
-  profileRevision: 4,
-  weekStart: "2027-02-01",
-  weekEnd: "2027-02-07",
-  shiftsThisWeek: [
-    { shiftId: "s-1", date: "2027-02-02", startHour: 17, endHour: 20, role: "preparer" },
-    { shiftId: "s-2", date: "2027-02-06", startHour: 10, endHour: 14, role: "preparer" },
-  ],
+  certificates: ["vsc", "basic"],
+  form13615: null,
+  uploadUrl: "https://example.org/upload",
+  siteCoordinatorName: "Dana Wu",
   ...over,
 });
-const state = (myProfile, over = {}) => ({
-  screen: "my-profile",
-  myProfile,
-  myProfileUi: { notice: null },
-  lists: { myProfile: myProfile ? "ready" : "loading" },
+const stateOf = (over = {}, list = "ready") => ({
+  principal: { access: "staff", personId: "p-mira", personName: "Mira Patel", clearance: cleared() },
+  myProfile: profile(over),
+  lists: { myProfile: list },
   busy: false,
-  ...over,
 });
-const pressed = (html) => [...html.matchAll(/data-day="(\d)" aria-pressed="(true|false)"/g)].map((m) => [Number(m[1]), m[2] === "true"]);
+// esc turns an apostrophe into &#39;; read it back for the sentence checks.
+const says = (html, sentence) => html.replace(/&#39;/g, "'").includes(sentence);
+const page = (over, list) => myProfilePage(stateOf(over, list));
+const text = (html) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
 
-test("my profile: the title, the overline, the name and the roles", () => {
-  const html = myProfileScreen(state(profile({ roles: ["preparer", "reviewer"] })));
-  assert.match(html, /<span class="overline">VOLUNTEER<\/span><h1>My profile<\/h1>/);
-  assert.match(html, /Rowan Diaz/);
-  assert.match(html, /Roles this season[\s\S]*Preparer[\s\S]*Reviewer/);
-  assert.doesNotMatch(html, /No roles recorded/);
-  assert.match(myProfileScreen(state(profile({ roles: [] }))), /Roles this season[\s\S]*No roles recorded/);
-});
-
-test("my profile: seven usual-day toggles, Mon to Sun, the saved ones pressed, with Save and the privacy note", () => {
-  const html = myProfileScreen(state(profile()));
-  assert.deepEqual(pressed(html), [
-    [1, false],
-    [2, true],
-    [3, false],
-    [4, false],
-    [5, false],
-    [6, true],
-    [7, false],
-  ]);
-  assert.match(html, />Mon<\/button>[\s\S]*>Sun<\/button>/);
-  assert.match(html, /<h2[^>]*>Usual days<\/h2>/);
-  // The toggles are a group named by the heading, described by the note.
-  assert.match(html, /<h2 id="profile-days-title">Usual days<\/h2>/);
-  assert.match(html, /<div class="usual-days" role="group" aria-labelledby="profile-days-title"[^>]*aria-describedby="profile-days-note"/);
-  assert.match(html, /id="my-profile-form"/);
-  assert.match(html, /<input type="hidden" id="my-usual-days" name="usualDays" value="2,6">/);
-  assert.match(html, /<button type="submit" class="btn primary">Save<\/button>/);
-  assert.equal(PROFILE_PRIVACY_NOTE, "Only you and the office admins see your usual days.");
-  assert.match(html, /Only you and the office admins see your usual days\./);
-});
-
-test("my profile: the shifts this week, in order, or none", () => {
-  const html = myProfileScreen(state(profile()));
-  assert.match(html, /Your shifts this week[\s\S]*Tue, Feb 2 · 5 pm – 8 pm · Preparer[\s\S]*Sat, Feb 6 · 10 am – 2 pm · Preparer/);
-  assert.doesNotMatch(html, /No shifts this week/);
-  assert.match(myProfileScreen(state(profile({ shiftsThisWeek: [] }))), /Your shifts this week[\s\S]*No shifts this week\./);
-});
-
-test("my profile: busy, or with no profile row to save to, the toggles and Save are off", () => {
-  const busy = myProfileScreen(state(profile(), { busy: true }));
-  assert.match(busy, /<button type="submit" class="btn primary" disabled>Save<\/button>/);
-  assert.equal([...busy.matchAll(/data-action="toggle-usual-day"[^>]* disabled/g)].length, 7);
-  const none = myProfileScreen(state(profile({ profileRevision: null, usualDays: [] })));
-  assert.match(none, /<button type="submit" class="btn primary" disabled>Save<\/button>/);
-});
-
-test("my profile: loading, a failed first read, and the conflict notice", () => {
-  assert.match(myProfileScreen(state(null)), /Loading your profile/);
-  assert.match(myProfileScreen(state(null, { lists: { myProfile: "failed" } })), /Your profile couldn&#39;t load\./);
-  const conflict = myProfileScreen(state(profile(), { myProfileUi: { notice: "Changed elsewhere." } }));
-  assert.match(conflict, /role="alert"[^>]*>Changed elsewhere\./);
-});
-
-test("usual-day toggles: their own hidden field, ids from it, and no day outside 1 to 7", () => {
-  const html = usualDayToggles({ id: "volunteer-usual-days", days: [7, 1, 9] });
-  assert.match(html, /data-for="volunteer-usual-days"/);
-  assert.match(html, /<input type="hidden" id="volunteer-usual-days" name="usualDays" value="1,7">/);
-  assert.equal(pressed(html).filter(([, on]) => on).length, 2);
-  assert.match(html, /aria-label="Monday"/);
-});
-
-test("staffScreen: a schedule viewer on My profile sees it, and the link is current; anyone else gets home", () => {
-  const principal = (scheduleViewer) => ({
-    userId: "u1",
-    access: "staff",
-    personId: "p-rowan",
-    personName: "Rowan Diaz",
-    clearance: { ...cleared({ capabilities: ["prepare"] }), scheduleViewer },
-  });
-  const base = {
-    people: [{ id: "p-rowan", name: "Rowan Diaz", capabilities: ["prepare"] }],
-    cases: [],
-    boardFilters: {},
-  };
-  const html = staffScreen({ ...state(profile()), ...base, lists: { cases: "ready", myProfile: "ready" }, principal: principal(true) });
+test("shows the three sections", () => {
+  const html = page();
+  for (const heading of ["Your details", "This season", "Passed a higher certification? Send your new Form 13615"])
+    assert.ok(html.includes(heading), heading);
   assert.match(html, /<h1>My profile<\/h1>/);
+  assert.match(html, /<form id="my-profile-form"/);
+  for (const name of ["name", "phone", "works", "languages", "otherLanguage", "usualDays"])
+    assert.match(html, new RegExp(`name="${name}"`), name);
+  assert.match(html, /value="Mira Patel"/);
+  assert.match(html, /value="Tagalog"/);
+  assert.match(html, /name="usualDays" value="tue" checked/);
+  assert.doesNotMatch(html, /name="usualDays" value="mon" checked/);
+  assert.match(html, /name="works" value="on_site" checked/);
+  assert.match(html, /name="languages" value="other" checked/);
+  assert.match(text(html), /Active/);
+});
+
+test("email is read-only with its hint", () => {
+  const html = page();
+  assert.match(html, /<input[^>]*name="email"[^>]*readonly/);
+  assert.match(html, /value="mira@example.org"/);
+  assert.ok(html.includes("Your email is how you sign in. Only a site coordinator can change it."));
+});
+
+test("roles and certificates have no control", () => {
+  const html = page();
+  const section = html.match(/<section[^>]*id="my-profile-season"[\s\S]*?<\/section>/)[0];
+  assert.doesNotMatch(section, /<input|<select|<textarea|<button/);
+  const plain = text(section);
+  assert.match(plain, /Managed by the office/);
+  assert.match(plain, /Preparer/);
+  assert.match(plain, /VSC/);
+  assert.match(plain, /Basic/);
+  assert.match(text(page({ roles: [], certificates: [] })), /No roles this season/);
+});
+
+test("does not name the site coordinator (Hailey, Nov 22: the line isn't needed)", () => {
+  assert.ok(!page().includes("Dana Wu"));
+  assert.ok(!page().includes(", your site coordinator."));
+});
+
+test("Upload opens the link in a new tab, and nothing takes its place with no link", () => {
+  const html = page();
+  assert.match(html, /<a class="btn secondary" href="https:\/\/example\.org\/upload" target="_blank" rel="noopener">Upload<\/a>/);
+  assert.match(html, /data-action="mark-upload-sent"[^>]*data-document="form13615"/);
+  assert.ok(says(html, "I've uploaded it"));
+  const none = page({ uploadUrl: null });
+  assert.ok(!none.includes("Ask your site coordinator"));
+  assert.doesNotMatch(none, /<a [^>]*>Upload/);
+  assert.ok(says(none, "I've uploaded it"));
+  const hostile = page({ uploadUrl: 'https://example.org/"><script>' });
+  assert.doesNotMatch(hostile, /<script>/);
+});
+
+test("a sent 13615 shows Waiting for review · sent <date>", () => {
+  const sent = { sentAt: "2026-11-20T15:00:00Z", reviewedAt: null, reviewReason: null };
+  const html = page({ form13615: sent });
+  assert.ok(html.includes("Waiting for review · sent Nov 20"));
+  assert.ok(!says(html, "I've uploaded it"));
+  assert.match(html, /Upload<\/a>/);
+  assert.ok(!page({ uploadUrl: null, form13615: sent }).includes("Ask your site coordinator"));
+});
+
+test("a returned 13615 shows the reason with I've uploaded it", () => {
+  const returned = (reviewReason) => ({ sentAt: null, reviewedAt: "2026-11-20T16:00:00Z", reviewReason });
+  const wrong = page({ form13615: returned("Wrong form") });
+  assert.ok(wrong.includes("Your site coordinator looked at this: Wrong form. Please send it again or ask them."));
+  assert.ok(says(wrong, "I've uploaded it"));
+  assert.match(wrong, /Upload<\/a>/);
+  const onFile = page({ form13615: returned("Already on file") });
+  assert.ok(says(onFile, "Your site coordinator says this is already on file. You don't need to send it again."));
+  assert.ok(says(onFile, "I've uploaded it"));
+});
+
+test("escapes the reason", () => {
+  const html = page({ form13615: { sentAt: null, reviewedAt: "2026-11-20T16:00:00Z", reviewReason: "<img src=x onerror=1>" } });
+  assert.ok(!html.includes("<img"));
+  assert.ok(html.includes("&lt;img src=x onerror=1&gt;"));
+  assert.ok(!page({ name: '"><script>x</script>' }).includes("<script>"));
+});
+
+test("loading and failed states", () => {
+  const loading = myProfilePage({ ...stateOf(), myProfile: null, lists: { myProfile: "loading" } });
+  assert.match(loading, /Loading/);
+  assert.doesNotMatch(loading, /<form|<input/);
+  const failed = myProfilePage({ ...stateOf(), myProfile: null, lists: { myProfile: "failed" } });
+  assert.ok(says(failed, "My profile couldn't load."));
+  assert.doesNotMatch(failed, /<form|<input/);
+  // A failed read never draws a Save that would do nothing.
+  const stale = myProfilePage({ ...stateOf(), lists: { myProfile: "failed" } });
+  assert.doesNotMatch(stale, /<form|<input/);
+  // Busy disables Save.
+  const busy = myProfilePage({ ...stateOf(), busy: true });
+  assert.match(busy, /<button type="submit" class="btn primary" disabled>Save<\/button>/);
+});
+
+test("the staff screen routes my-profile for a cleared window and marks the sidebar link current", () => {
+  const html = staffScreen({ ...stateOf(), screen: "my-profile", connection: "online", people: [], cases: [], assistance: [] });
+  assert.match(html, /<form id="my-profile-form"/);
   assert.match(html, /data-action="open-my-profile"[^>]*aria-current="page"/);
-  const not = staffScreen({ ...state(profile()), ...base, lists: { cases: "ready", myProfile: "ready" }, principal: principal(false) });
-  assert.doesNotMatch(not, /<h1>My profile<\/h1>/);
-  assert.doesNotMatch(not, /open-my-profile/);
+});
+
+test("a cleared window's account row is the My profile link; an uncleared one's is plain text", () => {
+  const sam = { id: "p-sam", name: "Sam <b>", capabilities: ["admin"] };
+  const base = { connection: "online", people: [sam], cases: [], assistance: [], screen: "staff" };
+  const principal = (clearance) => ({ access: "staff", personId: "p-sam", personName: "Sam <b>", clearance });
+  const row = (html) => html.match(/<div class="account-row">[\s\S]*?<\/div>\s*(?=<button)/)[0];
+  const open = row(staffScreen({ ...base, principal: principal(cleared({ isAdmin: true })) }));
+  assert.match(open, /data-action="open-my-profile"/);
+  assert.match(open, /<span>My profile<\/span><small class="account-name">Sam &lt;b&gt;<\/small>/);
+  assert.doesNotMatch(open, /Signed in as|aria-current/);
+  const current = row(staffScreen({ ...base, screen: "my-profile", principal: principal(cleared({ isAdmin: true })) }));
+  assert.match(current, /aria-current="page"/);
+  const plain = row(staffScreen({ ...base, principal: principal({ ...cleared({ isAdmin: true }), cleared: false, missing: [] }) }));
+  assert.doesNotMatch(plain, /<button|open-my-profile/);
+  assert.match(text(plain), /Signed in as Sam &lt;b&gt;/);
 });

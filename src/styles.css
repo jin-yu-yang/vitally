@@ -7175,7 +7175,174 @@ button.schedule-shift {
 }
 /* end Schedule */
 
+/* Volunteers: the Mark reviewed reason row and the setup screen's reason (change add-my-profile) */
+.volunteer-review {
+  margin: 0 0 12px;
+}
+.setup-reason {
+  margin: 4px 0 0;
+}
+/* My profile (change add-my-profile): the sidebar's account link and the screen */
+.account-row .btn.account-link {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  padding: 2px 8px;
+  text-align: left;
+  color: var(--vt-ink);
+  font-weight: 600;
+}
+.account-row .btn.account-link .account-name {
+  font-weight: 400;
+}
+/* A cleared window's account row is one link (icon, "My profile", the name):
+   the whole row takes the hover and current colours, like the nav links above
+   it, instead of a pill around the text beside a loose icon. The button's
+   ::after covers the row, so the icon is part of the target too. */
+.account-row:has(.account-link) {
+  position: relative;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+.account-row:has(.account-link:hover) {
+  background: var(--vt-background);
+}
+.account-row:has(.account-link.current) {
+  background: var(--vt-primary-soft);
+}
+.account-row:has(.account-link) > svg {
+  flex: none;
+  color: var(--vt-muted);
+}
+.account-row:has(.account-link.current) > svg {
+  color: var(--vt-primary);
+}
+.account-row .btn.nav-link.account-link,
+.account-row .btn.nav-link.account-link:hover,
+.account-row .btn.nav-link.account-link.current {
+  min-height: 0;
+  padding: 0;
+  gap: 1px;
+  background: transparent;
+  color: var(--vt-ink);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  transform: none;
+}
+.account-row .btn.nav-link.account-link.current {
+  color: var(--vt-primary);
+}
+.account-row .btn.account-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+}
+.account-row .btn.account-link .account-name {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--vt-muted);
+}
+/* The sections are cards like Season settings': inner padding, a smaller
+   heading, and no extra rule above the form, since the card already frames it. */
+.my-profile-section {
+  margin-bottom: 20px;
+  padding: 20px 22px;
+  border-radius: var(--vt-radius);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.my-profile-section h2 {
+  margin: 0 0 16px;
+  font-size: 17px;
+  letter-spacing: 0;
+}
+.my-profile-section .staff-form {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 0;
+}
+/* The email is the sign-in and can't be changed here: show it as read-only. */
+.my-profile-section input[readonly] {
+  background: var(--vt-background);
+  color: var(--vt-muted);
+  cursor: default;
+}
+.my-profile-status {
+  margin: 0 0 22px;
+  font-size: 14px;
+}
+/* `.field` sets `display: block`, which beats the browser's own [hidden]:
+   without this, "Other language" shows before Other is ticked. */
+.my-profile-section .field[hidden] {
+  display: none;
+}
+/* Short choices sit side by side and wrap, so Works, Languages and Usual days
+   don't make a long single column. Each keeps its full tap height. */
+.my-profile-section .check-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 20px;
+  margin-bottom: 18px;
+}
+/* My profile's "This season" card: the office's records as label / value rows
+   (Roles, Certificates), and "Managed by the office" as the card's subtitle. */
+#my-profile-season > h2 {
+  margin-bottom: 2px;
+}
+#my-profile-season > p {
+  margin: 0;
+  font-size: 14px;
+}
+#my-profile-season > p.muted:first-of-type {
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+#my-profile-season > p:has(> span.muted:first-child) {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid var(--vt-line);
+}
+#my-profile-season > p > span.muted:first-child {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vt-muted);
+}
+#my-profile-season .volunteer-chips {
+  gap: 6px;
+}
+#my-profile-season .volunteer-chip {
+  padding: 3px 10px;
+  border-color: var(--vt-primary-line);
+  background: var(--vt-primary-soft);
+  color: var(--vt-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+/* Inside the app the page column is up to 1240px wide; a one-column form
+   that wide is hard to read, so the My profile cards stop at 720px. */
+.my-profile-section {
+  max-width: 720px;
+}
+#my-profile-send .setup-upload > span {
+  font-size: 14px;
+  color: var(--vt-muted);
+}
+#my-profile-send .setup-reason {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
 /* ---- My profile, usual days and site hours (change add-volunteer-schedule) ---- */
+/* TODO(Task 15): .my-profile, .profile-card, .profile-subhead, .profile-shifts and
+   .usual-days style our duplicate My profile; main's .my-profile-section rules
+   above are the page's. The site hours and targets rules (.site-*) stay. */
 .my-profile {
   display: grid;
   gap: 16px;

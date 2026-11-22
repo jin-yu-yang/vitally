@@ -296,6 +296,7 @@ test("an uncleared schedule viewer opens the Schedule read-only from the setup s
   assert.doesNotMatch(not, /<h1>Schedule<\/h1>/);
 });
 
+// TODO(Task 15): no "open-my-profile" nav link once our duplicate goes.
 test("an uncleared workspace admin's setup sidebar orders Volunteers, Schedule, My profile, Post an update, Season settings", () => {
   const html = staffScreen(staffState({ isAdmin: true, scheduleViewer: true }));
   const order = [...html.matchAll(/data-action="(open-[a-z-]+)"/g)].map((m) => m[1]).filter((a) => a !== "open-help");
@@ -309,4 +310,32 @@ test("an uncleared workspace admin's setup sidebar orders Volunteers, Schedule, 
   );
   assert.match(schedule, /data-action="open-shift"/);
   assert.match(schedule, /\+ Add shift/);
+});
+
+// Why a document came back (change add-my-profile, design D8).
+const returned = (document, reviewReason, sentAt = null) =>
+  setupScreen(staffState({ missing: [{ kind: document, sentAt, reviewedAt: "2026-11-21T03:30:00Z", reviewReason }], uploadUrl: URL13615 }));
+
+test("setup reason: a returned item shows the reason line", () => {
+  const html = returned("form13615", "Not signed");
+  assert.match(html, /Your site coordinator looked at this: Not signed\. Please send it again or ask them\./);
+  assert.match(html, /data-action="mark-upload-sent"/);
+});
+
+test("setup reason: already on file shows its own line", () => {
+  const html = returned("form13615", "Already on file");
+  assert.match(html, /Your site coordinator says this is already on file\. You don(?:'|&#39;|&#x27;)t need to send it again\./);
+  assert.doesNotMatch(html, /looked at this/);
+});
+
+test("setup reason: a sent item shows no reason", () => {
+  const html = returned("form13615", "Not signed", "2026-11-20T15:00:00Z");
+  assert.doesNotMatch(html, /looked at this|already on file/);
+  assert.match(html, /Waiting for review/);
+});
+
+test("setup reason: escapes a typed reason", () => {
+  const html = returned("photoId", '<b>&"');
+  assert.match(html, /&lt;b&gt;&amp;&quot;/);
+  assert.doesNotMatch(html, /<b>/);
 });

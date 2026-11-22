@@ -106,6 +106,7 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
       works: profile.works,
       languages: [...(profile.languages ?? [])],
       otherLanguage: profile.other_language ?? null,
+      usualDays: [...(profile.usual_days ?? [])],
       roles,
       certificates: certsById.get(person.id) ?? [],
       revision: profile.revision,
@@ -117,13 +118,15 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
       // When the volunteer said they sent each document (migration 053); null before.
       form13615SentAt: entry.form_13615_sent_at ?? null,
       photoIdSentAt: entry.photo_id_sent_at ?? null,
+      // What the office last said about each document (migration 057); null when unset.
+      form13615ReviewedAt: entry.form_13615_reviewed_at ?? null,
+      form13615ReviewReason: entry.form_13615_review_reason ?? null,
+      photoIdReviewedAt: entry.photo_id_reviewed_at ?? null,
+      photoIdReviewReason: entry.photo_id_review_reason ?? null,
       account,
       isSiteCoordinator,
       cleared,
-      missing,
-      // Usual days (change add-volunteer-schedule), only when the row has
-      // them: a model without the field never sends them (volunteerFromForm).
-      ...(Array.isArray(profile.usual_days) ? { usualDays: readUsualDays(profile.usual_days.join(",")) } : {})
+      missing
     });
   }
   return list.sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
@@ -146,6 +149,8 @@ export function filterVolunteers(list, { search = "", role = "all", show = "all"
   });
 }
 
+// TODO(Task 15): our numeric usual days; main's are text[] (mon..sun). Remove
+// with our usual-day toggles (src/app.mjs) and our My profile code.
 // The usual-day toggles' field ("2,6") as weekdays: whole days 1 (Monday) to
 // 7 (Sunday), each once, sorted. Anything else in it is dropped.
 export function readUsualDays(text) {
@@ -157,8 +162,7 @@ export function readUsualDays(text) {
   return [...new Set(days)].sort((a, b) => a - b);
 }
 
-// Reads the drawer's FormData into the exact RPC payload. `usualDays` goes
-// only when the drawer drew its field, so an older model never clears them.
+// Reads the drawer's FormData into the exact RPC payload.
 export function volunteerFromForm(formData) {
   const text = (key) => String(formData.get(key) ?? "").trim();
   const languages = formData.getAll("language").map(String);
@@ -174,7 +178,7 @@ export function volunteerFromForm(formData) {
     certificates: formData.getAll("certificate").map(String),
     isNew: formData.get("isNew") != null,
     photoIdChecked: formData.get("photoIdChecked") != null,
-    ...(formData.has("usualDays") ? { usualDays: readUsualDays(formData.get("usualDays")) } : {})
+    usualDays: formData.getAll("usualDays").map(String)
   };
 }
 
@@ -195,19 +199,37 @@ export function volunteerFormChanged(volunteer, payload) {
     !same(payload.certificates, volunteer.certificates) ||
     payload.isNew !== (volunteer.isNew === true) ||
     payload.photoIdChecked !== (volunteer.photoIdChecked === true) ||
-    (Object.hasOwn(payload, "usualDays") && !same(payload.usualDays, volunteer.usualDays))
+    !same(payload.usualDays, volunteer.usualDays)
   );
 }
 
+// The field rules the Roster drawer and My profile share (change
+// add-my-profile): the same sentences, null when the fields are fine.
+const nameProblem = (payload) => (!payload.name || payload.name.length > NAME_MAX ? "Enter a name." : null);
+const phoneProblem = (payload) =>
+  payload.phone && payload.phone.length > PHONE_MAX ? "Enter a phone number of 30 characters or fewer." : null;
+const otherLanguageProblem = (payload) => {
+  if (!payload.languages?.includes("other")) return null;
+  if (!payload.otherLanguage) return "Name the other language.";
+  if (payload.otherLanguage.length > OTHER_LANGUAGE_MAX) return "Name the other language in 40 characters or fewer.";
+  return null;
+};
+
+// My profile's problem with its six fields, as a sentence, or null.
+export const profileProblem = (payload) =>
+  nameProblem(payload) ?? phoneProblem(payload) ?? otherLanguageProblem(payload);
+
 // Returns the first problem as a sentence, or null when the payload may be saved.
 export function volunteerProblem(payload, list, volunteerId) {
-  if (!payload.name || payload.name.length > NAME_MAX) return "Enter a name.";
+  const name = nameProblem(payload);
+  if (name) return name;
   const email = String(payload.email ?? "").trim().toLowerCase();
   if (!email || email.length > EMAIL_MAX || !EMAIL_PATTERN.test(email)) return "Enter a valid email.";
   if (list.some((v) => v.id !== volunteerId && String(v.email ?? "").toLowerCase() === email)) {
     return "That email is already on the Roster.";
   }
-  if (payload.phone && payload.phone.length > PHONE_MAX) return "Enter a phone number of 30 characters or fewer.";
+  const phone = phoneProblem(payload);
+  if (phone) return phone;
   // A role held before this edit is not refused here: the server drops it when
   // it lost a certificate (withoutLostRoles). Only a newly ticked one is.
   const held = heldRoles(list, volunteerId);
@@ -216,11 +238,7 @@ export function volunteerProblem(payload, list, volunteerId) {
     const missing = missingFor(role, payload.certificates);
     if (missing.length) return `${roleLabel(role)} needs ${missing.join(" and ")}.`;
   }
-  if (payload.languages?.includes("other")) {
-    if (!payload.otherLanguage) return "Name the other language.";
-    if (payload.otherLanguage.length > OTHER_LANGUAGE_MAX) return "Name the other language in 40 characters or fewer.";
-  }
-  return null;
+  return otherLanguageProblem(payload);
 }
 
 const heldRoles = (list, volunteerId) =>

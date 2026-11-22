@@ -500,7 +500,7 @@ export const RPC_SIGNATURES = Object.freeze([
   // (design D3).
   Object.freeze({
     name: "vitally_mark_upload_reviewed",
-    signature: "vitally_mark_upload_reviewed(uuid,uuid,bigint,text)",
+    signature: "vitally_mark_upload_reviewed(uuid,uuid,bigint,text,text)",
     authorized: (f) => f.siteCoordinator,
     receiptKeys: Object.freeze(["actionId", "personId", "revision"]),
     context: async (f) => {
@@ -514,6 +514,51 @@ export const RPC_SIGNATURES = Object.freeze([
       p_volunteer_id: context.reviewVolunteerId,
       p_expected_revision: context.reviewRevision,
       p_document: "form13615",
+      p_reason: "Not signed",
+    }),
+  }),
+  // A staff member's own profile (OpenSpec change add-my-profile, design D1, D2).
+  Object.freeze({
+    name: "vitally_my_profile",
+    signature: "vitally_my_profile()",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze([
+      "accountStatus",
+      "certificates",
+      "email",
+      "form13615",
+      "languages",
+      "name",
+      "otherLanguage",
+      "personId",
+      "phone",
+      "revision",
+      "roles",
+      "siteCoordinatorName",
+      "uploadUrl",
+      "usualDays",
+      "works",
+    ]),
+    args: () => ({}),
+  }),
+  Object.freeze({
+    name: "vitally_save_my_profile",
+    signature: "vitally_save_my_profile(uuid,bigint,jsonb)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["actionId", "personId", "revision"]),
+    context: async (f) => {
+      const { rows } = await f.sql(
+        "select vp.revision::int as revision from public.volunteer_profiles vp join public.people p on p.id=vp.person_id where p.workspace_id=$1 and p.person_key='site_coordinator'",
+        [f.workspaceId],
+      );
+      return { profileRevision: rows[0].revision };
+    },
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_expected_revision: context.profileRevision,
+      p_profile: {
+        name: "Avery Lin", phone: null, works: "on_site", languages: ["english"], otherLanguage: null, usualDays: [],
+      },
     }),
   }),
   // The office panel's client list: an array, each element of this shape.

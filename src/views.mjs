@@ -42,6 +42,7 @@ import { volunteerTabs, renderWorkload, assignDrawerBody, assignDrawerTitle, DEF
 import { workloadRows, unassignedCases, candidates } from "./volunteer-workload.mjs";
 import { awaitingClearance, ceilingAdmin, scheduleViewer, siteCoordinator } from "./clearance.mjs";
 import { setupScreen, siteCheckScreen } from "./setup-views.mjs";
+import { myProfilePage } from "./profile-views.mjs";
 import {
   renderNotificationsPanel,
   renderPostUpdatePage,
@@ -52,7 +53,6 @@ import {
 } from "./update-views.mjs";
 import { renderSeasonSettings, changeSidnDialogBody, startSeasonDialogBody } from "./season-settings-views.mjs";
 import { scheduleScreen, shiftDrawer, shiftDrawerTitle, removeShiftDialogBody, removeShiftTitle } from "./schedule-views.mjs";
-import { myProfileScreen } from "./profile-views.mjs";
 
 // The shared shell: the frame every screen sits in, the dialogs, the two
 // screens that belong to nobody in particular (setup needed, no access), and
@@ -219,15 +219,25 @@ const isAdmin = (person) =>
 // add-volunteer-schedule, design D11), and
 // `board` is false on the setup screen, which has no work board.
 export function staffSidebar(state, person, office, { volunteers = office, board = true, schedule = false } = {}) {
-  // A staff account is its own person: "Signed in as".
-  const accountRow = `<small>Signed in as</small> <strong>${esc(person?.name ?? state.principal?.personName ?? "")}</strong>`;
+  // A staff account is its own person. A cleared window's row is the link to
+  // My profile (change add-my-profile, D9); on the setup screen it stays the
+  // plain "Signed in as".
+  const accountName = person?.name ?? state.principal?.personName ?? "";
+  const onProfile = state?.screen === "my-profile";
+  const accountRow = board
+    ? button(
+        `<span>My profile</span><small class="account-name">${esc(accountName)}</small>`,
+        "open-my-profile",
+        `nav-link account-link${onProfile ? " current" : ""}`,
+        onProfile ? 'aria-current="page"' : "",
+      )
+    : `<small>Signed in as</small> <strong>${esc(accountName)}</strong>`;
   const onBoard = state?.screen === "staff";
   const onPool = state?.screen === "office-cases";
   const onRoster = state?.screen === "office-volunteers";
   const onUpdates = state?.screen === "office-updates";
   const onSettings = state?.screen === "office-settings";
   const onSchedule = state?.screen === "schedule";
-  const onProfile = state?.screen === "my-profile";
   const label = office ? "Follow-ups" : "Work board";
   // All cases, then the Roster (admin only, change add-volunteer-roster-records).
   const pool = office && board
@@ -269,6 +279,8 @@ export function staffSidebar(state, person, office, { volunteers = office, board
         onSchedule ? 'aria-current="page"' : "",
       )
     : "";
+  // TODO(Task 15): our My profile nav link; main's My profile is the account
+  // row above, for cleared windows only. Remove this link.
   // My profile follows the Schedule, for the same people.
   const profileLink = schedule
     ? button(
@@ -442,7 +454,9 @@ export function staffScreen(state) {
   // No work.
   if (awaitingClearance(state)) {
     const onCeiling = volunteers && CEILING_SCREENS.includes(state.screen);
-    const onSchedule = viewer && (state.screen === "schedule" || state.screen === "my-profile");
+    // TODO(Task 15): main's My profile opens for cleared windows only, so an
+    // uncleared window's Schedule exception no longer includes "my-profile".
+    const onSchedule = viewer && state.screen === "schedule";
     return appShell({
       sidebar: staffSidebar(
         { ...state, screen: onCeiling || onSchedule ? state.screen : "staff" },
@@ -458,9 +472,7 @@ export function staffScreen(state) {
           : onCeiling
             ? ceilingPage(state)
             : onSchedule
-              ? state.screen === "my-profile"
-                ? myProfileScreen(state)
-                : scheduleScreen(state)
+              ? scheduleScreen(state)
               : setupScreen(state),
       open,
     });
@@ -476,7 +488,7 @@ export function staffScreen(state) {
         (name === "office-volunteers" && volunteers) ||
         (name === "office-add-case" && state.principal?.access === "staff");
   const screen =
-    (OFFICE_SCREENS.includes(state.screen) && !allowed(state.screen)) || ((state.screen === "schedule" || state.screen === "my-profile") && !viewer)
+    (OFFICE_SCREENS.includes(state.screen) && !allowed(state.screen)) || (state.screen === "schedule" && !viewer)
       ? "staff"
       : state.screen;
   const main = (() => {
@@ -535,11 +547,11 @@ export function staffScreen(state) {
         addCasePage(state, person, people),
       );
     // Past the setup screen above, so cleared: the Workload follows the effective admin.
+    if (screen === "my-profile") return myProfilePage(state);
     if (screen === "office-volunteers") return rosterPage(state, { workload: office });
     if (screen === "office-updates") return postUpdatePage(state);
     if (screen === "office-settings") return seasonSettingsPage(state);
     if (screen === "schedule") return scheduleScreen(state);
-    if (screen === "my-profile") return myProfileScreen(state);
     const cases = (state.cases ?? []).map((record) =>
       decorateStaffCase(record, people),
     );
@@ -847,6 +859,7 @@ export function dialog(state) {
           ...ui,
           formError: state.volunteerFormError ?? null,
           accountNotice: state.volunteerAccountNotice ?? null,
+          reviewReasonFor: state.reviewReasonFor ?? null,
         },
       });
     } else if (state.dialog === "log-call") {

@@ -51,4 +51,18 @@ export const uploadItems = (clearance) =>
       document: item.kind,
       line: missingLines({ missing: [item] })[0],
       sentAt: item.sentAt ?? null,
+      reviewedAt: item.reviewedAt ?? null,
+      reviewReason: item.reviewReason ?? null,
     }));
+
+// What the office said about a document that came back (change add-my-profile,
+// D8), as plain text; views escape it. Null while it waits for review or has
+// no reason. Only a Form 13615's exact quick pick is "already on file".
+export const reviewLine = ({ document, sentAt, reviewReason }) => {
+  if (sentAt || !reviewReason) return null;
+  if (document === "form13615" && reviewReason === "Already on file")
+    return "Your site coordinator says this is already on file. You don't need to send it again.";
+  // One trailing . ! or ? goes, so a note that ends a sentence does not double it.
+  const reason = String(reviewReason).trim().replace(/[.!?]$/, "");
+  return `Your site coordinator looked at this: ${reason}. Please send it again or ask them.`;
+};

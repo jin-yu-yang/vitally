@@ -53,7 +53,7 @@ const POLICIES = Object.freeze([
   ["volunteer_profiles", "admin_volunteer_profiles"],
   ["workspaces", "member_workspace"],
 ]);
-// The thirty-one public RPCs after 055, by name and identity arguments.
+// The thirty-four public RPCs after 057, by name and identity arguments.
 const RPCS = Object.freeze([
   "vitally_apply_action(p_action_id uuid, p_case_id uuid, p_expected_revision bigint, p_type text, p_payload jsonb)",
   "vitally_assistance_action(p_action_id uuid, p_item_id uuid, p_expected_revision bigint, p_type text, p_note text)",
@@ -91,8 +91,10 @@ const RPCS = Object.freeze([
   "vitally_save_my_usual_days(p_action_id uuid, p_expected_revision bigint, p_days integer[])",
   "vitally_set_site_number(p_action_id uuid, p_sidn text)",
   "vitally_mark_upload_sent(p_action_id uuid, p_document text)",
-  "vitally_mark_upload_reviewed(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_document text)",
+  "vitally_mark_upload_reviewed(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_document text, p_reason text)",
   "vitally_start_next_season(p_action_id uuid, p_expected_season smallint, p_typed_year smallint)",
+  "vitally_my_profile()",
+  "vitally_save_my_profile(p_action_id uuid, p_expected_revision bigint, p_profile jsonb)",
 ]);
 // The public RPCs that only read: no action id, no digest.
 // The RPCs that take no action id and store no digest: the reads, and (047,
@@ -101,7 +103,6 @@ const RPCS = Object.freeze([
 // vitally_mark_updates (add-posted-updates) is naturally idempotent.
 const READ_ONLY_RPCS = Object.freeze([
   "vitally_activate_client_account",
-  "vitally_client_documents_link()",
   "vitally_client_documents_link",
   "vitally_client_invitations",
   "vitally_complete_site_check",
@@ -209,7 +210,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
     });
 
-    await t.test("the public API is exactly thirty-one RPCs", async () => {
+    await t.test("the public API is exactly thirty-four RPCs", async () => {
       const { rows } = await sql(
         `select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as signature
            from pg_proc p where p.pronamespace='public'::regnamespace`,

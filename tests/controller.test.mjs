@@ -5307,7 +5307,7 @@ test("an applicant's help-request list counts as loaded, and sign-out starts ove
   // The Roster's list is a staff admin's, read only on its screen: an
   // applicant never reads it. Nor the posted-update feed and table, which
   // are staff's, nor Season settings, a workspace admin's, nor the Schedule,
-  // a schedule viewer's.
+  // a schedule viewer's, nor My profile, a cleared staff window's.
   assert.deepEqual(controller.getState().lists, {
     cases: "ready",
     assistance: "ready",
@@ -11030,10 +11030,10 @@ const openReviewDrawer = async (store, ids = ["action-1", "action-2"]) => {
   return built;
 };
 
-test("Mark reviewed sends the drawer volunteer's revision", async () => {
+test("markUploadReviewed sends the reason", async () => {
   const store = uploadReviewStore();
   const { controller } = await openReviewDrawer(store);
-  const text = await controller.markUploadReviewed("form13615");
+  const text = await controller.markUploadReviewed("form13615", "Wrong form");
   assert.equal(text, "Marked reviewed");
   assert.deepEqual(store.writes.at(-1), {
     type: "markUploadReviewed",
@@ -11041,6 +11041,7 @@ test("Mark reviewed sends the drawer volunteer's revision", async () => {
     volunteerId: "v-1",
     expectedRevision: 4,
     document: "form13615",
+    reason: "Wrong form",
   });
   assert.equal(controller.getState().busy, false);
   controller.stop();
@@ -11050,7 +11051,7 @@ test("Mark reviewed re-reads the Roster", async () => {
   const store = uploadReviewStore();
   const { controller } = await openReviewDrawer(store);
   const reads = volunteerReads(store);
-  await controller.markUploadReviewed("photoId");
+  await controller.markUploadReviewed("photoId", "Can't read it");
   assert.equal(volunteerReads(store), reads + 1);
   assert.equal(controller.getState().volunteers.find((entry) => entry.id === "v-1").revision, 5);
   controller.stop();
@@ -11062,7 +11063,7 @@ test("Mark reviewed keeps the drawer open and the next Save sends the new revisi
   // The typed values live in the page (app.mjs drafts). Their survival is checked by the browser test (Task 8): it types into the drawer, presses Mark reviewed and saves.
   const before = controller.getState();
   const { dialog, dialogContext } = before;
-  await controller.markUploadReviewed("form13615");
+  await controller.markUploadReviewed("form13615", "Wrong form");
   const after = controller.getState();
   assert.equal(after.dialog, dialog);
   assert.deepEqual(after.dialogContext, dialogContext);
@@ -11079,7 +11080,7 @@ test("a CONFLICT on Mark reviewed says VOLUNTEER_CONFLICT_MESSAGE and re-reads",
   store.volunteers = [{ ...ROSTER_VOLUNTEER, revision: 9 }];
   store.failReview = Object.assign(new Error("stale"), { code: "CONFLICT" });
   const reads = volunteerReads(store);
-  assert.equal(await controller.markUploadReviewed("form13615"), null);
+  assert.equal(await controller.markUploadReviewed("form13615", "Wrong form"), null);
   const state = controller.getState();
   assert.equal(state.error.code, "CONFLICT");
   assert.equal(state.error.message, VOLUNTEER_CONFLICT_MESSAGE);
@@ -11101,9 +11102,9 @@ test("Mark reviewed does nothing while another action is busy", async () => {
     await held;
     return send(request);
   };
-  const first = controller.markUploadReviewed("form13615");
+  const first = controller.markUploadReviewed("form13615", "Wrong form");
   assert.equal(controller.getState().busy, true);
-  assert.equal(await controller.markUploadReviewed("photoId"), null);
+  assert.equal(await controller.markUploadReviewed("photoId", "Can't read it"), null);
   release();
   assert.equal(await first, "Marked reviewed");
   assert.equal(store.writes.filter((w) => w.type === "markUploadReviewed").length, 1);
@@ -11115,7 +11116,7 @@ test("Mark reviewed says NOT_FOUND when the drawer's volunteer is gone", async (
   const { controller } = await openReviewDrawer(store);
   store.volunteers = [];
   await controller.loadVolunteers();
-  await assert.rejects(() => controller.markUploadReviewed("form13615"), (error) => error.code === "NOT_FOUND");
+  await assert.rejects(() => controller.markUploadReviewed("form13615", "Wrong form"), (error) => error.code === "NOT_FOUND");
   assert.equal(store.calls.includes("markUploadReviewed"), false);
   controller.stop();
 });
@@ -11124,7 +11125,7 @@ test("Mark reviewed does nothing outside the volunteer dialog", async () => {
   const store = uploadReviewStore();
   const { controller } = await openReviewDrawer(store);
   controller.closeDialog();
-  assert.equal(await controller.markUploadReviewed("form13615"), null);
+  assert.equal(await controller.markUploadReviewed("form13615", "Wrong form"), null);
   assert.equal(store.calls.includes("markUploadReviewed"), false);
   controller.stop();
 });
@@ -11870,259 +11871,103 @@ test("schedule: signing out releases an uncleared viewer's Schedule channel", as
 });
 
 // ---------------------------------------------------------------------------
-// My profile and the site hours card (change add-volunteer-schedule, Task 9)
+// My profile (change add-my-profile, design D9)
 // ---------------------------------------------------------------------------
 
-const profileAnswer = (over = {}) => ({
-  name: "Rowan Diaz",
+const MY_PROFILE_CONFLICT = "Someone else changed these details. Here they are now.";
+const profileAnswer = () => ({
+  personId: "person-riley",
+  name: "Riley Park",
+  email: "riley.park@example.test",
+  phone: "215-555-0110",
+  works: "in_person",
+  languages: ["english"],
+  otherLanguage: null,
+  usualDays: ["tue"],
+  revision: 6,
+  accountStatus: "active",
   roles: ["preparer"],
-  usualDays: [2],
-  profileRevision: 4,
-  weekStart: "2027-02-01",
-  weekEnd: "2027-02-07",
-  shiftsThisWeek: [{ shiftId: "s-1", date: "2027-02-02", startHour: 17, endHour: 20, role: "preparer" }],
-  ...over,
+  certificates: ["vsc", "basic"],
+  form13615: null,
+  uploadUrl: "https://example.org/upload",
+  siteCoordinatorName: "Sam",
 });
-// A schedule store with the My profile calls. `failNextProfile` makes the next save reject.
-const profileStore = (options = {}) => {
-  const store = scheduleStore(options);
+const PROFILE_VALUES = Object.freeze({
+  name: "Riley Vale",
+  phone: "215-555-0142",
+  works: "remote",
+  languages: ["english", "other"],
+  otherLanguage: "Tagalog",
+  usualDays: ["mon", "sat"],
+});
+// A cleared Preparer's staff store with the two My profile calls and the
+// upload send. `failNextProfile` makes the next save reject; `loseNextProfile`
+// lands it and then rejects OFFLINE, as a reply lost on the way back would.
+// A repeat of a landed action id answers from its receipt.
+const profileStore = (overrides = {}) => {
+  const people = [{ id: "person-riley", name: "Riley Park", capabilities: ["prepare"] }];
+  const store = staffStore({ people, clearance: { ...PREPARER_CLEARED }, ...overrides });
   store.profile = profileAnswer();
   store.failNextProfile = null;
-  store.myProfile = async () => {
-    store.calls.push("myProfile");
+  store.loseNextProfile = false;
+  store.profileReceipts = new Map();
+  store.getMyProfile = async () => {
+    store.calls.push("getMyProfile");
     return structuredClone(store.profile);
   };
-  store.saveMyUsualDays = async (request) => {
-    store.calls.push("saveMyUsualDays");
-    store.writes.push({ type: "saveMyUsualDays", ...request });
-    const error = store.failNextProfile;
-    store.failNextProfile = null;
-    if (error) throw error;
-    store.profile = { ...store.profile, usualDays: [...request.days], profileRevision: store.profile.profileRevision + 1 };
-    return { usualDays: store.profile.usualDays, profileRevision: store.profile.profileRevision };
+  store.saveMyProfile = async (request) => {
+    store.calls.push("saveMyProfile");
+    store.writes.push({ type: "saveMyProfile", ...request });
+    if (store.profileReceipts.has(request.actionId)) return store.profileReceipts.get(request.actionId);
+    if (store.failNextProfile) {
+      const error = store.failNextProfile;
+      store.failNextProfile = null;
+      throw error;
+    }
+    store.profile = { ...store.profile, ...request.profile, revision: store.profile.revision + 1 };
+    people[0] = { ...people[0], name: request.profile.name };
+    const answer = { actionId: request.actionId, personId: "person-riley", revision: store.profile.revision };
+    store.profileReceipts.set(request.actionId, answer);
+    if (store.loseNextProfile) {
+      store.loseNextProfile = false;
+      throw Object.assign(new Error("offline"), { code: "OFFLINE" });
+    }
+    return answer;
+  };
+  store.markUploadSent = async (request) => {
+    store.calls.push("markUploadSent");
+    store.writes.push({ type: "markUploadSent", ...request });
+    store.profile = { ...store.profile, form13615: { sentAt: "2026-11-20T15:00:00Z", reviewedAt: null, reviewReason: null } };
+    return { actionId: request.actionId, document: request.document, sentAt: "2026-11-20T15:00:00Z" };
   };
   return store;
 };
-const profileReads = (store) => store.calls.filter((entry) => entry === "myProfile").length;
+const profileReads = (store) => callCount(store, "getMyProfile");
 
-async function onMyProfile(options = {}) {
-  const store = profileStore(options);
-  const built = build({ store, clock: SCHEDULE_NOW });
+async function onMyProfile(overrides = {}, options = {}) {
+  const store = profileStore(overrides);
+  const built = build({ store, ...options });
   await built.controller.start();
-  await built.controller.openMyProfile();
+  await built.controller.navigate("my-profile");
   return { store, ...built };
 }
 
-test("my profile: opening reads it and shows it", async () => {
-  const { store, controller } = await onMyProfile({ clearance: PREPARER_VIEWER });
+test("navigate to my-profile reads the profile", async () => {
+  const { store, controller } = await onMyProfile();
   const state = controller.getState();
   assert.equal(state.screen, "my-profile");
   assert.equal(state.lists.myProfile, "ready");
-  assert.equal(profileReads(store), 1);
-  const html = staffScreen(state);
-  assert.match(html, /<h1>My profile<\/h1>[\s\S]*Rowan Diaz[\s\S]*Tue, Feb 2 · 5 pm – 8 pm · Preparer/);
-  assert.match(html, /data-action="open-my-profile"[^>]*aria-current="page"/);
-  controller.stop();
-});
-
-test("my profile: a window restored on it without scheduleViewer goes home and reads nothing", async () => {
-  const sessionStorage = fakeSession();
-  const seed = build({ store: profileStore({ clearance: PREPARER_VIEWER }), sessionStorage, clock: SCHEDULE_NOW });
-  await seed.controller.start();
-  await seed.controller.openMyProfile();
-  seed.controller.stop();
-  const store = profileStore({ clearance: { ...PREPARER_VIEWER, scheduleViewer: false } });
-  const { controller } = build({ store, sessionStorage, clock: SCHEDULE_NOW });
-  await controller.start();
-  assert.equal(controller.getState().screen, "staff");
-  assert.equal(profileReads(store), 0);
-  // Asking for it again goes home too.
-  await controller.openMyProfile();
-  assert.equal(controller.getState().screen, "staff");
-  assert.equal(profileReads(store), 0);
-  assert.doesNotMatch(staffScreen(controller.getState()), /open-my-profile/);
-  controller.stop();
-});
-
-test("my profile: a viewer's window restored on it reads it", async () => {
-  const sessionStorage = fakeSession();
-  const seed = build({ store: profileStore({ clearance: PREPARER_VIEWER }), sessionStorage, clock: SCHEDULE_NOW });
-  await seed.controller.start();
-  await seed.controller.openMyProfile();
-  seed.controller.stop();
-  const store = profileStore({ clearance: PREPARER_VIEWER });
-  const { controller } = build({ store, sessionStorage, clock: SCHEDULE_NOW });
-  await controller.start();
-  assert.equal(controller.getState().screen, "my-profile");
+  assert.equal(state.myProfile.revision, 6);
+  assert.equal(state.myProfile.name, "Riley Park");
   assert.equal(profileReads(store), 1);
   controller.stop();
 });
 
-test("my profile: Save sends the sorted days at the profile revision and says so", async () => {
-  const { store, controller } = await onMyProfile({ clearance: PREPARER_VIEWER });
-  const text = await controller.saveMyUsualDays([6, 2]);
-  assert.equal(text, "Usual days saved");
-  const write = store.writes.find((entry) => entry.type === "saveMyUsualDays");
-  assert.deepEqual(write.days, [2, 6]);
-  assert.equal(write.revision, 4);
-  assert.ok(write.actionId);
-  assert.deepEqual(controller.getState().myProfile.usualDays, [2, 6]);
-  assert.equal(controller.getState().myProfile.profileRevision, 5);
-  controller.stop();
-});
-
-test("my profile: a CONFLICT re-reads and says the usual days were refreshed", async () => {
-  const { store, controller } = await onMyProfile({ clearance: PREPARER_VIEWER });
-  store.profile = { ...store.profile, usualDays: [4], profileRevision: 9 };
-  store.failNextProfile = shiftRefusal("CONFLICT");
-  const reads = profileReads(store);
-  const text = await controller.saveMyUsualDays([2, 6]);
-  assert.equal(text, null);
-  assert.equal(profileReads(store), reads + 1);
-  const state = controller.getState();
-  assert.deepEqual(state.myProfile.usualDays, [4]);
-  assert.equal(state.myProfileUi.notice, "Someone changed your usual days. They have been refreshed.");
-  assert.match(staffScreen(state), /role="alert"[^>]*>Someone changed your usual days\. They have been refreshed\./);
-  // The next save is at the revision read, and clears the notice.
-  await controller.saveMyUsualDays([2]);
-  assert.equal(store.writes.at(-1).revision, 9);
-  assert.equal(controller.getState().myProfileUi.notice, null);
-  controller.stop();
-});
-
-test("my profile: a lost answer is sent again with the same action id", async () => {
-  const { store, controller } = await onMyProfile({ clearance: PREPARER_VIEWER });
-  store.failNextProfile = shiftRefusal("OFFLINE");
-  await controller.saveMyUsualDays([3]);
-  await controller.saveMyUsualDays([3]);
-  const writes = store.writes.filter((entry) => entry.type === "saveMyUsualDays");
-  assert.equal(writes.length, 2);
-  assert.equal(writes[0].actionId, writes[1].actionId);
-  controller.stop();
-});
-
-test("my profile: a shifts change and focus re-read it; elsewhere a shift change does not", async () => {
-  const { store, controller, events } = await onMyProfile({ clearance: PREPARER_VIEWER });
-  let reads = profileReads(store);
-  await store.handlers.onChange({ table: "shifts", eventType: "INSERT", id: "s-new" });
-  assert.equal(profileReads(store), reads + 1);
-  reads = profileReads(store);
-  await events.emit("focus");
-  assert.equal(profileReads(store), reads + 1);
-  controller.navigate("staff");
-  reads = profileReads(store);
-  await store.handlers.onChange({ table: "shifts", eventType: "INSERT", id: "s-2" });
-  assert.equal(profileReads(store), reads);
-  controller.stop();
-});
-
-test("my profile: the uncleared viewer's setup sidebar has My profile, which opens, saves and re-reads on focus", async () => {
-  const store = profileStore({ clearance: UNCLEARED_VIEWER });
-  const { controller, events } = build({ store, clock: SCHEDULE_NOW });
-  await controller.start();
-  assert.match(staffScreen(controller.getState()), /data-action="open-my-profile"/);
-  await controller.openMyProfile();
-  assert.equal(controller.getState().screen, "my-profile");
-  assert.equal(store.calls.includes("listCases"), false);
-  assert.match(staffScreen(controller.getState()), /<h1>My profile<\/h1>/);
-  assert.equal(await controller.saveMyUsualDays([6]), "Usual days saved");
-  const reads = profileReads(store);
-  await events.emit("focus");
-  assert.equal(profileReads(store), reads + 1);
-  // Losing the roster entry sends the window back to the setup screen.
-  store.nextClearance = { ...UNCLEARED_VIEWER, scheduleViewer: false };
-  await events.emit("focus");
-  assert.equal(controller.getState().screen, "staff");
-  assert.equal(controller.getState().myProfile, null);
-  assert.match(staffScreen(controller.getState()), /Finish your setup for this season/);
-  controller.stop();
-});
-
-test("my profile: an uncleared viewer on it follows shift changes live, reads no case, and releases the channel on leaving", async () => {
-  const store = profileStore({ clearance: UNCLEARED_VIEWER });
-  const { controller } = build({ store, clock: SCHEDULE_NOW });
-  await controller.start();
-  assert.equal(store.subscriptions, 0);
-  await controller.openMyProfile();
-  assert.equal(store.subscriptions, 1);
-  const reads = profileReads(store);
-  await store.handlers.onChange({ table: "shifts", eventType: "INSERT", id: "s-new" });
-  assert.equal(profileReads(store), reads + 1);
-  const calls = store.calls.length;
-  for (const table of ["cases", "workspaces", "assistance_items", "posted_updates", "case_labels"])
-    await store.handlers.onChange({ table, eventType: "UPDATE", id: "x", caseId: "case-a" });
-  assert.deepEqual(store.calls.slice(calls), []);
-  // Moving to the Schedule keeps the one channel; leaving both releases it.
-  await controller.openSchedule();
-  assert.equal(store.subscriptions, 1);
-  assert.equal(store.released, 0);
-  controller.navigate("staff");
-  assert.equal(store.handlers, null);
-  assert.equal(store.released, 1);
-  controller.stop();
-});
-
-test("my profile: an uncleared viewer restored on it gets the channel; losing the viewer flag releases it", async () => {
-  const sessionStorage = fakeSession();
-  const seed = build({ store: profileStore({ clearance: UNCLEARED_VIEWER }), sessionStorage, clock: SCHEDULE_NOW });
-  await seed.controller.start();
-  await seed.controller.openMyProfile();
-  seed.controller.stop();
-  const store = profileStore({ clearance: UNCLEARED_VIEWER });
-  const { controller } = build({ store, sessionStorage, clock: SCHEDULE_NOW });
-  await controller.start();
-  assert.equal(controller.getState().screen, "my-profile");
-  assert.equal(profileReads(store), 1);
-  assert.equal(store.subscriptions, 1);
-  store.nextClearance = { ...UNCLEARED_VIEWER, scheduleViewer: false };
-  await controller.checkClearance();
-  assert.equal(controller.getState().screen, "staff");
-  assert.equal(store.handlers, null);
-  controller.stop();
-});
-
-test("my profile: an uncleared viewer who becomes cleared on it keeps one channel; signing out releases it", async () => {
-  const store = profileStore({ clearance: UNCLEARED_VIEWER });
-  const { controller } = build({ store, clock: SCHEDULE_NOW });
-  await controller.start();
-  await controller.openMyProfile();
-  store.nextClearance = { ...PREPARER_VIEWER };
-  await controller.checkClearance();
-  assert.equal(controller.getState().screen, "my-profile");
-  assert.equal(store.subscriptions, 1);
-  assert.equal(store.released, 0);
-  await controller.signOut();
-  assert.equal(store.handlers, null);
-  assert.equal(store.released, 1);
-  assert.equal(controller.getState().myProfile, null);
-  controller.stop();
-});
-
-test("my profile: the sidebar puts My profile after Schedule for an admin and for a preparer", async () => {
-  const admin = build({ store: profileStore(), clock: SCHEDULE_NOW });
-  await admin.controller.start();
-  assert.deepEqual(navOrder(staffScreen(admin.controller.getState())), [
-    "open-board",
-    "open-cases",
-    "open-volunteers",
-    "open-schedule",
-    "open-my-profile",
-    "open-post-update",
-    "open-season-settings",
-    "open-notifications",
-  ]);
-  admin.controller.stop();
-  const preparer = build({ store: profileStore({ clearance: PREPARER_VIEWER }), clock: SCHEDULE_NOW });
-  await preparer.controller.start();
-  assert.deepEqual(navOrder(staffScreen(preparer.controller.getState())), [
-    "open-board",
-    "open-schedule",
-    "open-my-profile",
-    "open-notifications",
-  ]);
-  assert.match(staffScreen(preparer.controller.getState()), /Work board[\s\S]*Schedule[\s\S]*My profile/);
-  preparer.controller.stop();
-});
+// ---------------------------------------------------------------------------
+// The site hours card (change add-volunteer-schedule, Task 9). TODO(Task 15):
+// tests for My profile's shifts section; this change's own My profile tests
+// were dropped in the merge with main's My profile (#262).
+// ---------------------------------------------------------------------------
 
 // ---- the site hours card ----
 
@@ -12257,41 +12102,305 @@ test("site hours: with no concurrent change a save sends the current revision; t
   controller.stop();
 });
 
-test("my profile: an edit begun at profileRevision N saves at N after a focus or shifts re-read moved it, and the CONFLICT re-reads", async () => {
-  for (const reread of ["focus", "shifts"]) {
-    const { store, controller, events } = await onMyProfile({ clearance: PREPARER_VIEWER });
-    controller.beginUsualDaysEdit();
-    // An admin saved the Roster drawer: the profile is at 5 now.
-    store.profile = { ...store.profile, usualDays: [3], profileRevision: 5 };
-    if (reread === "focus") await events.emit("focus");
-    else await store.handlers.onChange({ table: "shifts", eventType: "INSERT", id: "s-new" });
-    assert.equal(controller.getState().myProfile.profileRevision, 5, reread);
-    store.failNextProfile = shiftRefusal("CONFLICT");
-    const reads = profileReads(store);
-    assert.equal(await controller.saveMyUsualDays([2, 6]), null, reread);
-    assert.equal(store.writes.at(-1).revision, 4, reread);
-    assert.equal(profileReads(store), reads + 1, reread);
-    assert.equal(controller.getState().myProfileUi.notice, "Someone changed your usual days. They have been refreshed.");
-    // Cleared by the CONFLICT: the next save is at the revision on screen.
-    controller.beginUsualDaysEdit();
-    await controller.saveMyUsualDays([2]);
-    assert.equal(store.writes.at(-1).revision, 5, reread);
-    controller.stop();
-  }
+test("my-profile: a failed first read marks it failed", async () => {
+  const store = profileStore();
+  store.getMyProfile = async () => {
+    store.calls.push("getMyProfile");
+    throw Object.assign(new Error("offline"), { code: "OFFLINE" });
+  };
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.navigate("my-profile");
+  const state = controller.getState();
+  assert.equal(state.lists.myProfile, "failed");
+  assert.equal(state.myProfile, null);
+  assert.equal(state.error.code, "OFFLINE");
+  controller.stop();
 });
 
-test("my profile: with no concurrent change a save sends the current revision; the base clears after a save and on reopening", async () => {
-  const { store, controller } = await onMyProfile({ clearance: PREPARER_VIEWER });
-  controller.beginUsualDaysEdit();
-  assert.equal(await controller.saveMyUsualDays([6]), "Usual days saved");
-  assert.equal(store.writes.at(-1).revision, 4);
-  controller.beginUsualDaysEdit();
-  await controller.saveMyUsualDays([2, 6]);
-  assert.equal(store.writes.at(-1).revision, 5);
-  controller.beginUsualDaysEdit();
-  store.profile = { ...store.profile, profileRevision: 8 };
-  await controller.openMyProfile();
-  await controller.saveMyUsualDays([1]);
-  assert.equal(store.writes.at(-1).revision, 8);
+test("an uncleared window cannot open my-profile", async () => {
+  const store = profileStore({ clearance: { ...UNCLEARED_VOLUNTEER } });
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.navigate("my-profile");
+  assert.equal(controller.getState().screen, "staff");
+  assert.equal(profileReads(store), 0);
   controller.stop();
+});
+
+test("an uncleared window restored on my-profile lands on its home", async () => {
+  const sessionStorage = fakeSession();
+  const seed = build({ store: profileStore(), sessionStorage });
+  await seed.controller.start();
+  await seed.controller.navigate("my-profile");
+  seed.controller.stop();
+  const store = profileStore({ clearance: { ...UNCLEARED_VOLUNTEER } });
+  const { controller } = build({ store, sessionStorage });
+  await controller.start();
+  assert.equal(controller.getState().screen, "staff");
+  assert.equal(profileReads(store), 0);
+  controller.stop();
+});
+
+test("a cleared window restored on my-profile reads it", async () => {
+  const sessionStorage = fakeSession();
+  const seed = build({ store: profileStore(), sessionStorage });
+  await seed.controller.start();
+  await seed.controller.navigate("my-profile");
+  seed.controller.stop();
+  const store = profileStore();
+  const { controller } = build({ store, sessionStorage });
+  await controller.start();
+  assert.equal(controller.getState().screen, "my-profile");
+  assert.equal(controller.getState().lists.myProfile, "ready");
+  assert.equal(profileReads(store), 1);
+  controller.stop();
+});
+
+test("saveMyProfile sends the read's revision and re-reads the profile and people", async () => {
+  const { store, controller } = await onMyProfile({}, { newActionId: () => "action-profile" });
+  const reads = profileReads(store);
+  const people = callCount(store, "listPeople");
+  const checks = callCount(store, "getClearance");
+  const text = await controller.saveMyProfile({ ...PROFILE_VALUES, name: "  Riley Vale ", extra: "dropped" });
+  assert.equal(text, "Profile saved");
+  assert.deepEqual(store.writes.at(-1), {
+    type: "saveMyProfile",
+    actionId: "action-profile",
+    expectedRevision: 6,
+    profile: { ...PROFILE_VALUES },
+  });
+  const state = controller.getState();
+  assert.equal(profileReads(store), reads + 1);
+  assert.equal(state.myProfile.revision, 7);
+  assert.equal(callCount(store, "listPeople"), people + 1);
+  assert.equal(state.people.find((person) => person.id === "person-riley").name, "Riley Vale");
+  assert.ok(callCount(store, "getClearance") > checks, "the clearance is asked again");
+  assert.equal(state.busy, false);
+  assert.equal(state.error, null);
+  controller.stop();
+});
+
+test("saveMyProfile sends no other-language name unless Other is among the languages", async () => {
+  const { store, controller } = await onMyProfile();
+  await controller.saveMyProfile({ ...PROFILE_VALUES, languages: ["english"], otherLanguage: "Tagalog" });
+  assert.equal(store.writes.at(-1).profile.otherLanguage, null);
+  assert.deepEqual(store.writes.at(-1).profile.languages, ["english"]);
+  controller.stop();
+});
+
+test("saveMyProfile sends an empty phone and other language as null", async () => {
+  const { store, controller } = await onMyProfile();
+  await controller.saveMyProfile({ ...PROFILE_VALUES, phone: "  ", languages: ["english"], otherLanguage: "" });
+  const { profile } = store.writes.at(-1);
+  assert.equal(profile.phone, null);
+  assert.equal(profile.otherLanguage, null);
+  assert.deepEqual(Object.keys(profile).sort(), ["languages", "name", "otherLanguage", "phone", "usualDays", "works"]);
+  controller.stop();
+});
+
+test("saveMyProfile retries a lost save with the same action id", async () => {
+  let next = 0;
+  const { store, controller } = await onMyProfile({}, { newActionId: () => `action-${(next += 1)}` });
+  store.loseNextProfile = true;
+  assert.equal(await controller.saveMyProfile(PROFILE_VALUES), null);
+  assert.equal(controller.getState().error.code, "OFFLINE");
+  const first = store.writes.at(-1);
+  assert.equal(await controller.saveMyProfile(PROFILE_VALUES), "Profile saved");
+  const again = store.writes.at(-1);
+  assert.equal(again.actionId, first.actionId);
+  assert.equal(again.expectedRevision, first.expectedRevision);
+  assert.deepEqual(again.profile, first.profile);
+  // Changed values are a new save, with a new action id.
+  await controller.saveMyProfile({ ...PROFILE_VALUES, phone: "215-555-0177" });
+  assert.notEqual(store.writes.at(-1).actionId, first.actionId);
+  assert.equal(store.writes.at(-1).expectedRevision, 7);
+  controller.stop();
+});
+
+test("a CONFLICT re-reads and says so", async () => {
+  const { store, controller } = await onMyProfile();
+  store.profile = { ...store.profile, name: "Riley Q. Park", revision: 9 };
+  store.failNextProfile = Object.assign(new Error("stale"), { code: "CONFLICT" });
+  const reads = profileReads(store);
+  assert.equal(await controller.saveMyProfile(PROFILE_VALUES), null);
+  const state = controller.getState();
+  assert.equal(state.error.code, "CONFLICT");
+  assert.equal(state.error.message, MY_PROFILE_CONFLICT);
+  assert.equal(profileReads(store), reads + 1);
+  assert.equal(state.myProfile.revision, 9);
+  assert.equal(state.myProfile.name, "Riley Q. Park");
+  assert.equal(state.busy, false);
+  // The next save sends the revision just read.
+  await controller.saveMyProfile(PROFILE_VALUES);
+  assert.equal(store.writes.at(-1).expectedRevision, 9);
+  controller.stop();
+});
+
+test("an admin's edit between the form and Save is a CONFLICT even after a refresh", async () => {
+  const { store, controller } = await onMyProfile();
+  assert.equal(controller.getState().myProfile.revision, 6);
+  // An admin saves the volunteer in the Roster: 7.
+  store.profile = { ...store.profile, name: "Riley Q. Park", phone: "215-555-0199", revision: 7 };
+  store.saveMyProfile = (save => async (request) => {
+    if (request.expectedRevision !== store.profile.revision) {
+      store.writes.push({ type: "saveMyProfile", ...request });
+      throw Object.assign(new Error("stale"), { code: "CONFLICT" });
+    }
+    return save(request);
+  })(store.saveMyProfile);
+  // The page refreshes on focus, then the volunteer presses Save.
+  await controller.refresh();
+  assert.equal(controller.getState().myProfile.revision, 7);
+  assert.equal(await controller.saveMyProfile(PROFILE_VALUES), null);
+  assert.equal(store.writes.at(-1).expectedRevision, 6);
+  const state = controller.getState();
+  assert.equal(state.error.code, "CONFLICT");
+  assert.equal(state.error.message, MY_PROFILE_CONFLICT);
+  assert.equal(store.profile.name, "Riley Q. Park");
+  assert.equal(store.profile.phone, "215-555-0199");
+  // The page now shows the admin's values; a save from them lands.
+  assert.equal(await controller.saveMyProfile(PROFILE_VALUES), "Profile saved");
+  assert.equal(store.writes.at(-1).expectedRevision, 7);
+  controller.stop();
+});
+
+test("the re-read after I've uploaded it does not move the revision Save sends", async () => {
+  const { store, controller } = await onMyProfile();
+  store.profile = { ...store.profile, revision: 7 };
+  await controller.markUploadSent("form13615");
+  assert.equal(controller.getState().myProfile.revision, 7);
+  await controller.saveMyProfile(PROFILE_VALUES);
+  assert.equal(store.writes.filter((write) => write.type === "saveMyProfile").at(-1).expectedRevision, 6);
+  controller.stop();
+});
+
+test("a landed save moves the revision Save sends next", async () => {
+  const { store, controller } = await onMyProfile();
+  assert.equal(await controller.saveMyProfile(PROFILE_VALUES), "Profile saved");
+  await controller.refresh();
+  assert.equal(await controller.saveMyProfile({ ...PROFILE_VALUES, phone: "215-555-0177" }), "Profile saved");
+  assert.equal(store.writes.at(-1).expectedRevision, 7);
+  controller.stop();
+});
+
+test("a refused save keeps the typed values", async () => {
+  const { store, controller } = await onMyProfile();
+  const shown = controller.getState().myProfile;
+  store.failNextProfile = Object.assign(new Error("bad"), {
+    code: "VALIDATION",
+    cause: { message: "VALIDATION", details: "name" },
+  });
+  const reads = profileReads(store);
+  assert.equal(await controller.saveMyProfile(PROFILE_VALUES), null);
+  const state = controller.getState();
+  assert.equal(state.error.code, "VALIDATION");
+  assert.equal(state.busy, false);
+  // What the page drew stays: the form keeps what was typed (app.mjs drafts).
+  assert.equal(profileReads(store), reads);
+  assert.deepEqual(state.myProfile, shown);
+  assert.equal(state.screen, "my-profile");
+  controller.stop();
+});
+
+test("an empty name is said with the drawer's sentence and nothing is sent", async () => {
+  const { store, controller } = await onMyProfile();
+  const shown = controller.getState().myProfile;
+  const writes = store.writes.length;
+  assert.equal(await controller.saveMyProfile({ ...PROFILE_VALUES, name: "   " }), null);
+  const state = controller.getState();
+  assert.equal(state.error.code, "VALIDATION");
+  assert.equal(state.error.message, "Enter a name.");
+  assert.equal(store.writes.length, writes);
+  assert.equal(state.busy, false);
+  assert.deepEqual(state.myProfile, shown);
+  // A corrected form saves, and the sentence goes.
+  assert.equal(await controller.saveMyProfile(PROFILE_VALUES), "Profile saved");
+  assert.equal(controller.getState().error, null);
+  controller.stop();
+});
+
+test("Other ticked with no language named is said and nothing is sent", async () => {
+  const { store, controller } = await onMyProfile();
+  const writes = store.writes.length;
+  assert.equal(
+    await controller.saveMyProfile({ ...PROFILE_VALUES, languages: ["english", "other"], otherLanguage: " " }),
+    null,
+  );
+  assert.equal(controller.getState().error.message, "Name the other language.");
+  assert.equal(
+    await controller.saveMyProfile({ ...PROFILE_VALUES, languages: ["other"], otherLanguage: "x".repeat(41) }),
+    null,
+  );
+  assert.equal(controller.getState().error.message, "Name the other language in 40 characters or fewer.");
+  assert.equal(
+    await controller.saveMyProfile({ ...PROFILE_VALUES, phone: "5".repeat(31) }),
+    null,
+  );
+  assert.equal(controller.getState().error.message, "Enter a phone number of 30 characters or fewer.");
+  assert.equal(store.writes.length, writes);
+  controller.stop();
+});
+
+test("losing clearance on my-profile shows the setup screen", async () => {
+  const { store, controller } = await onMyProfile();
+  store.nextClearance = { ...UNCLEARED_VOLUNTEER };
+  await controller.checkClearance();
+  const state = controller.getState();
+  assert.equal(state.principal.clearance.cleared, false);
+  assert.equal(state.screen, "staff");
+  assert.match(staffScreen(state), /Finish your setup for this season/);
+  controller.stop();
+});
+
+test("markUploadSent on my-profile re-reads the profile", async () => {
+  const { store, controller } = await onMyProfile();
+  const reads = profileReads(store);
+  assert.equal(await controller.markUploadSent("form13615"), true);
+  assert.equal(profileReads(store), reads + 1);
+  assert.equal(controller.getState().myProfile.form13615.sentAt, "2026-11-20T15:00:00Z");
+  controller.stop();
+});
+
+test("markUploadSent elsewhere does not read the profile", async () => {
+  const store = profileStore();
+  const { controller } = build({ store });
+  await controller.start();
+  await controller.markUploadSent("form13615");
+  assert.equal(profileReads(store), 0);
+  controller.stop();
+});
+
+test("the profile is re-read on focus while on my-profile", async () => {
+  const { store, controller, events } = await onMyProfile();
+  const reads = profileReads(store);
+  await events.emit("focus");
+  assert.equal(profileReads(store), reads + 1);
+  controller.navigate("staff");
+  await events.emit("focus");
+  assert.equal(profileReads(store), reads + 1);
+  controller.stop();
+});
+
+test("signing out forgets the profile", async () => {
+  const { controller } = await onMyProfile();
+  await controller.signOut();
+  const state = controller.getState();
+  assert.equal(state.myProfile, null);
+  assert.equal(state.lists.myProfile, "loading");
+  controller.stop();
+});
+
+test("saveVolunteer sends usualDays when the values carry them", async () => {
+  const store = rosterStore();
+  const built = build({ store });
+  await built.controller.start();
+  built.controller.navigate("office-volunteers");
+  await built.controller.loadVolunteers();
+  built.controller.openDialog("volunteer", { volunteerId: "v-1" });
+  assert.equal(await built.controller.saveVolunteer({ ...VOLUNTEER_PAYLOAD, usualDays: ["mon", "fri"] }), true);
+  assert.deepEqual(store.writes.at(-1).volunteer.usualDays, ["mon", "fri"]);
+  assert.equal(await built.controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
+  assert.equal("usualDays" in store.writes.at(-1).volunteer, false);
+  built.controller.stop();
 });

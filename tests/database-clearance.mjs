@@ -997,7 +997,7 @@ test("vitally_my_clearance against real Supabase", async (t) => {
       });
       assert.deepEqual(await myClearance(member.client), {
         cleared: false,
-        missing: [{ kind: "form13615", sentAt: null }],
+        missing: [{ kind: "form13615", sentAt: null, reviewedAt: null, reviewReason: null }],
         capabilities: [],
         isAdmin: false,
         isSiteCoordinator: false,
@@ -1052,7 +1052,7 @@ test("vitally_my_clearance against real Supabase", async (t) => {
       await setNew(false);
       const unchecked = await myClearance(member.client);
       assert.equal(unchecked.cleared, false);
-      assert.deepEqual(unchecked.missing, [{ kind: "photoId", sentAt: null }]);
+      assert.deepEqual(unchecked.missing, [{ kind: "photoId", sentAt: null, reviewedAt: null, reviewReason: null }]);
       // Not cleared: no capabilities (#193 item 7), whatever the roles.
       assert.deepEqual(unchecked.capabilities, []);
       await setNew(true);

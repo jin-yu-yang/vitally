@@ -1,79 +1,122 @@
-// My profile (change add-volunteer-schedule, design D8): the volunteer's
-// name and roles this season, their usual days with Save, and their shifts
-// this week. Every schedule viewer's, cleared or not. Staff text, English
-// only. Pure: `state.myProfile` is the `vitally_my_profile` answer.
-//
-// The usual-day toggles are shared with the Roster's drawer: seven
-// `aria-pressed` buttons and one hidden field that holds the pressed days
-// ("2,6"), which is what a form sends; `data-saved` keeps the days as drawn.
-// The app flips a button and rewrites the field (`toggle-usual-day`); the
-// field's draft survives a redraw.
-import { esc, button, loadingLine, unloadedLine } from "./ui.mjs";
-import { ROLE_LABELS, WEEKDAYS, shiftLine } from "./volunteer-schedule.mjs";
-import { readUsualDays } from "./volunteer-roster.mjs";
+// My profile (change add-my-profile, design D9): a cleared staff member's own
+// details, the office's records read-only, and the Form 13615 they send again.
+// Staff text, English only. Pure: `state.myProfile` is the
+// `vitally_my_profile()` answer.
+import { esc, button, icon, SENT_DAY, loadingLine, unloadedLine } from "./ui.mjs";
+import { reviewLine } from "./clearance.mjs";
+import { ROLES, CERTIFICATES, WORKS, LANGUAGES } from "./volunteer-roster.mjs";
+import { accountLabel } from "./volunteer-views.mjs";
 
-export const PROFILE_PRIVACY_NOTE = "Only you and the office admins see your usual days.";
+const when = (condition, html) => (condition ? html : "");
+const labelOf = (list, value) => list.find((entry) => entry.value === value)?.label ?? value;
 
-const disabled = (off) => (off ? " disabled" : "");
+const DAYS = Object.freeze([
+  ["mon", "Monday"],
+  ["tue", "Tuesday"],
+  ["wed", "Wednesday"],
+  ["thu", "Thursday"],
+  ["fri", "Friday"],
+  ["sat", "Saturday"],
+  ["sun", "Sunday"],
+]);
 
-/**
- * The seven toggles, Mon to Sun, and their hidden field `id` (name
- * `usualDays`). `days` are the pressed weekdays (1 Monday … 7 Sunday).
- * `labelledBy` names the toggles as a group (outside a fieldset, which names
- * them with its legend), so `describedBy` is announced with that name.
- */
-export function usualDayToggles({ id, days = [], busy = false, describedBy = "", labelledBy = "" } = {}) {
-  const on = readUsualDays((days ?? []).join(","));
-  const buttons = WEEKDAYS.map((weekday, index) => {
-    const day = index + 1;
-    return button(
-      esc(weekday.slice(0, 3)),
-      "toggle-usual-day",
-      "usual-day",
-      `data-day="${day}" aria-pressed="${on.includes(day)}" aria-label="${esc(weekday)}"${disabled(busy)}`,
-    );
-  }).join("");
-  return `<div class="usual-days"${labelledBy ? ` role="group" aria-labelledby="${esc(labelledBy)}"` : ""} data-for="${esc(id)}" data-saved="${on.join(",")}"${describedBy ? ` aria-describedby="${esc(describedBy)}"` : ""}>${buttons}</div><input type="hidden" id="${esc(
-    id,
-  )}" name="usualDays" value="${on.join(",")}">`;
+const frame = (body) =>
+  `<main id="main" class="narrow" tabindex="-1"><div class="page-intro"><span class="overline">MY PROFILE</span><h1>My profile</h1></div>${body}</main>`;
+
+const field = (id, label, name, value, { type = "text", maxlength = 80, extra = "" } = {}) =>
+  `<label class="field" for="${id}"><span>${label}</span><input id="${id}" name="${name}" type="${type}" value="${esc(
+    value ?? "",
+  )}" maxlength="${maxlength}" autocomplete="off"${extra}></label>`;
+
+const choices = (type, name, list, chosen) =>
+  list
+    .map((entry) => {
+      const id = `my-profile-${name}-${entry.value}`;
+      return `<label class="checkbox-row small" for="${id}"><input type="${type}" name="${name}" value="${esc(
+        entry.value,
+      )}"${chosen.includes(entry.value) ? " checked" : ""} id="${id}"><span>${esc(entry.label)}</span></label>`;
+    })
+    .join("");
+
+function detailsSection(p, busy) {
+  const languages = p.languages ?? [];
+  const works = p.works || "on_site";
+  const days = DAYS.map(([value, label]) => ({ value, label }));
+  return `<section class="panel my-profile-section" id="my-profile-details" aria-labelledby="my-profile-details-title"><h2 id="my-profile-details-title">Your details</h2><form id="my-profile-form" class="staff-form" novalidate>${field(
+    "my-profile-name",
+    "Name",
+    "name",
+    p.name,
+  )}${field("my-profile-email", "Email", "email", p.email, {
+    type: "email",
+    maxlength: 254,
+    extra: ' readonly aria-describedby="my-profile-email-note"',
+  })}<p class="field-note" id="my-profile-email-note">Your email is how you sign in. Only a site coordinator can change it.</p><p class="my-profile-status"><span class="muted">Account</span> <strong>${esc(
+    accountLabel({ account: { status: p.accountStatus } }),
+  )}</strong></p>${field("my-profile-phone", "Phone (optional)", "phone", p.phone, {
+    type: "tel",
+    maxlength: 30,
+  })}<fieldset class="check-group"><legend>Works</legend>${choices("radio", "works", WORKS, [works])}</fieldset><fieldset class="check-group"><legend>Languages</legend>${choices(
+    "checkbox",
+    "languages",
+    LANGUAGES,
+    languages,
+  )}</fieldset><label class="field" id="my-profile-other-language" for="my-profile-other-language-input"${when(
+    !languages.includes("other"),
+    " hidden",
+  )}><span>Other language</span><input id="my-profile-other-language-input" name="otherLanguage" type="text" value="${esc(
+    p.otherLanguage ?? "",
+  )}" maxlength="40" autocomplete="off"></label><fieldset class="check-group"><legend>Usual days</legend>${choices(
+    "checkbox",
+    "usualDays",
+    days,
+    p.usualDays ?? [],
+  )}</fieldset><div class="drawer-actions"><button type="submit" class="btn primary"${busy ? " disabled" : ""}>Save</button></div></form></section>`;
 }
 
-const roleChips = (roles) =>
-  roles.length
-    ? `<span class="volunteer-chips">${roles
-        .map((role) => `<span class="volunteer-chip">${esc(ROLE_LABELS[role] ?? role)}</span>`)
-        .join("")}</span>`
-    : `<p class="muted">No roles recorded</p>`;
-
-function profileBody(profile, { busy, notice }) {
-  const roles = Array.isArray(profile.roles) ? profile.roles : [];
-  const shifts = Array.isArray(profile.shiftsThisWeek) ? profile.shiftsThisWeek : [];
-  // With no volunteer profile row there is nothing to save to (ruling R3).
-  const off = busy || profile.profileRevision == null;
-  const alert = notice ? `<p class="notice error settings-notice" role="alert">${esc(notice)}</p>` : "";
-  const who = `<section class="panel profile-card" aria-labelledby="profile-name"><h2 id="profile-name">${esc(
-    profile.name ?? "",
-  )}</h2><h3 class="profile-subhead">Roles this season</h3>${roleChips(roles)}</section>`;
-  const days = `<section class="panel profile-card" aria-labelledby="profile-days-title"><h2 id="profile-days-title">Usual days</h2>${alert}<form id="my-profile-form" class="staff-form profile-days-form" novalidate>${usualDayToggles(
-    { id: "my-usual-days", days: profile.usualDays ?? [], busy: off, describedBy: "profile-days-note", labelledBy: "profile-days-title" },
-  )}<p class="field-note" id="profile-days-note">${esc(PROFILE_PRIVACY_NOTE)}</p><div class="settings-actions"><button type="submit" class="btn primary"${disabled(
-    off,
-  )}>Save</button></div></form></section>`;
-  const list = shifts.length
-    ? `<ul class="profile-shifts">${shifts.map((shift) => `<li>${esc(shiftLine(shift))}</li>`).join("")}</ul>`
-    : `<p class="muted">No shifts this week.</p>`;
-  const week = `<section class="panel profile-card" aria-labelledby="profile-shifts-title"><h2 id="profile-shifts-title">Your shifts this week</h2>${list}</section>`;
-  return `${who}${days}${week}`;
+function seasonSection(p) {
+  const list = (values, all, none) =>
+    values?.length
+      ? `<span class="volunteer-chips">${values
+          .map((value) => `<span class="volunteer-chip">${esc(labelOf(all, value))}</span>`)
+          .join("")}</span>`
+      : `<span class="muted">${none}</span>`;
+  return `<section class="panel my-profile-section" id="my-profile-season" aria-labelledby="my-profile-season-title"><h2 id="my-profile-season-title">This season</h2><p class="muted">Managed by the office</p><p><span class="muted">Roles</span> ${list(
+    p.roles,
+    ROLES,
+    "No roles this season",
+  )}</p><p><span class="muted">Certificates</span> ${list(p.certificates, CERTIFICATES, "None confirmed")}</p></section>`;
 }
 
-/** The My profile page. */
-export function myProfileScreen(state) {
-  const profile = state?.myProfile ?? null;
+function sendSection(p, busy) {
+  const item = p.form13615 ?? null;
+  const sentAt = item?.sentAt ?? null;
+  const day = sentAt ? new Date(sentAt) : null;
+  const upload = p.uploadUrl
+    ? `<a class="btn secondary" href="${esc(p.uploadUrl)}" target="_blank" rel="noopener">Upload</a>`
+    : "";
+  const sent = sentAt
+    ? `<span>Waiting for review${Number.isNaN(day.getTime()) ? "" : ` · sent ${esc(SENT_DAY.format(day))}`}</span>`
+    : button(
+        "I've uploaded it",
+        "mark-upload-sent",
+        "primary",
+        `data-document="form13615" aria-describedby="my-profile-send-title"${busy ? " disabled" : ""}`,
+      );
+  const why = item ? reviewLine({ document: "form13615", sentAt, reviewReason: item.reviewReason }) : null;
+  return `<section class="panel my-profile-section" id="my-profile-send" aria-labelledby="my-profile-send-title"><h2 id="my-profile-send-title">Passed a higher certification? Send your new Form 13615</h2>${
+    why ? `<p class="setup-reason">${esc(why)}</p>` : ""
+  }<div class="setup-upload">${upload} ${sent}</div></section>`;
+}
+
+export function myProfilePage(state) {
+  const p = state?.myProfile ?? null;
   const list = state?.lists?.myProfile ?? "loading";
-  const body = profile
-    ? profileBody(profile, { busy: state?.busy === true, notice: state?.myProfileUi?.notice ?? null })
-    : list === "failed"
-      ? unloadedLine("Your profile couldn't load.")
-      : loadingLine("Loading your profile…");
-  return `<main id="main" class="narrow" tabindex="-1"><div class="page-intro"><span class="overline">VOLUNTEER</span><h1>My profile</h1></div><div class="my-profile">${body}</div></main>`;
+  // A failed read, or none yet: no Save form, which could only do nothing.
+  if (!p || list === "failed") {
+    if (list === "failed") return frame(unloadedLine("My profile couldn't load."));
+    return frame(loadingLine("Loading My profile…"));
+  }
+  const busy = state?.busy === true;
+  return frame(`${detailsSection(p, busy)}${seasonSection(p)}${sendSection(p, busy)}`);
 }

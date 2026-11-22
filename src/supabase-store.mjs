@@ -849,6 +849,20 @@ export function createStore(client) {
         p_volunteer_id: request.volunteerId,
         p_expected_revision: request.expectedRevision,
         p_document: request.document,
+        p_reason: request.reason,
+      });
+    },
+
+    // My profile (migration 057): a volunteer reads and edits their own details.
+    async getMyProfile() {
+      return await call("vitally_my_profile");
+    },
+
+    async saveMyProfile(request) {
+      return await call("vitally_save_my_profile", {
+        p_action_id: actionId(request),
+        p_expected_revision: request.expectedRevision,
+        p_profile: request.profile,
       });
     },
 

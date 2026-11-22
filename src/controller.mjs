@@ -37,7 +37,7 @@ import { LABEL_COLORS, labelNameTaken } from "./case-labels.mjs";
 import { createShadedSave } from "./shaded-editor.mjs";
 import { createWindowState } from "./window-state.mjs";
 import { isLang, readLanguage, writeLanguage } from "./language.mjs";
-import { volunteerProblem, withoutLostRoles, roleNeedsMessage, openWorkMessage, accountMessage } from "./volunteer-roster.mjs";
+import { volunteerProblem, profileProblem, withoutLostRoles, roleNeedsMessage, openWorkMessage, accountMessage } from "./volunteer-roster.mjs";
 import { emptyUpdateForm, toUpdateRequest, validateUpdate } from "./posted-updates.mjs";
 import { nowInput } from "./contact-log.mjs";
 import { seasonRefusalLines } from "./season-settings-views.mjs";
@@ -82,18 +82,24 @@ const STAFF_SCREENS = Object.freeze([
   // (`screenAllowed`).
   "office-updates",
   "office-settings",
-  // The Schedule and My profile (change add-volunteer-schedule): a schedule
-  // viewer's only, cleared or not (`screenAllowed`).
+  // The Schedule (change add-volunteer-schedule): a schedule viewer's only,
+  // cleared or not (`screenAllowed`).
   "schedule",
+  // My profile (change add-my-profile, design D9): a cleared window's only
+  // (`screenAllowed`).
   "my-profile",
 ]);
 // The screens only a schedule viewer may be on (design D11).
-const SCHEDULE_SCREENS = Object.freeze(["schedule", "my-profile"]);
+// My profile is main's (change add-my-profile), a cleared window's, not a
+// schedule viewer's. TODO(Task 15): My profile's shifts section and realtime.
+const SCHEDULE_SCREENS = Object.freeze(["schedule"]);
 // The admin screens an uncleared workspace admin keeps (design D10 of
 // add-volunteer-clearance, add-posted-updates and add-season-settings).
 const ADMIN_SETUP_SCREENS = Object.freeze(["office-volunteers", "office-updates", "office-settings"]);
 // The screens only a workspace admin may be on.
 const CEILING_ONLY_SCREENS = Object.freeze(["office-updates", "office-settings"]);
+// The screens only a cleared window may be on.
+const CLEARED_ONLY_SCREENS = Object.freeze(["my-profile"]);
 
 // An action whose answer never arrived may or may not have been applied. Those
 // are the only failures worth retrying with the same envelope; a refusal is
@@ -157,16 +163,15 @@ const STAFF_SHIFT_VOLUNTEER_MESSAGE = "Choose a volunteer.";
 // `vitally_schedule_day` answer as last read, and the open shift drawer's
 // draft. None persisted but the screen itself.
 const freshSchedule = () => ({ date: null, day: null, drawer: null });
-// My profile (design D8). Staff-only.
-const STAFF_USUAL_DAYS_SAVED = "Usual days saved";
-const STAFF_USUAL_DAYS_CONFLICT_MESSAGE = "Someone changed your usual days. They have been refreshed.";
-const freshProfileUi = () => ({ notice: null });
 // The site hours card on Season settings: what its save says, and the
 // sentence for each field the database can name (VT007 detail).
 const STAFF_SITE_HOURS_SAVED = "Site hours saved";
 const STAFF_TARGET_MESSAGE = "Enter a whole number from 0 to 9.";
 const SITE_TARGET_FIELDS = Object.freeze(["preparersNeeded", "reviewersNeeded", "onSiteNeeded"]);
 const siteHoursMessage = (day) => `${WEEKDAYS[day - 1]} must close after it opens.`;
+// My profile (change add-my-profile, design D9). Staff-only text.
+export const STAFF_MY_PROFILE_CONFLICT_MESSAGE = "Someone else changed these details. Here they are now.";
+const STAFF_MY_PROFILE_SAVED = "Profile saved";
 // Post an update (change add-posted-updates): the table is read again and
 // the form keeps what was typed. Staff-only, so named STAFF_.
 const STAFF_UPDATE_CONFLICT_MESSAGE = "Someone changed this update. Check the table and try again.";
@@ -391,6 +396,8 @@ export function createController({
     volunteers: [],
     volunteerFilters: { search: "", role: "all" },
     volunteerFormError: null,
+    // The document whose Mark reviewed reason row is open in the drawer; window-local.
+    reviewReasonFor: null,
     // The last account action's result in the drawer: {kind: "ok" | "error", text}.
     volunteerAccountNotice: null,
     // The office screen's Invite a client panel (admin only): the client
@@ -442,10 +449,9 @@ export function createController({
     // drawer is `{mode: "add" | "edit", shiftId, revision, volunteerId, name,
     // role, startHour, endHour, actionId}` or null.
     schedule: freshSchedule(),
-    // My profile (a schedule viewer's): the `vitally_my_profile` answer as
-    // last read (null until then), and the page's own conflict sentence.
+    // My profile (a cleared staff window's): the `vitally_my_profile` answer
+    // as last read, or null until then. Not persisted.
     myProfile: null,
-    myProfileUi: freshProfileUi(),
     // The caller's own workspace row, read only for a staff window: the
     // office's defaults.
     workspace: null,
@@ -547,15 +553,21 @@ export function createController({
   // A shift save or removal whose answer never came: `{key, request}`, sent
   // again unchanged when the same values are pressed again.
   let pendingShiftWrite = null;
-  // My profile's usual-days save whose answer never came, kept the same way.
-  let pendingProfileWrite = null;
-  // The revision a draft of the site hours card, or of My profile's usual
-  // days, started from (ruling R13): set at the person's first change since
-  // the last save, CONFLICT re-read or page open, and sent by Save, so a
-  // live or focus re-read that moves the page never lets an unsent draft
-  // overwrite a change it never saw. null while there is no draft.
+  // The revision a draft of the site hours card started from (ruling R13):
+  // set at the person's first change since the last save, CONFLICT re-read
+  // or page open, and sent by Save, so a live or focus re-read that moves the
+  // page never lets an unsent draft overwrite a change it never saw. null
+  // while there is no draft.
   let siteHoursBaseRevision = null;
-  let usualDaysBaseRevision = null;
+  // A My profile save whose answer never came: `{ key, request }`, the key
+  // being the values as typed.
+  let pendingProfileSave = null;
+  // The revision My profile's form was drawn from: set by the first read
+  // after the screen opens, by a landed save's answer and by a CONFLICT's
+  // re-read. A focus refresh or the re-read after "I've uploaded it" never
+  // moves it, so an edit made elsewhere in between is a CONFLICT, never
+  // overwritten (PR #262 review). null until a read sets it.
+  let profileFormRevision = null;
   let pendingUpdateAction = null;
   // The screening start for the open case, if one is due or held:
   // `{ action, inFlight, gaveUp }` (`startScreeningIfDue`).
@@ -637,12 +649,14 @@ export function createController({
   // Screens the current principal may be on, first entry first.
   const screens = () => (staffWindow() ? STAFF_SCREENS : CLIENT_SCREENS);
 
-  // Whether this principal may be on a screen: in its list, and Post an
-  // update only for a workspace admin.
+  // Whether this principal may be on a screen: in its list, Post an update
+  // and Season settings only for a workspace admin, and My profile only
+  // while cleared.
   const screenAllowed = (screen) =>
     screens().includes(screen) &&
     (!CEILING_ONLY_SCREENS.includes(screen) || ceilingAdmin(state.principal)) &&
-    (!SCHEDULE_SCREENS.includes(screen) || scheduleViewer(state.principal));
+    (!SCHEDULE_SCREENS.includes(screen) || scheduleViewer(state.principal)) &&
+    (!CLEARED_ONLY_SCREENS.includes(screen) || !awaitingClearance(state));
 
   // Where "back to the list" goes for whoever is signed in.
   const homeScreen = () => screens()[0];
@@ -1186,6 +1200,9 @@ export function createController({
     };
   }
 
+  // TODO(Task 15): main's My profile is a cleared window's only, so the
+  // uncleared "my-profile" reads here, in handleChange, refresh and
+  // holdForClearance are dead; the channel is held only on the Schedule.
   // An uncleared schedule viewer's window follows the Schedule and My
   // profile live (design D10): it holds the channel while it is on either,
   // and only then. A cleared window's channel is loadWork's and is left alone.
@@ -1252,6 +1269,7 @@ export function createController({
       state.screen === "schedule" &&
       (touchesWorkspace || change.table === "shifts" || change.table === "schedule_settings");
     // ... and My profile's week, which a new season changes too.
+    // TODO(Task 15): re-read myShifts (vitally_my_shifts) here, not main's profile.
     const touchesProfile =
       state.screen === "my-profile" &&
       (touchesWorkspace || change.table === "shifts" || change.table === "schedule_settings");
@@ -1569,7 +1587,13 @@ export function createController({
     return { receipt, notice: `Assigned ${name} as ${slot}.` };
   }
 
+  function setReviewReasonFor(document) {
+    state.reviewReasonFor = document ?? null;
+    show();
+  }
+
   function clearVolunteerFormError() {
+    state.reviewReasonFor = null;
     state.volunteerFormError = null;
     state.volunteerAccountNotice = null;
   }
@@ -1971,31 +1995,28 @@ export function createController({
     );
   }
 
-  // Leaving the Schedule or My profile because this person may no longer be
-  // on them: their data goes with them.
+  // Leaving the Schedule because this person may no longer be on it: its data
+  // goes with it. (My profile is main's, change add-my-profile.)
   function leaveSchedule() {
     if (state.dialog === "shift" || state.dialog === "remove-shift") {
       state.dialog = null;
       state.dialogContext = null;
     }
     state.schedule = freshSchedule();
-    state.myProfile = null;
-    state.myProfileUi = freshProfileUi();
-    pendingProfileWrite = null;
-    usualDaysBaseRevision = null;
     state.screen = homeScreen();
   }
 
-  // ---- My profile (change add-volunteer-schedule, design D8 and D10) -------
+  // ---- My profile (change add-my-profile, design D9) ---------------------
   //
-  // A schedule viewer's page, cleared or not: read on open, on focus, on a
-  // shifts or schedule_settings change and after its save. A first read that
-  // fails marks it failed; one that loaded once keeps what it shows. It
-  // throws, for loadData and refresh.
+  // A cleared staff window's own details. It is read when the screen opens,
+  // on focus, after a save and after a send; there is no realtime for it.
+  // Like Season settings, a first read that fails marks it failed, and one
+  // that loaded once keeps what it shows. It throws, for loadData and refresh.
   async function readMyProfile() {
-    if (!staffWindow() || !scheduleViewer(state.principal)) return;
+    if (!staffWindow() || awaitingClearance(state)) return;
     try {
-      state.myProfile = await store.myProfile();
+      state.myProfile = await store.getMyProfile();
+      if (profileFormRevision === null) profileFormRevision = Number(state.myProfile?.revision ?? 0);
       state.lists = { ...state.lists, myProfile: "ready" };
       noteConnected();
     } catch (error) {
@@ -2004,8 +2025,11 @@ export function createController({
     }
   }
 
-  // Reads it and says a failure with its own Try again. Never rejects.
+  // Opening the screen: read it, and say a failure with its own Try again.
+  // Never rejects.
   async function loadMyProfile() {
+    // The form is drawn afresh: it starts from what this read finds.
+    profileFormRevision = null;
     try {
       await readMyProfile();
     } catch (error) {
@@ -2015,74 +2039,95 @@ export function createController({
     show();
   }
 
-  // The sidebar link.
-  async function openMyProfile() {
-    navigate("my-profile");
-    if (state.screen !== "my-profile") return;
-    state.myProfile = null;
-    state.myProfileUi = freshProfileUi();
-    usualDaysBaseRevision = null;
-    state.lists = { ...state.lists, myProfile: "loading" };
-    show();
-    await loadMyProfile();
-  }
+  // The six fields the save sends, and nothing else: strings trimmed, an
+  // empty phone or other language as null, the lists as lists.
+  const profileFields = (values) => {
+    const text = (value) => String(value ?? "").trim();
+    const list = (value) => (Array.isArray(value) ? value.map(String) : []);
+    const languages = list(values?.languages);
+    return {
+      name: text(values?.name),
+      phone: text(values?.phone) || null,
+      works: text(values?.works),
+      languages,
+      // A hidden box still holds its stored name: only Other names a language.
+      otherLanguage: languages.includes("other") ? text(values?.otherLanguage) || null : null,
+      usualDays: list(values?.usualDays),
+    };
+  };
 
-  // The person's first change to the usual days since the last save,
-  // CONFLICT re-read or page open: the draft starts from the revision on
-  // screen (ruling R13).
-  function beginUsualDaysEdit() {
-    if (usualDaysBaseRevision !== null || state.screen !== "my-profile") return;
-    const revision = state.myProfile?.profileRevision;
-    if (revision != null) usualDaysBaseRevision = Number(revision);
-  }
-
-  // Save the usual days: sorted, each once, at the revision the draft
-  // started from (or, with no draft begun, the one read).
-  // A CONFLICT reads the profile again and says so on the page; a lost answer
-  // is kept and sent again for the same days. Resolves to the toast's text,
-  // or null.
-  async function saveMyUsualDays(days) {
-    const profile = state.myProfile;
-    if (state.busy || !staffWindow() || state.screen !== "my-profile" || !profile || profile.profileRevision == null) return null;
-    const sorted = [...new Set((days ?? []).map(Number).filter((day) => Number.isInteger(day)))].sort((a, b) => a - b);
-    const revision = usualDaysBaseRevision ?? Number(profile.profileRevision);
-    const key = JSON.stringify({ days: sorted, revision });
-    let request = pendingProfileWrite?.key === key ? pendingProfileWrite.request : null;
-    pendingProfileWrite = null;
-    if (!request) request = { actionId: newActionId(), revision, days: sorted };
-    state.myProfileUi = freshProfileUi();
+  // Save: the typed details at the revision the form was drawn from
+  // (profileFormRevision), not the latest refresh. A save whose
+  // answer never came is kept, and Save pressed again with the same values
+  // sends that very request, so the stored receipt answers; changed values
+  // are a new save. A CONFLICT re-reads and says someone else changed them
+  // (the page then shows what is stored now). Any other refusal is said and
+  // leaves the read alone, so the form keeps what was typed. After a landed
+  // save the profile, the people (the name the window shows for the
+  // signed-in person) and the clearance are read again. Resolves to the
+  // toast's text, or null.
+  async function saveMyProfile(values) {
+    if (state.busy || !staffWindow() || awaitingClearance(state) || !state.myProfile) return null;
+    const profile = profileFields(values);
+    const key = JSON.stringify(profile);
+    let request = pendingProfileSave?.key === key ? pendingProfileSave.request : null;
+    pendingProfileSave = null;
+    if (!request) {
+      // The drawer's own check and sentences: nothing is sent, and the form
+      // keeps what was typed.
+      const problem = profileProblem(profile);
+      if (problem) {
+        state.error = { code: "VALIDATION", message: problem };
+        state.retryable = false;
+        show();
+        return null;
+      }
+    }
+    if (!request)
+      request = {
+        actionId: newActionId(),
+        expectedRevision: profileFormRevision ?? Number(state.myProfile.revision ?? 0),
+        profile,
+      };
     state.busy = true;
     state.error = null;
-    dropLocalRetry();
     show();
     let answer;
     try {
-      answer = await store.saveMyUsualDays(request);
+      answer = await store.saveMyProfile(request);
     } catch (error) {
       state.busy = false;
-      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingProfileWrite = { key, request };
-      if (error?.code === "CONFLICT") {
-        state.myProfileUi = { notice: STAFF_USUAL_DAYS_CONFLICT_MESSAGE };
-        // The re-read below is what the next draft starts from.
-        usualDaysBaseRevision = null;
-      } else noteFailure(error);
-      // What the save did, or what changed under it: the profile as it is now.
-      await readMyProfile().catch(() => {});
+      // An earlier action's Try again does not belong beside this refusal.
+      state.retryable = false;
+      const lost = UNKNOWN_OUTCOME.includes(error?.code);
+      if (lost) pendingProfileSave = { key, request };
+      noteFailure(error, error?.code === "CONFLICT" ? { message: STAFF_MY_PROFILE_CONFLICT_MESSAGE } : undefined);
+      // What changed under it, or what a lost save did: the details as they
+      // are now.
+      // A CONFLICT draws the stored details, so the form starts again from
+      // them; a lost save keeps its revision for the retry.
+      if (error?.code === "CONFLICT") profileFormRevision = null;
+      if (lost || error?.code === "CONFLICT") await readMyProfile().catch(() => {});
       show();
       return null;
     }
     state.busy = false;
     noteConnected();
-    usualDaysBaseRevision = null;
-    if (state.myProfile && answer && Array.isArray(answer.usualDays))
-      state.myProfile = { ...state.myProfile, usualDays: answer.usualDays, profileRevision: answer.profileRevision };
+    // The form now holds what was saved, at the revision the save made.
+    profileFormRevision = Number.isFinite(Number(answer?.revision))
+      ? Number(answer.revision)
+      : request.expectedRevision + 1;
+    // A landed save whose re-read fails is a stale page, never a failed save.
+    await readMyProfile().catch((error) => noteFailure(error));
     try {
-      await readMyProfile();
+      state.people = withOwnCapabilities(await store.listPeople(), state.principal);
     } catch (error) {
       noteFailure(error);
     }
     show();
-    return STAFF_USUAL_DAYS_SAVED;
+    await recheckAfterOwnSave();
+    show();
+    return STAFF_MY_PROFILE_SAVED;
   }
 
   // ---- Season settings (change add-season-settings, design D10) ----------
@@ -3091,6 +3136,7 @@ export function createController({
     state.volunteers = [];
     state.volunteerFilters = { search: "", role: "all" };
     state.volunteerFormError = null;
+    state.reviewReasonFor = null;
     state.volunteerAccountNotice = null;
     state.invitations = null;
     state.invitationsFailed = false;
@@ -3121,9 +3167,8 @@ export function createController({
     state.schedule = freshSchedule();
     pendingShiftWrite = null;
     state.myProfile = null;
-    state.myProfileUi = freshProfileUi();
-    pendingProfileWrite = null;
-    usualDaysBaseRevision = null;
+    pendingProfileSave = null;
+    profileFormRevision = null;
     state.assistance = [];
     state.workspace = null;
     state.openPanels = [];
@@ -3168,15 +3213,16 @@ export function createController({
     // Post an update and Season settings are a workspace admin's: anyone else
     // lands on their home.
     if (CEILING_ONLY_SCREENS.includes(screen) && !screenAllowed(screen)) screen = homeScreen();
-    // The Schedule and My profile are a schedule viewer's (design D11).
+    // The Schedule is a schedule viewer's (design D11).
     if (SCHEDULE_SCREENS.includes(screen) && !screenAllowed(screen)) screen = homeScreen();
     // Leaving the Schedule leaves its drawer.
     if (screen !== "schedule") state.schedule = { ...state.schedule, drawer: null };
+    // My profile is a cleared window's: an uncleared one stays on its home.
+    if (CLEARED_ONLY_SCREENS.includes(screen) && !screenAllowed(screen)) screen = homeScreen();
     // Season settings starts without an earlier visit's sentences.
     if (screen === "office-settings") state.seasonSettingsUi = freshSettingsUi();
     // Leaving or opening a page ends its draft, and the revision it began at.
     siteHoursBaseRevision = null;
-    usualDaysBaseRevision = null;
     // A new office draft belongs to the Add a case page: leaving drops it.
     if (screen !== "office-add-case") {
       state.officeDraft = false;
@@ -3193,6 +3239,10 @@ export function createController({
     syncScheduleChannel();
     persistSession();
     show(true);
+    // My profile is read each time it opens. The promise is returned for
+    // callers that wait on the read; it never rejects.
+    if (screen === "my-profile") return loadMyProfile();
+    return undefined;
   }
 
   function togglePanel(name) {
@@ -4863,10 +4913,17 @@ export function createController({
       noteFailure(error, { message: known ?? (error?.code === "OFFLINE" ? undefined : "Something went wrong.") });
       show();
       if (error?.code === "VALIDATION") void recheckAfterOwnSave();
+      // A stale My profile section: what it is now.
+      if (error?.code === "VALIDATION" && state.screen === "my-profile") {
+        await readMyProfile().catch(() => {});
+        show();
+      }
       return false;
     }
     state.busy = false;
     await recheckAfterOwnSave();
+    // My profile shows the send: read it again (change add-my-profile, D9).
+    if (state.screen === "my-profile") await readMyProfile().catch((error) => noteFailure(error));
     show();
     return true;
   }
@@ -4876,8 +4933,10 @@ export function createController({
   // drawer volunteer's revision, as Save does, and then re-reads the Roster so
   // the next Save sends the new one. The drawer stays open and its typed
   // values are untouched. Returns the toast's text, or null when it did not
-  // land (the banner says why).
-  async function markUploadReviewed(document) {
+  // land (the banner says why). Since change add-my-profile (design D6) it
+  // carries the reason the admin picked or typed, trimmed; the database
+  // refuses an empty one or one over 120 characters.
+  async function markUploadReviewed(document, reason) {
     if (state.busy || state.dialog !== "volunteer") return null;
     const volunteerId = state.dialogContext?.volunteerId ?? null;
     const current = volunteerId ? (state.volunteers.find((entry) => entry?.id === volunteerId) ?? null) : null;
@@ -4891,6 +4950,7 @@ export function createController({
         volunteerId,
         expectedRevision: Number(current.revision),
         document,
+        reason: String(reason ?? "").trim(),
       });
     } catch (error) {
       state.busy = false;
@@ -4903,6 +4963,7 @@ export function createController({
       return null;
     }
     state.busy = false;
+    state.reviewReasonFor = null;
     noteConnected();
     try {
       await readVolunteers();
@@ -5556,6 +5617,7 @@ export function createController({
     setVolunteerFilter,
     saveVolunteer,
     markUploadReviewed,
+    setReviewReasonFor,
     createAccount,
     resendAccount,
     deactivateAccount,
@@ -5577,18 +5639,15 @@ export function createController({
     scheduleGo,
     readScheduleDay,
     loadScheduleDay,
-    openMyProfile,
-    readMyProfile,
-    loadMyProfile,
-    saveMyUsualDays,
     saveScheduleSettings,
-    beginUsualDaysEdit,
     beginSiteHoursEdit,
     openShiftDrawer,
     editShiftDraft,
     saveShift,
     saveShiftDrag,
     removeShift,
+    loadMyProfile,
+    saveMyProfile,
     saveSidn,
     startNextSeason,
     addSiteCoordinator,
