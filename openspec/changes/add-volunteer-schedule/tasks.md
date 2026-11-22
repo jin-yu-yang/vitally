@@ -85,12 +85,12 @@
 
 ## 7. Browser story and docs
 
-- [ ] 7.1 Browser story, kept short:
+- [x] 7.1 Browser story, kept short:
   - the site coordinator sets site hours in Season settings;
   - an admin adds a shift with the button path and resizes one by drag, and the coverage row shows a gap and then OK;
   - the preparer window sees the shift live, read-only, with no tags or coverage;
   - the preparer saves usual days on My profile.
 
   Run `npm run test:browser`.
-- [ ] 7.2 Docs: `docs/developer/database.md` (new column, tables, RPCs, realtime), the frontend notes for the new screens and drag, and the production-roadmap line about the Workload's Hours this week column.
-- [ ] 7.3 Final checks: `npm test`, `npm run db:migrate:test` on a stack that already has main's migrations, then `npm run test:database`, and `npm run test:browser`. Also `npx openspec validate --all`.
+- [x] 7.2 Docs: `docs/developer/database.md` (new column, tables, RPCs, realtime), the frontend notes for the new screens and drag, and the production-roadmap line about the Workload's Hours this week column.
+- [x] 7.3 Final checks: `npm test`, `npm run db:migrate:test` on a stack that already has main's migrations, then `npm run test:database`, and `npm run test:browser`. Also `npx openspec validate --all`.
