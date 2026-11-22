@@ -20,6 +20,9 @@ const OUT = "artifacts/landing";
 const HIDE_DEMO =
   ".fiction-tools,.demo-fill,.fiction-pill,.demo-fiction,.toast,[role=status].toast{display:none!important}";
 const WIDE = { width: 1280, height: 900 };
+// Follow-ups and the reviewer's board overflow at 1280 (their last column is
+// cut off; #147), so they are also taken at 1440 for #261.
+const WIDER = { width: 1440, height: 900 };
 
 await mkdir(OUT, { recursive: true });
 const done = [];
@@ -81,6 +84,9 @@ try {
     const { page } = await chrome.newPage({ viewport: WIDE });
     await loginTestUser({ page, actor: fixture.actor("reviewer"), fixture, heading: WORK_BOARD_HEADING });
     await shot(page, "reviewer-work-board-full", { full: true });
+    await page.setViewportSize(WIDER);
+    await shot(page, "reviewer-work-board-1440-full", { full: true });
+    await page.setViewportSize(WIDE);
     await step("reviewer board chips", () => shootChips(page, "status", "reviewer-work-board"));
   });
 
@@ -88,6 +94,9 @@ try {
     const { page } = await chrome.newPage({ viewport: WIDE });
     await loginTestUser({ page, actor: fixture.actor("siteCoordinator"), fixture, heading: OFFICE_BOARD_HEADING });
     await shot(page, "office-followups-full", { full: true });
+    await page.setViewportSize(WIDER);
+    await shot(page, "office-followups-1440-full", { full: true });
+    await page.setViewportSize(WIDE);
     await clickAction(page, "open-cases");
     await waitForText(page, "Case pool");
     await shot(page, "office-case-pool");
