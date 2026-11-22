@@ -12,12 +12,13 @@ import {
   clickAction,
   waitForText,
   waitForQuiet,
+  clearToast,
 } from "./support/story-pages.mjs";
 import { seedWorkspace } from "../tools/admin/seed-cases.mjs";
 
 const OUT = "artifacts/landing";
 const HIDE_DEMO =
-  ".fiction-tools,.demo-fill,.fiction-pill,.demo-fiction{display:none!important}";
+  ".fiction-tools,.demo-fill,.fiction-pill,.demo-fiction,.toast,[role=status].toast{display:none!important}";
 const WIDE = { width: 1280, height: 900 };
 
 await mkdir(OUT, { recursive: true });
@@ -117,6 +118,11 @@ try {
       await waitForQuiet(page).catch(() => {});
       await clickAction(page, "start-application");
       await waitForQuiet(page).catch(() => {});
+      await clearToast(page).catch(() => {});
+      await shot(page, "client-reference-card");
+      await clickAction(page, "continue-intake");
+      await waitForQuiet(page).catch(() => {});
+      await clearToast(page).catch(() => {});
       await shot(page, "client-intake");
       await shot(page, "client-intake-full", { full: true });
       await page.setViewportSize({ width: 390, height: 844 });
