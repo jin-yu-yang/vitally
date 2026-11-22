@@ -340,3 +340,26 @@ The user decided two things: adopt main's My profile with My profile cleared-onl
 - the walk's "Saturday" names on Sundays;
 - reopening My profile shows the last visit's shifts until the re-read lands (main's keep-what-loaded rule);
 - during the site check, an invited admin's sidebar can show the Schedule link, as main's Roster link already does.
+
+---
+
+## 9. Follow-up: the pre-archive merge of main #267 (written 2026-11-22)
+
+- **Evidence**: `c57f3f5..4c218ec`.
+  - Merge e86d6a5, with main's "Returning volunteers and the Roster CSV" (#267). It had 4 conflicted files and none under `openspec/`.
+  - Docs fix 05cd26a.
+  - `/opsx:update` 57d1945, recording the seed exception (brainstorm Q14).
+  - Task 18 (tasks.md group 9): d5cb18f and 704664b.
+  - Verify re-check 4c218ec.
+  - Tasks 41/41. npm test 2457/2457; seed 33/33 (five runs in a row); test:database 927/928 at the merge (the env-only failure); filtered browser 4/4. A full browser run is left to CI.
+- **Win** [the merge review]: reviewing the merge from a `--remerge-diff` caught that the merge had changed main's `seedPastSeason` to protect admin-added shifts. That departs from main's seed spec, so the conflict was surfaced and the user decided it before archive, instead of it landing silently.
+- **Miss** 🟡 [704664b]: one of this change's own seed tests (from c3bd2eb) was order-dependent and failed 2 times in 7. It was found only by running the seed suite repeatedly in Task 18.
+- **Promote candidate**:
+  - [ ] 🟡 **Run a new database test several times before committing it.** → **Promote to** memory (type: feedback)
+    > **Why**: a query without `ORDER BY` passed once and flaked later (704664b).
+    > **How to apply**: for any database test that picks rows from seeded data, use an explicit filter and `ORDER BY`, and run the file 3–5 times.
+- **Ledger summary (round 3)**:
+  - **R21**: fix the flaky seed test inside Task 18.
+  - **R22**: no second whole-branch review for round 3. The merge and Task 18 were each reviewed, and CI's full run must pass on the PR.
+  - **Deferred minors (LEAVE)**: the new test's `picked = past[0]` assumes it isn't the also-current volunteer (a comment would document it); a long comment line in `seedVolunteers`.
+  - **Parked findings**: none.
