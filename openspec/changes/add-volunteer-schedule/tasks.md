@@ -70,7 +70,7 @@
 
 ## 5. Workload hours
 
-- [ ] 5.1 `src/volunteer-workload.mjs` and `src/workload-views.mjs`: "Hours this week" after Stalled, summing every live shift of the NY week, sortable, re-read on shift changes. Unit tests (D9).
+- [x] 5.1 `src/volunteer-workload.mjs` and `src/workload-views.mjs`: "Hours this week" after Stalled, summing every live shift of the NY week, sortable, re-read on shift changes. Unit tests (D9).
 
 ## 6. Seed
 
