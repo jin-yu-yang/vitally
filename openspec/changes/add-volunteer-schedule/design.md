@@ -48,7 +48,7 @@ Issue #140 asks for an hourly volunteer schedule: one day at a time, a role per 
 - Notifications about shifts.
 - Client appointments.
 - Mobile layouts (#147).
-- Carrying shifts into a new season (Start next season is not built; shifts are per season).
+- Carrying shifts into a new season. Shifts are per season and reads filter the current season, so Start next season (migration 055) opens on an empty schedule. Usual days (on the volunteer's profile) and the site hours and coverage targets (one row per workspace) carry over.
 
 ## Decisions
 

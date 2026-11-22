@@ -19,8 +19,10 @@ const disabled = (off) => (off ? " disabled" : "");
 /**
  * The seven toggles, Mon to Sun, and their hidden field `id` (name
  * `usualDays`). `days` are the pressed weekdays (1 Monday … 7 Sunday).
+ * `labelledBy` names the toggles as a group (outside a fieldset, which names
+ * them with its legend), so `describedBy` is announced with that name.
  */
-export function usualDayToggles({ id, days = [], busy = false, describedBy = "" } = {}) {
+export function usualDayToggles({ id, days = [], busy = false, describedBy = "", labelledBy = "" } = {}) {
   const on = readUsualDays((days ?? []).join(","));
   const buttons = WEEKDAYS.map((weekday, index) => {
     const day = index + 1;
@@ -31,7 +33,7 @@ export function usualDayToggles({ id, days = [], busy = false, describedBy = "" 
       `data-day="${day}" aria-pressed="${on.includes(day)}" aria-label="${esc(weekday)}"${disabled(busy)}`,
     );
   }).join("");
-  return `<div class="usual-days" data-for="${esc(id)}" data-saved="${on.join(",")}"${describedBy ? ` aria-describedby="${esc(describedBy)}"` : ""}>${buttons}</div><input type="hidden" id="${esc(
+  return `<div class="usual-days"${labelledBy ? ` role="group" aria-labelledby="${esc(labelledBy)}"` : ""} data-for="${esc(id)}" data-saved="${on.join(",")}"${describedBy ? ` aria-describedby="${esc(describedBy)}"` : ""}>${buttons}</div><input type="hidden" id="${esc(
     id,
   )}" name="usualDays" value="${on.join(",")}">`;
 }
@@ -53,7 +55,7 @@ function profileBody(profile, { busy, notice }) {
     profile.name ?? "",
   )}</h2><h3 class="profile-subhead">Roles this season</h3>${roleChips(roles)}</section>`;
   const days = `<section class="panel profile-card" aria-labelledby="profile-days-title"><h2 id="profile-days-title">Usual days</h2>${alert}<form id="my-profile-form" class="staff-form profile-days-form" novalidate>${usualDayToggles(
-    { id: "my-usual-days", days: profile.usualDays ?? [], busy: off, describedBy: "profile-days-note" },
+    { id: "my-usual-days", days: profile.usualDays ?? [], busy: off, describedBy: "profile-days-note", labelledBy: "profile-days-title" },
   )}<p class="field-note" id="profile-days-note">${esc(PROFILE_PRIVACY_NOTE)}</p><div class="settings-actions"><button type="submit" class="btn primary"${disabled(
     off,
   )}>Save</button></div></form></section>`;

@@ -11630,7 +11630,7 @@ test("schedule: an end before the start is said without sending", async () => {
 
 test("schedule: a drag-made shift saves like the drawer's, with the gesture's action id, and needs no drawer", async () => {
   const { store, controller } = await onSchedule();
-  const draft = { volunteerId: "person-rowan", shiftId: null, revision: null, startHour: 14, endHour: 16, role: "preparer", actionId: "gesture-1" };
+  const draft = { volunteerId: "person-rowan", shiftId: null, revision: null, startHour: 14, endHour: 16, role: "preparer", date: "2027-02-06", actionId: "gesture-1" };
   const reads = dayReads(store);
   assert.deepEqual(await controller.saveShiftDrag(draft), { done: true, toast: null });
   const write = store.writes.at(-1);
@@ -11643,7 +11643,7 @@ test("schedule: a drag-made shift saves like the drawer's, with the gesture's ac
 
 test("schedule: a drag resize sends the shift's id and revision", async () => {
   const { store, controller } = await onSchedule();
-  await controller.saveShiftDrag({ volunteerId: "person-rowan", shiftId: "shift-rowan", revision: 3, startHour: 10, endHour: 15, role: "preparer", actionId: "gesture-2" });
+  await controller.saveShiftDrag({ volunteerId: "person-rowan", shiftId: "shift-rowan", revision: 3, startHour: 10, endHour: 15, role: "preparer", date: "2027-02-06", actionId: "gesture-2" });
   const write = store.writes.at(-1);
   assert.equal(write.shiftId, "shift-rowan");
   assert.equal(write.revision, 3);
@@ -11653,7 +11653,7 @@ test("schedule: a drag resize sends the shift's id and revision", async () => {
 
 test("schedule: a refused drag shows the refusal and reads the day again; a CONFLICT says it was refreshed", async () => {
   const { store, controller } = await onSchedule();
-  const draft = { volunteerId: "person-rowan", shiftId: "shift-rowan", revision: 3, startHour: 10, endHour: 17, role: "preparer", actionId: "gesture-3" };
+  const draft = { volunteerId: "person-rowan", shiftId: "shift-rowan", revision: 3, startHour: 10, endHour: 17, role: "preparer", date: "2027-02-06", actionId: "gesture-3" };
   store.failNextShift = shiftRefusal("VALIDATION", "OUTSIDE_SITE_HOURS");
   const reads = dayReads(store);
   assert.equal(await controller.saveShiftDrag(draft), null);
@@ -11667,7 +11667,7 @@ test("schedule: a refused drag shows the refusal and reads the day again; a CONF
 
 test("schedule: a drag is not sent on a non-admin day or while a drawer is open", async () => {
   const viewer = await onSchedule({ clearance: PREPARER_VIEWER });
-  const draft = { volunteerId: "person-rowan", shiftId: null, revision: null, startHour: 14, endHour: 16, role: "preparer", actionId: "g" };
+  const draft = { volunteerId: "person-rowan", shiftId: null, revision: null, startHour: 14, endHour: 16, role: "preparer", date: "2027-02-06", actionId: "g" };
   assert.equal(await viewer.controller.saveShiftDrag(draft), null);
   assert.equal(viewer.store.writes.length, 0);
   viewer.controller.stop();
@@ -11676,6 +11676,30 @@ test("schedule: a drag is not sent on a non-admin day or while a drawer is open"
   assert.equal(await admin.controller.saveShiftDrag(draft), null);
   assert.equal(admin.store.writes.length, 0);
   admin.controller.stop();
+});
+
+test("schedule: a drag from another day sends nothing (the day changed mid-drag)", async () => {
+  const { store, controller } = await onSchedule();
+  const writes = store.writes.length;
+  const draft = { volunteerId: "person-rowan", shiftId: "shift-rowan", revision: 3, startHour: 10, endHour: 15, role: "preparer", actionId: "gesture-5" };
+  assert.equal(await controller.saveShiftDrag({ ...draft, date: "2027-02-05" }), null);
+  assert.equal(await controller.saveShiftDrag(draft), null);
+  assert.equal(store.writes.length, writes);
+  assert.equal(controller.getState().busy, false);
+  controller.stop();
+});
+
+test("schedule: Add shift with no volunteer chosen says so in the drawer without sending", async () => {
+  const { store, controller } = await onSchedule();
+  controller.openShiftDrawer(null);
+  const writes = store.writes.length;
+  assert.equal(await controller.saveShift({ role: "preparer", startHour: "10", endHour: "12" }), null);
+  assert.equal(store.writes.length, writes);
+  const state = controller.getState();
+  assert.equal(state.dialog, "shift");
+  assert.equal(state.error.message, "Choose a volunteer.");
+  assert.match(dialog(state), /Choose a volunteer\./);
+  controller.stop();
 });
 
 test("schedule: a lost answer is sent again with the same action id", async () => {

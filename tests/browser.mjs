@@ -9738,7 +9738,7 @@ test(
       assert.equal(
         shot.overflow.scrollWidth,
         shot.overflow.clientWidth,
-        `season-settings: the page scrolls sideways at ${MOBILE_WIDTH}px`,
+        `season-settings: the page scrolls sideways at ${DESKTOP.width}px`,
       );
       assertConsoleQuiet(adminWin, { name: "the Site Coordinator's Season settings window" });
 
@@ -9826,7 +9826,7 @@ test(
       await waitForQuiet(page);
       await page.evaluate(() => window.scrollTo(0, 0));
       const shot = await capture(page, SHOTS, name);
-      assert.equal(shot.overflow.scrollWidth, shot.overflow.clientWidth, `${name}: the page scrolls sideways at ${MOBILE_WIDTH}px`);
+      assert.equal(shot.overflow.scrollWidth, shot.overflow.clientWidth, `${name}: the page scrolls sideways at ${DESKTOP.width}px`);
       // Open again, for the next step.
       await page.locator('[data-action="toggle-sidebar"]').click({ timeout: CLICK_MS });
       await waitFor(
@@ -9914,10 +9914,13 @@ test(
 
       // 5. Drag the shift's end one cell to the right. The coverage row moves,
       // the drag opens no drawer, and the next press on the shift does.
-      // The grid is wider than the window (a cell is about 280 px): scroll its
-      // region so the shift's end and the next cell are both on screen, clear
-      // of the sticky name column.
-      await admin.locator(".schedule-scroll").evaluate((el) => (el.scrollLeft = 480));
+      // The six Saturday hours fit the desktop window, so the grid is not
+      // scrolled: the shift's end and the next cell are both on screen.
+      assert.equal(await admin.locator(".schedule-scroll").evaluate((el) => el.scrollLeft), 0, "the Schedule grid is scrolled");
+      assert.ok(
+        await admin.locator(".schedule-scroll").evaluate((el) => el.scrollWidth <= el.clientWidth),
+        "six Saturday hours do not fit the desktop window",
+      );
       const edgeBox = await shiftButton.locator('[data-edge="end"]').boundingBox();
       const cellBox = await admin.locator('.schedule-row[data-volunteer-id] .schedule-cell[data-hour="12"]').first().boundingBox();
       const y = edgeBox.y + edgeBox.height / 2;

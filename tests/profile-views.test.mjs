@@ -50,6 +50,9 @@ test("my profile: seven usual-day toggles, Mon to Sun, the saved ones pressed, w
   ]);
   assert.match(html, />Mon<\/button>[\s\S]*>Sun<\/button>/);
   assert.match(html, /<h2[^>]*>Usual days<\/h2>/);
+  // The toggles are a group named by the heading, described by the note.
+  assert.match(html, /<h2 id="profile-days-title">Usual days<\/h2>/);
+  assert.match(html, /<div class="usual-days" role="group" aria-labelledby="profile-days-title"[^>]*aria-describedby="profile-days-note"/);
   assert.match(html, /id="my-profile-form"/);
   assert.match(html, /<input type="hidden" id="my-usual-days" name="usualDays" value="2,6">/);
   assert.match(html, /<button type="submit" class="btn primary">Save<\/button>/);

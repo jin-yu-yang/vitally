@@ -102,7 +102,7 @@ function grid(day, admin, rows) {
         .join("")}</div>`
     : "";
   const empty = people.length ? "" : `<p class="muted schedule-empty">No shifts on this day.</p>`;
-  return `<div class="schedule-scroll" role="region" aria-labelledby="schedule-day" tabindex="0"><div class="schedule-grid${admin ? " can-drag" : ""}" style="--schedule-hours: ${count}"><div class="schedule-row schedule-head"><span class="schedule-name"></span>${head.join(
+  return `<div class="schedule-scroll" role="region" aria-label="Shifts" tabindex="0"><div class="schedule-grid${admin ? " can-drag" : ""}" style="--schedule-hours: ${count}"><div class="schedule-row schedule-head"><span class="schedule-name"></span>${head.join(
     "",
   )}</div>${people.map((row) => volunteerRow(row, hours, admin)).join("")}${coverage}</div></div>${empty}`;
 }

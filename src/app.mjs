@@ -2944,7 +2944,14 @@ if (!config) {
       // A pointer that is already gone; the gesture ends on its own.
     }
     scheduleDrag = {
-      gesture: createGesture({ kind: edge ? edge.dataset.edge : "create", volunteerId: row.dataset.volunteerId, shift, fromHour, actionId: crypto.randomUUID() }),
+      gesture: createGesture({
+        kind: edge ? edge.dataset.edge : "create",
+        volunteerId: row.dataset.volunteerId,
+        shift,
+        fromHour,
+        actionId: crypto.randomUUID(),
+        date: state.schedule.date,
+      }),
       row,
       pointerId: event.pointerId,
       toHour: fromHour,
@@ -2980,9 +2987,15 @@ if (!config) {
       suppressShiftClick = true;
       setTimeout(() => (suppressShiftClick = false), 100);
     }
-    const day = controller.getState().schedule?.day;
+    const schedule = controller.getState().schedule;
+    const day = schedule?.day;
     // A press that never left its cell makes nothing (a tap is not a shift).
-    const draft = drag.moved || drag.gesture.kind !== "create" ? drag.gesture.finish({ toHour: drag.toHour, hours: day?.hours, shifts: day?.shifts ?? [] }) : null;
+    // A day changed while the press was down (Next with the keyboard) cancels
+    // it: `finish` answers null when the date is not the gesture's own.
+    const draft =
+      drag.moved || drag.gesture.kind !== "create"
+        ? drag.gesture.finish({ toHour: drag.toHour, hours: day?.hours, shifts: day?.shifts ?? [], date: schedule?.date })
+        : null;
     if (!draft) return;
     const by = signedInUserId();
     const shown = controller.getState().errorCount;

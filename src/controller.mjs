@@ -152,6 +152,7 @@ const freshSettingsUi = () => ({ notice: null, fieldErrors: null, sidnError: nul
 // The Schedule (change add-volunteer-schedule, design D7 and D10). Staff-only.
 const STAFF_SHIFT_CONFLICT_MESSAGE = "Someone changed this shift. The schedule has been refreshed.";
 const STAFF_SHIFT_ORDER_MESSAGE = "The shift must end after it starts.";
+const STAFF_SHIFT_VOLUNTEER_MESSAGE = "Choose a volunteer.";
 // The day on screen (null: today in New York, set when it opens), the
 // `vitally_schedule_day` answer as last read, and the open shift drawer's
 // draft. None persisted but the screen itself.
@@ -1892,6 +1893,11 @@ export function createController({
     if (state.busy || !staffWindow() || !open || state.schedule.day?.canEdit !== true) return null;
     const drawer = draftValues(open, values);
     state.schedule = { ...state.schedule, drawer };
+    if (!drawer.volunteerId) {
+      noteFailure({ code: "VALIDATION" }, { message: STAFF_SHIFT_VOLUNTEER_MESSAGE });
+      show();
+      return null;
+    }
     if (!(drawer.endHour > drawer.startHour)) {
       noteFailure({ code: "VALIDATION" }, { message: STAFF_SHIFT_ORDER_MESSAGE });
       show();
@@ -1922,13 +1928,16 @@ export function createController({
   // through the same write as the drawer's Save, so a CONFLICT, a refusal and
   // a lost answer are handled identically. There is no drawer: a refusal is
   // the page's banner, and the day is read again either way. The draft's
-  // `actionId` is the gesture's.
+  // `actionId` is the gesture's, and so is its `date`: a draft from another
+  // day than the one on screen (the day changed mid-drag) sends nothing, so a
+  // resize never moves a shift to another date.
   async function saveShiftDrag(draft) {
     if (state.busy || state.dialog || !staffWindow() || state.screen !== "schedule" || state.schedule.day?.canEdit !== true) return null;
     if (!draft?.volunteerId || !(draft.endHour > draft.startHour)) return null;
+    if (!draft.date || draft.date !== state.schedule.date) return null;
     const shift = {
       volunteerId: draft.volunteerId,
-      date: state.schedule.date,
+      date: draft.date,
       startHour: draft.startHour,
       endHour: draft.endHour,
       role: draft.role,
@@ -1948,6 +1957,7 @@ export function createController({
   }
 
   // Remove shift, once its confirmation is pressed, at the revision read.
+  // The re-read revision on purpose: the confirmation shows the re-read hours.
   async function removeShift(shiftId) {
     if (state.busy || !staffWindow() || !shiftId || state.schedule.day?.canEdit !== true) return null;
     const shift = scheduleShift(shiftId);

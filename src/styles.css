@@ -6950,7 +6950,12 @@ html:lang(zh-Hant) {
 }
 .schedule-grid {
   --schedule-name: 9.5rem;
-  min-width: max-content;
+  /* As wide as the names plus the narrowest hour column, so a long day or a
+     narrow window scrolls inside the box; otherwise the hours share the box's
+     width and coverage text wraps inside its own cell. Not max-content: each
+     row is its own grid, so that would size every hour to the widest
+     coverage text. */
+  min-width: calc(var(--schedule-name) + var(--schedule-hours) * 5.5rem);
 }
 .schedule-row {
   display: grid;
@@ -7011,6 +7016,7 @@ html:lang(zh-Hant) {
   font-size: 13px;
   text-align: left;
   overflow: hidden;
+  overflow-wrap: anywhere;
 }
 button.schedule-shift {
   cursor: pointer;
@@ -7092,6 +7098,7 @@ button.schedule-shift {
 .coverage-cell {
   padding: 8px 6px;
   font-size: 12px;
+  overflow-wrap: anywhere;
   border-left: 1px solid var(--vt-line);
 }
 .coverage-cell.ok {

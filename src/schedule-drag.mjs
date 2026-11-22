@@ -49,22 +49,27 @@ export function dragResult({ kind, volunteerId, shift = null, fromHour, toHour, 
 export const gestureLive = (row) => row?.isConnected === true;
 
 /**
- * One gesture, made at pointerdown with its own `actionId`. `finish` answers
- * once: the draft (carrying the actionId) or null, and null every time after,
- * so a second pointerup for the same gesture sends nothing.
+ * One gesture, made at pointerdown with its own `actionId` and the `date` of
+ * the day it was pressed on. `finish` answers once: the draft (carrying the
+ * actionId and that date) or null, and null every time after, so a second
+ * pointerup for the same gesture sends nothing. A gesture finished on another
+ * day (the day changed while the press was down) is cancelled: null, so a
+ * shift is never moved to the day now on screen.
  */
-export function createGesture({ kind, volunteerId, shift = null, fromHour, actionId }) {
+export function createGesture({ kind, volunteerId, shift = null, fromHour, actionId, date }) {
   let spent = false;
   return {
     kind,
     volunteerId,
     shift,
     fromHour,
-    finish({ toHour, hours, shifts }) {
+    date,
+    finish({ toHour, hours, shifts, date: now }) {
       if (spent) return null;
       spent = true;
+      if (now !== date) return null;
       const draft = dragResult({ kind, volunteerId, shift, fromHour, toHour, hours, shifts });
-      return draft ? { ...draft, actionId } : null;
+      return draft ? { ...draft, date, actionId } : null;
     },
   };
 }

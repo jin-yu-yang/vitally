@@ -96,6 +96,16 @@ test("two gestures carry their own actionIds", () => {
   assert.notEqual(a.actionId, b.actionId);
 });
 
+test("a gesture carries its day, and finishing it on another day cancels it", () => {
+  const resize = createGesture({ kind: "end", volunteerId: "v1", shift: rowan(), fromHour: 12, actionId: "act-3", date: "2027-02-06" });
+  assert.equal(resize.finish({ toHour: 13, hours, shifts, date: "2027-02-13" }), null);
+  assert.equal(resize.finish({ toHour: 13, hours, shifts, date: "2027-02-06" }), null, "a cancelled gesture is spent");
+  const same = createGesture({ kind: "end", volunteerId: "v1", shift: rowan(), fromHour: 12, actionId: "act-4", date: "2027-02-06" });
+  const draft = same.finish({ toHour: 13, hours, shifts, date: "2027-02-06" });
+  assert.equal(draft.date, "2027-02-06");
+  assert.equal(draft.endHour, 14);
+});
+
 test("a gesture is live only while its row is still on the page", () => {
   assert.equal(gestureLive({ isConnected: true }), true);
   assert.equal(gestureLive({ isConnected: false }), false);

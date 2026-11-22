@@ -107,8 +107,9 @@ test("schedule: an admin day has the gap header, one column per open hour, tags,
   assert.match(html, /data-action="schedule-prev"/);
   assert.match(html, /data-action="schedule-next"/);
   assert.match(html, /data-action="schedule-today"/);
-  // The grid scrolls in its own box.
-  assert.match(html, /class="schedule-scroll"/);
+  // The grid scrolls in its own box, a region named apart from the section.
+  assert.match(html, /class="schedule-scroll" role="region" aria-label="Shifts"/);
+  assert.match(html, /<section class="panel schedule-panel" aria-labelledby="schedule-day">/);
 });
 
 test("schedule: no gaps says No gaps", () => {
