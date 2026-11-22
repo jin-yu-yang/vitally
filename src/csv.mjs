@@ -19,5 +19,5 @@ function encodeCell(value) {
 
 export function toCsv(header, rows) {
   const lines = [header, ...rows].map((row) => row.map(encodeCell).join(","));
-  return `﻿${lines.map((line) => `${line}\r\n`).join("")}`;
+  return `\uFEFF${lines.map((line) => `${line}\r\n`).join("")}`;
 }

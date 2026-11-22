@@ -11697,3 +11697,14 @@ test("an unpicked add with an earlier volunteer's email is not sent", async () =
   assert.equal(store.calls.includes("saveVolunteer"), false);
   controller.stop();
 });
+
+test("an Edit of a current volunteer to an earlier volunteer's email does not get the earlier-volunteer sentence", async () => {
+  const store = rosterStore();
+  const controller = await earlierRoster(store);
+  controller.openDialog("volunteer", { volunteerId: "v-1" });
+  assert.equal(await controller.saveVolunteer({ ...VOLUNTEER_PAYLOAD, email: "Nadia@example.org" }), true);
+  assert.equal(controller.getState().volunteerFormError ?? null, null);
+  assert.equal(store.writes.at(-1).type, "saveVolunteer");
+  assert.equal(store.writes.at(-1).volunteerId, "v-1");
+  controller.stop();
+});

@@ -4536,7 +4536,10 @@ export function createController({
         : null;
       if (volunteerId && !current)
         throw refuse("NOT_FOUND", STAFF_VOLUNTEER_GONE_MESSAGE);
-      const problem = volunteerProblem(values, state.volunteers, volunteerId, state.earlierVolunteers);
+      // The earlier-volunteer sentence is for Add only; an Edit of a current
+      // volunteer is sent and the server decides.
+      const earlierList = !volunteerId || returning ? state.earlierVolunteers : [];
+      const problem = volunteerProblem(values, state.volunteers, volunteerId, earlierList);
       if (problem) {
         state.volunteerFormError = problem;
         show();

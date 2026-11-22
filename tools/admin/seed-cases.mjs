@@ -567,6 +567,8 @@ export async function seedPastSeason(client, { workspaceId, actorPersonId }) {
     "select current_season from public.workspaces where id=$1",
     [workspaceId],
   );
+  // No current season: nothing to be "previous" to, so write nothing.
+  if (rows[0]?.current_season == null) return 0;
   const season = rows[0].current_season - 1;
   const past = SEED_VALUES.SEED_PAST_VOLUNTEERS;
   await client.query("begin");
