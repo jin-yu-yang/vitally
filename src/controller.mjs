@@ -1076,6 +1076,12 @@ export function createController({
         } catch (error) {
           failure = failure ?? error;
         }
+      // A wake, focus or reconnect re-reads the week too (it may have turned).
+      try {
+        await readWorkloadHours();
+      } catch (error) {
+        failure = failure ?? error;
+      }
     }
     try {
       await loadSelected();
@@ -1277,7 +1283,12 @@ export function createController({
       if (touchesSchedule && state.screen === "schedule") await readScheduleDay();
       if (touchesProfile && state.screen === "my-profile") await readMyProfile();
       if (touchesSettings && state.screen === "office-settings") await readSeasonSettings();
-      if (touchesHours) await readWorkloadHours();
+      if (touchesHours)
+        try {
+          await readWorkloadHours();
+        } catch (error) {
+          noteFailure(error);
+        }
       // The open case comes last, because it is the one read that may
       // legitimately find nothing: a case that is gone must not stop the
       // lists around it from being refreshed.
@@ -1379,6 +1390,8 @@ export function createController({
   async function loadVolunteers() {
     try {
       await readVolunteers();
+      // The Workload's Hours this week come with its rows, on every arrival.
+      await readWorkloadHours();
     } catch (error) {
       noteLocalFailure(error, loadVolunteers);
       return;
@@ -1408,7 +1421,6 @@ export function createController({
     state.volunteerTab = tab;
     show();
     await loadVolunteers();
-    if (tab === "workload") await loadWorkloadHours();
   }
 
   // The Workload's Hours this week: the live shifts dated Monday to Sunday of
@@ -1418,15 +1430,6 @@ export function createController({
     state.weekShifts = (await store.weekShifts(weekBounds(nyToday(clock())))) ?? [];
   }
 
-  async function loadWorkloadHours() {
-    try {
-      await readWorkloadHours();
-    } catch (error) {
-      noteLocalFailure(error, loadWorkloadHours);
-      return;
-    }
-    show();
-  }
 
   // The Workload's search, sort and open rows, one change at a time:
   // `search` (text), `sortBy` (a header pressed: the same key again reverses
