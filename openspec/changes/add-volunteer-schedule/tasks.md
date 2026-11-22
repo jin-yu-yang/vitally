@@ -39,8 +39,8 @@
 
 ## 3. Store and pure logic
 
-- [ ] 3.1 `src/supabase-store.mjs`: the new RPC calls, `shifts` and `schedule_settings` in `STAFF_TABLES`, the admin's direct `shifts` read for a week, and the mapping of the new refusal reasons.
-- [ ] 3.2 New `src/volunteer-schedule.mjs`, with pure functions and unit tests:
+- [x] 3.1 `src/supabase-store.mjs`: the new RPC calls, `shifts` and `schedule_settings` in `STAFF_TABLES`, the admin's direct `shifts` read for a week, and the mapping of the new refusal reasons.
+- [x] 3.2 New `src/volunteer-schedule.mjs`, with pure functions and unit tests:
   - New York today and week bounds;
   - hour labels;
   - coverage sums and gap wording ("1 more preparer", "N of M hours have gaps", "No gaps");
