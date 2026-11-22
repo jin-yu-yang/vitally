@@ -66,26 +66,26 @@ Each change SHALL be sent at the revision the screen read. A stale revision SHAL
 - **WHEN** a signed-in workspace admin inserts, updates or deletes a row of the shifts table directly
 - **THEN** it is refused
 
-### Requirement: Rostered staff open the Schedule and My profile
+### Requirement: Rostered staff open the Schedule
 A **schedule viewer** SHALL be either of these:
 - a workspace admin;
-- a staff member with an active account on an active staff membership and a roster entry for the current season, cleared or not and whatever their roles.
+- a staff member with an active account on an active staff membership and a roster entry for the current season, cleared or not, and whatever their roles.
 
-`vitally_my_clearance` SHALL say whether the caller is a schedule viewer (capability `volunteer-clearance`). Every schedule viewer SHALL see a "Schedule" link and a "My profile" link in the staff sidebar, the setup screen's sidebar included. For workspace admins, Schedule SHALL follow Volunteers. For other staff, it SHALL follow the Work board. My profile SHALL follow Schedule.
+`vitally_my_clearance` SHALL say whether the caller is a schedule viewer (capability `volunteer-clearance`). Every schedule viewer SHALL see a "Schedule" link in the staff sidebar, the setup screen's sidebar included. For workspace admins, Schedule SHALL follow Volunteers. For other staff, it SHALL follow the Work board. My profile is not part of this capability: it SHALL stay the sidebar account row's link for cleared windows only (capability `my-profile`).
 
-The schedule day read and the My profile read SHALL be refused with `FORBIDDEN` for anyone who is not a schedule viewer. A window left on either screen by someone who is not a schedule viewer SHALL get their home screen and no schedule data.
+The schedule day read SHALL be refused with `FORBIDDEN` for anyone who is not a schedule viewer. A window left on the Schedule by someone who is not a schedule viewer SHALL get their home screen and no schedule data.
 
 #### Scenario: A cleared preparer
 - **WHEN** a cleared preparer on this season's roster signs in
-- **THEN** the sidebar shows Work board, Schedule, My profile and Notifications
+- **THEN** the sidebar shows Work board, Schedule and Notifications, and its account row is the My profile link
 
 #### Scenario: An uncleared volunteer
 - **WHEN** a staff member with a current-season roster entry and no roles signs in
-- **THEN** the setup screen's sidebar shows Schedule and My profile, and both screens open
+- **THEN** the setup screen's sidebar shows Schedule, the Schedule opens read-only, and there is no My profile
 
 #### Scenario: Not on the roster
 - **WHEN** a staff member with an active account and no current-season roster entry, who is not a workspace admin, signs in or restores a window saved on the Schedule
-- **THEN** there is no Schedule or My profile link, they get their home screen, and the schedule day read is refused with `FORBIDDEN`
+- **THEN** there is no Schedule link, they get their home screen, and the schedule day read is refused with `FORBIDDEN`
 
 #### Scenario: A client
 - **WHEN** a client calls the schedule day read
@@ -166,7 +166,7 @@ Every shift SHALL be a button that the keyboard reaches. No change SHALL need a 
 - **THEN** the shift is removed and its row disappears if it was the volunteer's only shift that day
 
 ### Requirement: Add shift offers rostered volunteers, usual days first
-The Add shift picker SHALL offer every volunteer with a current-season roster entry, at least one role, and an account that is not deactivated, including volunteers with no sign-in. Volunteers whose usual days include the day's weekday SHALL come first, each tagged "Usually here <weekday>s". Everyone else SHALL follow. Within each group the order SHALL be by name. The picker SHALL show each volunteer's roles. It SHALL show "Not cleared" for one who is not cleared, and "No sign-in" for one with no sign-in.
+The Add shift picker SHALL offer every volunteer with a current-season roster entry, at least one role, and an account that is not deactivated, including volunteers with no sign-in. A volunteer's usual days SHALL be the ones stored with their volunteer profile, `mon` to `sun` (capability `volunteer-roster`). Volunteers whose usual days include the day's weekday SHALL come first, each tagged "Usually here <weekday>s". Everyone else SHALL follow. Within each group the order SHALL be by name. The picker SHALL show each volunteer's roles. It SHALL show "Not cleared" for one who is not cleared, and "No sign-in" for one with no sign-in.
 
 #### Scenario: Usual days first
 - **WHEN** an admin opens Add shift on a Saturday, and Hana and Wen usually come on Saturdays and Ari does not
@@ -223,52 +223,38 @@ An hour SHALL have a gap when any count is below its target (capability `season-
 - **WHEN** Saturday is open 10 am to 4 pm, and two of its six hours have a gap
 - **THEN** the day is headed "2 of 6 hours have gaps"
 
-### Requirement: Usual days are private to the volunteer and admins
-A volunteer's usual days SHALL be a set of weekdays, Monday to Sunday, stored with their volunteer profile and kept across seasons. It MAY be empty. Only workspace admins and the volunteer themselves SHALL read them. No read, answer or realtime message SHALL give them to any other staff member. The volunteer SHALL change their own through `vitally_save_my_usual_days`. An admin SHALL change them through the Roster (capability `volunteer-roster`). Both SHALL raise the profile's revision, and a save at a stale revision SHALL be refused with `CONFLICT`. A day outside Monday to Sunday, or a repeated day, SHALL be refused with `VALIDATION`.
+### Requirement: My profile lists the volunteer's shifts this week
+The My profile screen (capability `my-profile`) SHALL have a section "Your shifts this week". It SHALL list every live shift of the signed-in volunteer dated from Monday to Sunday of the week that holds today in America/New_York, in date and start order. Each shift SHALL be written like "Tue, Feb 3 · 5 pm – 8 pm · Preparer". With none, the section SHALL say "No shifts this week."
 
-#### Scenario: The volunteer saves
-- **WHEN** a volunteer toggles Tuesday and Saturday on My profile and presses Save
-- **THEN** their usual days are Tuesday and Saturday, and the Roster drawer shows the same
-
-#### Scenario: Another volunteer
-- **WHEN** a preparer reads the schedule day, My profile or the shifts table for a day another volunteer usually comes
-- **THEN** nothing they receive contains the other volunteer's usual days
-
-#### Scenario: A volunteer saves during an admin's edit
-- **WHEN** an admin opens a volunteer's Roster drawer, the volunteer then saves their own usual days, and the admin saves the drawer
-- **THEN** the admin's save is refused with `CONFLICT`
-
-#### Scenario: A bad day
-- **WHEN** `vitally_save_my_usual_days` is called with day 8 or with Monday twice
-- **THEN** it is refused with `VALIDATION`, and nothing changes
-
-### Requirement: My profile shows the volunteer's roles, usual days and shifts this week
-The My profile screen SHALL be titled "My profile" with the overline "VOLUNTEER". It SHALL show:
-- the volunteer's name, and "Roles this season" with their current-season roles, read-only, or "No roles recorded";
-- "Usual days": seven toggles, Mon to Sun, with Save, and the note "Only you and the office admins see your usual days.";
-- "Your shifts this week": every shift of theirs from Monday to Sunday of the week that holds today in America/New_York, in date and start order, each written like "Tue, Feb 3 · 5 pm – 8 pm · Preparer". With none, it SHALL say "No shifts this week."
-
-Staff screens SHALL be English only.
+The section SHALL be read through `vitally_my_shifts()`. That read SHALL take no arguments and SHALL answer only for the signed-in `staff` caller, with `weekStart`, `weekEnd` and `shifts` (each with `shiftId`, `date`, `startHour`, `endHour` and `role`). It SHALL cover only the current season and leave removed shifts out. It SHALL return nothing about any other person, and it SHALL NOT be gated by clearance. A client, an anonymous caller, a staff caller with no person row, or a caller whose account is `invited` SHALL be refused with `FORBIDDEN`. Execute SHALL be granted to `authenticated` only. Staff screens SHALL be English only.
 
 #### Scenario: A week with shifts
-- **WHEN** a volunteer has a Preparer shift Tuesday 5 to 8 and a Preparer shift Saturday 10 to 2 this week, and one next Monday
-- **THEN** My profile lists the two shifts of this week, Tuesday first, and not next Monday's
+- **WHEN** a cleared volunteer has a Preparer shift Tuesday 5 to 8 and a Preparer shift Saturday 10 to 2 this week, and one next Monday
+- **THEN** My profile lists the two shifts of this week under "Your shifts this week", Tuesday first, and not next Monday's
 
 #### Scenario: No shifts
-- **WHEN** a volunteer has no shift this week
+- **WHEN** a cleared volunteer has no shift this week
 - **THEN** My profile says "No shifts this week."
 
 #### Scenario: A removed shift
 - **WHEN** an admin removes one of a volunteer's shifts this week
 - **THEN** My profile no longer lists it
 
+#### Scenario: Only the caller's own shifts
+- **WHEN** a preparer calls `vitally_my_shifts()` in a week where another volunteer also has shifts
+- **THEN** the answer holds only the preparer's own shifts
+
+#### Scenario: An invited account
+- **WHEN** a staff member whose account is `invited` calls `vitally_my_shifts()`
+- **THEN** it is refused with `FORBIDDEN`
+
 ### Requirement: Schedule screens follow changes live and on focus
 Shifts and the schedule settings SHALL be delivered by realtime to schedule viewers, under the reading rules above. A change SHALL make:
 - an open Schedule re-read the day on screen;
-- an open My profile re-read itself;
+- an open My profile re-read its shifts this week;
 - an open Workload re-read its hours.
 
-The screens SHALL also re-read when the window regains focus. A change refused with `CONFLICT` SHALL re-read the day, and say "Someone changed this shift. The schedule has been refreshed." Usual days SHALL NOT be published to realtime.
+An uncleared window SHALL hold a realtime connection only while it is on the Schedule, and SHALL read nothing but the schedule day from it. The screens SHALL also re-read when the window regains focus. A change refused with `CONFLICT` SHALL re-read the day, and say "Someone changed this shift. The schedule has been refreshed." Usual days SHALL NOT be published to realtime.
 
 #### Scenario: Another admin adds a shift
 - **WHEN** two admins have the same Saturday open, and one adds a shift

@@ -94,3 +94,32 @@
   Run `npm run test:browser`.
 - [x] 7.2 Docs: `docs/developer/database.md` (new column, tables, RPCs, realtime), the frontend notes for the new screens and drag, and the production-roadmap line about the Workload's Hours this week column.
 - [x] 7.3 Final checks: `npm test`, `npm run db:migrate:test` on a stack that already has main's migrations, then `npm run test:database`, and `npm run test:browser`. Also `npx openspec validate --all`.
+
+## 8. Reconcile with main's My profile (#262)
+
+Decided by the user on 2026-11-22: adopt main's merged My profile (`add-my-profile`) and its usual days, and keep My profile cleared-only. Group 8 supersedes tasks 2.5, 2.6, 4.5 and 4.7 and the My profile half of 7.1.
+
+- [ ] 8.1 Merge `origin/main` into the branch. Resolve every conflict in favour of main's My profile: its page, `vitally_my_profile`, `vitally_save_my_profile`, its usual-days column and drawer checkboxes, and its account-row link. Stop if a conflict lands under `openspec/specs/`.
+- [ ] 8.2 Migration 058:
+  - rename `057_volunteer_schedule.sql` to `058_volunteer_schedule.sql`, with `-- 058` markers;
+  - remove this change's `usual_days` column, `valid_usual_days`, `vitally_my_profile`, `ny_week` if nothing else uses it, `vitally_save_my_usual_days`, and the `vitally_save_volunteer` replacement;
+  - rebuild `vitally_my_clearance` from main's `057_my_profile.sql` body, adding only `scheduleViewer`;
+  - make the day read's candidates and `shift_counts` read main's `usual_days` (`mon`…`sun`);
+  - add `vitally_my_shifts()` (D5);
+  - update `tests/database-schedule.mjs`, `tests/database-clearance.mjs`, `tests/support/rpc-signatures.mjs` and `tests/database-catalog.mjs`;
+  - reset the local database, then run `npm run db:migrate:test` and the full `npm run test:database`.
+- [ ] 8.3 Store and pure helpers: `myShifts()` replaces `myProfile()` and `saveMyUsualDays()`. `orderCandidates` maps `mon`…`sun` to ISO weekdays. Unit tests.
+- [ ] 8.4 Interface:
+  - remove this change's My profile page, its route, its sidebar link and the Roster drawer's usual-days toggles, keeping main's;
+  - add a "Your shifts this week" section to main's `myProfilePage`, read on open, on focus and on `shifts` changes;
+  - make the uncleared-viewer channel Schedule-only;
+  - update the sidebar-order and gate tests.
+- [ ] 8.5 Seed: write usual days as `mon`…`sun` through main's `vitally_save_volunteer`. `tests/database-seed.mjs`.
+- [ ] 8.6 Browser walk: replace step 6, where the preparer saved usual days on My profile, with the preparer opening main's My profile and seeing the shift under "Your shifts this week". Run the schedule, Season settings and My profile browser tests.
+- [ ] 8.7 Docs and counts (`docs/developer/*.md`, README): migrations, RPCs and Realtime tables, re-derived from the migrated database.
+- [ ] 8.8 Final checks:
+  - `npm test`;
+  - `npm run db:migrate:test` and `npm run test:database`;
+  - `npm run test:browser`;
+  - `npm run build:hant -- --check`;
+  - `npx openspec validate --all`.

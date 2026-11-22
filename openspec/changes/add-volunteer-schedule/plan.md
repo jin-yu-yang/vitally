@@ -417,3 +417,90 @@
   
   Expected: all PASS.
 - [ ] **Step 5: Commit** `Story walk and docs for the volunteer schedule (#140)`.
+
+---
+
+## Reconciliation with main's My profile (added 2026-11-22, `/opsx:update`)
+
+Main merged `add-my-profile` (#262/#264/#265, `057_my_profile.sql`) while this change was in review. By the user's decision this change adopts main's My profile and usual days, and keeps My profile cleared-only. These tasks implement tasks.md group 8. They supersede Tasks 5 (`vitally_my_profile`, `vitally_save_my_usual_days`, the `vitally_save_volunteer` replacement) and 9 (the My profile page and the Roster usual-days toggles), and step 6 of Task 12's walk.
+
+**Constraints added to the Global Constraints for these tasks:**
+- Main's My profile is the authority for the page, usual days, `vitally_my_profile` and `vitally_save_my_profile`. Do not change their behaviour or their tests, except to add the shifts section.
+- Usual days are main's `text[]`, values `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`. ISO weekday 1 is `mon` and 7 is `sun`.
+- The migration is `058_volunteer_schedule.sql`, with markers `-- 058`. Replaced functions copy their latest body: main's `057_my_profile.sql` for `vitally_my_clearance`, and 052 for `vitally_season_settings`.
+- My profile opens only for cleared windows (main's spec). Uncleared windows hold the realtime channel only while on the Schedule.
+
+### Task 13: Merge main
+
+**Files:** whatever conflicts.
+
+- [ ] **Step 1:** Run `git fetch origin` and `git merge origin/main` (a merge commit). Resolve conflicts so main's My profile is intact and every schedule change outside My profile and usual days is kept. If a conflict lands under `openspec/specs/`, stop and report it.
+- [ ] **Step 2:** The tree may not build or pass yet, because Tasks 14–16 reconcile it. Commit the merge as `Merge main into add-volunteer-schedule (#262 My profile took 057)`.
+
+### Task 14: Migration 058 and the database tests
+
+**Files:**
+- Modify: `supabase/migrations/057_volunteer_schedule.sql` → `058_volunteer_schedule.sql`
+- Modify: `tests/database-schedule.mjs`, `tests/database-clearance.mjs`, `tests/support/rpc-signatures.mjs`, `tests/database-catalog.mjs`
+
+**Interfaces:**
+- Produces: `public.vitally_my_shifts() returns jsonb`, which returns `{weekStart, weekEnd, shifts:[{shiftId, date, startHour, endHour, role}]}`. It is gated like main's `vitally_my_profile` (FORBIDDEN for a client, an anonymous caller, no person, an `invited` account; no clearance gate), and it is in both registries.
+- Removes: this change's `volunteer_profiles.usual_days` DDL, `vitally_private.valid_usual_days`, `public.vitally_my_profile`, `public.vitally_save_my_usual_days`, and the `vitally_save_volunteer` replacement.
+- Keeps: `vitally_private.ny_week` if `vitally_my_shifts` uses it.
+
+- [ ] **Step 1: Write the failing tests.**
+  - `vitally_my_shifts` returns only the caller's live current-season shifts in the New York week. It leaves out next Monday and removed shifts, refuses an `invited` account and a client with VT001, and holds no other volunteer's shift.
+  - The day read's `candidates[].usualDays` are main's strings, for example `["sat"]` for a volunteer an admin saved with `usualDays: ["sat"]` through main's `vitally_save_volunteer`.
+  - `vitally_my_clearance` still returns main's `reviewedAt` and `reviewReason`, plus `scheduleViewer`.
+  - Remove the tests of this change's dropped functions. Keep the privacy check that no non-admin answer contains another volunteer's `usualDays`.
+- [ ] **Step 2: Run them to see them fail.** Reset the local database first, by adapting the scratch reset script outside the repo. Then run `npm run db:migrate:test` and `node --env-file=.env.test --test tests/database-schedule.mjs`.
+- [ ] **Step 3: Implement.** Copy `vitally_my_clearance` verbatim from main's `057_my_profile.sql`, plus the `scheduleViewer` line marked `-- 058`.
+- [ ] **Step 4: Run them to see them pass.** Run the full `npm run test:database`. The known env-only failure in `database-accounts-function.mjs` is the only failure allowed.
+- [ ] **Step 5: Commit** as `058: reconcile with main's My profile; vitally_my_shifts (#140)`.
+
+### Task 15: Store, pure helpers and the My profile section
+
+**Files:**
+- Modify: `src/supabase-store.mjs`, `src/volunteer-schedule.mjs`, `src/controller.mjs`, `src/profile-views.mjs` (main's file), `src/views.mjs`, `src/volunteer-views.mjs`, `src/volunteer-roster.mjs`, `src/app.mjs`, `src/styles.css`
+- Test: `tests/volunteer-schedule.test.mjs`, `tests/profile-views.test.mjs`, `tests/controller.test.mjs`, `tests/volunteer-roster.test.mjs`
+
+**Interfaces:**
+- Produces:
+  - `store.myShifts()`;
+  - `orderCandidates(candidates, weekday)`, now matching `usualDays` strings (`WEEKDAY_KEYS = ["mon","tue","wed","thu","fri","sat","sun"]`, exported);
+  - `state.myShifts = {weekStart, weekEnd, shifts}`;
+  - the section "Your shifts this week" in main's `myProfilePage`.
+
+- [ ] **Step 1: Write the failing tests.**
+  - `orderCandidates` puts `["sat"]` volunteers first on weekday 6.
+  - Main's `myProfilePage` renders "Your shifts this week" with lines like "Tue, Feb 3 · 5 pm – 8 pm · Preparer", or "No shifts this week.". Main's other sections are unchanged, and main's existing profile-view tests still pass.
+  - The controller reads `myShifts` when My profile opens, on focus, and on a `shifts` change, for a cleared window.
+  - An uncleared window has no My profile, and holds the channel only on the Schedule.
+  - The sidebar has Schedule and no "My profile" nav link; My profile stays main's account-row link.
+  - The Roster drawer shows main's usual-days checkboxes only.
+- [ ] **Step 2: Run them to see them fail.** Run `npm test`.
+- [ ] **Step 3: Implement.** Remove this change's My profile page, route, nav link, `saveMyUsualDays` and usual-days toggles, and the R13 base revision for usual days. The site-hours base revision stays.
+- [ ] **Step 4: Run them to see them pass.** Run `npm test`.
+- [ ] **Step 5: Commit** as `My profile: Your shifts this week on main's page; drop the duplicate profile (#140)`.
+
+### Task 16: Seed
+
+**Files:** `tools/admin/seed-values.mjs`, `tools/admin/seed-cases.mjs`, `tests/database-seed.mjs`
+
+- [ ] **Step 1:** Change the seed volunteers' `usualDays` to `mon`…`sun` strings, saved through main's `vitally_save_volunteer`. Tests: at least four fictional volunteers have usual days, and at least two include `sat`.
+- [ ] **Step 2:** Run `node --env-file=.env.test --test tests/database-seed.mjs` until it passes.
+- [ ] **Step 3: Commit** as `seed:local: usual days as mon…sun (#140)`.
+
+### Task 17: Browser walk, docs and the final checks
+
+**Files:** `tests/browser.mjs`, `docs/developer/*.md`, `README.md`
+
+- [ ] **Step 1:** In "A site coordinator schedules a volunteer, and the volunteer sees it", replace step 6, the preparer saving usual days on this change's My profile. The preparer now opens main's My profile from the account row and sees the Saturday shift under "Your shifts this week".
+- [ ] **Step 2:** Run the schedule, Season settings and My profile browser tests with a test-name filter, then the full `npm run test:browser`.
+- [ ] **Step 3:** Update the docs. Re-derive the migration, RPC and Realtime-table counts from the migrated database. Describe `vitally_my_shifts`, and remove the dropped functions.
+- [ ] **Step 4:** Run the final checks:
+  - `npm test`;
+  - `npm run db:migrate:test` then `npm run test:database`;
+  - `npm run build:hant -- --check`;
+  - `npx openspec validate --all`.
+- [ ] **Step 5: Commit** as `Schedule walk on main's My profile; docs and counts (#140)`.

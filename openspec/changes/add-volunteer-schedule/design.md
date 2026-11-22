@@ -17,8 +17,15 @@ Issue #140 asks for an hourly volunteer schedule: one day at a time, a role per 
 - Season settings (052) is a single RPC-only row (`season_settings`, RLS on with no policy). `vitally_season_settings` answers workspace admins and `vitally_save_season_settings` writes for site coordinators. Both use receipts, the workspace advisory lock and revision CONFLICT.
 
 *Functions this change replaces:*
-- `vitally_save_volunteer` was last replaced in 053.
-- `vitally_my_clearance` was last replaced in 053. It returns `cleared`, `missing`, `capabilities`, `isAdmin`, `isSiteCoordinator`, `siteCoordinatorName`, `siteCheck` and `uploadUrl`.
+- `vitally_my_clearance`. Since 2026-11-22 its latest body is main's `057_my_profile.sql`, which added `reviewedAt` and `reviewReason` to the document items and withholds `uploadUrl` while the site check is owed.
+- `vitally_season_settings`, last replaced in 052.
+
+**Reconciliation with main's My profile (2026-11-22).** While this change was in review, main merged a separate My profile change (`add-my-profile`, #262/#264/#265, migration `057_my_profile.sql`). That change owns:
+- `volunteer_profiles.usual_days text[]` (`mon`…`sun`), and admin editing of usual days through `vitally_save_volunteer` (capability `volunteer-roster`);
+- `vitally_my_profile()` and `vitally_save_my_profile()`;
+- the My profile page (`myProfilePage` in `src/profile-views.mjs`), opened from the sidebar's account row for cleared windows only (capability `my-profile`).
+
+By the user's decision, this change adopts all of that. It drops its own usual-days column and validator, `vitally_my_profile`, `vitally_save_my_usual_days`, its My profile page and its usual-days requirements. It stops replacing `vitally_save_volunteer`. It adds only a "Your shifts this week" section to main's page, read through a new `vitally_my_shifts()`. Its migration becomes `058_volunteer_schedule.sql`. The decision log is in brainstorm.md, "Update 2026-11-22".
 
 *Front end:*
 - The Workload (046) is computed in the browser (`src/volunteer-workload.mjs`) from the admin's Roster read and the staff case list.
@@ -27,7 +34,7 @@ Issue #140 asks for an hourly volunteer schedule: one day at a time, a role per 
 
 **Constraints:**
 - Fictional data only.
-- Migrations are final once applied. This is 057.
+- Migrations are final once applied. This is 058 (main took 055 for Start next season, 056 for OneDrive and 057 for My profile).
 - No client text.
 - The browser story runs at about 550–600 s per leg against a 900 s limit, so the Schedule walk must stay short.
 - Times are America/New_York throughout. The contact log already shows NY time whatever the viewer's zone.
@@ -52,7 +59,7 @@ Issue #140 asks for an hourly volunteer schedule: one day at a time, a role per 
 
 ## Decisions
 
-### D1: Storage. `shifts`, `schedule_settings` and `volunteer_profiles.usual_days`
+### D1: Storage. `shifts` and `schedule_settings`; usual days are main's
 - **Choice:**
   - **`public.shifts`**:
     - Columns: `id uuid`, `workspace_id`, `season smallint`, `person_id`, `shift_date date`, `start_hour smallint`, `end_hour smallint`, `role text`, `revision bigint`, `created_at`, `created_by_person_id`, `updated_at`, `updated_by_person_id`, `removed_at timestamptz`.
@@ -63,15 +70,15 @@ Issue #140 asks for an hourly volunteer schedule: one day at a time, a role per 
     - One row per workspace: `site_hours jsonb`, `preparers_needed`, `reviewers_needed` and `on_site_needed` (smallint 0–9, defaults 2 / 1 / 1), `revision`, `updated_at`, `updated_by_person_id`.
     - `site_hours` is an object keyed `"1"`…`"7"` (ISO weekday, Monday = 1), each `{open, close}` with `0 ≤ open < close ≤ 24`. A missing key means closed.
     - A missing row means every day is closed and the targets are at their defaults.
-  - **`volunteer_profiles.usual_days smallint[] not null default '{}'`**: values 1–7, no duplicates, stored sorted.
+  - **Usual days:** this change adds no column. It reads main's `volunteer_profiles.usual_days text[]` (`mon`…`sun`, admin-only RLS, from `057_my_profile.sql`). The day read maps a date's ISO weekday to that key (1 → `mon` … 7 → `sun`).
 - **Why:**
   - Site hours and targets get their own table, not columns on `season_settings`. Every Schedule window must learn of a change through realtime, and `season_settings` is deliberately unreadable by the browser (it sits beside the upload links and the SIDN flow).
   - jsonb for site hours keeps the save one row and one revision. A per-weekday table would need seven revisions or a parent row anyway.
-  - Usual days are a per-volunteer, cross-season attribute, like `works`, so they sit on the profile and inherit its admin-only RLS.
+  - Usual days were first built here as `smallint[]` (1–7). Main's My profile shipped the same column first as `text[]` (`mon`…`sun`), and the user chose to adopt it (2026-11-22).
 - **Alternatives considered:**
   - Columns on `season_settings`: no realtime without exposing the links.
   - A `site_hours` row per weekday: more locking for no gain.
-  - Usual days on `roster_entries`: they would reset each season, and the volunteer's preference is not seasonal.
+  - Keeping this change's `smallint[]` usual days and converting main's column: it would rewrite a teammate's merged change (rejected by the user).
 
 ### D2: Removing a shift is a soft delete
 - **Choice:** Remove sets `removed_at` and raises the revision. Every read ignores removed shifts. Nothing deletes a shift row.
@@ -129,9 +136,8 @@ Issue #140 asks for an hourly volunteer schedule: one day at a time, a role per 
   - For workspace admins only, each shift also carries:
     - `flags`: any of `notCleared`, `noSignIn`, `roleRemoved`, `outsideSiteHours`;
     - `counts`: `preparer`, `reviewer`, `onSite` or null. This is the D6 rule decided in SQL from clearance, role and Works.
-  - Admins also get `candidates`: current-season roster people with at least one role whose account is not deactivated. Each carries `volunteerId`, `name`, `roles`, `usualDays`, `cleared` and `works`.
-  - **`vitally_my_profile()`**, for schedule viewers. It returns `name`, `roles`, `usualDays`, `profileRevision`, and `shiftsThisWeek` for the Monday-to-Sunday week that holds today in America/New_York. Each shift has `date`, `startHour`, `endHour` and `role`.
-  - **`vitally_save_my_usual_days(p_action_id, p_expected_revision, p_days int[])`** writes only the caller's own profile, at the profile revision, and raises it.
+  - Admins also get `candidates`: current-season roster people with at least one role whose account is not deactivated. Each carries `volunteerId`, `name`, `roles`, `usualDays` (main's `mon`…`sun` strings), `cleared` and `works`.
+  - **`vitally_my_shifts()`**, caller-only. It is gated like main's `vitally_my_profile`: FORBIDDEN for a client, an anonymous caller, a staff caller with no person row, or an `invited` account, and not gated by clearance. It returns `weekStart`, `weekEnd` and `shifts` (each `shiftId`, `date`, `startHour`, `endHour`, `role`) for the caller's live current-season shifts in the Monday-to-Sunday week that holds today in America/New_York. It replaces this change's earlier `vitally_my_profile` and `vitally_save_my_usual_days`, which are dropped (main owns `vitally_my_profile`).
   - **`vitally_season_settings`** (replaced) adds `schedule: {siteHours, targets, revision}` to its answer.
 - **Why:**
   - One answer per screen, with the privacy filtering in one place.
@@ -183,15 +189,14 @@ Issue #140 asks for an hourly volunteer schedule: one day at a time, a role per 
   - A drag that opens the drawer to confirm: slower, and redundant with the button path.
   - Drag to move a shift: not agreed, and it equals remove plus add.
 
-### D8: My profile and usual days
+### D8: "Your shifts this week" on main's My profile
 - **Choice:**
-  - A "My profile" screen with the overline "VOLUNTEER". It shows the name and "Roles this season", read-only, or "No roles recorded".
-  - "Usual days" are seven toggle buttons (Mon … Sun) with Save, at the profile revision. The note says: "Only you and the office admins see your usual days."
-  - "Your shifts this week" lists each shift as "Tue, Feb 3 · 5 pm – 8 pm · Preparer", or "No shifts this week."
-  - The Roster's Edit drawer gains the same seven toggles under Works.
-  - `vitally_save_volunteer` (replaced) accepts an optional `usualDays`. When the key is missing it keeps the stored days, so older callers can't wipe them. When present it is validated (1–7, no duplicates) and stored sorted.
-  - Both paths raise the profile revision. So an admin's drawer opened before the volunteer's own save is refused with CONFLICT, as two admins are today.
-- **Why:** One field, two editors, one revision. It matches existing conflict handling.
+  - Main's My profile page (`myProfilePage`, capability `my-profile`) gains one section, "Your shifts this week". It lists each shift as "Tue, Feb 3 · 5 pm – 8 pm · Preparer", or "No shifts this week.". The page's other sections, its usual-days checkboxes and its save are main's and are not changed.
+  - The section reads `vitally_my_shifts()` (D5) when the page opens, on focus, and on a `shifts` change (D10).
+  - My profile stays cleared-only, as main's spec says (user decision 2026-11-22). Uncleared rostered volunteers see their shifts on the read-only Schedule.
+  - This change's own My profile screen, its usual-days toggles on My profile and on the Roster drawer, and the base-revision handling for usual days (ruling R13's usual-days half) are removed. Main's page and drawer do these.
+- **Why:** The user chose to adopt main's merged My profile rather than keep two pages and two usual-days models.
+- **Alternatives considered:** Keeping this change's page and RPCs (rejected: duplicate screens and column). Opening My profile to uncleared viewers (rejected: it would change main's spec and its site-check privacy reasoning).
 
 ### D9: Workload "Hours this week"
 - **Choice:**
@@ -203,8 +208,9 @@ Issue #140 asks for an hourly volunteer schedule: one day at a time, a role per 
 ### D10: Realtime and re-reads
 - **Choice:**
   - `shifts` and `schedule_settings` join `supabase_realtime` with 049's DO block, and join `STAFF_TABLES` in the store.
-  - A change on either table makes an open Schedule re-read its day, an open My profile re-read itself, and a Workload re-read its shifts.
-  - Season settings re-reads on a `schedule_settings` change.
+  - A change on either table makes an open Schedule re-read its day, an open My profile re-read its shifts this week (cleared windows; D8), and a Workload re-read its shifts.
+  - An uncleared window holds the realtime channel only while it is on the Schedule, and routes only `shifts` and `schedule_settings` to the day read.
+  - Season settings re-reads on a `schedule_settings` change (cleared windows; ruling R11).
   - Focus re-reads these screens as it does the Roster.
   - A CONFLICT re-reads, then shows "Someone changed this shift. The schedule has been refreshed." **(builder's call for the wording)**
   - Usual days are not published.
@@ -212,16 +218,16 @@ Issue #140 asks for an hourly volunteer schedule: one day at a time, a role per 
 
 ### D11: The sidebar and the setup screen
 - **Choice:**
-  - `vitally_my_clearance` (replaced) adds `scheduleViewer` (D3), for cleared and uncleared callers alike.
-  - The staff sidebar shows "Schedule" (calendar icon) after Volunteers for admins and after the Work board for others. It shows "My profile" (user icon) after Schedule. **(builder's call for the order)**
-  - The setup screen's sidebar shows both links when `scheduleViewer` is true.
-  - A window restored on either screen without `scheduleViewer` gets the home screen.
+  - `vitally_my_clearance` (replaced, rebuilt from main's `057_my_profile.sql` body) adds `scheduleViewer` (D3), for cleared and uncleared callers alike.
+  - The staff sidebar shows "Schedule" (calendar icon) after Volunteers for admins and after the Work board for others. **(builder's call for the order)** My profile stays main's account-row link (cleared windows only), not a nav link.
+  - The setup screen's sidebar shows Schedule when `scheduleViewer` is true.
+  - A window restored on the Schedule without `scheduleViewer` gets the home screen.
   - The sidebar's "does not exist yet" comment drops Schedule.
-- **Why:** User decision Q5: every rostered volunteer, cleared or not, including during preseason.
+- **Why:** User decision Q5: every rostered volunteer, cleared or not, can see the Schedule, including during preseason. My profile access follows main's spec (user decision 2026-11-22).
 
 ### D12: Seed and fixtures
 - **Choice:**
-  - `seed:local` writes site hours (Tue and Thu 5 pm – 8 pm, Sat 10 am – 4 pm), the default targets, and usual days for several fictional volunteers.
+  - `seed:local` writes site hours (Tue and Thu 5 pm – 8 pm, Sat 10 am – 4 pm), the default targets, and usual days for several fictional volunteers, as main's `mon`…`sun` values through main's `vitally_save_volunteer`.
   - It also writes about six shifts in the current NY week across the four role accounts and two roster volunteers. One Saturday hour is left with a gap, and one shift goes to a volunteer with no sign-in.
   - Site hours are written only when the workspace never saved them.
   - The seeded shift ids go into the run file, and a re-run removes exactly those through `vitally_remove_shift`.
@@ -232,22 +238,21 @@ Issue #140 asks for an hourly volunteer schedule: one day at a time, a role per 
 ## Risks / Trade-offs
 
 - [Risk] **Scope against the Dec 6 target.** This is a large change: three screens, three replaced RPCs and drag. → Mitigation: the plan orders tasks so the Workload column and the seeded shifts come last and can be cut (OQ3).
-- [Risk] **Replacing `vitally_save_volunteer` a fourth time** risks dropping a 053 rule. → Mitigation: copy 053's body as is, add only the `usualDays` lines marked `-- 057`, and re-run the existing roster and clearance-upload database suites.
-- [Risk] **A volunteer's own usual-days save makes an admin's open drawer hit CONFLICT.** → Mitigation: the existing re-read-on-conflict path. This is rare.
+- [Risk] **Replacing `vitally_my_clearance` again** risks dropping main's 057 review fields. → Mitigation: copy main's `057_my_profile.sql` body as is, add only the `scheduleViewer` line marked `-- 058`, and re-run the clearance, clearance-upload and my-profile database suites. `vitally_save_volunteer` is no longer replaced by this change.
+- [Risk] **Reconciling a reviewed implementation with main's My profile** (2026-11-22) touches the migration, the store, the views and the browser walk after review. → Mitigation: one more task group (tasks.md group 8) runs through apply with task reviews, then verify is re-run in full.
 - [Risk] **Drag on touch screens and in Playwright.** → Mitigation: pointer events with `setPointerCapture`. The story drives the button path, and one drag runs with Playwright's mouse API.
-- [Risk] **Migration number collision.** `main` took 055 (`055_start_next_season.sql`, #255) after this change was proposed, so this change is 056. Open PR #245 (`055_onedrive_client_documents.sql`) must also renumber and may claim 056. → Mitigation: re-check `main` and open PRs right before the PR. Whoever merges second renumbers; 056 is applied nowhere until merge. #245 merged first and took 056 (`056_onedrive_client_documents.sql`), so this change is 057.
+- [Risk] **Migration number collision.** `main` took 055 (`055_start_next_season.sql`, #255) after this change was proposed, so this change is 056. Open PR #245 (`055_onedrive_client_documents.sql`) must also renumber and may claim 056. → Mitigation: re-check `main` and open PRs right before the PR. Whoever merges second renumbers; 056 is applied nowhere until merge. #245 merged first and took 056 (`056_onedrive_client_documents.sql`), so this change became 057, and then #262 took 057 (`057_my_profile.sql`), so this change is 058.
 - [Trade-off] Non-admins don't see the coverage row. → Accepted: coverage encodes others' clearance and Works.
 - [Trade-off] Overlap is checked in the RPC, not by a constraint. → Accepted: every write goes through the RPC under the workspace lock, and RLS refuses direct writes.
 - [Trade-off] Site hours repeat weekly with no closed dates. → Accepted (Q3): a holiday is handled by not scheduling anyone.
 
 ## Migration Plan
 
-1. 057 is additive. It adds a column with a default, new tables, new functions and policies, replaces three functions, and adds two tables to the publication.
-   - Existing profiles get `usual_days = '{}'`. Nothing else changes in existing rows.
-   - Even so, run the local `db:migrate:test` on a stack that already has main's migrations, as for 052 and 053.
+1. 058 is additive. It adds new tables, new functions and policies, replaces two functions (`vitally_my_clearance` from main's 057, `vitally_season_settings` from 052), and adds two tables to the publication. It changes no existing row.
+   - Even so, run the local `db:migrate:test` on a stack that already has main's migrations through 057.
 2. The 049 DO block refuses if the `supabase_realtime` publication is missing. Hosted already has it.
-3. Deploy order is the usual one: migration, then front end. An old front end ignores the new answer keys, and the replaced `vitally_save_volunteer` keeps the stored days when `usualDays` is absent.
-4. Rollback means a new migration that drops the tables, the column and the publication entries and restores 053's three functions. Applied migrations are never edited.
+3. Deploy order is the usual one: migration, then front end. An old front end ignores the new answer keys.
+4. Rollback means a new migration that drops the tables, the publication entries and the new functions, and restores main's 057 `vitally_my_clearance` and 052's `vitally_season_settings`. Applied migrations are never edited.
 5. Checks:
    - `npm test`;
    - `npm run db:migrate:test` then `npm run test:database`;
@@ -259,3 +264,4 @@ Issue #140 asks for an hourly volunteer schedule: one day at a time, a role per 
 - **OQ2: PCDC's real site hours.** Owner: the team. They affect only the seed (D12). The seed uses fictional hours until then.
 - **OQ3: the Dec 6 target.** Owner: the user. If the change runs late, the Workload column (D9) and the seeded shifts (D12) are the first things to cut.
 - OQ1 (no-sign-in visibility) was resolved by the user on 2026-11-21. See D3.
+- OQ4 (overlap with main's My profile, #262) was resolved by the user on 2026-11-22: adopt main's My profile and usual days, add only "Your shifts this week", and keep My profile cleared-only. See Context, D1, D5, D8, D11.

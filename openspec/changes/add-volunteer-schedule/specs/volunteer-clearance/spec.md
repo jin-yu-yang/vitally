@@ -4,22 +4,23 @@
 `vitally_my_clearance()` SHALL take no arguments and SHALL answer only for the signed-in `staff` caller with:
 - whether they are cleared;
 - what is missing:
-  - no roles (their Form 13615), with `sentAt`: when they marked it sent, or null;
-  - the photo ID check if they are new and unchecked, with `sentAt` likewise;
+  - no roles (their Form 13615), with `sentAt`: when they marked it sent, or null; and `reviewedAt` and `reviewReason`: when an admin last sent it back and why, or null;
+  - the photo ID check if they are new and unchecked, with `sentAt`, `reviewedAt` and `reviewReason` likewise;
   - the certificates any role lacks;
   - the SC certificate if they are a site coordinator on this season's roster without it;
 - their effective capabilities, which SHALL be empty whenever they are not cleared;
 - whether they are a workspace admin (`isAdmin`: a site coordinator, or holding the Admin role this season);
 - whether they are a site coordinator (`isSiteCoordinator`);
 - the display name of the workspace's default follow-up person;
-- `uploadUrl`: the workspace's certificate and photo ID upload link (capability `season-settings`) when they have a roster entry for the current season and the link is set, and null otherwise;
+- whether they still owe the first-sign-in site check (`siteCheck`: their account is `invited`);
+- `uploadUrl`: the workspace's certificate and photo ID upload link (capability `season-settings`) when they have a roster entry for the current season, the link is set, and `siteCheck` is false; null otherwise;
 - `scheduleViewer`: whether they are a schedule viewer (capability `volunteer-schedule`), whether or not they are cleared.
 
 It SHALL return no email, phone or other profile data. A client or an anonymous caller SHALL be refused with `FORBIDDEN`. Execute SHALL be granted to `authenticated` only.
 
 #### Scenario: Not cleared
 - **WHEN** a staff member with no roles calls it
-- **THEN** it says they are not cleared, that their Form 13615 is missing with no sent date, that their effective capabilities are empty, that they are not an admin, and names the default follow-up person
+- **THEN** it says they are not cleared, that their Form 13615 is missing with no sent date and no review, that their effective capabilities are empty, that they are not an admin, and names the default follow-up person
 
 #### Scenario: Cleared
 - **WHEN** a cleared Preparer calls it
@@ -33,9 +34,17 @@ It SHALL return no email, phone or other profile data. A client or an anonymous 
 - **WHEN** a staff member with no roles has marked their Form 13615 as sent, and calls it
 - **THEN** the Form 13615 item carries that sent date
 
+#### Scenario: A document sent back
+- **WHEN** a new staff member has sent their photo ID, and an admin marks it reviewed with the reason "Can't read it"
+- **THEN** the photo ID item has no sent date, the reviewed time of that call, and the reason "Can't read it"
+
 #### Scenario: The upload link
-- **WHEN** a staff member with a current-season entry calls it, and a site coordinator has set the certificate upload link
+- **WHEN** a staff member with a current-season entry and an active account calls it, and a site coordinator has set the certificate upload link
 - **THEN** `uploadUrl` is that link, whether or not they are cleared
+
+#### Scenario: No link before the site check
+- **WHEN** an invited staff member with a current-season entry, who has not passed the first-sign-in site check, calls it while the link is set
+- **THEN** `siteCheck` is true and `uploadUrl` is null; after they pass the site check, `uploadUrl` is the link
 
 #### Scenario: No link, or no entry
 - **WHEN** the link is not set, or the caller has no current-season roster entry
@@ -74,7 +83,7 @@ The Form 13615 and photo ID items SHALL each offer:
 
 Once the item has a sent date, I've uploaded it SHALL be replaced by "Waiting for review · sent <date>", and Upload, or the text in its place, SHALL stay. A refused or failed send SHALL be said on the setup screen. The text SHALL be English only.
 
-It SHALL have a "Check again" button. The screen SHALL re-check when Check again is pressed and when the window regains focus, and SHALL show the normal staff screens once the person is cleared. The setup screen's sidebar SHALL offer Notifications, with its unread badge, and the panel SHALL show the updates addressed to them (capability `posted-updates`). The feed and badge SHALL re-read together with the clearance check. An uncleared schedule viewer (capability `volunteer-schedule`) SHALL also have the Schedule link and screen, read-only unless they are a workspace admin, and the My profile link and screen. An uncleared workspace admin SHALL also have the Volunteers link and the Roster, the Post an update link and screen, and the Season settings link and screen (capability `season-settings`), and no client data. When any action returns `NOT_CLEARED`, the window SHALL switch to the setup screen.
+It SHALL have a "Check again" button. The screen SHALL re-check when Check again is pressed and when the window regains focus, and SHALL show the normal staff screens once the person is cleared. The setup screen's sidebar SHALL offer Notifications, with its unread badge, and the panel SHALL show the updates addressed to them (capability `posted-updates`). The feed and badge SHALL re-read together with the clearance check. An uncleared schedule viewer (capability `volunteer-schedule`) SHALL also have the Schedule link and the Schedule screen, read-only unless they are a workspace admin. An uncleared workspace admin SHALL also have the Volunteers link and the Roster, the Post an update link and screen, and the Season settings link and screen (capability `season-settings`), and no client data. When any action returns `NOT_CLEARED`, the window SHALL switch to the setup screen.
 
 #### Scenario: Signing in uncleared
 - **WHEN** a staff member with no roles signs in
@@ -106,7 +115,7 @@ It SHALL have a "Check again" button. The screen SHALL re-check when Check again
 
 #### Scenario: An uncleared volunteer on the roster
 - **WHEN** a staff member with a current-season roster entry and no roles signs in
-- **THEN** the setup screen's sidebar shows Schedule and My profile; the Schedule opens read-only, and My profile lets them save their usual days
+- **THEN** the setup screen's sidebar shows Schedule, and the Schedule opens read-only
 
 #### Scenario: A site coordinator waiting for SC
 - **WHEN** a site coordinator with the Admin role and its certificates, and no SC, signs in

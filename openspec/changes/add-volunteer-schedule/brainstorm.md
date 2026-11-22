@@ -181,3 +181,27 @@ The user picked approach 1.
 - `npm run test:browser`.
 - Not `build:hant`: these are staff screens only.
 - `test:auth-browser` only if sign-in is touched.
+
+## Update 2026-11-22: overlap with main's My profile (#262)
+
+**What happened.** At archive time, main had merged a separate My profile change (`add-my-profile`, #262, then #264 and #265; migration `057_my_profile.sql`). It had already shipped:
+- `volunteer_profiles.usual_days text[]` (`mon`…`sun`);
+- `vitally_my_profile()` and `vitally_save_my_profile()`;
+- a My profile page opened from the sidebar's account row for cleared windows only;
+- admin editing of usual days on the Roster;
+- its own rebuilds of `vitally_my_clearance` and `vitally_save_volunteer`.
+
+This change had built overlapping versions of all of these.
+
+**Q11. How to reconcile?** Options: adopt main's My profile; keep this change's model and convert main's; pause and talk to the team.
+→ **Adopt main's My profile** (user, 2026-11-22).
+- Drop this change's usual-days column and validator, `vitally_my_profile`, `vitally_save_my_usual_days`, its My profile page, its Roster usual-days toggles and its usual-days requirements.
+- The Add-shift hint and the seed read main's `usual_days`.
+- Rebuild `vitally_my_clearance` from main's 057 body. Stop replacing `vitally_save_volunteer`.
+- Renumber to 058.
+- Add only "Your shifts this week" to main's page, through a new `vitally_my_shifts()`.
+
+**Q12. Who sees "Your shifts this week"?** Options: follow main (cleared only); open My profile to uncleared viewers.
+→ **Follow main: cleared only** (user, 2026-11-22). Uncleared rostered volunteers keep the read-only Schedule. This narrows the original Q5 answer for My profile only; the Schedule still goes to every rostered viewer.
+
+**Unchanged:** the Schedule, coverage, site hours and targets, drag, the Workload column, and live updates on the Schedule.

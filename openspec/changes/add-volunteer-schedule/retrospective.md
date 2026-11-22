@@ -4,6 +4,8 @@
 > Commit range: `7e06662..2c79549`, the branch start through the verify update (merge base with origin/main is 4ab301e)
 > Worktree: `.claude/worktrees/add-volunteer-schedule` (branch `add-volunteer-schedule`, not pushed)
 
+> **Update 2026-11-22**: at archive time, main had merged a separate My profile change (#262), which overlapped this change's usual days, `vitally_my_profile` and My profile page. The user chose to adopt main's version (brainstorm.md "Update 2026-11-22"; tasks.md group 8). That supersedes §0's state (tasks 30/30, migration 057) and the parts of §1–§3 about this change's own My profile and usual days. A follow-up section is appended after group 8 is applied. §2 gains a miss: overlapping work with a parallel change went unnoticed until archive.
+
 ---
 
 ## 0. Evidence

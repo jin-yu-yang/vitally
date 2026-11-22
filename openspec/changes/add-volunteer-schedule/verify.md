@@ -1,5 +1,7 @@
 # Verification Report
 
+> **Superseded 2026-11-22.** Main merged a separate My profile change (#262) after this report. The artifacts were revised with `/opsx:update` (tasks.md group 8, plan Tasks 13–17). This report describes the state at 2c79549, before that reconciliation. Verify is re-run, and this file overwritten, once group 8 is applied.
+
 **Change**: `add-volunteer-schedule`
 **Verified at**: `2026-11-22 07:16` (America/New_York)
 **Verifier**: Claude (controller session), after subagent-driven apply and a clean final whole-branch review
