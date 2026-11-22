@@ -20,10 +20,10 @@ alter table public.roster_entries
  add column photo_id_review_reason text,
  add constraint roster_entries_13615_review_pair check (
   (form_13615_reviewed_at is null and form_13615_review_reason is null)
-  or (form_13615_reviewed_at is not null and form_13615_review_reason=btrim(form_13615_review_reason,E' \t\n\r') and char_length(form_13615_review_reason) between 1 and 120)),
+  or (form_13615_reviewed_at is not null and form_13615_review_reason is not null and form_13615_review_reason=btrim(form_13615_review_reason,E' \t\n\r') and char_length(form_13615_review_reason) between 1 and 120)),
  add constraint roster_entries_photo_review_pair check (
   (photo_id_reviewed_at is null and photo_id_review_reason is null)
-  or (photo_id_reviewed_at is not null and photo_id_review_reason=btrim(photo_id_review_reason,E' \t\n\r') and char_length(photo_id_review_reason) between 1 and 120));
+  or (photo_id_reviewed_at is not null and photo_id_review_reason is not null and photo_id_review_reason=btrim(photo_id_review_reason,E' \t\n\r') and char_length(photo_id_review_reason) between 1 and 120));
 alter table public.volunteer_profiles
  add column usual_days text[] not null default '{}',
  add constraint volunteer_profiles_usual_days check (
