@@ -57,8 +57,9 @@ This runs `node --env-file-if-exists=.env.local server.mjs`, so the server start
 
 - **No `.env.local`, or an incomplete one:** the app fetches `./public-config.json`, reads
   `{"configured": false}`, and renders the **setup-needed** screen ("ViTally is not configured
-  yet") instead of a sign-in form. This is the state the public GitHub Pages copy of `main` is in
-  today.
+  yet") instead of a sign-in form. (The local server builds this file from `.env.local`; the
+  committed `public-config.json` that GitHub Pages serves for the hosted test project is not read
+  here.)
 - **A complete `.env.local`:** copy `.env.example` to `.env.local` (git-ignored) and fill in:
 
   | Variable | Meaning |
@@ -1102,9 +1103,10 @@ from anywhere else. Publication (Task 10D) happens only with the user's explicit
 destination choice — this document does not invent or assume one. The built app is already
 designed for static hosting with no build step (the committed vendor bundle, and
 `/public-config.json` fetched relatively so a static host can ship a plain JSON file at that path
-instead of running `server.mjs`), but until that file exists with real values, any deployed copy —
-including the current GitHub Pages copy of `main` — shows the same "ViTally is not configured yet"
-screen a fresh local checkout does.
+instead of running `server.mjs`). The GitHub Pages copy of `main`, served at <https://govitally.org>, ships the committed
+[`public-config.json`](../public-config.json) for the hosted test project (#212), so it shows the
+sign-in form. A static copy without a configured file shows the same "ViTally is not configured
+yet" screen a fresh local checkout does.
 
 Pages serves `main`'s root, so a deployed copy publishes every committed file, not only the page
 and its bundle: the migrations, the admin tooling, the tests and these documents are all fetchable
