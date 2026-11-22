@@ -1417,10 +1417,21 @@ if (!config) {
 
   // The volunteer drawer. The controller checks the values and says what is
   // wrong in the drawer (false, nothing sent); a refusal stays in the drawer
-  // too, so it closes only on a save that landed.
+  // too, so it closes only on a save that landed. A picked earlier volunteer
+  // whose account is deactivated is the exception (#269): the controller
+  // turns the pick into their Edit, with a notice beside Reactivate, and the
+  // drawer stays open there.
   async function submitVolunteer(form, by) {
+    const picked = controller.getState().dialogContext?.returning === true;
     const saved = await controller.saveVolunteer(volunteerFromForm(new FormData(form)));
-    if (saved) closeDialog("#main");
+    if (!saved) return;
+    const after = controller.getState();
+    if (picked && after.dialog === "volunteer" && after.dialogContext?.returning !== true) {
+      forgetVolunteerDrafts();
+      root.querySelector('[data-action="account-reactivate"]')?.focus();
+      return;
+    }
+    closeDialog("#main");
   }
 
   // The site check (decision 4). A wrong number keeps the name and empties
@@ -2338,6 +2349,21 @@ if (!config) {
         break;
       case "confirm-deactivate-account":
         await controller.deactivateAccount();
+        break;
+      case "volunteer-remove":
+        // Asks first: nothing is sent until the dialog's confirm.
+        openDialog("remove-from-roster", { volunteerId: target.dataset.volunteerId }, describeFocus(target));
+        break;
+      case "confirm-remove-from-roster":
+        // A refusal keeps the confirmation (or the drawer, for the banner); a
+        // removal that landed closes both, so the drawer's typed text goes and
+        // the keyboard goes to the page, as the drawer's own close does.
+        await controller.removeFromRoster();
+        if (!controller.getState().dialog) {
+          forgetVolunteerDrafts();
+          focusBeforeDialog = null;
+          root.querySelector("#main")?.focus();
+        }
         break;
       // The Workload (change add-volunteer-workload). The controller decides
       // who may see it and open its drawer; these only pass the press on and

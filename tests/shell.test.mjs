@@ -1472,7 +1472,24 @@ test("app.mjs saves the volunteer drawer and closes it only on success", () => {
   const submit = app.slice(app.indexOf("async function submitVolunteer("), app.indexOf("async function submitVolunteer(") + 600);
   assert.match(submit, /volunteerFromForm\(new FormData\(form\)\)/);
   assert.match(submit, /await controller\.saveVolunteer\(/);
-  assert.match(submit, /if \(saved\) closeDialog\("#main"\)/);
+  assert.match(submit, /if \(!saved\) return;/);
+  assert.match(submit, /closeDialog\("#main"\)/);
+  // A re-added volunteer whose account is deactivated (#269): the controller
+  // turned the pick into their Edit, so the drawer stays open on Reactivate.
+  assert.match(submit, /const picked = controller\.getState\(\)\.dialogContext\?\.returning === true;/);
+  assert.match(submit, /picked && after\.dialog === "volunteer" && after\.dialogContext\?\.returning !== true/);
+  assert.match(submit, /\[data-action="account-reactivate"\]/);
+});
+
+test("app.mjs asks before removing from the roster, and a landed removal leaves the drawer", () => {
+  const app = appSource();
+  assert.match(
+    app,
+    /case "volunteer-remove":\s*(?:\/\/[^\n]*\n\s*)*openDialog\("remove-from-roster", \{ volunteerId: target\.dataset\.volunteerId \}, describeFocus\(target\)\);/,
+  );
+  const confirm = app.slice(app.indexOf('case "confirm-remove-from-roster":'), app.indexOf('case "confirm-remove-from-roster":') + 600);
+  assert.match(confirm, /await controller\.removeFromRoster\(\);/);
+  assert.match(confirm, /if \(!controller\.getState\(\)\.dialog\) \{\s*forgetVolunteerDrafts\(\);/);
 });
 
 test("closing the volunteer drawer forgets every field typed in it, and falls back to #main", () => {

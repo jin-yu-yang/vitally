@@ -357,6 +357,12 @@ const ACCOUNT_MESSAGES = Object.freeze({
 });
 export const accountMessage = (reason) => ACCOUNT_MESSAGES[String(reason ?? "")] ?? null;
 
+// What only a site coordinator may do (change add-season-settings, and
+// add-remove-from-roster): said by the drawer before a press, and by the
+// controller when the server refuses one. One source for both.
+export const ADMIN_ROLE_MESSAGE = "Only site coordinators change the Admin role.";
+export const REMOVE_SITE_COORDINATOR_MESSAGE = "Only site coordinators remove a site coordinator from the roster.";
+
 // The server's OPEN_WORK detail, a JSON array of labels, as the drawer's
 // sentence; null when it isn't a non-empty array of strings.
 export function openWorkMessage(name, details) {

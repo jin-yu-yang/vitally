@@ -6728,6 +6728,19 @@ const rosterStore = (overrides = {}) => {
       }
       return { ...store.accountAnswer };
     };
+  // Remove from this season's roster (change add-remove-from-roster):
+  // `failRemove` makes the next call reject.
+  store.failRemove = null;
+  store.removeFromRoster = async (request) => {
+    store.calls.push("removeFromRoster");
+    store.writes.push({ type: "remove", ...request });
+    if (store.failRemove) {
+      const error = store.failRemove;
+      store.failRemove = null;
+      throw error;
+    }
+    return { actionId: request.actionId, volunteerId: request.volunteerId, revision: 5, accountDeactivated: false };
+  };
   return store;
 };
 const volunteerReads = (store) => store.calls.filter((entry) => entry === "listVolunteers").length;
@@ -11706,5 +11719,192 @@ test("an Edit of a current volunteer to an earlier volunteer's email does not ge
   assert.equal(controller.getState().volunteerFormError ?? null, null);
   assert.equal(store.writes.at(-1).type, "saveVolunteer");
   assert.equal(store.writes.at(-1).volunteerId, "v-1");
+  controller.stop();
+});
+
+// Remove from this season's roster (change add-remove-from-roster, design D8)
+const removals = (store) => store.writes.filter((entry) => entry.type === "remove");
+
+test("removeFromRoster sends only from its confirmation, with the profile revision", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  assert.equal(await controller.removeFromRoster(), false, "from the drawer alone, nothing is sent");
+  assert.equal(store.calls.includes("removeFromRoster"), false);
+  controller.openDialog("remove-from-roster", { volunteerId: "v-1" });
+  assert.equal(store.calls.includes("removeFromRoster"), false, "asking sends nothing");
+  store.volunteers = [];
+  assert.equal(await controller.removeFromRoster(), true);
+  assert.deepEqual(removals(store), [{ type: "remove", actionId: "action-1", volunteerId: "v-1", expectedRevision: 4 }]);
+  controller.stop();
+});
+
+test("a successful removal closes the dialog and drawer, and re-reads the Roster and the uploads count", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("remove-from-roster", { volunteerId: "v-1" });
+  store.volunteers = [];
+  const reads = volunteerReads(store);
+  const counts = store.calls.filter((entry) => entry === "countUploadsToReview").length;
+  assert.equal(await controller.removeFromRoster(), true);
+  const state = controller.getState();
+  assert.equal(state.dialog, null);
+  assert.equal(state.dialogContext, null);
+  assert.equal(state.busy, false);
+  assert.equal(state.removeFromRosterError, null);
+  assert.equal(volunteerReads(store), reads + 1);
+  assert.ok(store.calls.filter((entry) => entry === "countUploadsToReview").length > counts);
+  assert.deepEqual(state.volunteers, []);
+  controller.stop();
+});
+
+test("Cancel in the removal confirmation returns to the volunteer's drawer, sending nothing", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("remove-from-roster", { volunteerId: "v-1" });
+  store.failRemove = accountRefusal("INVALID_TRANSITION", "OPEN_WORK", JSON.stringify(["reviewing client 3"]));
+  assert.equal(await controller.removeFromRoster(), false);
+  assert.ok(controller.getState().removeFromRosterError);
+  controller.closeDialog();
+  const state = controller.getState();
+  assert.equal(state.dialog, "volunteer");
+  assert.equal(state.dialogContext.volunteerId, "v-1");
+  assert.equal(state.removeFromRosterError, null);
+  assert.equal(removals(store).length, 1, "Cancel sends nothing more");
+  controller.stop();
+});
+
+test("OPEN_WORK keeps the removal dialog open with the open-work sentence", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("remove-from-roster", { volunteerId: "v-1" });
+  store.failRemove = accountRefusal("INVALID_TRANSITION", "OPEN_WORK", JSON.stringify(["reviewing client 3"]));
+  const reads = volunteerReads(store);
+  assert.equal(await controller.removeFromRoster(), false);
+  const state = controller.getState();
+  assert.equal(state.dialog, "remove-from-roster");
+  assert.equal(
+    state.removeFromRosterError,
+    "Mira Patel still has open work: reviewing client 3. Finish it or hand it over first.",
+  );
+  assert.equal(state.error, null);
+  assert.equal(state.busy, false);
+  assert.equal(volunteerReads(store), reads + 1);
+  // Opening the confirmation again starts without it.
+  controller.closeDialog();
+  controller.openDialog("remove-from-roster", { volunteerId: "v-1" });
+  assert.equal(controller.getState().removeFromRosterError, null);
+  controller.stop();
+});
+
+test("ADMIN_ROLE and a site coordinator's FORBIDDEN keep the removal dialog open with their sentences", async () => {
+  const store = rosterStore();
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, roles: ["admin"] }];
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("remove-from-roster", { volunteerId: "v-1" });
+  store.failRemove = accountRefusal("FORBIDDEN", "ADMIN_ROLE", null);
+  assert.equal(await controller.removeFromRoster(), false);
+  assert.equal(controller.getState().dialog, "remove-from-roster");
+  assert.equal(controller.getState().removeFromRosterError, "Only site coordinators change the Admin role.");
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, isSiteCoordinator: true, account: { status: "active", revision: 2 } }];
+  await controller.loadVolunteers();
+  store.failRemove = accountRefusal("FORBIDDEN", "FORBIDDEN", null);
+  assert.equal(await controller.removeFromRoster(), false);
+  const state = controller.getState();
+  assert.equal(state.dialog, "remove-from-roster");
+  assert.equal(state.removeFromRosterError, "Only site coordinators remove a site coordinator from the roster.");
+  assert.equal(state.error, null);
+  controller.stop();
+});
+
+test("CONFLICT on removal goes to the banner and re-reads the list", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("remove-from-roster", { volunteerId: "v-1" });
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, revision: 5 }];
+  store.failRemove = Object.assign(new Error("stale"), { code: "CONFLICT" });
+  const reads = volunteerReads(store);
+  await assert.rejects(() => controller.removeFromRoster(), (error) => error.code === "CONFLICT");
+  const state = controller.getState();
+  assert.equal(state.error.message, VOLUNTEER_CONFLICT_MESSAGE);
+  assert.equal(state.removeFromRosterError, null);
+  assert.equal(volunteerReads(store), reads + 1);
+  assert.equal(state.volunteers[0].revision, 5);
+  assert.equal(state.dialog, "volunteer", "back in the drawer, which shows the banner");
+  assert.equal(state.busy, false);
+  controller.stop();
+});
+
+test("a removal whose answer never came keeps the action id for the next press", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("remove-from-roster", { volunteerId: "v-1" });
+  store.failRemove = Object.assign(new Error("offline"), { code: "OFFLINE" });
+  await assert.rejects(() => controller.removeFromRoster(), (error) => error.code === "OFFLINE");
+  controller.openDialog("remove-from-roster", { volunteerId: "v-1" });
+  assert.equal(await controller.removeFromRoster(), true);
+  const sent = removals(store);
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].actionId, sent[0].actionId);
+  controller.stop();
+});
+
+test("a removal of a volunteer gone from the list is refused as gone, sending nothing", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("remove-from-roster", { volunteerId: "v-1" });
+  store.volunteers = [];
+  await controller.loadVolunteers();
+  await assert.rejects(() => controller.removeFromRoster(), (error) => error.code === "NOT_FOUND");
+  assert.equal(controller.getState().error.message, "This volunteer could not be opened. Close this and try again.");
+  assert.equal(store.calls.includes("removeFromRoster"), false);
+  controller.stop();
+});
+
+// After a re-add (#269, design D10)
+const NADIA_BACK = Object.freeze({
+  ...ROSTER_VOLUNTEER,
+  id: "e-1",
+  name: "Nadia Kerr",
+  email: "nadia@example.org",
+  revision: 8,
+  account: { status: "deactivated", revision: 3 },
+});
+
+test("after saving a picked earlier volunteer whose account is deactivated, the drawer stays open with the notice", async () => {
+  const store = rosterStore();
+  const controller = await earlierRoster(store);
+  controller.openDialog("volunteer", null);
+  controller.pickReturningVolunteer("e-1");
+  store.volunteers = [{ ...ROSTER_VOLUNTEER }, { ...NADIA_BACK }];
+  const values = { ...VOLUNTEER_PAYLOAD, email: "nadia@example.org", name: "Nadia Kerr" };
+  assert.equal(await controller.saveVolunteer(values), true);
+  const state = controller.getState();
+  assert.equal(state.dialog, "volunteer");
+  assert.equal(state.dialogContext.volunteerId, "e-1");
+  assert.equal(state.dialogContext.returning, undefined);
+  assert.deepEqual(state.volunteerAccountNotice, {
+    kind: "info",
+    text: "Nadia Kerr is back on this season's roster. Their account is deactivated. Reactivate it so they can sign in.",
+  });
+  controller.stop();
+});
+
+test("any other save still closes the drawer: a picked earlier volunteer with no account, and a plain Edit", async () => {
+  const store = rosterStore();
+  const controller = await earlierRoster(store);
+  controller.openDialog("volunteer", null);
+  controller.pickReturningVolunteer("e-1");
+  store.volunteers = [{ ...ROSTER_VOLUNTEER }, { ...NADIA_BACK, account: { status: "none", revision: null } }];
+  assert.equal(await controller.saveVolunteer({ ...VOLUNTEER_PAYLOAD, email: "nadia@example.org", name: "Nadia Kerr" }), true);
+  // Still the pick: the page closes the drawer on true.
+  assert.deepEqual(controller.getState().dialogContext, { volunteerId: "e-1", returning: true });
+  assert.equal(controller.getState().volunteerAccountNotice, null);
+  // A plain Edit of someone whose account is deactivated is not a re-add.
+  store.volunteers = [{ ...ROSTER_VOLUNTEER, account: { status: "deactivated", revision: 2 } }];
+  await controller.loadVolunteers();
+  controller.openDialog("volunteer", { volunteerId: "v-1" });
+  assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
+  assert.deepEqual(controller.getState().dialogContext, { volunteerId: "v-1" });
+  assert.equal(controller.getState().volunteerAccountNotice, null);
   controller.stop();
 });
