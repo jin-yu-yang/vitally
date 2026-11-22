@@ -82,12 +82,12 @@
 
 ## 6. Browser test and docs
 
-- [ ] 6.1 `tests/browser.mjs`: a new block, "A volunteer edits My profile and re-sends a Form 13615", with its own workspace. It covers:
+- [x] 6.1 `tests/browser.mjs`: a new block, "A volunteer edits My profile and re-sends a Form 13615", with its own workspace. It covers:
   - editing details and usual days, and the sidebar name updating;
   - sending a 13615;
   - an admin sending it back with "Wrong form" in the drawer;
   - the reason on My profile;
   - sending again, which clears it.
-- [ ] 6.2 Extend "A volunteer says their uploads were sent, and an admin reviews them": Mark reviewed gives a reason, and the setup screen shows the reason line.
+- [x] 6.2 Extend "A volunteer says their uploads were sent, and an admin reviews them": Mark reviewed gives a reason, and the setup screen shows the reason line.
 - [ ] 6.3 Docs: the developer guide's migration and RPC counts and its RPC list; the roadmap entries for #242 and #246; the database notes for the new columns.
 - [ ] 6.4 Run `npm test`. Push, and get the PR's full CI run green (`checks`, `database`, `sign-in`, both `story` legs). Record per-phase story timings, and review the story screenshots from the run's artifacts.
