@@ -708,6 +708,46 @@ test("only a screen change asks the page to take the keyboard back", async () =>
   controller.stop();
 });
 
+test("the client documents link is read on load and wake, not on every realtime refresh (#157)", async () => {
+  const store = fakeStore({
+    cases: [{ id: "case-a", reference: "VT-AAAA-BBBB", stage: "preparing", revision: 1, answers: {} }],
+  });
+  let reads = 0;
+  store.getClientDocumentsUrl = async () => {
+    reads += 1;
+    return "https://example.org/client-documents";
+  };
+  const { controller, events } = build({ store });
+  await controller.start();
+  assert.ok(reads >= 1, "read when the window loads");
+  assert.equal(controller.getState().clientDocumentsUrl, "https://example.org/client-documents");
+  const loaded = reads;
+  await store.handlers.onChange({ table: "cases", eventType: "UPDATE", id: "case-a", caseId: "case-a" });
+  await controller.refresh();
+  assert.equal(reads, loaded, "a realtime change or plain refresh does not re-read it");
+  await events.emit("focus");
+  assert.equal(reads, loaded + 1, "a wake re-reads it");
+  controller.stop();
+});
+
+test("a staff window never reads the client documents link (#245 review)", async () => {
+  const store = fakeStore({
+    principal: { userId: "user-s", workspaceId: "w1", access: "staff", personId: "person-sam" },
+    people: [{ id: "person-sam", name: "Sam", capabilities: ["admin", "assist", "followup", "receive_documents"], userId: "user-s" }],
+  });
+  let reads = 0;
+  store.getClientDocumentsUrl = async () => {
+    reads += 1;
+    return "https://example.org/client-documents";
+  };
+  const { controller, events } = build({ store });
+  await controller.start();
+  await events.emit("focus");
+  assert.equal(reads, 0);
+  assert.equal(controller.getState().clientDocumentsUrl, null);
+  controller.stop();
+});
+
 test("focus and online events refresh, and stop removes the listeners", async () => {
   const store = fakeStore({
     cases: [{ id: "case-a", reference: "VT-AAAA-BBBB", stage: "draft", revision: 1, answers: {} }],

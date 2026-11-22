@@ -24,8 +24,7 @@ import {
   reviewerQuestionnaire,
 } from "./questionnaires.mjs";
 
-// The one fictional file the demo ever sends (Ruling R18); the database accepts
-// no other name.
+// Legacy test fixture; live OneDrive responses send only requestId, not a file name.
 export const SAMPLE_DOCUMENT_FILENAME = "demo-mileage-record-2025.pdf";
 
 // The review conversation's outcome, and the subset that may resolve an office
@@ -294,11 +293,9 @@ const BUILDERS = Object.freeze({
   }),
   RESPOND_DOCUMENT: (dataset, values) => ({
     requestId: relatedId(dataset, values, "requestId", "request"),
-    filename: SAMPLE_DOCUMENT_FILENAME,
   }),
   RECORD_DOCUMENT_RESPONSE: (dataset, values) => ({
     requestId: relatedId(dataset, values, "requestId", "request"),
-    filename: SAMPLE_DOCUMENT_FILENAME,
   }),
   VERIFY_DOCUMENT: (dataset, values) => ({
     requestId: relatedId(dataset, values, "requestId", "request"),
