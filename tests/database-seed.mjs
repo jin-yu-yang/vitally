@@ -1142,7 +1142,12 @@ test("seed command against real Supabase", async (t) => {
                join public.volunteer_profiles v on v.person_id=p.id and v.workspace_id=p.workspace_id
                join public.roster_entries e on e.person_id=p.id and e.workspace_id=p.workspace_id and e.season=w.current_season
               where p.workspace_id=$1 and p.user_id is null and v.email=any($2)
-                and not exists (select 1 from public.shifts s where s.person_id=p.id and s.removed_at is null)`,
+                and e.roles[1] is not null
+                and exists (select 1 from public.certificates c
+                             where c.person_id=p.id and c.workspace_id=p.workspace_id
+                               and c.season=w.current_season and c.status='confirmed')
+                and not exists (select 1 from public.shifts s where s.person_id=p.id and s.removed_at is null)
+              order by v.email`,
             [f.workspaceId, emails],
           )
         ).rows;
