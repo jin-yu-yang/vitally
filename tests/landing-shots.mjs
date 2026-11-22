@@ -69,6 +69,13 @@ try {
     runDir,
   });
   console.log("Seeded:", JSON.stringify(seeded));
+  // A client documents link, as govitally.org has, so the client pages show
+  // "Upload to PCDC" / "I've uploaded it" (#245) instead of "Online upload is
+  // not available". A fictional address; nothing is uploaded.
+  await db.sql(
+    "insert into public.season_settings(workspace_id,client_documents_url) values($1,$2) on conflict(workspace_id) do update set client_documents_url=excluded.client_documents_url",
+    [db.workspaceId, "https://example.org/pcdc-client-documents"],
+  );
 
   const chrome = await fixture.launch("chrome");
 
