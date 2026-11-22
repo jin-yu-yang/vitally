@@ -67,8 +67,8 @@
 
 ## 5. Screens
 
-- [ ] 5.1 `src/setup-views.mjs`: the reason line under a returned item (design D8). Unit tests in `tests/setup-views.test.mjs`.
-- [ ] 5.2 `src/volunteer-views.mjs`:
+- [x] 5.1 `src/setup-views.mjs`: the reason line under a returned item (design D8). Unit tests in `tests/setup-views.test.mjs`.
+- [x] 5.2 `src/volunteer-views.mjs`:
   - the reason row for Mark reviewed (quick picks per document: for a 13615 "Not signed", "Can't read it", "Wrong form" and "Missing a certification", plus "Already on file" only with a role this season; for a photo ID "Can't read it", "Expired" and "Not a photo ID"; a note with maxlength 120; Send back disabled until one is given; Cancel);
   - "Last returned: <reason> · <date>" in a document's place when a review reason is stored;
   - the Usual days checkboxes in the drawer.
