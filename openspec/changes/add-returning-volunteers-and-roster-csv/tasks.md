@@ -37,5 +37,5 @@
 
 ## 8. Docs and checks
 
-- [ ] 8.1 Update the developer guide where it describes the Roster and the seed (`docs/developer/`), and the roadmap's #138 progress line if it lists these items
+- [x] 8.1 Update the developer guide where it describes the Roster and the seed (`docs/developer/`), and the roadmap's #138 progress line if it lists these items
 - [ ] 8.2 Run `npm test` locally; run the database tests with `database-quick.yml`; verify `test:database` and the browser suite with the PR's full CI run (no local Docker)
