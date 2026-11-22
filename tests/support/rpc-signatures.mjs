@@ -325,7 +325,7 @@ export const RPC_SIGNATURES = Object.freeze([
   // (design D3).
   Object.freeze({
     name: "vitally_mark_upload_reviewed",
-    signature: "vitally_mark_upload_reviewed(uuid,uuid,bigint,text)",
+    signature: "vitally_mark_upload_reviewed(uuid,uuid,bigint,text,text)",
     authorized: (f) => f.siteCoordinator,
     receiptKeys: Object.freeze(["actionId", "personId", "revision"]),
     context: async (f) => {
@@ -339,6 +339,7 @@ export const RPC_SIGNATURES = Object.freeze([
       p_volunteer_id: context.reviewVolunteerId,
       p_expected_revision: context.reviewRevision,
       p_document: "form13615",
+      p_reason: "Not signed",
     }),
   }),
   // The office panel's client list: an array, each element of this shape.

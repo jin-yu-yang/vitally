@@ -426,12 +426,13 @@ test("reviewing sent uploads against real Supabase", async (t) => {
       assert.equal(error, null, `save: ${error?.code} ${error?.message} ${error?.details}`);
       return data;
     };
-    const review = (m, document, { actionId = randomUUID(), revision } = {}) =>
+    const review = (m, document, { actionId = randomUUID(), revision, reason = "Not signed" } = {}) =>
       admin.client.rpc("vitally_mark_upload_reviewed", {
         p_action_id: actionId,
         p_volunteer_id: m.personId,
         p_expected_revision: revision,
         p_document: document,
+        p_reason: reason,
       });
     const reviewed = async (m, document, opts) => {
       const revision = opts?.revision ?? (await revisionOf(m));
@@ -553,6 +554,111 @@ test("reviewing sent uploads against real Supabase", async (t) => {
       assert.equal(await revisionOf(m), before);
     });
 
+    await t.test("Mark reviewed stores the reason and time", async () => {
+      const m = await uncleared("rev_reason", "Cora Eastwick");
+      await send(m, "form13615");
+      await reviewed(m, "form13615", { reason: "Can't read it" });
+      const entry = await entryOf(m);
+      assert.equal(entry.form_13615_sent_at, null);
+      assert.equal(entry.form_13615_review_reason, "Can't read it");
+      assert.ok(Math.abs(entry.form_13615_reviewed_at.getTime() - Date.now()) < 60_000);
+    });
+
+    await t.test("Mark reviewed trims the reason", async () => {
+      const m = await uncleared("rev_trim", "Dara Quillfeather");
+      await send(m, "form13615");
+      await reviewed(m, "form13615", { reason: "  Wrong form  " });
+      assert.equal((await entryOf(m)).form_13615_review_reason, "Wrong form");
+    });
+
+    await t.test("Mark reviewed with no reason is refused VALIDATION with no receipt", async () => {
+      const m = await uncleared("rev_noreason", "Emil Strand");
+      await send(m, "form13615");
+      for (const reason of [null, "   "]) {
+        const actionId = randomUUID();
+        const { error } = await review(m, "form13615", { actionId, revision: await revisionOf(m), reason });
+        assert.equal(error?.code, "VT007", `reason ${JSON.stringify(reason)}`);
+        assert.ok((await entryOf(m)).form_13615_sent_at, "a refusal changes nothing");
+        assert.equal(await f.receiptsFor(actionId), 0);
+      }
+    });
+
+    await t.test("a 121-character reason is refused; 120 is accepted", async () => {
+      const m = await uncleared("rev_long", "Fern Oyelaran");
+      await send(m, "form13615");
+      const { error } = await review(m, "form13615", { revision: await revisionOf(m), reason: "x".repeat(121) });
+      assert.equal(error?.code, "VT007");
+      assert.ok((await entryOf(m)).form_13615_sent_at);
+      await reviewed(m, "form13615", { reason: "x".repeat(120) });
+      assert.equal((await entryOf(m)).form_13615_review_reason, "x".repeat(120));
+    });
+
+    await t.test("nothing waiting keeps the first reason", async () => {
+      const m = await uncleared("rev_first", "Gus Lindholm");
+      await send(m, "form13615");
+      await reviewed(m, "form13615", { reason: "Not signed" });
+      await reviewed(m, "form13615", { reason: "Wrong form" });
+      assert.equal((await entryOf(m)).form_13615_review_reason, "Not signed");
+    });
+
+    await t.test("a non-admin with no reason is refused FORBIDDEN, not VALIDATION", async () => {
+      const m = await uncleared("rev_forbid_noreason", "Hana Wexford");
+      await send(m, "form13615");
+      const { error } = await f.preparer.rpc("vitally_mark_upload_reviewed", {
+        p_action_id: randomUUID(),
+        p_volunteer_id: m.personId,
+        p_expected_revision: await revisionOf(m),
+        p_document: "form13615",
+        p_reason: null,
+      });
+      assert.equal(error?.code, "VT001");
+    });
+
+    await t.test("the four-argument call is gone", async () => {
+      const m = await uncleared("rev_four", "Ivo Castellane");
+      await send(m, "form13615");
+      const { error } = await admin.client.rpc("vitally_mark_upload_reviewed", {
+        p_action_id: randomUUID(),
+        p_volunteer_id: m.personId,
+        p_expected_revision: await revisionOf(m),
+        p_document: "form13615",
+      });
+      assert.equal(error?.code, "PGRST202");
+    });
+
+    await t.test("a role change clears the review pair", async () => {
+      const m = await f.staff({ key: "rev_pair_role", name: "Joss Merriweather", capabilities: ["prepare"] });
+      await send(m, "form13615");
+      await reviewed(m, "form13615", { reason: "Missing a certification" });
+      assert.equal((await entryOf(m)).form_13615_review_reason, "Missing a certification");
+      await save(m, { certificates: [...(await certsOf(m)), "advanced"] });
+      const entry = await entryOf(m);
+      assert.equal(entry.form_13615_reviewed_at, null);
+      assert.equal(entry.form_13615_review_reason, null);
+    });
+
+    await t.test("Photo ID checked clears the photo review pair", async () => {
+      const m = await uncleared("rev_pair_photo", "Kit Aldercott");
+      await setEntry(m, "is_new=true,photo_id_checked_at=null");
+      await send(m, "photoId");
+      await reviewed(m, "photoId", { reason: "Expired" });
+      assert.equal((await entryOf(m)).photo_id_review_reason, "Expired");
+      await save(m, { isNew: true, photoIdChecked: true });
+      const entry = await entryOf(m);
+      assert.equal(entry.photo_id_reviewed_at, null);
+      assert.equal(entry.photo_id_review_reason, null);
+    });
+
+    await t.test("a phone-only save keeps the review pair", async () => {
+      const m = await uncleared("rev_pair_keep", "Lior Vandenberg");
+      await send(m, "form13615");
+      await reviewed(m, "form13615", { reason: "Not signed" });
+      await save(m, { phone: "555-0144" });
+      const entry = await entryOf(m);
+      assert.ok(entry.form_13615_reviewed_at);
+      assert.equal(entry.form_13615_review_reason, "Not signed");
+    });
+
     await t.test("Mark reviewed with a stale revision is refused CONFLICT", async () => {
       const m = await uncleared("rev_stale", "Dina Marchetti");
       await send(m, "form13615");
@@ -572,6 +678,7 @@ test("reviewing sent uploads against real Supabase", async (t) => {
         p_volunteer_id: randomUUID(),
         p_expected_revision: 1,
         p_document: "form13615",
+        p_reason: "Not signed",
       });
       assert.equal(error?.code, "VT002");
     });
@@ -585,6 +692,7 @@ test("reviewing sent uploads against real Supabase", async (t) => {
         p_volunteer_id: m.personId,
         p_expected_revision: await revisionOf(m),
         p_document: "form13615",
+        p_reason: "Not signed",
       });
       assert.equal(error?.code, "VT001");
       assert.ok((await entryOf(m)).form_13615_sent_at);
@@ -613,6 +721,7 @@ test("reviewing sent uploads against real Supabase", async (t) => {
         p_volunteer_id: m.personId,
         p_expected_revision: before,
         p_document: "form13615",
+        p_reason: "Not signed",
       });
       assert.equal(error, null, `review: ${error?.code} ${error?.message} ${error?.details}`);
       assert.equal(data.personId, m.personId);

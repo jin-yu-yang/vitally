@@ -81,7 +81,7 @@ const RPCS = Object.freeze([
   "vitally_save_season_settings(p_action_id uuid, p_expected_revision bigint, p_settings jsonb)",
   "vitally_set_site_number(p_action_id uuid, p_sidn text)",
   "vitally_mark_upload_sent(p_action_id uuid, p_document text)",
-  "vitally_mark_upload_reviewed(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_document text)",
+  "vitally_mark_upload_reviewed(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_document text, p_reason text)",
   "vitally_start_next_season(p_action_id uuid, p_expected_season smallint, p_typed_year smallint)",
 ]);
 // The public RPCs that only read: no action id, no digest.
