@@ -30,6 +30,7 @@ async function requestedCase(f) {
 test("document requests, receipts and verification keep the preparer in charge", async (t) => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     await t.test(
       "the assigned preparer requests, the client responds, the preparer verifies",
       async () => {
@@ -339,6 +340,68 @@ test("document requests, receipts and verification keep the preparer in charge",
       },
     );
     await t.test(
+      "a client reports an upload only while the client documents link is set; the office records one without it",
+      async () => {
+        const owned = await requestedCase(f);
+        const office = await f.assistedCase();
+        await f.setClientDocumentsLink(null);
+        try {
+          await assert.rejects(
+            () => f.act(f.applicantA, owned, "RESPOND_DOCUMENT", {}),
+            rejected("INVALID_TRANSITION"),
+          );
+          await assert.rejects(
+            () => f.act(f.applicantA, owned, "SET_DOCUMENT_CARD", { slotId: "photo_id.tp", status: "sent" }),
+            rejected("INVALID_TRANSITION"),
+          );
+          const staff = await f.readStaffCase(owned);
+          assert.equal(staff.requests[0].status, "open");
+          assert.equal(staff.documents.length, 0);
+          // The office saw the document itself, so no link is needed.
+          await f.act(f.siteCoordinator, office, "RECORD_DOCUMENT_RESPONSE", {});
+          assert.equal((await f.readStaffCase(office)).requests[0].status, "awaiting_verification");
+        } finally {
+          await f.setClientDocumentsLink();
+        }
+        await f.act(f.applicantA, owned, "RESPOND_DOCUMENT", {});
+        assert.equal((await f.readStaffCase(owned)).requests[0].status, "awaiting_verification");
+      },
+    );
+    await t.test(
+      "a mis-marked card can be taken back: the client before staff confirm it, staff one step at a time",
+      async () => {
+        const caseId = await preparingCase(f);
+        const slotId = "photo_id.tp";
+        const status = async () =>
+          (
+            await f.sql("select status from public.case_document_cards where case_id=$1 and slot_id=$2", [
+              caseId,
+              slotId,
+            ])
+          ).rows[0]?.status ?? null;
+        const mark = (client, value) => f.act(client, caseId, "SET_DOCUMENT_CARD", { slotId, status: value });
+        // The client reported it by mistake and takes it back.
+        await mark(f.applicantA, "sent");
+        await mark(f.applicantA, "later");
+        assert.equal(await status(), "later");
+        await mark(f.applicantA, "sent");
+        await mark(f.applicantA, "not_done");
+        assert.equal(await status(), null);
+        await mark(f.applicantA, "sent");
+        // The preparer marks it received, then takes that back to "sent".
+        await mark(f.preparer, "received");
+        await mark(f.preparer, "sent");
+        assert.equal(await status(), "sent");
+        // Verified goes back to received.
+        await mark(f.preparer, "verified");
+        await mark(f.preparer, "received");
+        assert.equal(await status(), "received");
+        // Once staff confirmed it, the client can no longer change it.
+        await assert.rejects(() => mark(f.applicantA, "later"), rejected("INVALID_TRANSITION"));
+        assert.equal(await status(), "received");
+      },
+    );
+    await t.test(
       "receipts reject the wrong actor and the wrong case",
       async () => {
         const owned = await requestedCase(f);
@@ -592,6 +655,7 @@ test("document requests, receipts and verification keep the preparer in charge",
 test("admin follow-up is assigned, recorded and resolved by the office", async (t) => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     await t.test(
       "escalation assigns the default person and resolution leaves preparation untouched",
       async () => {

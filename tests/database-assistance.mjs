@@ -111,6 +111,7 @@ async function pendingCase(f) {
 test("assistance items are claimed and resolved by their own helper", async (t) => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     await t.test(
       "a claim assigns the helper and a resolution records the note",
       async () => {
@@ -492,6 +493,7 @@ test("assistance items are claimed and resolved by their own helper", async (t) 
 test("reminders record a simulated nudge on available work", async (t) => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     await t.test(
       "unclaimed preparation work takes a reminder and no external message",
       async () => {
@@ -633,6 +635,7 @@ test("reminders record a simulated nudge on available work", async (t) => {
 test("closure cancels pending work without erasing its history", async (t) => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     await t.test(
       "a reasoned closure cancels the open request and the open task",
       async () => {

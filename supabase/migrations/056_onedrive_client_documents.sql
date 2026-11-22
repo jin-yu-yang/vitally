@@ -340,6 +340,14 @@ $$;
 create or replace function vitally_private.act_respond_document(p_member public.memberships,p_case public.cases,p_person public.people,p_payload jsonb)
 returns jsonb language plpgsql security definer set search_path='' as $$
 begin
+ -- As for a card marked "sent": a client reports an upload only when the site
+ -- configured its client link. (The office's RECORD_DOCUMENT_RESPONSE needs no link.)
+ if not exists (
+  select 1 from public.season_settings s where s.workspace_id=p_case.workspace_id
+   and s.client_documents_url is not null
+ ) then
+  raise sqlstate 'VT004' using message='INVALID_TRANSITION';
+ end if;
  return jsonb_build_object(
   'detail',vitally_private.receive_document(p_case,p_payload,'client',p_member.user_id,null),
   'message','You reported uploading a document to PCDC OneDrive. Staff will check it before verifying.');

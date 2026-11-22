@@ -545,6 +545,7 @@ const INTERNAL = Object.freeze([
 
 test("Realtime carries one applicant's rows to that applicant only", async (t) => {
   const f = await createDatabaseFixture();
+  await f.setClientDocumentsLink();
   // One channel held open for the whole file so the tenant keeps streaming
   // between checks; it is a staff member's, so it proves nothing about isolation
   // and is never read for evidence.
@@ -1015,6 +1016,7 @@ test("Realtime carries one applicant's rows to that applicant only", async (t) =
 // sign-in is streamed to admins only.
 test("a volunteer with no sign-in reaches admins only", async () => {
   const f = await createDatabaseFixture();
+  await f.setClientDocumentsLink();
   let adminWatch = null;
   let staffWatch = null;
   try {
@@ -1080,6 +1082,7 @@ test("a volunteer with no sign-in reaches admins only", async () => {
 // so the uncleared channel's warm-up and fence are people rows.
 test("an uncleared subscriber gets no case change", async () => {
   const f = await createDatabaseFixture();
+  await f.setClientDocumentsLink();
   let clearedWatch = null;
   let unclearedWatch = null;
   try {
@@ -1148,6 +1151,7 @@ test("an uncleared subscriber gets no case change", async () => {
 // publication, and the history lines name neither.
 test("realtime carries no code", async () => {
   const f = await createDatabaseFixture();
+  await f.setClientDocumentsLink();
   const CODE = "IND-031-04";
   const NOTE = "Fictional note: preparer to correct the dependent's SSN in TaxSlayer.";
   let watch = null;
@@ -1226,6 +1230,7 @@ test("realtime carries no code", async () => {
 // an applicant, even the owner of the labelled case.
 test("label changes reach staff and no applicant", async () => {
   const f = await createDatabaseFixture();
+  await f.setClientDocumentsLink();
   let staff = null;
   let applicant = null;
   let fence = null;

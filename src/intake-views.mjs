@@ -374,6 +374,9 @@ export function docCard(card, { links = true, off = "", office = false, lang = "
   const hintText = card.hint?.en ? shown(card.hint) : "";
   const hint = hintText ? `<p class="doc-hint">${esc(hintText)}</p>` : "";
   const sent = ["sent", "received", "verified"].includes(card.status);
+  // Only staff's received / verified is final for the client. A "sent" they
+  // reported by mistake can still be changed to Later, Don't have or not done.
+  const confirmed = ["received", "verified"].includes(card.status);
   const upload = office || card.status === "verified" || card.status === "received" ? "" : uploadControls({
     url: uploadLink, record, lang: language, sent,
     off,
@@ -382,7 +385,7 @@ export function docCard(card, { links = true, off = "", office = false, lang = "
   const status = statusOf(card);
   const marks = optional && card.status === "not_done"
     ? ""
-    : `<div class="doc-marks">${sent || optional ? "" : markButton(card.slotId, "later", words.later, off)}${sent || optional ? "" : markButton(card.slotId, "none", words.none, off)}${when(card.status !== "not_done" && !sent, markButton(card.slotId, "not_done", say("doc.mark_not_done"), off))}</div><p class="doc-status is-${esc(card.status)}" id="${id}-status" tabindex="-1">${icon(status.icon)}<span class="sr-only">${esc(say("doc.status"))}</span>${esc(statusWord(card, language))}</p>`;
+    : `<div class="doc-marks">${confirmed || optional ? "" : markButton(card.slotId, "later", words.later, off)}${confirmed || optional ? "" : markButton(card.slotId, "none", words.none, off)}${when(card.status !== "not_done" && !confirmed, markButton(card.slotId, "not_done", say("doc.mark_not_done"), off))}</div><p class="doc-status is-${esc(card.status)}" id="${id}-status" tabindex="-1">${icon(status.icon)}<span class="sr-only">${esc(say("doc.status"))}</span>${esc(statusWord(card, language))}</p>`;
   return `<article class="doc-card" id="${id}" data-slot="${esc(card.slotId)}" tabindex="-1"><h3>${esc(text(card.label))}</h3><p class="doc-owner">${esc(shown(card.ownerLine))}</p>${why}${hint}${upload}${marks}</article>`;
 }
 

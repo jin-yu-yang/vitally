@@ -973,8 +973,9 @@ export function createController({
       if (staffWindow() !== wasStaff) return;
       if (awaitingClearance(state)) return;
     }
-    // Season settings may change independently of case changes.
-    await readClientDocumentsUrl();
+    // The client documents link is read once in loadData; a wake re-reads it,
+    // since Season settings may change in another window.
+    if (wake) await readClientDocumentsUrl();
     // The feed never blocks the rest, and never fails the refresh.
     await readFeed();
     let failure = null;
@@ -1645,6 +1646,7 @@ export function createController({
         return false;
       },
     );
+    if (answer) await readClientDocumentsUrl();
     return answer ? STAFF_SETTINGS_SAVED : null;
   }
 

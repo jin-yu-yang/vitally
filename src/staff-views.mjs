@@ -20,7 +20,6 @@ import { canLabelCase, canManageLabels, labelNameTaken, LABEL_COLORS } from "./c
 import { formatAnswer, sendable } from "./intake-form.mjs";
 import { exitFormSource, exitFormNote } from "./exit-form-source.mjs";
 import { cardsFor, CARD_SUBSTEPS } from "./document-cards.mjs";
-import { uploadUrl } from "./document-upload.mjs";
 import { serverAnswersV2, variantOf } from "./intake-views.mjs";
 import {
   esc,
@@ -1345,7 +1344,7 @@ function groupMark(card) {
   return { word: "Maybe needed", icon: "help", className: "is-maybe" };
 }
 
-function checklistRow(card, { variant, markable, movable, off, answers, uploadLink }) {
+function checklistRow(card, { variant, markable, movable, off, answers }) {
   const id = `doc-${esc(dashedSlot(card.slotId))}`;
   const slot = esc(card.slotId);
   const group = groupMark(card);
@@ -1360,7 +1359,7 @@ function checklistRow(card, { variant, markable, movable, off, answers, uploadLi
     button(esc(text), "mark-card", "secondary", `data-slot="${slot}" data-status="${value}"${off}`);
   const marks =
     markable && (!optional || ["sent", "received", "verified"].includes(card.status))
-      ? `${optional ? "" : mark("later", "Later")}${optional ? "" : mark("none", "Don't have")}${when(card.status === "sent", `${mark("received", "Mark received")}${mark("verified", "Mark verified")}`)}${when(card.status === "received", mark("verified", "Mark verified"))}${when(!["not_done", "received", "verified"].includes(card.status), mark("not_done", "Mark as not done"))}`
+      ? `${optional ? "" : mark("later", "Later")}${optional ? "" : mark("none", "Don't have")}${when(card.status === "sent", `${mark("received", "Mark received")}${mark("verified", "Mark verified")}`)}${when(card.status === "received", `${mark("verified", "Mark verified")}${mark("sent", "Undo received")}`)}${when(card.status === "verified", mark("received", "Undo verified"))}${when(!["not_done", "received", "verified"].includes(card.status), mark("not_done", "Mark as not done"))}`
       : "";
   const move =
     movable && card.baseGroup === "maybe"
@@ -1368,7 +1367,7 @@ function checklistRow(card, { variant, markable, movable, off, answers, uploadLi
         ? button("Move to Needed", "move-card", "secondary", `data-slot="${slot}" data-group="needed"${off}`)
         : button("Move to Maybe needed", "move-card", "secondary", `data-slot="${slot}" data-group="maybe"${off}`)
       : "";
-  return `<article class="doc-row" id="${id}" data-slot="${slot}" tabindex="-1"><div class="doc-row-head"><strong class="doc-label">${esc(card.label?.en)}</strong><span class="doc-group ${group.className}">${icon(group.icon)} ${esc(group.word)}</span></div><p class="doc-owner">${esc(card.ownerLine?.office ?? card.ownerLine?.en)}</p>${why}${statusLine}${when(card.status === "sent" && uploadUrl(uploadLink), `<p class="field-note">Uploaded ${esc(card.changedAt ? formatTime(card.changedAt) : "") } · to check</p><a class="btn secondary" href="${esc(uploadLink)}" target="_blank" rel="noopener noreferrer">Open upload folder</a>`)}${when(marks || move, `<div class="doc-marks">${marks}${move}</div>`)}</article>`;
+  return `<article class="doc-row" id="${id}" data-slot="${slot}" tabindex="-1"><div class="doc-row-head"><strong class="doc-label">${esc(card.label?.en)}</strong><span class="doc-group ${group.className}">${icon(group.icon)} ${esc(group.word)}</span></div><p class="doc-owner">${esc(card.ownerLine?.office ?? card.ownerLine?.en)}</p>${why}${statusLine}${when(card.status === "sent", `<p class="field-note">Uploaded ${esc(card.changedAt ? formatTime(card.changedAt) : "")} · to check</p>`)}${when(marks || move, `<div class="doc-marks">${marks}${move}</div>`)}</article>`;
 }
 
 /**
@@ -1394,7 +1393,7 @@ export function documentChecklist(record, rights, ui = {}) {
     const mine = cards.filter((card) => card.substep === name);
     if (!mine.length) return "";
     const title = findSubstep(`documents.${name}`)?.title?.general?.en ?? name;
-    return `<h3>${esc(title)}</h3><div class="doc-rows">${mine.map((card) => checklistRow(card, { variant, markable, movable, off, answers, uploadLink: ui.clientDocumentsUrl })).join("")}</div>`;
+    return `<h3>${esc(title)}</h3><div class="doc-rows">${mine.map((card) => checklistRow(card, { variant, markable, movable, off, answers })).join("")}</div>`;
   }).join("");
   return `<section class="panel doc-checklist" aria-labelledby="doc-checklist-title"><div class="section-head"><h2 id="doc-checklist-title">Document checklist</h2></div><p class="field-note">From the client's answers. Same-day clients bring these to the visit.</p>${reasons
     .map((reason) => explain({ reason }))
@@ -1402,8 +1401,6 @@ export function documentChecklist(record, rights, ui = {}) {
 }
 
 function requestCard(record, request, rights, ui) {
-  const folderLink = uploadUrl(ui?.clientDocumentsUrl)
-    ? `<a class="btn secondary" href="${esc(ui.clientDocumentsUrl)}" target="_blank" rel="noopener noreferrer">Open upload folder</a>` : "";
   const busy = ui.busy ? "disabled" : "";
   const documents = (record.documents ?? []).filter(
     (document) => document?.requestId === request?.id,
@@ -1443,13 +1440,13 @@ function requestCard(record, request, rights, ui) {
     `<ul class="document-list">${documents
       .map(
         (document) =>
-          `<li>${icon("file")} ${esc(request?.title)} <small>${document.source === "client" ? "Uploaded" : "Office recorded"} ${esc(formatTime(document.createdAt))} · ${request.status === "verified" ? "verified" : "to check"}</small>${folderLink}</li>`,
+          `<li>${icon("file")} ${esc(request?.title)} <small>${document.source === "client" ? "Uploaded" : "Office recorded"} ${esc(formatTime(document.createdAt))} · ${request.status === "verified" ? "verified" : "to check"}</small></li>`,
       )
       .join("")}</ul>`,
   )}${when(
     Boolean(followup),
     `<p class="field-note">${icon("clock")} The office is already contacting the client about this request.</p>`,
-  )}${when(request?.status === "awaiting_verification", folderLink)}${verify}${escalate}</div>`;
+  )}${verify}${escalate}</div>`;
 }
 
 export function documentsPanel(record, rights, ui) {

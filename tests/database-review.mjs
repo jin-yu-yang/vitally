@@ -84,6 +84,7 @@ function assertPlainClientMessage(message) {
 test("independent review corrects, re-reviews and approves a prepared case", async (t) => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     // Test-only staff: Drew prepares and also holds `review`, so self-review
     // is proved to be blocked by participation rather than by a missing
     // qualification; Casey prepares without reviewing, and Riley reviews
@@ -746,6 +747,7 @@ test("independent review corrects, re-reviews and approves a prepared case", asy
 test("review submission waits for documents, not for office contact", async (t) => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     await t.test(
       "an open follow-up never blocks a preparer whose documents are verified",
       async () => {
@@ -1051,6 +1053,7 @@ test("review submission waits for documents, not for office contact", async (t) 
 test("a reassigned case excludes its former preparer from review", async (t) => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     // Test-only staff: Drew prepares and also holds `review`; Casey prepares only.
     const drew = await f.staff({ key: "drew", name: "Drew Hayes", capabilities: ["prepare", "review"] });
     const casey = await f.staff({ key: "casey", name: "Casey", capabilities: ["prepare"] });
@@ -1236,6 +1239,7 @@ const claimedReview = async (f) => {
 test("questionnaire tables are staff-only", async () => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     const { caseId, reviewId } = await claimedReview(f);
     await insertReviewer(f, caseId, reviewId);
     for (const table of ["preparer_questionnaires", "reviewer_questionnaires"]) {
@@ -1259,6 +1263,7 @@ test("questionnaire tables are staff-only", async () => {
 test("questionnaire table checks", async () => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     const { caseId, reviewId } = await claimedReview(f);
     await assert.rejects(() => insertPreparer(f, caseId, { confirmed_by: "other", confirmed_by_name: null }));
     await assert.rejects(() => insertPreparer(f, caseId, { confirmed_by: "client", confirmed_by_name: "Pat" }));
@@ -1291,6 +1296,7 @@ test("questionnaire table checks", async () => {
 test("follow-ups have a purpose", async () => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     const caseId = await f.readyCase();
     await f.act(f.preparer, caseId, "CLAIM_PREPARATION", {});
     await f.act(f.preparer, caseId, "REQUEST_DOCUMENT", f.sampleRequest);
@@ -1317,6 +1323,7 @@ test("follow-ups have a purpose", async () => {
 test("the signing plan is the client's to read", async () => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     const caseId = await f.preparedCase();
     const set = (plan, at) =>
       f.sql("update public.cases set signing_plan=$2, signing_appointment_at=$3 where id=$1", [caseId, plan, at]);
@@ -1446,6 +1453,7 @@ const GOOD_REVIEWER = {
 test("questionnaire payloads are validated by the database", async (t) => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     const unchanged = async (caseId, run) => {
       const before = await f.readStaffCase(caseId);
       await run();
@@ -1566,6 +1574,7 @@ const defaultFollowup = async (f) =>
 test("the three handlers store the answers", async (t) => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     const season = async (caseId) =>
       Number(
         (

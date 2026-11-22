@@ -63,6 +63,7 @@ function pending() {
 test("the browser adapter reads, acts and subscribes against real Supabase", async (t) => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     const applicant = createStore(f.applicantA);
     const office = createStore(f.siteCoordinator);
 

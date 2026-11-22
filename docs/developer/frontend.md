@@ -1148,16 +1148,27 @@ environments.
 The site coordinator sets **Client documents upload link** in Season settings; use a
 OneDrive **file request** (upload-only) link. Client Intake document cards and open
 document requests open that URL in a new tab. They do not send file bytes or
-filenames to ViTally. Clients name their OneDrive file with the client number, or
-with the `VT-…` application reference before one is assigned.
+filenames to ViTally. Clients name their OneDrive file with the case's `VT-…`
+reference, which stays the same after submit and is never reused in a later season
+(client numbers restart each season).
 
 `I've uploaded it` is a client declaration only: the corresponding card moves
 from `not_done` / `later` to `sent`, or an open document request becomes
-`awaiting_verification`. Staff see the date and a OneDrive folder link, then
-confirm a card as `received` / `verified` or verify a document request using
-its existing `VERIFY_DOCUMENT` action. If there is no configured URL, the
-client is told to bring documents to PCDC and no upload control appears. The
-application never reads OneDrive or checks whether a file arrived.
+`awaiting_verification`. The database refuses both while the workspace has no
+client documents link; the office's `RECORD_DOCUMENT_RESPONSE` needs none. Until
+staff confirm it, a client who reported a card by mistake can still mark it
+Later, Don't have or not done. Staff see the date it was reported, then confirm a
+card as `received` / `verified` (with **Undo received** and **Undo verified** to
+take a mis-click back one step) or verify a document request using its existing
+`VERIFY_DOCUMENT` action. Staff get no OneDrive folder link: the client link is
+upload-only, so site coordinators open the folder in OneDrive themselves. If
+there is no configured URL, the client is told to bring documents to PCDC and no
+upload control appears. The application never reads OneDrive or checks whether a
+file arrived.
+
+The controller reads the link (`readClientDocumentsUrl`) when the window loads its
+data, on each wake (focus, tab visible, `online`), and after a Season settings
+save; not on every realtime refresh.
 
 Migration `056_onedrive_client_documents.sql` adds an applicant-safe URL read
 RPC and expands card statuses; *clients cannot set* `received` or `verified`.

@@ -5,6 +5,7 @@ import { docCard } from "../src/intake-views.mjs";
 import { cardsFor } from "../src/document-cards.mjs";
 import { makeSampleAnswers } from "../src/sample-data.mjs";
 import { progressScreen } from "../src/client-views.mjs";
+import { documentChecklist } from "../src/staff-views.mjs";
 
 const record = { reference: "VT-GJPY-JAY9", clientNumber: null };
 const link = "https://example.org/upload?x=1&y=2";
@@ -20,11 +21,6 @@ test("uploads open only an HTTPS OneDrive link in a protected new tab", () => {
   assert.match(html, /VT-GJPY-JAY9 W-2/);
   assert.match(html, /I&#39;ve uploaded it/);
   assert.doesNotMatch(html, /<input[^>]*type="file"/);
-});
-
-test("reference naming uses the client number when available, draft ID otherwise", () => {
-  assert.equal(uploadReference(record), "VT-GJPY-JAY9");
-  assert.equal(uploadReference({ ...record, clientNumber: 47 }), "#047");
 });
 
 test("without an upload link, neither upload link nor confirmation is shown", () => {
@@ -56,4 +52,49 @@ test("progress request confirmation requires a configured URL", () => {
   const available = progressScreen({ ...state, clientDocumentsUrl: link });
   assert.match(available, /data-case-action="RESPOND_DOCUMENT"/);
   assert.doesNotMatch(available, /demo-mileage-record|Simulate an upload failure/);
+});
+
+test("the file-name hint uses the case reference, never the season's client number", () => {
+  assert.equal(uploadReference(record), "VT-GJPY-JAY9");
+  assert.equal(uploadReference({ ...record, clientNumber: 47 }), "VT-GJPY-JAY9");
+  assert.equal(uploadReference({ clientNumber: 47 }), "");
+});
+
+test("a client can take back an upload they reported, until staff confirm it", () => {
+  const at = (status) =>
+    docCard(cardsFor(makeSampleAnswers(), [{ slotId: card.slotId, status }]).find((c) => c.slotId === card.slotId), {
+      uploadLink: link,
+      record,
+    });
+  const sent = at("sent");
+  for (const status of ["later", "none", "not_done"]) assert.match(sent, new RegExp(`data-status="${status}"`));
+  for (const status of ["received", "verified"]) {
+    const html = at(status);
+    for (const value of ["later", "none", "not_done", "sent"])
+      assert.doesNotMatch(html, new RegExp(`data-status="${value}"`), `${status} offers ${value}`);
+  }
+});
+
+test("staff can undo a mark one step, and get no upload-folder link", () => {
+  const checklist = (status) =>
+    documentChecklist(
+      { answers: makeSampleAnswers(), documentCards: [{ slotId: card.slotId, status, changedAt: "2026-02-10T15:00:00Z" }] },
+      { markDocumentCard: { allowed: true } },
+      { clientDocumentsUrl: link },
+    );
+  const row = (status) => {
+    const html = checklist(status);
+    const start = html.indexOf(`data-slot="${card.slotId}"`);
+    return html.slice(start, html.indexOf("</article>", start));
+  };
+  assert.match(row("sent"), /data-status="received"[^>]*>Mark received/);
+  assert.match(row("received"), /data-status="sent"[^>]*>Undo received/);
+  assert.match(row("received"), /data-status="verified"[^>]*>Mark verified/);
+  assert.match(row("verified"), /data-status="received"[^>]*>Undo verified/);
+  assert.doesNotMatch(row("verified"), /Mark verified/);
+  for (const status of ["sent", "received", "verified"]) {
+    const html = checklist(status);
+    assert.doesNotMatch(html, /Open upload folder/);
+    assert.doesNotMatch(html, /example\.org\/upload/);
+  }
 });

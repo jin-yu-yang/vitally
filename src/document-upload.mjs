@@ -5,10 +5,9 @@ import { t } from "./client-text.mjs";
 export const uploadUrl = (value) =>
   typeof value === "string" && /^https:\/\/[^\s]+$/i.test(value) ? value : null;
 
-export const uploadReference = (record) =>
-  record?.clientNumber != null
-    ? `#${String(record.clientNumber).padStart(3, "0")}`
-    : record?.reference ?? "";
+// The case reference (VT-…): the same before and after submit, and never
+// reused in a later season, unlike the client number.
+export const uploadReference = (record) => record?.reference ?? "";
 
 export function uploadControls({ url, record, lang = "en", sent = false, off = "", action = "" } = {}) {
   const say = (key, values = {}) => esc(t(key, values, lang));

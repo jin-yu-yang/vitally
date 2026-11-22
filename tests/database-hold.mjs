@@ -8,6 +8,7 @@ import { applyArgs, createDatabaseFixture, rejected, SAMPLE_CONTACT } from "./su
 test("documents at intake against real Supabase", async (t) => {
   const f = await createDatabaseFixture();
   try {
+    await f.setClientDocumentsLink();
     const asSiteCoordinator = (caseId, type, payload = {}) => f.act(f.siteCoordinator, caseId, type, payload);
     const columns = async (caseId) =>
       (
