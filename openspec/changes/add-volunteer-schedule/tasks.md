@@ -108,8 +108,8 @@ Decided by the user on 2026-11-22: adopt main's merged My profile (`add-my-profi
   - add `vitally_my_shifts()` (D5);
   - update `tests/database-schedule.mjs`, `tests/database-clearance.mjs`, `tests/support/rpc-signatures.mjs` and `tests/database-catalog.mjs`;
   - reset the local database, then run `npm run db:migrate:test` and the full `npm run test:database`.
-- [ ] 8.3 Store and pure helpers: `myShifts()` replaces `myProfile()` and `saveMyUsualDays()`. `orderCandidates` maps `mon`…`sun` to ISO weekdays. Unit tests.
-- [ ] 8.4 Interface:
+- [x] 8.3 Store and pure helpers: `myShifts()` replaces `myProfile()` and `saveMyUsualDays()`. `orderCandidates` maps `mon`…`sun` to ISO weekdays. Unit tests.
+- [x] 8.4 Interface:
   - remove this change's My profile page, its route, its sidebar link and the Roster drawer's usual-days toggles, keeping main's;
   - add a "Your shifts this week" section to main's `myProfilePage`, read on open, on focus and on `shifts` changes;
   - make the uncleared-viewer channel Schedule-only;
