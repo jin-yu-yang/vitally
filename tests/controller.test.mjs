@@ -11441,6 +11441,53 @@ test("a CONFLICT re-reads and says so", async () => {
   controller.stop();
 });
 
+test("an admin's edit between the form and Save is a CONFLICT even after a refresh", async () => {
+  const { store, controller } = await onMyProfile();
+  assert.equal(controller.getState().myProfile.revision, 6);
+  // An admin saves the volunteer in the Roster: 7.
+  store.profile = { ...store.profile, name: "Riley Q. Park", phone: "215-555-0199", revision: 7 };
+  store.saveMyProfile = (save => async (request) => {
+    if (request.expectedRevision !== store.profile.revision) {
+      store.writes.push({ type: "saveMyProfile", ...request });
+      throw Object.assign(new Error("stale"), { code: "CONFLICT" });
+    }
+    return save(request);
+  })(store.saveMyProfile);
+  // The page refreshes on focus, then the volunteer presses Save.
+  await controller.refresh();
+  assert.equal(controller.getState().myProfile.revision, 7);
+  assert.equal(await controller.saveMyProfile(PROFILE_VALUES), null);
+  assert.equal(store.writes.at(-1).expectedRevision, 6);
+  const state = controller.getState();
+  assert.equal(state.error.code, "CONFLICT");
+  assert.equal(state.error.message, MY_PROFILE_CONFLICT);
+  assert.equal(store.profile.name, "Riley Q. Park");
+  assert.equal(store.profile.phone, "215-555-0199");
+  // The page now shows the admin's values; a save from them lands.
+  assert.equal(await controller.saveMyProfile(PROFILE_VALUES), "Profile saved");
+  assert.equal(store.writes.at(-1).expectedRevision, 7);
+  controller.stop();
+});
+
+test("the re-read after I've uploaded it does not move the revision Save sends", async () => {
+  const { store, controller } = await onMyProfile();
+  store.profile = { ...store.profile, revision: 7 };
+  await controller.markUploadSent("form13615");
+  assert.equal(controller.getState().myProfile.revision, 7);
+  await controller.saveMyProfile(PROFILE_VALUES);
+  assert.equal(store.writes.filter((write) => write.type === "saveMyProfile").at(-1).expectedRevision, 6);
+  controller.stop();
+});
+
+test("a landed save moves the revision Save sends next", async () => {
+  const { store, controller } = await onMyProfile();
+  assert.equal(await controller.saveMyProfile(PROFILE_VALUES), "Profile saved");
+  await controller.refresh();
+  assert.equal(await controller.saveMyProfile({ ...PROFILE_VALUES, phone: "215-555-0177" }), "Profile saved");
+  assert.equal(store.writes.at(-1).expectedRevision, 7);
+  controller.stop();
+});
+
 test("a refused save keeps the typed values", async () => {
   const { store, controller } = await onMyProfile();
   const shown = controller.getState().myProfile;

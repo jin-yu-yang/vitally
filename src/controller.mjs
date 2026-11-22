@@ -523,6 +523,12 @@ export function createController({
   // A My profile save whose answer never came: `{ key, request }`, the key
   // being the values as typed.
   let pendingProfileSave = null;
+  // The revision My profile's form was drawn from: set by the first read
+  // after the screen opens, by a landed save's answer and by a CONFLICT's
+  // re-read. A focus refresh or the re-read after "I've uploaded it" never
+  // moves it, so an edit made elsewhere in between is a CONFLICT, never
+  // overwritten (PR #262 review). null until a read sets it.
+  let profileFormRevision = null;
   let pendingUpdateAction = null;
   // The screening start for the open case, if one is due or held:
   // `{ action, inFlight, gaveUp }` (`startScreeningIfDue`).
@@ -1600,6 +1606,7 @@ export function createController({
     if (!staffWindow() || awaitingClearance(state)) return;
     try {
       state.myProfile = await store.getMyProfile();
+      if (profileFormRevision === null) profileFormRevision = Number(state.myProfile?.revision ?? 0);
       state.lists = { ...state.lists, myProfile: "ready" };
       noteConnected();
     } catch (error) {
@@ -1611,6 +1618,8 @@ export function createController({
   // Opening the screen: read it, and say a failure with its own Try again.
   // Never rejects.
   async function loadMyProfile() {
+    // The form is drawn afresh: it starts from what this read finds.
+    profileFormRevision = null;
     try {
       await readMyProfile();
     } catch (error) {
@@ -1637,7 +1646,8 @@ export function createController({
     };
   };
 
-  // Save: the typed details at the revision the screen read. A save whose
+  // Save: the typed details at the revision the form was drawn from
+  // (profileFormRevision), not the latest refresh. A save whose
   // answer never came is kept, and Save pressed again with the same values
   // sends that very request, so the stored receipt answers; changed values
   // are a new save. A CONFLICT re-reads and says someone else changed them
@@ -1664,12 +1674,17 @@ export function createController({
       }
     }
     if (!request)
-      request = { actionId: newActionId(), expectedRevision: Number(state.myProfile.revision ?? 0), profile };
+      request = {
+        actionId: newActionId(),
+        expectedRevision: profileFormRevision ?? Number(state.myProfile.revision ?? 0),
+        profile,
+      };
     state.busy = true;
     state.error = null;
     show();
+    let answer;
     try {
-      await store.saveMyProfile(request);
+      answer = await store.saveMyProfile(request);
     } catch (error) {
       state.busy = false;
       // An earlier action's Try again does not belong beside this refusal.
@@ -1679,12 +1694,19 @@ export function createController({
       noteFailure(error, error?.code === "CONFLICT" ? { message: STAFF_MY_PROFILE_CONFLICT_MESSAGE } : undefined);
       // What changed under it, or what a lost save did: the details as they
       // are now.
+      // A CONFLICT draws the stored details, so the form starts again from
+      // them; a lost save keeps its revision for the retry.
+      if (error?.code === "CONFLICT") profileFormRevision = null;
       if (lost || error?.code === "CONFLICT") await readMyProfile().catch(() => {});
       show();
       return null;
     }
     state.busy = false;
     noteConnected();
+    // The form now holds what was saved, at the revision the save made.
+    profileFormRevision = Number.isFinite(Number(answer?.revision))
+      ? Number(answer.revision)
+      : request.expectedRevision + 1;
     // A landed save whose re-read fails is a stale page, never a failed save.
     await readMyProfile().catch((error) => noteFailure(error));
     try {
@@ -2674,6 +2696,7 @@ export function createController({
     pendingSettingsWrite = null;
     state.myProfile = null;
     pendingProfileSave = null;
+    profileFormRevision = null;
     state.assistance = [];
     state.workspace = null;
     state.openPanels = [];
