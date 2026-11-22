@@ -181,3 +181,12 @@ No finding was parked at a cap.
   - `openDrawer` waits for focus anywhere in the modal.
 - **Final review**
   - A reason that is only "." renders "looked at this: . Please…" (cosmetic).
+
+## After review (PR #262)
+
+The approving review raised three points. The first two were fixed before merging, and 057 was edited in place because it wasn't applied anywhere yet.
+- **Save after a refresh couldn't get CONFLICT.** Save sent the revision from the latest read, and My profile re-reads on focus and after "I've uploaded it". Save now sends the revision the form was drawn from. It moves only when the screen opens, a save lands, or a CONFLICT re-reads. Controller tests cover the reviewer's case (6, admin saves 7, refresh, Save → CONFLICT). Season settings has the same pattern: #263, Before the pilot.
+  - **Miss:** the plan's tests checked "sends the read's revision" with no read in between. Neither the brainstorm nor the review asked which read.
+- **Blank text passed as a reason or a name.** `btrim` stripped only spaces, so a reason of "\n\t" or a name of "\n" was stored. 057 now uses 049's `btrim(x, E' \t\n\r')` for the Mark reviewed reason (its checks and digest too) and the name in both saves. Database tests cover both.
+  - **Miss:** while making this fix, I first dropped the `is not null` guard from the pair checks, reopening 12272d7's gap. The quick database run caught it.
+- **Deploy order:** 057 goes to hosted before the merge. The old front end still works on 057, except Mark reviewed.
