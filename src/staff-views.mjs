@@ -1328,6 +1328,9 @@ const CARD_STATUS = Object.freeze({
   not_done: { word: "Not done", icon: "upload" },
   later: { word: "Later", icon: "clock" },
   none: { word: "Don't have", icon: "close" },
+  sent: { word: "Uploaded · to check", icon: "clock" },
+  received: { word: "Received by PCDC", icon: "check" },
+  verified: { word: "Verified by PCDC", icon: "check" },
 });
 
 function groupMark(card) {
@@ -1349,14 +1352,14 @@ function checklistRow(card, { variant, markable, movable, off, answers }) {
   const asked = card.ask ? wording(findQuestion(2, card.ask), { variant, answers }) : "";
   const why = asked ? `<p class="doc-why">Asked by: ${esc(asked)}</p>` : "";
   const status = CARD_STATUS[card.status] ?? CARD_STATUS.not_done;
-  const statusLine = optional
+  const statusLine = optional && card.status === "not_done"
     ? ""
     : `<p class="doc-status is-${esc(card.status)}" id="${id}-status" tabindex="-1">${icon(status.icon)}<span class="sr-only">Status: </span>${esc(status.word)}</p>`;
   const mark = (value, text) =>
     button(esc(text), "mark-card", "secondary", `data-slot="${slot}" data-status="${value}"${off}`);
   const marks =
-    markable && !optional
-      ? `${mark("later", "Later")}${mark("none", "Don't have")}${when(card.status !== "not_done", mark("not_done", "Mark as not done"))}`
+    markable && (!optional || ["sent", "received", "verified"].includes(card.status))
+      ? `${optional ? "" : mark("later", "Later")}${optional ? "" : mark("none", "Don't have")}${when(card.status === "sent", `${mark("received", "Mark received")}${mark("verified", "Mark verified")}`)}${when(card.status === "received", `${mark("verified", "Mark verified")}${mark("sent", "Undo received")}`)}${when(card.status === "verified", mark("received", "Undo verified"))}${when(!["not_done", "received", "verified"].includes(card.status), mark("not_done", "Mark as not done"))}`
       : "";
   const move =
     movable && card.baseGroup === "maybe"
@@ -1364,7 +1367,7 @@ function checklistRow(card, { variant, markable, movable, off, answers }) {
         ? button("Move to Needed", "move-card", "secondary", `data-slot="${slot}" data-group="needed"${off}`)
         : button("Move to Maybe needed", "move-card", "secondary", `data-slot="${slot}" data-group="maybe"${off}`)
       : "";
-  return `<article class="doc-row" id="${id}" data-slot="${slot}" tabindex="-1"><div class="doc-row-head"><strong class="doc-label">${esc(card.label?.en)}</strong><span class="doc-group ${group.className}">${icon(group.icon)} ${esc(group.word)}</span></div><p class="doc-owner">${esc(card.ownerLine?.office ?? card.ownerLine?.en)}</p>${why}${statusLine}${when(marks || move, `<div class="doc-marks">${marks}${move}</div>`)}</article>`;
+  return `<article class="doc-row" id="${id}" data-slot="${slot}" tabindex="-1"><div class="doc-row-head"><strong class="doc-label">${esc(card.label?.en)}</strong><span class="doc-group ${group.className}">${icon(group.icon)} ${esc(group.word)}</span></div><p class="doc-owner">${esc(card.ownerLine?.office ?? card.ownerLine?.en)}</p>${why}${statusLine}${when(["sent", "received", "verified"].includes(card.status) && card.reportedAt, `<p class="field-note">Client reported it ${esc(formatTime(card.reportedAt))}</p>`)}${when(marks || move, `<div class="doc-marks">${marks}${move}</div>`)}</article>`;
 }
 
 /**
@@ -1374,7 +1377,10 @@ function checklistRow(card, { variant, markable, movable, off, answers }) {
  */
 export function documentChecklist(record, rights, ui = {}) {
   const answers = serverAnswersV2(record);
-  const cards = cardsFor(answers, record.documentCards ?? []);
+  const cards = cardsFor(answers, record.documentCards ?? []).map((card) => ({
+    ...card,
+    reportedAt: (record.documentCards ?? []).find((item) => item.slotId === card.slotId)?.reportedAt ?? null,
+  }));
   const variant = variantOf(answers);
   const markable = Boolean(rights?.markDocumentCard?.allowed);
   const movable = Boolean(rights?.moveDocumentCard?.allowed);
@@ -1437,9 +1443,7 @@ function requestCard(record, request, rights, ui) {
     `<ul class="document-list">${documents
       .map(
         (document) =>
-          `<li>${icon("file")} ${esc(document.filename)} <small>${esc(
-            document.source === "client" ? "sent by the client" : "recorded by the office",
-          )} · ${esc(formatTime(document.createdAt))}</small></li>`,
+          `<li>${icon("file")} ${esc(request?.title)} <small>${document.source === "client" ? "Uploaded" : "Office recorded"} ${esc(formatTime(document.createdAt))} · ${request.status === "verified" ? "verified" : "to check"}</small></li>`,
       )
       .join("")}</ul>`,
   )}${when(

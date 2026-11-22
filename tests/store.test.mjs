@@ -1603,12 +1603,12 @@ test("both principals read the card rows by named columns and map them", async (
     const client = fakeClient({ access });
     const found = await createStore(client).getCase("case-1");
     const [read] = client.reads.filter((entry) => entry.table === "case_document_cards");
-    assert.equal(read.columns, "slot_id,status,group_override,changed_at", access);
+    assert.equal(read.columns, "slot_id,status,group_override,changed_at,reported_at", access);
     assert.deepEqual(read.filters, [["case_id", "case-1"]], access);
     assert.deepEqual(read.orders, ["slot_id"], access);
     assert.deepEqual(found.documentCards, [
-      { slotId: "w2.household", status: "later", groupOverride: null, changedAt: "2026-09-08T00:00:00Z" },
-      { slotId: "ssn.tp", status: null, groupOverride: "needed", changedAt: "2026-09-08T01:00:00Z" },
+      { slotId: "w2.household", status: "later", groupOverride: null, changedAt: "2026-09-08T00:00:00Z", reportedAt: null },
+      { slotId: "ssn.tp", status: null, groupOverride: "needed", changedAt: "2026-09-08T01:00:00Z", reportedAt: null },
     ], access);
     assert.deepEqual(found.intakeVisited, ["about.you", "before.ready"], access);
   }

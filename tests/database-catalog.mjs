@@ -77,6 +77,7 @@ const RPCS = Object.freeze([
   "vitally_mark_updates(p_update_ids uuid[], p_confirm boolean)",
   "vitally_my_updates()",
   "vitally_posted_updates()",
+  "vitally_client_documents_link()",
   "vitally_season_settings()",
   "vitally_save_season_settings(p_action_id uuid, p_expected_revision bigint, p_settings jsonb)",
   "vitally_set_site_number(p_action_id uuid, p_sidn text)",
@@ -91,6 +92,8 @@ const RPCS = Object.freeze([
 // vitally_mark_updates (add-posted-updates) is naturally idempotent.
 const READ_ONLY_RPCS = Object.freeze([
   "vitally_activate_client_account",
+  "vitally_client_documents_link()",
+  "vitally_client_documents_link",
   "vitally_client_invitations",
   "vitally_complete_site_check",
   "vitally_expire_invitations",
