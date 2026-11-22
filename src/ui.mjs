@@ -281,6 +281,8 @@ const RELATED_KEYS = Object.freeze([
   ["tab", "data-tab"],
   ["key", "data-key"],
   ["rowId", "data-row-id"],
+  // The Schedule (change add-volunteer-schedule): one volunteer may have two shifts.
+  ["shiftId", "data-shift-id"],
 ]);
 
 const attributeValue = (value) =>

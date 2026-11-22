@@ -6884,3 +6884,237 @@ html:lang(zh-Hant) {
     flex: 1 1 auto;
   }
 }
+
+/* Volunteers: the Schedule (change add-volunteer-schedule, design D7). One
+   day: a column per open hour after the names, a row per volunteer. The grid
+   scrolls sideways inside .schedule-scroll, never the page. Each row is its
+   own grid on the same columns; its hour cells (data-hour) and its shifts
+   share the row's one track, the shifts drawn over the cells. Every colour is
+   a token, so it follows the theme. */
+.schedule-panel {
+  min-width: 0;
+}
+.schedule-daybar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 0 0 12px;
+}
+.schedule-daybar h2 {
+  margin: 0;
+  font-size: 18px;
+  min-width: 12ch;
+  text-align: center;
+}
+.schedule-gaps {
+  margin: 0 0 10px;
+  font-weight: 600;
+}
+.schedule-closed,
+.schedule-empty {
+  margin: 12px 0 0;
+}
+.schedule-notice {
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 12px 0 0;
+  padding: 14px 16px;
+  background: var(--vt-attention-bg);
+}
+.schedule-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--vt-line);
+  border-radius: var(--vt-radius-sm);
+  background: var(--vt-surface);
+}
+.schedule-scroll:focus-visible {
+  outline: 2px solid var(--vt-primary);
+  outline-offset: 2px;
+}
+.schedule-grid {
+  --schedule-name: 9.5rem;
+  min-width: max-content;
+}
+.schedule-row {
+  display: grid;
+  grid-template-columns: var(--schedule-name) repeat(var(--schedule-hours), minmax(5.5rem, 1fr));
+  border-bottom: 1px solid var(--vt-line);
+}
+.schedule-row:last-child {
+  border-bottom: 0;
+}
+.schedule-row > * {
+  grid-row: 1;
+  min-width: 0;
+}
+.schedule-name {
+  grid-column: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-weight: 600;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--vt-surface);
+  border-right: 1px solid var(--vt-line);
+}
+.schedule-hour {
+  padding: 8px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vt-muted);
+  border-left: 1px solid var(--vt-line);
+}
+.schedule-head {
+  background: var(--vt-background);
+}
+.schedule-head .schedule-name {
+  background: var(--vt-background);
+}
+.schedule-cell {
+  min-height: 52px;
+  border-left: 1px solid var(--vt-line);
+}
+.schedule-shift {
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  margin: 4px 3px;
+  padding: 6px 8px;
+  border: 1px solid var(--vt-primary-line);
+  border-radius: var(--vt-radius-sm);
+  background: var(--vt-primary-soft);
+  color: var(--vt-ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  overflow: hidden;
+}
+button.schedule-shift {
+  cursor: pointer;
+  min-height: var(--vt-tap);
+}
+button.schedule-shift:hover {
+  border-color: var(--vt-primary);
+}
+button.schedule-shift:focus-visible {
+  outline: 2px solid var(--vt-primary);
+  outline-offset: 2px;
+}
+.schedule-shift.flagged {
+  border-style: dashed;
+  border-color: var(--vt-office);
+}
+.schedule-shift.off-hours {
+  margin: 0;
+  font-weight: 400;
+}
+.schedule-role {
+  font-weight: 600;
+}
+.schedule-time {
+  color: var(--vt-muted);
+  white-space: nowrap;
+}
+.schedule-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.schedule-off {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.schedule-coverage {
+  background: var(--vt-background);
+}
+.schedule-coverage .schedule-name {
+  background: var(--vt-background);
+  color: var(--vt-muted);
+}
+.coverage-cell {
+  padding: 8px 6px;
+  font-size: 12px;
+  border-left: 1px solid var(--vt-line);
+}
+.coverage-cell.ok {
+  color: var(--vt-progress);
+}
+.coverage-cell.gap {
+  background: var(--vt-attention-bg);
+  color: var(--vt-ink);
+  font-weight: 600;
+}
+/* The shift drawer: the volunteer picker, then role, start and end. */
+.shift-pick {
+  margin: 0 0 18px;
+  padding: 0;
+  border: 0;
+}
+.shift-pick legend {
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+.shift-candidates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+.shift-candidate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-height: var(--vt-tap);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--vt-line);
+  cursor: pointer;
+}
+.shift-candidate-name {
+  font-weight: 600;
+}
+.shift-candidate-roles {
+  font-size: 13px;
+}
+.shift-saved {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 16px;
+}
+.shift-hours {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 16px;
+}
+.shift-hours .field {
+  flex: 1 1 8rem;
+}
+.shift-form .drawer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+@media (max-width: 480px) {
+  .schedule-grid {
+    --schedule-name: 7rem;
+  }
+  .schedule-daybar h2 {
+    flex: 1 0 100%;
+    order: -1;
+    text-align: left;
+  }
+}
+/* end Schedule */

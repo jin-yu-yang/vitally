@@ -1073,11 +1073,18 @@ if (!config) {
   // (another window resolved the task), so a drawer always has one: the queue.
   function closeDialog(fallbackFocusSelector) {
     const dialog = controller.getState().dialog;
-    // The volunteer and assign drawers open from the Volunteers page, which
-    // has no queue; the Notifications panel from the sidebar.
+    // Keeping a shift goes back to its drawer, at its Remove shift.
+    if (dialog === "remove-shift" && controller.getState().schedule?.drawer) {
+      controller.closeDialog();
+      root.querySelector('#shift-form [data-action="remove-shift"]')?.focus();
+      return;
+    }
+    // The volunteer and assign drawers open from the Volunteers page, and the
+    // shift drawer from the Schedule, which have no queue; the Notifications
+    // panel from the sidebar.
     const fallback =
       fallbackFocusSelector ??
-      (dialog === "assign" || dialog === "volunteer"
+      (dialog === "shift" || dialog === "remove-shift" || dialog === "assign" || dialog === "volunteer"
         ? "#main"
         : dialog === "notifications"
           ? '[data-action="open-notifications"]'
@@ -1098,6 +1105,29 @@ if (!config) {
     if (opener) opener.focus();
     else if (fallback) root.querySelector(fallback)?.focus();
     focusBeforeDialog = null;
+  }
+
+  // The shift drawer's choices as the form holds them (change
+  // add-volunteer-schedule): the volunteer (a new shift only), role, start, end.
+  function shiftFormValues(form) {
+    const values = new FormData(form ?? undefined);
+    const pick = (name) => (values.has(name) ? String(values.get(name)) : undefined);
+    return { volunteerId: pick("volunteerId"), role: pick("role"), startHour: pick("startHour"), endHour: pick("endHour") };
+  }
+
+  // A shift write's answer: done closes the drawer (back to what opened it),
+  // and a CONFLICT says the schedule was refreshed (the controller's staff
+  // sentence). A refusal stays in the drawer.
+  function shiftDone(result, by) {
+    if (!result?.done) return;
+    closeDialog("#main");
+    if (result.toast) notify("warning", result.toast, by);
+  }
+
+  async function saveShiftFromDrawer(by) {
+    const form = root.querySelector("#shift-form");
+    if (!form) return;
+    shiftDone(await controller.saveShift(shiftFormValues(form)), by);
   }
 
   function fictional(replaceEverything) {
@@ -2025,6 +2055,11 @@ if (!config) {
       controller.navigate("office-settings");
       void controller.loadSeasonSettings();
     },
+    // And the Schedule, on today (change add-volunteer-schedule).
+    "open-schedule": () => {
+      formDrafts.clear();
+      void controller.openSchedule();
+    },
     // Pressed again while on the page: a fresh draft, which is what it asks for.
     "open-add-case": async () => {
       formDrafts.clear();
@@ -2092,6 +2127,30 @@ if (!config) {
       case "open-season-settings":
         if (leaveAddCaseFirst("open-season-settings", target)) break;
         EXITS["open-season-settings"]();
+        break;
+      // ---- the Schedule (change add-volunteer-schedule) ----
+      case "open-schedule":
+        if (leaveAddCaseFirst("open-schedule", target)) break;
+        EXITS["open-schedule"]();
+        break;
+      case "schedule-prev":
+      case "schedule-next":
+      case "schedule-today":
+        await controller.scheduleGo(action.slice("schedule-".length));
+        break;
+      case "open-add-shift":
+      case "open-shift":
+        openDialog("shift", { shiftId: target.dataset.shiftId || null }, describeFocus(target));
+        break;
+      case "save-shift":
+        await saveShiftFromDrawer(by);
+        break;
+      case "remove-shift":
+        // Asked over the drawer; the drawer's opener stays the one to go back to.
+        controller.openDialog("remove-shift", { shiftId: target.dataset.shiftId });
+        break;
+      case "confirm-remove-shift":
+        shiftDone(await controller.removeShift(target.dataset.shiftId), by);
         break;
       // ---- Season settings (change add-season-settings) ----
       case "open-change-sidn":
@@ -2802,6 +2861,12 @@ if (!config) {
       syncUpdateForm(field.form);
       return;
     }
+    // The shift drawer is drawn from its draft: a choice goes there, and the
+    // roles follow the volunteer picked.
+    if (field.closest?.("#shift-form")) {
+      controller.editShiftDraft(shiftFormValues(field.form));
+      return;
+    }
     if (field.matches?.(V2_CONTROLS)) {
       // The version-2 form (spec §2.4 rule 2): the draft, quietly, then the
       // note, the rail mark and a longtext's count in place, never a redraw.
@@ -2917,6 +2982,15 @@ if (!config) {
     // Add a case has no submit: its bar's controls are buttons. Enter in a
     // lone text box would otherwise reach `reportValidity`.
     if (form.id === "add-case-v2-form") return;
+    // The shift drawer saves from its Save button; Enter does the same.
+    if (form.id === "shift-form") {
+      try {
+        await saveShiftFromDrawer(by);
+      } catch (error) {
+        safetyNet(error, by, shown);
+      }
+      return;
+    }
     if (form.id === "intake-v2-form") {
       // Continue. Before `reportValidity`, which ignores `novalidate`: the
       // form warns but always moves on, and a half-typed `type="email"` would

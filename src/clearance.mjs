@@ -20,6 +20,11 @@ export const ceilingAdmin = (principal) => principal?.clearance?.isAdmin === tru
 // only they change Season settings, who is a site coordinator, and the Admin role.
 export const siteCoordinator = (principal) => principal?.clearance?.isSiteCoordinator === true;
 
+// Whether the signed-in person is a schedule viewer (change
+// add-volunteer-schedule, design D11): a workspace admin, or anyone on this
+// season's roster with an active account, cleared or not.
+export const scheduleViewer = (principal) => principal?.clearance?.scheduleViewer === true;
+
 const capitalise = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 
 // One line per thing still missing: the 13615, the photo ID, each role, then

@@ -5258,7 +5258,8 @@ test("an applicant's help-request list counts as loaded, and sign-out starts ove
   await controller.start();
   // The Roster's list is a staff admin's, read only on its screen: an
   // applicant never reads it. Nor the posted-update feed and table, which
-  // are staff's, nor Season settings, a workspace admin's.
+  // are staff's, nor Season settings, a workspace admin's, nor the Schedule,
+  // a schedule viewer's.
   assert.deepEqual(controller.getState().lists, {
     cases: "ready",
     assistance: "ready",
@@ -5266,6 +5267,7 @@ test("an applicant's help-request list counts as loaded, and sign-out starts ove
     updates: "loading",
     postedUpdates: "loading",
     seasonSettings: "loading",
+    schedule: "loading",
   });
   await controller.signOut();
   assert.deepEqual(controller.getState().lists, {
@@ -5275,6 +5277,7 @@ test("an applicant's help-request list counts as loaded, and sign-out starts ove
     updates: "loading",
     postedUpdates: "loading",
     seasonSettings: "loading",
+    schedule: "loading",
   });
   controller.stop();
 });
@@ -11166,5 +11169,413 @@ test("losing the workspace admin standing resets the count", async () => {
   store.uploadsCount = 3;
   await controller.checkClearance();
   assert.equal(controller.getState().uploadsToReview, 3);
+  controller.stop();
+});
+
+// ---------------------------------------------------------------------------
+// The Schedule (change add-volunteer-schedule, Task 7)
+// ---------------------------------------------------------------------------
+
+// 10 am in New York on Saturday, February 6, 2027.
+const SCHEDULE_NOW = () => Date.parse("2027-02-06T15:00:00Z");
+const ADMIN_VIEWER = Object.freeze({
+  cleared: true,
+  missing: [],
+  capabilities: ["admin"],
+  isAdmin: true,
+  isSiteCoordinator: true,
+  siteCoordinatorName: null,
+  scheduleViewer: true,
+});
+const PREPARER_VIEWER = Object.freeze({
+  cleared: true,
+  missing: [],
+  capabilities: ["prepare"],
+  isAdmin: false,
+  isSiteCoordinator: false,
+  siteCoordinatorName: null,
+  scheduleViewer: true,
+});
+const UNCLEARED_VIEWER = Object.freeze({
+  cleared: false,
+  missing: [{ kind: "form13615" }],
+  capabilities: [],
+  isAdmin: false,
+  isSiteCoordinator: false,
+  siteCoordinatorName: "Sam",
+  scheduleViewer: true,
+});
+const scheduleAnswer = (date, canEdit = true) => ({
+  date,
+  weekday: 6,
+  hours: { open: 10, close: 16 },
+  anyOpen: true,
+  targets: { preparersNeeded: 2, reviewersNeeded: 1, onSiteNeeded: 1 },
+  settingsRevision: 1,
+  canEdit,
+  canEditSettings: canEdit,
+  shifts: [
+    {
+      shiftId: "shift-rowan",
+      revision: 3,
+      volunteerId: "person-rowan",
+      name: "Rowan Diaz",
+      role: "preparer",
+      startHour: 10,
+      endHour: 13,
+      ...(canEdit ? { flags: [], counts: "preparer" } : {}),
+    },
+  ],
+  ...(canEdit
+    ? {
+        candidates: [
+          { volunteerId: "person-rowan", name: "Rowan Diaz", roles: ["preparer"], usualDays: [6], cleared: true, works: "on_site", signedIn: true },
+        ],
+      }
+    : {}),
+});
+// A staff store with the schedule calls. `failNextShift` makes the next write reject.
+const scheduleStore = ({ clearance = ADMIN_VIEWER, ...overrides } = {}) => {
+  const admin = clearance.isAdmin === true;
+  const store = fakeStore({
+    principal: { userId: "p1", workspaceId: "w1", access: "staff", personId: admin ? "person-sam" : "person-rowan" },
+    people: [
+      { id: "person-sam", name: "Sam", capabilities: ["admin"] },
+      { id: "person-rowan", name: "Rowan Diaz", capabilities: ["prepare"] },
+    ],
+    clearance: { ...clearance },
+    ...overrides,
+  });
+  store.failNextShift = null;
+  store.days = [];
+  const fail = () => {
+    const error = store.failNextShift;
+    store.failNextShift = null;
+    if (error) throw error;
+  };
+  store.scheduleDay = async (date) => {
+    store.calls.push("scheduleDay");
+    store.days.push(date);
+    return scheduleAnswer(date, admin);
+  };
+  store.saveShift = async (request) => {
+    store.calls.push("saveShift");
+    store.writes.push({ type: "saveShift", ...request });
+    fail();
+    return { shiftId: request.shiftId ?? "shift-new", revision: (request.revision ?? 0) + 1 };
+  };
+  store.removeShift = async (request) => {
+    store.calls.push("removeShift");
+    store.writes.push({ type: "removeShift", ...request });
+    fail();
+    return { shiftId: request.shiftId, revision: request.revision + 1 };
+  };
+  return store;
+};
+const dayReads = (store) => store.calls.filter((entry) => entry === "scheduleDay").length;
+const shiftRefusal = (code, details = null) => Object.assign(new Error(code), { code, cause: { message: code, details } });
+const NAV_ACTIONS = Object.freeze([
+  "open-board",
+  "open-cases",
+  "open-volunteers",
+  "open-schedule",
+  "open-post-update",
+  "open-season-settings",
+  "open-notifications",
+]);
+const navOrder = (html) => [...html.matchAll(/data-action="(open-[a-z-]+)"/g)].map((m) => m[1]).filter((action) => NAV_ACTIONS.includes(action));
+
+async function onSchedule(options = {}) {
+  const store = scheduleStore(options);
+  const built = build({ store, clock: SCHEDULE_NOW });
+  await built.controller.start();
+  await built.controller.openSchedule();
+  return { store, ...built };
+}
+
+test("schedule: opening reads today in New York and shows the day", async () => {
+  const { store, controller } = await onSchedule();
+  const state = controller.getState();
+  assert.equal(state.screen, "schedule");
+  assert.equal(state.schedule.date, "2027-02-06");
+  assert.deepEqual(store.days, ["2027-02-06"]);
+  assert.equal(state.lists.schedule, "ready");
+  assert.match(staffScreen(state), /<h1>Schedule<\/h1>[\s\S]*Saturday, February 6/);
+  controller.stop();
+});
+
+test("schedule: Prev, Next and Today move the day and read it", async () => {
+  const { store, controller } = await onSchedule();
+  await controller.scheduleGo("next");
+  assert.equal(controller.getState().schedule.date, "2027-02-07");
+  await controller.scheduleGo("prev");
+  await controller.scheduleGo("prev");
+  assert.equal(controller.getState().schedule.date, "2027-02-05");
+  await controller.scheduleGo("today");
+  assert.equal(controller.getState().schedule.date, "2027-02-06");
+  assert.deepEqual(store.days, ["2027-02-06", "2027-02-07", "2027-02-06", "2027-02-05", "2027-02-06"]);
+  controller.stop();
+});
+
+test("schedule: a window restored on the Schedule without scheduleViewer lands on the home screen and reads nothing", async () => {
+  const sessionStorage = fakeSession();
+  const seed = build({ store: scheduleStore(), sessionStorage, clock: SCHEDULE_NOW });
+  await seed.controller.start();
+  await seed.controller.openSchedule();
+  seed.controller.stop();
+  const store = scheduleStore({ clearance: { ...PREPARER_VIEWER, scheduleViewer: false } });
+  const { controller } = build({ store, sessionStorage, clock: SCHEDULE_NOW });
+  await controller.start();
+  assert.equal(controller.getState().screen, "staff");
+  assert.equal(dayReads(store), 0);
+  // Asking for it again goes home too.
+  await controller.openSchedule();
+  assert.equal(controller.getState().screen, "staff");
+  assert.equal(dayReads(store), 0);
+  assert.doesNotMatch(staffScreen(controller.getState()), /open-schedule/);
+  controller.stop();
+});
+
+test("schedule: a viewer's window restored on the Schedule reads it", async () => {
+  const sessionStorage = fakeSession();
+  const seed = build({ store: scheduleStore({ clearance: PREPARER_VIEWER }), sessionStorage, clock: SCHEDULE_NOW });
+  await seed.controller.start();
+  await seed.controller.openSchedule();
+  seed.controller.stop();
+  const store = scheduleStore({ clearance: PREPARER_VIEWER });
+  const { controller } = build({ store, sessionStorage, clock: SCHEDULE_NOW });
+  await controller.start();
+  assert.equal(controller.getState().screen, "schedule");
+  assert.deepEqual(store.days, ["2027-02-06"]);
+  controller.stop();
+});
+
+test("schedule: the uncleared viewer's setup sidebar has Schedule, and the Schedule opens and re-reads on focus", async () => {
+  const store = scheduleStore({ clearance: UNCLEARED_VIEWER });
+  const { controller, events } = build({ store, clock: SCHEDULE_NOW });
+  await controller.start();
+  assert.match(staffScreen(controller.getState()), /Finish your setup for this season/);
+  assert.match(staffScreen(controller.getState()), /data-action="open-schedule"/);
+  await controller.openSchedule();
+  const state = controller.getState();
+  assert.equal(state.screen, "schedule");
+  assert.equal(store.calls.includes("listCases"), false);
+  assert.match(staffScreen(state), /<h1>Schedule<\/h1>/);
+  const reads = dayReads(store);
+  await events.emit("focus");
+  assert.equal(controller.getState().screen, "schedule");
+  assert.equal(dayReads(store), reads + 1);
+  // Losing the roster entry sends the window back to the setup screen.
+  store.nextClearance = { ...UNCLEARED_VIEWER, scheduleViewer: false };
+  await events.emit("focus");
+  assert.equal(controller.getState().screen, "staff");
+  assert.match(staffScreen(controller.getState()), /Finish your setup for this season/);
+  controller.stop();
+});
+
+test("schedule: a viewer who becomes cleared stays on the Schedule", async () => {
+  const store = scheduleStore({ clearance: UNCLEARED_VIEWER });
+  const { controller } = build({ store, clock: SCHEDULE_NOW });
+  await controller.start();
+  await controller.openSchedule();
+  store.nextClearance = { ...PREPARER_VIEWER };
+  await controller.checkClearance();
+  assert.equal(controller.getState().screen, "schedule");
+  assert.match(staffScreen(controller.getState()), /<h1>Schedule<\/h1>/);
+  controller.stop();
+});
+
+test("schedule: the sidebar order for an admin and for a preparer", async () => {
+  const admin = build({ store: scheduleStore(), clock: SCHEDULE_NOW });
+  await admin.controller.start();
+  assert.deepEqual(navOrder(staffScreen(admin.controller.getState())), [
+    "open-board",
+    "open-cases",
+    "open-volunteers",
+    "open-schedule",
+    "open-post-update",
+    "open-season-settings",
+    "open-notifications",
+  ]);
+  assert.match(
+    staffScreen(admin.controller.getState()),
+    /Follow-ups[\s\S]*All cases[\s\S]*Volunteers[\s\S]*Schedule[\s\S]*Post an update[\s\S]*Season settings/,
+  );
+  admin.controller.stop();
+  const preparer = build({ store: scheduleStore({ clearance: PREPARER_VIEWER }), clock: SCHEDULE_NOW });
+  await preparer.controller.start();
+  assert.deepEqual(navOrder(staffScreen(preparer.controller.getState())), ["open-board", "open-schedule", "open-notifications"]);
+  assert.match(staffScreen(preparer.controller.getState()), /Work board[\s\S]*Schedule/);
+  preparer.controller.stop();
+});
+
+test("schedule: Add shift saves the drawer's values for the day on screen and closes it", async () => {
+  const { store, controller } = await onSchedule();
+  controller.openShiftDrawer(null);
+  assert.equal(controller.getState().dialog, "shift");
+  assert.equal(controller.getState().schedule.drawer.mode, "add");
+  const result = await controller.saveShift({ volunteerId: "person-rowan", role: "preparer", startHour: "13", endHour: "15" });
+  assert.deepEqual(result, { done: true, toast: null });
+  const write = store.writes.at(-1);
+  assert.equal(write.type, "saveShift");
+  assert.equal(write.shiftId, null);
+  assert.equal(write.revision, null);
+  assert.deepEqual(write.shift, { volunteerId: "person-rowan", date: "2027-02-06", startHour: 13, endHour: 15, role: "preparer" });
+  assert.ok(write.actionId);
+  assert.equal(controller.getState().dialog, null);
+  assert.equal(controller.getState().schedule.drawer, null);
+  assert.equal(dayReads(store), 2);
+  controller.stop();
+});
+
+test("schedule: picking a volunteer in the drawer offers their roles", async () => {
+  const { controller } = await onSchedule();
+  controller.openShiftDrawer(null);
+  controller.editShiftDraft({ volunteerId: "person-rowan" });
+  assert.equal(controller.getState().schedule.drawer.volunteerId, "person-rowan");
+  assert.equal(controller.getState().schedule.drawer.role, "preparer");
+  controller.stop();
+});
+
+test("schedule: editing sends the shift's revision", async () => {
+  const { store, controller } = await onSchedule();
+  controller.openShiftDrawer("shift-rowan");
+  const drawer = controller.getState().schedule.drawer;
+  assert.equal(drawer.mode, "edit");
+  assert.equal(drawer.revision, 3);
+  assert.equal(drawer.startHour, 10);
+  await controller.saveShift({ role: "preparer", startHour: "10", endHour: "15" });
+  const write = store.writes.at(-1);
+  assert.equal(write.shiftId, "shift-rowan");
+  assert.equal(write.revision, 3);
+  assert.equal(write.shift.volunteerId, "person-rowan");
+  assert.equal(write.shift.endHour, 15);
+  controller.stop();
+});
+
+test("schedule: a CONFLICT on save re-reads the day and says the schedule was refreshed", async () => {
+  const { store, controller } = await onSchedule();
+  controller.openShiftDrawer("shift-rowan");
+  store.failNextShift = shiftRefusal("CONFLICT");
+  const reads = dayReads(store);
+  const result = await controller.saveShift({ role: "preparer", startHour: "10", endHour: "14" });
+  assert.deepEqual(result, { done: true, toast: "Someone changed this shift. The schedule has been refreshed." });
+  assert.equal(dayReads(store), reads + 1);
+  assert.equal(controller.getState().dialog, null);
+  assert.equal(controller.getState().error, null);
+  controller.stop();
+});
+
+test("schedule: a refused save says why in the drawer and keeps it open", async () => {
+  const { store, controller } = await onSchedule();
+  controller.openShiftDrawer("shift-rowan");
+  store.failNextShift = shiftRefusal("VALIDATION", "OUTSIDE_SITE_HOURS");
+  const result = await controller.saveShift({ role: "preparer", startHour: "10", endHour: "17" });
+  assert.equal(result, null);
+  const state = controller.getState();
+  assert.equal(state.dialog, "shift");
+  assert.equal(state.error.message, "The shift must stay inside site hours.");
+  assert.equal(state.schedule.drawer.endHour, 17);
+  assert.match(dialog(state), /The shift must stay inside site hours\./);
+  controller.stop();
+});
+
+test("schedule: an end before the start is said without sending", async () => {
+  const { store, controller } = await onSchedule();
+  controller.openShiftDrawer(null);
+  const writes = store.writes.length;
+  assert.equal(await controller.saveShift({ volunteerId: "person-rowan", role: "preparer", startHour: "14", endHour: "12" }), null);
+  assert.equal(store.writes.length, writes);
+  assert.equal(controller.getState().error.message, "The shift must end after it starts.");
+  controller.stop();
+});
+
+test("schedule: a lost answer is sent again with the same action id", async () => {
+  const { store, controller } = await onSchedule();
+  controller.openShiftDrawer(null);
+  store.failNextShift = shiftRefusal("OFFLINE");
+  const values = { volunteerId: "person-rowan", role: "preparer", startHour: "13", endHour: "15" };
+  assert.equal(await controller.saveShift(values), null);
+  const first = store.writes.at(-1).actionId;
+  await controller.saveShift(values);
+  assert.equal(store.writes.at(-1).actionId, first);
+  controller.stop();
+});
+
+test("schedule: Remove shift asks first, then removes at the shift's revision", async () => {
+  const { store, controller } = await onSchedule();
+  controller.openShiftDrawer("shift-rowan");
+  controller.openDialog("remove-shift", { shiftId: "shift-rowan" });
+  assert.match(dialog(controller.getState()), /Remove Rowan Diaz&#39;s shift\?/);
+  // Keeping it goes back to the drawer.
+  controller.closeDialog();
+  assert.equal(controller.getState().dialog, "shift");
+  controller.openDialog("remove-shift", { shiftId: "shift-rowan" });
+  const result = await controller.removeShift("shift-rowan");
+  assert.deepEqual(result, { done: true, toast: null });
+  const write = store.writes.at(-1);
+  assert.equal(write.type, "removeShift");
+  assert.equal(write.shiftId, "shift-rowan");
+  assert.equal(write.revision, 3);
+  assert.equal(controller.getState().dialog, null);
+  assert.equal(controller.getState().schedule.drawer, null);
+  controller.stop();
+});
+
+test("schedule: a CONFLICT on remove re-reads and says so", async () => {
+  const { store, controller } = await onSchedule();
+  controller.openShiftDrawer("shift-rowan");
+  controller.openDialog("remove-shift", { shiftId: "shift-rowan" });
+  store.failNextShift = shiftRefusal("CONFLICT");
+  const reads = dayReads(store);
+  const result = await controller.removeShift("shift-rowan");
+  assert.equal(result.toast, "Someone changed this shift. The schedule has been refreshed.");
+  assert.equal(dayReads(store), reads + 1);
+  assert.equal(controller.getState().dialog, null);
+  controller.stop();
+});
+
+test("schedule: a preparer cannot open the drawer", async () => {
+  const { controller } = await onSchedule({ clearance: PREPARER_VIEWER });
+  controller.openShiftDrawer("shift-rowan");
+  assert.equal(controller.getState().dialog, null);
+  controller.stop();
+});
+
+test("schedule: a shifts or schedule_settings change re-reads the open day", async () => {
+  const { store, controller } = await onSchedule();
+  for (const table of ["shifts", "schedule_settings"]) {
+    const reads = dayReads(store);
+    await store.handlers.onChange({ table, eventType: "UPDATE", id: "x" });
+    assert.equal(dayReads(store), reads + 1, table);
+  }
+  // Not on the Schedule: nothing is read.
+  controller.navigate("staff");
+  const reads = dayReads(store);
+  await store.handlers.onChange({ table: "shifts", eventType: "INSERT", id: "y" });
+  assert.equal(dayReads(store), reads);
+  controller.stop();
+});
+
+test("schedule: focus re-reads the open day", async () => {
+  const { store, controller, events } = await onSchedule();
+  const reads = dayReads(store);
+  await events.emit("focus");
+  assert.equal(dayReads(store), reads + 1);
+  assert.equal(controller.getState().schedule.date, "2027-02-06");
+  controller.stop();
+});
+
+test("schedule: a failed first read says so", async () => {
+  const store = scheduleStore();
+  store.scheduleDay = async () => {
+    store.calls.push("scheduleDay");
+    throw shiftRefusal("OFFLINE");
+  };
+  const { controller } = build({ store, clock: SCHEDULE_NOW });
+  await controller.start();
+  await controller.openSchedule();
+  assert.equal(controller.getState().lists.schedule, "failed");
+  assert.match(staffScreen(controller.getState()), /The schedule couldn&#39;t load\./);
   controller.stop();
 });
