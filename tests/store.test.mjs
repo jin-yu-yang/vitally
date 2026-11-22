@@ -1498,6 +1498,8 @@ test("a subscription watches only the tables its principal may read", async () =
     "case_labels",
     "case_label_links",
     "posted_updates",
+    "shifts",
+    "schedule_settings",
   ]);
   // The applicant's channel never names a staff-only table.
   for (const staffTable of STAFF_ONLY_TABLES)
@@ -2139,6 +2141,24 @@ test("an error from vitally_my_clearance surfaces from getPrincipal", async () =
 test("STAFF_TABLES holds the case label tables", () => {
   assert.ok(SUBSCRIBED_TABLES.staff.includes("case_labels"));
   assert.ok(SUBSCRIBED_TABLES.staff.includes("case_label_links"));
+});
+
+test("the staff tables include the schedule tables", () => {
+  assert.ok(SUBSCRIBED_TABLES.staff.includes("shifts"));
+  assert.ok(SUBSCRIBED_TABLES.staff.includes("schedule_settings"));
+});
+
+test("scheduleDay maps a refusal and saveShift passes its arguments", async () => {
+  const refused = fakeClient({ rpc: async () => ({ data: null, error: { code: "VT001" } }) });
+  await assert.rejects(() => createStore(refused).scheduleDay("2027-02-06"), { code: "FORBIDDEN" });
+  const client = fakeClient({ rpc: async () => ({ data: { shiftId: "s1", revision: 1 }, error: null }) });
+  const shift = { volunteerId: "v1", date: "2027-02-06", startHour: 10, endHour: 12, role: "preparer" };
+  const answer = await createStore(client).saveShift({ actionId: "a1", shift });
+  assert.deepEqual(answer, { shiftId: "s1", revision: 1 });
+  assert.deepEqual(client.rpcCalls.at(-1), {
+    name: "vitally_save_shift",
+    args: { p_action_id: "a1", p_shift_id: null, p_expected_revision: null, p_shift: shift },
+  });
 });
 
 test("listCases attaches sorted labels from active links only", async () => {
