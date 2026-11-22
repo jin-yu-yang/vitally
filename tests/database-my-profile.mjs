@@ -134,6 +134,10 @@ test("057 clearance answer against real Supabase", async (t) => {
           () => setEntry(member, "photo_id_reviewed_at=now()"),
           (error) => (error.cause?.code ?? error.code) === CHECK_VIOLATION,
         );
+        await assert.rejects(
+          () => setEntry(member, "form_13615_reviewed_at=now(),form_13615_review_reason='   '"),
+          (error) => (error.cause?.code ?? error.code) === CHECK_VIOLATION,
+        );
       });
 
       await t.test("usual_days refuses an unknown day", async () => {
