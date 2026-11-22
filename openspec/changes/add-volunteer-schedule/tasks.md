@@ -22,13 +22,13 @@
   - the refusals `NOT_ON_ROSTER`, `DEACTIVATED`, `ROLE_NOT_HELD`, `SITE_CLOSED`, `OUTSIDE_SITE_HOURS`, `OVERLAP` (adjacent shifts allowed);
   - an edit keeps the person (D4).
 - [x] 2.3 `vitally_remove_shift`: soft delete, raises the revision; a later change is refused (D2).
-- [ ] 2.4 `vitally_schedule_day(p_date)` (D5):
+- [x] 2.4 `vitally_schedule_day(p_date)` (D5):
   - for viewers: hours, targets, `canEdit`, and shifts with name, role, hours and revision, with no-sign-in shifts left out for non-admins;
   - for admins only: `flags`, `counts` (the D6 rule in SQL) and `candidates` with roles, usual days, cleared and works.
-- [ ] 2.5 `vitally_my_profile()` (name, roles, usual days, profile revision, shifts this NY week) and `vitally_save_my_usual_days` (own profile only; validation; raises the profile revision; CONFLICT) (D5, D8).
-- [ ] 2.6 Replace `vitally_save_volunteer`. Copy 053's body verbatim and add an optional `usualDays` (missing = keep), with the added lines marked `-- 056` (D8).
-- [ ] 2.7 Replace `vitally_my_clearance`. Copy 053's body and add `scheduleViewer` (D11).
-- [ ] 2.8 Add `tests/database-schedule.mjs`, which covers every `volunteer-schedule` database scenario:
+- [x] 2.5 `vitally_my_profile()` (name, roles, usual days, profile revision, shifts this NY week) and `vitally_save_my_usual_days` (own profile only; validation; raises the profile revision; CONFLICT) (D5, D8).
+- [x] 2.6 Replace `vitally_save_volunteer`. Copy 053's body verbatim and add an optional `usualDays` (missing = keep), with the added lines marked `-- 056` (D8).
+- [x] 2.7 Replace `vitally_my_clearance`. Copy 053's body and add `scheduleViewer` (D11).
+- [x] 2.8 Add `tests/database-schedule.mjs`, which covers every `volunteer-schedule` database scenario:
   - the refusal order;
   - the shift rules and flags;
   - `counts`, including uncleared, remote, Admin and flagged shifts;
