@@ -1100,7 +1100,7 @@ from anywhere else. Publication (Task 10D) happens only with the user's explicit
 destination choice — this document does not invent or assume one. The built app is already
 designed for static hosting with no build step (the committed vendor bundle, and
 `/public-config.json` fetched relatively so a static host can ship a plain JSON file at that path
-instead of running `server.mjs`). The GitHub Pages copy of `main` ships the committed
+instead of running `server.mjs`). The GitHub Pages copy of `main`, served at <https://govitally.org>, ships the committed
 [`public-config.json`](../public-config.json) for the hosted test project (#212), so it shows the
 sign-in form. A static copy without a configured file shows the same "ViTally is not configured
 yet" screen a fresh local checkout does.
