@@ -1,0 +1,35 @@
+# One-off: screenshots for the landing page (#218). Lives only on the
+# landing-screenshots branch; delete the branch when done.
+name: landing screenshots
+
+on:
+  push:
+    branches: [landing-screenshots]
+
+permissions:
+  contents: read
+
+jobs:
+  shots:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      TZ: America/New_York
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.21.0
+          cache: npm
+      - run: npm ci
+      - uses: ./.github/actions/test-stack
+      - name: Screenshots
+        run: node --env-file=.env.test tests/landing-shots.mjs
+      - name: Upload
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: landing-screenshots
+          path: artifacts/landing/
+          retention-days: 7
+          if-no-files-found: warn
