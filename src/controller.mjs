@@ -1,5 +1,5 @@
 import { awaitingClearance, ceilingAdmin, scheduleViewer, withOwnCapabilities } from "./clearance.mjs";
-import { nyToday, addDays, SHIFT_REFUSALS, WEEKDAYS } from "./volunteer-schedule.mjs";
+import { nyToday, addDays, weekBounds, SHIFT_REFUSALS, WEEKDAYS } from "./volunteer-schedule.mjs";
 import {
   CASE_ACTIONS,
   ASSISTANCE_ACTIONS,
@@ -179,7 +179,7 @@ const EDIT_CONFLICT_MESSAGE =
   "Someone else changed this application while you were editing. Choose which answers to keep.";
 
 // The Workload's sortable columns (workload-views.mjs) and its starting view.
-const WORKLOAD_SORT_KEYS = Object.freeze(["name", "open", "preparing", "review", "waiting", "stalled"]);
+const WORKLOAD_SORT_KEYS = Object.freeze(["name", "open", "preparing", "review", "waiting", "stalled", "hours"]);
 const freshWorkloadView = () => ({ sort: { key: "open", dir: "desc" }, search: "", expanded: [] });
 
 function controllerError(code, message, cause) {
@@ -406,6 +406,9 @@ export function createController({
     // tab is only ever set for a cleared, effective admin (`canSeeWorkload`).
     volunteerTab: "roster",
     workload: freshWorkloadView(),
+    // The live shifts of the week holding today, for the Workload's Hours
+    // this week (design D9); read only while the Workload is open.
+    weekShifts: [],
     // Posted updates (change add-posted-updates). The feed is every staff
     // window's, cleared or not: `updates` is the RPC's items as read,
     // `updatesUnread` its own badge count (never recounted here), and
@@ -1243,6 +1246,11 @@ export function createController({
       (touchesWorkspace || change.table === "shifts" || change.table === "schedule_settings");
     // The site hours card on Season settings.
     const touchesSettings = state.screen === "office-settings" && change.table === "schedule_settings";
+    // A shift moves the Workload's Hours this week (a new season too).
+    const touchesHours =
+      state.screen === "office-volunteers" &&
+      state.volunteerTab === "workload" &&
+      (touchesWorkspace || change.table === "shifts");
     if (
       !touchesList &&
       !touchesOpen &&
@@ -1250,7 +1258,8 @@ export function createController({
       !touchesUpdates &&
       !touchesSchedule &&
       !touchesProfile &&
-      !touchesSettings
+      !touchesSettings &&
+      !touchesHours
     )
       return;
     try {
@@ -1268,6 +1277,7 @@ export function createController({
       if (touchesSchedule && state.screen === "schedule") await readScheduleDay();
       if (touchesProfile && state.screen === "my-profile") await readMyProfile();
       if (touchesSettings && state.screen === "office-settings") await readSeasonSettings();
+      if (touchesHours) await readWorkloadHours();
       // The open case comes last, because it is the one read that may
       // legitimately find nothing: a case that is gone must not stop the
       // lists around it from being refreshed.
@@ -1398,6 +1408,24 @@ export function createController({
     state.volunteerTab = tab;
     show();
     await loadVolunteers();
+    if (tab === "workload") await loadWorkloadHours();
+  }
+
+  // The Workload's Hours this week: the live shifts dated Monday to Sunday of
+  // the week holding today in New York. A failed read keeps the last hours.
+  async function readWorkloadHours() {
+    if (!canSeeWorkload() || state.screen !== "office-volunteers" || state.volunteerTab !== "workload") return;
+    state.weekShifts = (await store.weekShifts(weekBounds(nyToday(clock())))) ?? [];
+  }
+
+  async function loadWorkloadHours() {
+    try {
+      await readWorkloadHours();
+    } catch (error) {
+      noteLocalFailure(error, loadWorkloadHours);
+      return;
+    }
+    show();
   }
 
   // The Workload's search, sort and open rows, one change at a time:
@@ -5428,6 +5456,7 @@ export function createController({
       assistance: [...state.assistance],
       volunteers: state.volunteers.map((entry) => ({ ...entry })),
       volunteerFilters: { ...state.volunteerFilters },
+      weekShifts: state.weekShifts.map((entry) => ({ ...entry })),
       workload: {
         ...state.workload,
         sort: { ...state.workload.sort },

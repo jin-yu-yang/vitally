@@ -355,7 +355,14 @@ const workloadPanel = (state) => {
   const view = state.workload ?? {};
   const cases = state.cases ?? [];
   return renderWorkload({
-    rows: workloadRows({ volunteers: state.volunteers ?? [], people: state.people ?? [], cases, now: Date.now() }),
+    rows: workloadRows({
+      volunteers: state.volunteers ?? [],
+      people: state.people ?? [],
+      cases,
+      now: Date.now(),
+      // Already the week's shifts: the controller read them for that week.
+      shifts: state.weekShifts ?? [],
+    }),
     unassigned: unassignedCases(cases),
     sort: view.sort ?? DEFAULT_WORKLOAD_SORT,
     search: view.search ?? "",

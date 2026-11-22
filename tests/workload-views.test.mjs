@@ -99,15 +99,14 @@ test("the Unassigned row is first, whatever the sort or search", () => {
   assert.deepEqual(rowIds(par), ["unassigned", "v-jordan"]);
 });
 
-test("the headers are sort buttons inside th aria-sort, with no hours column", () => {
+test("the headers are sort buttons inside th aria-sort", () => {
   const html = renderWorkload(args({ sort: { key: "name", dir: "asc" } }));
-  for (const key of ["name", "open", "preparing", "review", "waiting", "stalled"])
+  for (const key of ["name", "open", "preparing", "review", "waiting", "stalled", "hours"])
     assert.match(html, new RegExp(`<th scope="col" aria-sort="[a-z]+"><button type="button"[^>]*data-action="sort-workload" data-key="${key}"`), key);
   assert.match(html, /aria-sort="ascending"><button type="button"[^>]*data-key="name"/);
   assert.match(html, /aria-sort="none"><button type="button"[^>]*data-key="open"/);
   const desc = renderWorkload(args());
   assert.match(desc, /aria-sort="descending"><button type="button"[^>]*data-key="open"/);
-  assert.doesNotMatch(html, /hours/i);
   assert.match(html, /<input id="workload-search"[^>]*type="search"/);
   assert.match(html, /class="board-table people-table workload-table"/);
 });
@@ -119,7 +118,7 @@ test("each row toggles, shows its counts, and tags Not cleared", () => {
   const cells = [...jordan.matchAll(/<td[^>]*data-col="([a-z]+)"[^>]*>([\s\S]*?)<\/td>/g)].map((m) => [m[1], m[2].replace(/<[^>]+>/g, "")]);
   assert.deepEqual(
     Object.fromEntries(cells.filter(([k]) => k !== "bar")),
-    { open: "4", preparing: "3", review: "1", waiting: "1", stalled: "1" },
+    { open: "4", preparing: "3", review: "1", waiting: "1", stalled: "1", hours: "0" },
   );
   // The breakdown bar carries both numbers for screen readers.
   assert.match(jordan, /class="workload-bar" role="img" aria-label="3 preparing, 1 in review"/);
@@ -287,4 +286,27 @@ test("a locked Assign drawer drops the Choose buttons, keeps the search, and say
   assert.doesNotMatch(html, /data-action="assign-case"/);
   assert.match(html, /id="assign-search"/);
   assert.match(html, /Your roles changed, so you can&#39;t send this any more\./);
+});
+
+// ---- Hours this week (change add-volunteer-schedule, design D9) --------------
+
+test("Hours this week follows Stalled, sorts highest first, and the Unassigned row has no hours", () => {
+  const WEEK = { monday: "2026-11-09", sunday: "2026-11-15" };
+  const shifts = [
+    { person_id: "v-jordan", shift_date: "2026-11-10", start_hour: 9, end_hour: 18 },
+    { person_id: "v-alex", shift_date: "2026-11-11", start_hour: 9, end_hour: 15 },
+  ];
+  const rows = workloadRows({ volunteers: VOLUNTEERS, people: PEOPLE, cases: CASES, now: NOW, shifts, week: WEEK });
+  const html = renderWorkload(args({ rows, sort: { key: "hours", dir: "desc" } }));
+  const heads = [...html.matchAll(/<th scope="col"[^>]*>(?:<button[^>]*>)?([^<]+)/g)].map((m) => m[1]);
+  assert.equal(heads[heads.indexOf("Stalled") + 1], "Hours this week");
+  assert.match(html, /aria-sort="descending"><button type="button"[^>]*data-key="hours"/);
+  assert.deepEqual(rowIds(html), ["unassigned", "v-jordan", "v-alex", "v-casey"]);
+  const hoursOf = (id) =>
+    new RegExp(`data-row-id="${id}">[\\s\\S]*?<td data-col="hours">([^<]*)</td>`).exec(html)[1];
+  assert.deepEqual(["v-jordan", "v-alex", "v-casey"].map(hoursOf), ["9", "6", "0"]);
+  const unassigned = /<tr class="workload-row workload-unassigned"[^>]*>([\s\S]*?)<\/tr>/.exec(html)[1];
+  assert.match(unassigned, /<td data-col="hours">—<\/td>/);
+  const reversed = renderWorkload(args({ rows, sort: { key: "hours", dir: "asc" } }));
+  assert.deepEqual(rowIds(reversed), ["unassigned", "v-casey", "v-alex", "v-jordan"]);
 });

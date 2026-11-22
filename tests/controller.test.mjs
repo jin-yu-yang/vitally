@@ -113,6 +113,14 @@ function fakeStore({
       store.calls.push("listPeople");
       return people;
     },
+    // The Workload's hours: the live shifts of the week asked for.
+    weekShiftRows: [],
+    weekRequests: [],
+    async weekShifts(week) {
+      store.calls.push("weekShifts");
+      store.weekRequests.push(week);
+      return store.weekShiftRows.map((row) => ({ ...row }));
+    },
     async listCases() {
       store.calls.push("listCases");
       return [...records.values()];
@@ -9101,6 +9109,41 @@ test("a cleared staff member without effective admin gets no Workload and no ass
   controller.stop();
 });
 
+test("Hours this week: read for the week holding today, sortable, and re-read when a shift changes", async () => {
+  const store = workloadStore();
+  store.weekShiftRows = [{ person_id: "v-1", shift_date: "2026-11-10", start_hour: 9, end_hour: 13, role: "preparer" }];
+  const { controller } = build({ store, clock: () => Date.parse("2026-11-13T15:00:00-05:00") });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.setVolunteerTab("workload");
+  assert.deepEqual(store.weekRequests, [{ monday: "2026-11-09", sunday: "2026-11-15" }]);
+  const hours = (id) =>
+    new RegExp(String.raw`data-row-id="${id}">[\s\S]*?<td data-col="hours">([^<]*)</td>`).exec(staffScreen(controller.getState()))?.[1];
+  assert.equal(hours("v-1"), "4");
+  assert.equal(hours("v-2"), "0");
+  controller.setWorkloadView({ sortBy: "hours" });
+  assert.deepEqual(controller.getState().workload.sort, { key: "hours", dir: "desc" });
+  controller.setWorkloadView({ sortBy: "hours" });
+  assert.deepEqual(controller.getState().workload.sort, { key: "hours", dir: "asc" });
+  // A shift changed in another window: the week is read again, and only it.
+  store.weekShiftRows = [
+    ...store.weekShiftRows,
+    { person_id: "v-2", shift_date: "2026-11-12", start_hour: 10, end_hour: 15, role: "reviewer" },
+  ];
+  const casesBefore = caseListReads(store);
+  const volunteersBefore = volunteerReads(store);
+  await store.handlers.onChange({ table: "shifts", eventType: "INSERT", id: "s-1" });
+  assert.equal(store.weekRequests.length, 2);
+  assert.equal(hours("v-2"), "5");
+  assert.equal(caseListReads(store), casesBefore, "no case list is re-read");
+  assert.equal(volunteerReads(store), volunteersBefore, "nor the volunteers");
+  // On the Roster tab a shift change reads nothing for the Workload.
+  await controller.setVolunteerTab("roster");
+  await store.handlers.onChange({ table: "shifts", eventType: "UPDATE", id: "s-1" });
+  assert.equal(store.weekRequests.length, 2);
+  controller.stop();
+});
+
 test("the Workload's view: a header pressed again reverses, a new one starts at its natural order", async () => {
   const { controller } = build({ store: workloadStore() });
   await controller.start();
@@ -9113,7 +9156,7 @@ test("the Workload's view: a header pressed again reverses, a new one starts at 
   assert.deepEqual(controller.getState().workload.sort, { key: "name", dir: "desc" });
   controller.setWorkloadView({ sortBy: "stalled" });
   assert.deepEqual(controller.getState().workload.sort, { key: "stalled", dir: "desc" });
-  controller.setWorkloadView({ sortBy: "hours" });
+  controller.setWorkloadView({ sortBy: "bogus" });
   assert.deepEqual(controller.getState().workload.sort, { key: "stalled", dir: "desc" }, "an unknown key changes nothing");
   controller.setWorkloadView({ search: "par" });
   assert.equal(controller.getState().workload.search, "par");
