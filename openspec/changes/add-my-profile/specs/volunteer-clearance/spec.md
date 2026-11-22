@@ -84,18 +84,22 @@ A repeated `vitally_mark_upload_sent` request with the same action id SHALL retu
 
 ### Requirement: The setup screen says why a document came back
 When the Form 13615 or photo ID item on the setup screen has no sent date and has a review reason, the item SHALL show a line under it:
-- "Your site coordinator says this is already on file. You don't need to send it again." when the reason is exactly "Already on file";
-- otherwise, "Your site coordinator looked at this: <reason>. Please send it again or ask them."
+- "Your site coordinator says this is already on file. You don't need to send it again." for a Form 13615 whose reason is exactly "Already on file";
+- otherwise, for any other 13615 reason and for every photo ID reason (a typed "Already on file" included): "Your site coordinator looked at this: <reason>. Please send it again or ask them."
 
 Upload, or the text in its place, and I've uploaded it SHALL be offered as before. Once the item has a sent date again, the line SHALL go and "Waiting for review · sent <date>" SHALL show. The text SHALL be English only, and the reason SHALL be shown as stored, escaped.
 
 #### Scenario: A photo ID came back
-- **WHEN** a new staff member sent their photo ID, an admin marked it reviewed with the reason "Can't read it", and the staff member's setup screen re-checks
+- **WHEN** a new staff member sent their photo ID, an admin marked it reviewed with the quick pick "Can't read it", and the staff member's setup screen re-checks
 - **THEN** the photo ID item shows "Your site coordinator looked at this: Can't read it. Please send it again or ask them.", with Upload and I've uploaded it
 
 #### Scenario: Sending again hides the reason
 - **WHEN** that staff member presses I've uploaded it
 - **THEN** the reason line goes, and the item shows "Waiting for review · sent <today>"
+
+#### Scenario: "Already on file" typed for a photo ID
+- **WHEN** an admin sent a new staff member's photo ID back with the typed note "Already on file", and the setup screen re-checks
+- **THEN** the photo ID item shows "Your site coordinator looked at this: Already on file. Please send it again or ask them.", not the already-on-file line
 
 #### Scenario: A note
 - **WHEN** the admin's reason was the note "Please upload page 2 as well"

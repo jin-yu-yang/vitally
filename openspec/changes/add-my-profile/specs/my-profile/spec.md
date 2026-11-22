@@ -66,15 +66,15 @@ It SHALL NOT change the caller's email, roles, certificates, roster entry or acc
 - **THEN** it is refused with `FORBIDDEN`, and no receipt is stored
 
 ### Requirement: A cleared staff member opens My profile from the sidebar
-For a cleared `staff` window, the account row in the sidebar's bottom block SHALL be a "My profile" link that opens the My profile screen. This SHALL hold for admins as well. A window that is not cleared, admins included, SHALL keep the account row as plain text and SHALL NOT offer My profile; it keeps the setup screen. When a window loses clearance while My profile is open, it SHALL switch to the setup screen.
+For a cleared `staff` window, the account row in the sidebar's bottom block SHALL be a link that opens the My profile screen. Its first line SHALL read "My profile", with the signed-in name as a smaller second line. This SHALL hold for admins as well. A window that is not cleared, admins included, SHALL keep the account row as plain text and SHALL NOT offer My profile; it keeps the setup screen. When a window loses clearance while My profile is open, it SHALL switch to the setup screen.
 
 #### Scenario: A cleared Preparer
-- **WHEN** a cleared Preparer presses My profile in the sidebar
-- **THEN** the My profile screen opens, showing their details
+- **WHEN** a cleared Preparer looks at the sidebar and presses My profile
+- **THEN** the link reads "My profile" with their name as a smaller second line, and the My profile screen opens, showing their details
 
 #### Scenario: An uncleared admin
 - **WHEN** a site coordinator with no roles signs in
-- **THEN** the sidebar offers no My profile, and the account row is plain text
+- **THEN** the sidebar offers no My profile, and the account row is the plain "Signed in as <name>" text
 
 ### Requirement: My profile shows the office's records read-only
 My profile SHALL show:

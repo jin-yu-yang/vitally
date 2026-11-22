@@ -247,19 +247,38 @@ rather than merging first, so hosted never runs 057 before 056.
     otherLanguage and usualDays, under the admin save's rules for the shared
     fields.
   - The result is `{actionId, personId, revision}`.
-- **(my call) What the volunteer sees on a sent-back document.**
-  - **Any reason except "Already on file":** "Your site coordinator looked at
+- **(my call, narrowed by R5) What the volunteer sees on a sent-back document.**
+  - **Any reason except a 13615's "Already on file":** "Your site coordinator looked at
     this: <reason>. Please send it again or ask them." Upload and "I've
     uploaded it" are offered again.
   - **"Already on file":** "Your site coordinator says this is already on
     file. You don't need to send it again." Upload and "I've uploaded it"
     stay offered on My profile, for a later certification.
-- **(my call) What the admin sees.** The drawer does not show the last
-  reason. The Roster shows only what is waiting, as today.
+- **(my call, replaced by R2) What the admin sees.** ~~The drawer does not
+  show the last reason.~~ The Roster shows only what is waiting, as today.
 - **(my call) After the volunteer saves their name,** the window re-reads
   what it shows for the signed-in person, so the account row and the board
   show the new name.
 - **(my call) Docs.**
   - The developer guide's migration and RPC counts are updated.
   - The roadmap marks #242 and #246.
-  - Hosted runs 057 on merge day, after 056.
+  - Hosted runs 057 right after the merge, after 056 (R4).
+
+## Revisions from the user's review of 833eb6a (Nov 21)
+
+These override anything above that disagrees.
+
+- **R1. Photo ID quick picks.** "Can't read it", "Expired" and "Not a photo
+  ID", plus the note. "Not signed" and "Wrong form" are no longer offered for
+  a photo ID. The 13615 picks are unchanged.
+- **R2. Admins see the last reason.** In the Edit drawer, in the document's
+  place, "Last returned: <reason> · <date>" when a review reason is stored.
+  It is no longer a non-goal.
+- **R3. The sidebar link** reads "My profile", with the signed-in name as a
+  smaller second line.
+- **R4. Deploy order.** Hosted runs 057 right after the merge (and after
+  056), because the front end goes live from `main` and calls the new
+  functions. Not "a quiet day".
+- **R5. The already-on-file line is for the Form 13615 only.** For a photo
+  ID, any reason, a typed "Already on file" included, shows "Your site
+  coordinator looked at this: <reason>. Please send it again or ask them."

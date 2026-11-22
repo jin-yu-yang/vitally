@@ -34,7 +34,6 @@
 - The volunteer summary, phone sharing and gender (Before the pilot).
 - My profile for uncleared staff.
 - Notifying the volunteer outside the app.
-- Showing the last reason to admins.
 - A Roster column for usual days.
 - Any change to how a document is uploaded.
 
@@ -108,22 +107,26 @@
   - Send back and Cancel. Send back stays disabled until a pick or a note is given.
   **The quick picks:**
   - **For a 13615:** "Not signed", "Can't read it", "Wrong form" and "Missing a certification". "Already on file" is added when the volunteer has a role this season.
-  - **For a photo ID:** "Not signed", "Can't read it" and "Wrong form". Only the two 13615-only picks are left out, as agreed.
+  - **For a photo ID:** "Can't read it", "Expired" and "Not a photo ID".
   **What is sent:** a note replaces the pick's text. The reason sent is the pick's text or the note, as typed.
   **After it lands:** the admin's unsaved drawer edits survive, as 053 D7 requires.
-- **Rationale:** a dialog inside the drawer dialog would trap focus twice. "Already on file" only makes sense for a re-send; someone with no roles needs roles recorded.
+  **The last reason, for admins:** when a document has a stored review reason, the drawer shows "Last returned: <reason> · <date>" in that document's place, where its sent line goes:
+  - for the 13615, after Roles;
+  - for the photo ID, beside Photo ID checked.
+  `<date>` is the reviewed time's New York day. Sending again clears the reason, so a document shows either its sent line or this line, never both. The Roster's volunteer records carry `form13615ReviewedAt`, `form13615ReviewReason`, `photoIdReviewedAt` and `photoIdReviewReason` from the existing admin-only table read.
+- **Rationale:** a dialog inside the drawer dialog would trap focus twice. "Already on file" only makes sense for a re-send; someone with no roles needs roles recorded. The photo ID picks are what goes wrong with an ID; "Not signed" doesn't apply to one. The last reason tells a second admin what the first said.
 - **Alternative considered:** a separate dialog. Rejected as above.
 
 ### D8: What the volunteer sees on a returned document
 - **Choice:** when an item has no sent date and has a review reason, its line is followed by one of:
-  - **"Already on file" (exact match):** "Your site coordinator says this is already on file. You don't need to send it again."
-  - **Any other reason:** "Your site coordinator looked at this: <reason>. Please send it again or ask them."
+  - **A Form 13615 whose reason is exactly "Already on file":** "Your site coordinator says this is already on file. You don't need to send it again."
+  - **Any other reason, and any photo ID reason** (a typed "Already on file" included): "Your site coordinator looked at this: <reason>. Please send it again or ask them."
   Upload and I've uploaded it are offered as before. The line appears on the setup screen and in My profile's 13615 section. With a sent date, "Waiting for review · sent <date>" shows and no reason.
-- **Rationale:** an exact match is enough, because the quick pick's text is what gets stored.
+- **Rationale:** an exact match is enough, because the quick pick's text is what gets stored. "Already on file" is a 13615 quick pick only. A photo ID that is on file gets Photo ID checked ticked, so it never comes back with that line.
 
 ### D9: My profile screen and how it is reached
 - **Choice:**
-  - **Entry point:** for cleared staff, the sidebar's account row becomes a link button, "My profile", that opens the screen `my-profile`. While uncleared, the row stays plain text.
+  - **Entry point:** for cleared staff, the sidebar's account row becomes a link button that opens the screen `my-profile`. It reads "My profile", with the signed-in name as a smaller second line. While uncleared, the row stays the plain "Signed in as <name>" text.
   - **Sections:**
     1. Your details: the editable name, phone, works, languages and usual days, with a locked email and the read-only account status. Save.
     2. This season: roles and certificates, read-only, with "Managed by the office" and "Ask <site coordinator>".
@@ -145,8 +148,8 @@
 
 ## Risks / Trade-offs
 
-- **[Risk] Dropping the four-argument Mark reviewed breaks admin tabs open across the deploy.**
-  - Mitigation: the refusal is said in the drawer, and a reload fixes it. Deploy on a quiet day; note it in the PR.
+- **[Risk] The front end and the database go out of step.** The front end goes live from `main` as soon as the PR merges, and it calls the new functions (the five-argument Mark reviewed, `vitally_my_profile` and `vitally_save_my_profile`). Until hosted runs 057, those calls fail. Admin tabs opened before the deploy still call the dropped four-argument Mark reviewed.
+  - Mitigation: deploy 057 to hosted right after merging, and after 056. An old tab gets a refusal in the drawer, and a reload fixes it. Note the order in the PR.
 - **[Risk] The story job gets longer.** The new block runs outside the story's own 20-minute limit, as the other screen tests do, but it still adds time to the job.
   - Mitigation: report the block's timing marks from the CI run in `verify.md`. If the job slows too much, stop and show the timings; never trim tests to fit.
 - **[Risk] Two writers on one revision.** A volunteer saving My profile while an admin's drawer is open makes the admin's save fail with `CONFLICT`.
@@ -170,7 +173,7 @@
    - §7 `vitally_save_my_profile`.
    Each function is copied from its latest version, with this change's lines marked `-- 057`.
 2. Existing rows get the defaults: no review reasons and no usual days. No backfill is needed.
-3. Order: 056 merges and runs on hosted first. Then this PR merges, and hosted runs 057 the same day.
+3. Order: 056 merges and runs on hosted first. Then this PR merges, and hosted runs 057 right after the merge: the front end goes live from `main` and calls the new functions.
 4. Rollback: a new migration that restores 053's functions and drops the new columns and RPCs. Applied migrations are never edited.
 
 ## Open Questions

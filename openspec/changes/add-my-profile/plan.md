@@ -42,9 +42,10 @@ Executors read the design and specs alongside this plan.
   - The receipt operation is `SAVE_MY_PROFILE`.
   - The `vitally_save_my_profile` payload keys are exactly `languages`, `name`, `otherLanguage`, `phone`, `usualDays` and `works`.
   - The `vitally_save_volunteer` payload is the ten 053 keys, optionally plus `usualDays`.
-- **Quick picks (exact text):** "Not signed", "Can't read it", "Wrong form", "Missing a certification" and "Already on file".
-  - 13615: the first four, and "Already on file" only when the volunteer has a role this season.
-  - Photo ID: "Not signed", "Can't read it" and "Wrong form".
+- **Quick picks (exact text):**
+  - 13615: "Not signed", "Can't read it", "Wrong form" and "Missing a certification", plus "Already on file" only when the volunteer has a role this season.
+  - Photo ID: "Can't read it", "Expired" and "Not a photo ID".
+- **The already-on-file line** is for a Form 13615 whose reason is exactly "Already on file". Every photo ID reason, a typed "Already on file" included, gets the generic line.
 - **Staff text, English only (exact):**
   - "My profile"
   - "Your details"
@@ -58,6 +59,8 @@ Executors read the design and specs alongside this plan.
   - "Waiting for review · sent <date>"
   - "Your site coordinator says this is already on file. You don't need to send it again."
   - "Your site coordinator looked at this: <reason>. Please send it again or ask them."
+  - "Last returned: <reason> · <date>" (admins, in the drawer)
+  - The sidebar link: "My profile", with the signed-in name as a smaller second line
   - "Send back"
   - "Cancel"
   - "Usual days"
@@ -85,9 +88,9 @@ Executors read the design and specs alongside this plan.
 3. **A lost answer on Save in My profile, pressed again.**
    - One save is recorded (the same action id).
    - Test: Task 5 Step 1 `saveMyProfile retries a lost save with the same action id`.
-4. **"Already on file" typed as a note in a different case** ("already on file").
-   - That is a note, so the volunteer sees the generic line with their text. Only an exact match gets the already-on-file line.
-   - Test: Task 4 Step 1 `only the exact quick pick is already on file`.
+4. **"Already on file" typed in a different case ("already on file"), or typed for a photo ID.**
+   - Both are shown as the generic line with their text. Only a 13615 with the exact text gets the already-on-file line.
+   - Test: Task 4 Step 1 `only the exact quick pick is already on file` and `a photo ID is never already on file`.
 5. **Usual days sent out of order or repeated** (`["sat","mon"]`, `["mon","mon"]`).
    - The first is stored as `{mon,sat}`; the second is refused.
    - Test: Task 2 Step 1 and Task 3 Step 1.
@@ -223,9 +226,9 @@ Executors read the design and specs alongside this plan.
   - `store.getMyProfile()`, which resolves to the `vitally_my_profile` answer;
   - `store.saveMyProfile({actionId, expectedRevision, profile})`, which calls `vitally_save_my_profile` with `p_action_id`, `p_expected_revision` and `p_profile`;
   - `store.markUploadReviewed({actionId, volunteerId, expectedRevision, document, reason})`, which sends `p_reason`;
-  - volunteer records from `listVolunteers` carry `usualDays: string[]`;
+  - volunteer records from `listVolunteers` carry `usualDays: string[]`, plus `form13615ReviewedAt`, `form13615ReviewReason`, `photoIdReviewedAt` and `photoIdReviewReason` (string or null);
   - `uploadItems(clearance)` items gain `reviewedAt` and `reviewReason`;
-  - `reviewLine(item)` in `src/clearance.mjs`, which returns the D8 line or null.
+  - `reviewLine({document, sentAt, reviewReason})` in `src/clearance.mjs`, which returns the D8 line or null. The already-on-file line only applies when `document === "form13615"`.
 
 - [ ] **Step 1: Write the failing tests.**
   - `tests/store.test.mjs`:
@@ -236,7 +239,9 @@ Executors read the design and specs alongside this plan.
   - `tests/clearance.test.mjs`:
     - `uploadItems carries the review`;
     - `reviewLine is null with a sent date or no reason`;
-    - `only the exact quick pick is already on file`: `"Already on file"` gives the already-on-file sentence, and `"already on file"` gives the generic sentence with that text;
+    - `only the exact quick pick is already on file`: for `form13615`, `"Already on file"` gives the already-on-file sentence, and `"already on file"` gives the generic sentence with that text;
+    - `a photo ID is never already on file`: for `photoId`, `"Already on file"` gives "Your site coordinator looked at this: Already on file. Please send it again or ask them.";
+    - `listVolunteers carries the review fields` (in `tests/store.test.mjs`): the four fields map from the entry's columns, null when unset;
     - `a note is quoted in the generic line`.
 - [ ] **Step 2: Implement.** `reviewLine` returns plain text; views escape it. `src/volunteer-roster.mjs` maps `profile.usual_days ?? []`.
 - [ ] **Step 3: Run** `node --test tests/store.test.mjs tests/clearance.test.mjs`. Expected: PASS. Then run `npm test`. Expected: PASS.
@@ -297,7 +302,10 @@ Executors read the design and specs alongside this plan.
     - `escapes a typed reason`: a reason of `<b>&"` appears as `&lt;b&gt;&amp;&quot;`.
   - The drawer tests:
     - `Mark reviewed opens the reason row`;
-    - `photo ID picks leave out the 13615-only ones`;
+    - `photo ID picks are Can't read it, Expired and Not a photo ID` (and none of "Not signed", "Wrong form", "Missing a certification" or "Already on file");
+    - `13615 picks are the four, plus Already on file with a role`;
+    - `a stored reason shows Last returned in the document's place`: a 13615 reason "Not signed" reviewed `2026-11-21T03:30:00Z` shows "Last returned: Not signed · Nov 20" after Roles; a photo ID one shows beside Photo ID checked; a document with a sent date shows its sent line instead;
+    - `escapes the last reason in the drawer`;
     - `Already on file only with a role this season`;
     - `Send back is disabled until a pick or a note`;
     - `usual days are ticked from the record`.
@@ -336,10 +344,11 @@ Executors read the design and specs alongside this plan.
   - `escapes the reason`;
   - `loading and failed states`.
   - In the sidebar tests (`git grep -l "Signed in as" tests/*.test.mjs`):
-    - `a cleared window's account row is the My profile link`;
-    - `an uncleared admin's account row is plain text`.
+    - `a cleared window's account row is the My profile link`: the button's first line is "My profile", and its second, smaller line is the signed-in name;
+    - `an uncleared admin's account row is plain text`: "Signed in as <name>", with no button.
 - [ ] **Step 2: Implement.**
-  - The account row keeps "Signed in as <name>" as its visible text, wrapped in `button(…, "open-my-profile", "nav-link account-link")` with `aria-label="My profile"`, and gets `aria-current="page"` on the screen. On the setup screen (`board` false) it stays plain.
+  - For a cleared window, the account row is `button(…, "open-my-profile", "nav-link account-link")`. Its content is `<span>My profile</span><small class="account-name">${esc(name)}</small>`, and it gets `aria-current="page"` on the screen. On the setup screen (`board` false) it stays the plain "Signed in as <name>".
+  - Check that `readSignedInAs` in `tests/browser.mjs` still finds the name, and adjust it, not the other tests, if it read the "Signed in as" text.
   - Route `my-profile` in the cleared branch of the page switch, with the frame "MY PROFILE" / "My profile".
 - [ ] **Step 3: Run `npm test`.** Expected: PASS.
 - [ ] **Step 4: Commit.**
@@ -356,11 +365,11 @@ Executors read the design and specs alongside this plan.
   1. A cleared Preparer opens My profile from the account row.
   2. They change the phone to a fictional `555-0142`, tick Monday and Saturday, rename themselves "Jordan Vale", and save. The toast says "Profile saved", the account row shows "Jordan Vale", and after a reload the days are still ticked.
   3. They press I've uploaded it. The section shows "Waiting for review · sent <today>".
-  4. The site coordinator opens the Preparer's drawer, presses Mark reviewed, picks "Wrong form", and presses Send back. The sent line goes.
+  4. The site coordinator opens the Preparer's drawer, presses Mark reviewed, picks "Wrong form", and presses Send back. The sent line goes, and "Last returned: Wrong form · <today>" shows in its place.
   5. The Preparer's window regains focus. My profile shows "Your site coordinator looked at this: Wrong form. Please send it again or ask them."
   6. They press I've uploaded it again. The reason line goes.
 - [ ] **Step 2: Extend** "A volunteer says their uploads were sent, and an admin reviews them":
-  - its Mark reviewed step picks "Can't read it" and presses Send back;
+  - its photo ID Mark reviewed step picks "Can't read it" and presses Send back (if that test reviews the 13615 instead, use "Not signed");
   - after Check again, the volunteer's setup screen shows "Your site coordinator looked at this: Can't read it. Please send it again or ask them.".
 - [ ] **Step 3: Run** `node --check tests/browser.mjs` and `npm test`. Expected: PASS. The blocks run in CI (Task 9).
 - [ ] **Step 4: Commit.**

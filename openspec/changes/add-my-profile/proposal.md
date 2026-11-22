@@ -14,9 +14,10 @@ A staff member has no page of their own. They can't see which roles and certific
 - **Mark reviewed**
   - From: Mark reviewed clears the sent date with no reason, and the volunteer is told nothing.
   - To:
-    - It requires a reason: a quick pick ("Not signed", "Can't read it", "Wrong form", "Missing a certification", "Already on file") or a note of up to 120 characters.
+    - It requires a reason: a quick pick or a note of up to 120 characters. The quick picks for a Form 13615 are "Not signed", "Can't read it", "Wrong form", "Missing a certification" and "Already on file". For a photo ID they are "Can't read it", "Expired" and "Not a photo ID".
     - The reason and time are stored per document on this season's roster entry.
-    - The volunteer sees the reason on the setup screen and on My profile. "Already on file" gets its own line saying nothing needs sending.
+    - The volunteer sees the reason on the setup screen and on My profile. A 13615 sent back as "Already on file" gets its own line saying nothing needs sending.
+    - Admins see "Last returned: <reason> · <date>" in the Edit drawer.
     - The reason clears when the volunteer sends again, or when an admin's save acts on that document.
   - Reason: volunteers read a silent reset as the app losing their file.
   - Impact: breaking for the RPC. `vitally_mark_upload_reviewed` gains a required `p_reason`, and the four-argument form is dropped. Admin tabs opened before the deploy must reload.
@@ -39,7 +40,7 @@ A staff member has no page of their own. They can't see which roles and certific
   - marking a document sent clears its review reason;
   - the setup screen says why a document came back.
 - `volunteer-roster`:
-  - Mark reviewed requires a reason, which is stored, in a reason row in the drawer;
+  - Mark reviewed requires a reason, which is stored, in a reason row in the drawer, and the drawer shows the last reason;
   - the admin save carries usual days and clears the review reason when it acts on a document.
 
 ## Impact
@@ -60,4 +61,4 @@ A staff member has no page of their own. They can't see which roles and certific
   - a new `tests/database-my-profile.mjs`, plus updates to `tests/database-clearance-uploads.mjs` for the new Mark reviewed argument;
   - a new test block in `tests/browser.mjs`, "A volunteer edits My profile and re-sends a Form 13615".
 - **Docs:** developer guide migration and RPC counts; the roadmap for #242 and #246.
-- **Deploy:** hosted runs 057 on merge day, after 056.
+- **Deploy:** hosted runs 057 right after the merge, after 056. The front end goes live from `main` and calls the new functions.

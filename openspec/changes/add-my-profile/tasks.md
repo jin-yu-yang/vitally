@@ -54,9 +54,9 @@
 - [ ] 4.1 `src/supabase-store.mjs`:
   - `markUploadReviewed` sends `p_reason`;
   - add `getMyProfile()` and `saveMyProfile(request)`;
-  - `listVolunteers` and `src/volunteer-roster.mjs` carry `usualDays`;
+  - `listVolunteers` and `src/volunteer-roster.mjs` carry `usualDays` and the four review fields;
   - `saveVolunteer` sends `usualDays`.
-- [ ] 4.2 `src/clearance.mjs`: `uploadItems` carries `reviewedAt` and `reviewReason`. Add a shared helper that gives the D8 line for an item (exact "Already on file" match). Unit tests.
+- [ ] 4.2 `src/clearance.mjs`: `uploadItems` carries `reviewedAt` and `reviewReason`. Add a shared helper that gives the D8 line for an item: the already-on-file line only for a 13615 whose reason is exactly "Already on file"; every photo ID reason gets the generic line. Unit tests.
 - [ ] 4.3 `src/controller.mjs`:
   - `markUploadReviewed(document, reason)`;
   - a `my-profile` screen with its read state;
@@ -69,7 +69,8 @@
 
 - [ ] 5.1 `src/setup-views.mjs`: the reason line under a returned item (design D8). Unit tests in `tests/setup-views.test.mjs`.
 - [ ] 5.2 `src/volunteer-views.mjs`:
-  - the reason row for Mark reviewed (quick picks per document, "Already on file" only with a role this season, a note with maxlength 120, Send back disabled until one is given, Cancel);
+  - the reason row for Mark reviewed (quick picks per document: for a 13615 "Not signed", "Can't read it", "Wrong form" and "Missing a certification", plus "Already on file" only with a role this season; for a photo ID "Can't read it", "Expired" and "Not a photo ID"; a note with maxlength 120; Send back disabled until one is given; Cancel);
+  - "Last returned: <reason> · <date>" in a document's place when a review reason is stored;
   - the Usual days checkboxes in the drawer.
   `src/app.mjs` wiring keeps the unsaved drawer edits. Unit tests.
 - [ ] 5.3 New `src/profile-views.mjs`: the My profile screen (design D9).
@@ -77,7 +78,7 @@
   - This season (read-only, "Managed by the office" and the site coordinator);
   - the 13615 section (Upload or the ask text, I've uploaded it or "Waiting for review · sent <date>", the D8 line).
   English only. Unit tests.
-- [ ] 5.4 `src/views.mjs`: the account row becomes a "My profile" link for a cleared staff window only; route the `my-profile` screen. `src/app.mjs` handles the open, save and send actions. `src/styles.css` for the new screen and reason row. Unit tests.
+- [ ] 5.4 `src/views.mjs`: the account row becomes a link reading "My profile", with the signed-in name as a smaller second line, for a cleared staff window only; route the `my-profile` screen. `src/app.mjs` handles the open, save and send actions. `src/styles.css` for the new screen and reason row. Unit tests.
 
 ## 6. Browser test and docs
 

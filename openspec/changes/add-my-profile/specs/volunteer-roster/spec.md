@@ -37,13 +37,23 @@
 ### Requirement: The Edit drawer shows what was sent, with Mark reviewed
 While editing a volunteer, the Edit drawer SHALL show "Form 13615 sent <date>" and "Photo ID sent <date>" for each document that is waiting, each with a Mark reviewed button. Mark reviewed SHALL open a reason row in the drawer, with quick picks, a note of at most 120 characters, Send back and Cancel:
 - for a Form 13615: "Not signed", "Can't read it", "Wrong form" and "Missing a certification", and also "Already on file" when the volunteer has a role this season;
-- for a photo ID: "Not signed", "Can't read it" and "Wrong form".
+- for a photo ID: "Can't read it", "Expired" and "Not a photo ID".
 
-Send back SHALL be unavailable until a quick pick is chosen or a note is typed. A note SHALL be sent in place of the quick pick. Send back SHALL mark the document reviewed with that reason; Cancel SHALL close the row and send nothing. After Send back lands, the drawer SHALL keep the admin's unsaved edits and the new revision, and the line SHALL go.
+Send back SHALL be unavailable until a quick pick is chosen or a note is typed. A note SHALL be sent in place of the quick pick. Send back SHALL mark the document reviewed with that reason; Cancel SHALL close the row and send nothing. After Send back lands, the drawer SHALL keep the admin's unsaved edits and the new revision, and the sent line SHALL go.
+
+When a document has a stored review reason, the drawer SHALL show "Last returned: <reason> · <date>" in that document's place, where its sent line goes. `<date>` is the New York day it was sent back.
 
 #### Scenario: Mark reviewed on a photo ID
-- **WHEN** a new volunteer has marked their photo ID as sent, and an admin opens Edit, presses Mark reviewed beside "Photo ID sent <date>", picks "Can't read it" and presses Send back
-- **THEN** the photo ID sent date is cleared with the reason "Can't read it", the line goes, and the volunteer is no longer listed under Uploads to review
+- **WHEN** a new volunteer has marked their photo ID as sent, and an admin opens Edit, presses Mark reviewed beside "Photo ID sent <date>", picks "Expired" and presses Send back
+- **THEN** the photo ID sent date is cleared with the reason "Expired", the sent line goes, and the volunteer is no longer listed under Uploads to review
+
+#### Scenario: Photo ID quick picks
+- **WHEN** an admin presses Mark reviewed beside "Photo ID sent <date>"
+- **THEN** the quick picks are "Can't read it", "Expired" and "Not a photo ID", with the note; "Not signed", "Wrong form", "Missing a certification" and "Already on file" are not offered
+
+#### Scenario: The last reason
+- **WHEN** an admin sent a volunteer's Form 13615 back with "Not signed" on Nov 20, and another admin opens that volunteer's Edit drawer
+- **THEN** the drawer shows "Last returned: Not signed · Nov 20" where the Form 13615 line goes; once the volunteer sends it again, the drawer shows "Form 13615 sent <date>" instead
 
 #### Scenario: Send back needs a reason
 - **WHEN** an admin presses Mark reviewed and neither picks a reason nor types a note
