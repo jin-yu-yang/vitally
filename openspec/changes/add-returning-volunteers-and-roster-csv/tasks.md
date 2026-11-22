@@ -1,11 +1,11 @@
 ## 1. Shared CSV encoder
 
-- [ ] 1.1 Add `src/csv.mjs` (`toCsv(header, rows)`): UTF-8 BOM, RFC 4180 quoting, CR LF line endings, and the apostrophe guard for cells starting `=`, `+`, `-`, `@`, tab or CR (design D7)
-- [ ] 1.2 Unit tests for `src/csv.mjs`: BOM, quoting of `"`, `,`, CR and LF, the guard (phones included), and empty cells
+- [x] 1.1 Add `src/csv.mjs` (`toCsv(header, rows)`): UTF-8 BOM, RFC 4180 quoting, CR LF line endings, and the apostrophe guard for cells starting `=`, `+`, `-`, `@`, tab or CR (design D7)
+- [x] 1.2 Unit tests for `src/csv.mjs`: BOM, quoting of `"`, `,`, CR and LF, the guard (phones included), and empty cells
 
 ## 2. Roster data
 
-- [ ] 2.1 `combineVolunteers` carries each confirmed certificate's confirmation date; unit test
+- [x] 2.1 `combineVolunteers` carries each confirmed certificate's confirmation date; unit test
 - [ ] 2.2 New store method `listEarlierVolunteers()`: the profiles of people with no current-season roster entry, each with `lastSeason` (on the `current_season - 1` roster); `readVolunteers` reads it alongside `listVolunteers()` into `state.earlierVolunteers` (design D5); store and controller unit tests
 - [ ] 2.3 Pure helpers in `src/volunteer-roster.mjs`: the picker's candidates (last season's people not on this roster, filtered by name or email; full-email match on any other profile, labelled "Earlier volunteer") and the form values a pick fills (person fields and usual days; not new, photo ID unticked, no roles, no certificates); unit tests
 - [ ] 2.4 Form validation: an email belonging to a profile not on the current roster gives "That email belongs to an earlier volunteer. Pick them above."; an email on the current Roster keeps "That email is already on the Roster."; unit tests
@@ -18,7 +18,7 @@
 
 ## 4. Roster CSV export
 
-- [ ] 4.1 Pure CSV row builder for the Roster: the columns of design D6 in order, the table's labels (IT&QR), certificate dates in New York time, Account and Cleared; the filename `roster-<season>-<YYYY-MM-DD>.csv` from the New York date; unit tests
+- [x] 4.1 Pure CSV row builder for the Roster: the columns of design D6 in order, the table's labels (IT&QR), certificate dates in New York time, Account and Cleared; the filename `roster-<season>-<YYYY-MM-DD>.csv` from the New York date; unit tests
 - [ ] 4.2 "Export CSV" button in the Roster toolbar, disabled when no row is shown; it downloads the rows `filterVolunteers` keeps, as a Blob; view unit tests
 
 ## 5. Database contract
