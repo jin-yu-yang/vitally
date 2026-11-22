@@ -1023,7 +1023,7 @@ test("vitally_my_clearance against real Supabase", async (t) => {
     });
 
     // 047 (add-account-invitations, design D12) adds siteCheck; 052 (design
-    // D4) adds isSiteCoordinator; 053 (add-clearance-uploads, D5) adds uploadUrl; 057
+    // D4) adds isSiteCoordinator; 053 (add-clearance-uploads, D5) adds uploadUrl; 058
     // (add-volunteer-schedule, D3) adds scheduleViewer.
     await t.test("the answer has exactly nine keys", async () => {
       const result = await myClearance(f.preparer);
@@ -1105,7 +1105,7 @@ test("vitally_my_clearance against real Supabase", async (t) => {
       }
     });
 
-    // 057 (add-volunteer-schedule): the schedule is for anyone on the current roster and for
+    // 058 (add-volunteer-schedule): the schedule is for anyone on the current roster and for
     // admins, cleared or not.
     await t.test("scheduleViewer is true for a rostered member with no roles, false without an entry", async () => {
       const rostered = await f.staff({ key: "rhea_no_roles", name: "Rhea Castellan", capabilities: [], cleared: false });

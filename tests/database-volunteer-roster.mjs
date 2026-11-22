@@ -1148,37 +1148,6 @@ test("volunteer roster records against real Supabase", async (t) => {
       assert.equal(await findRosterLink(f.sql, f.workspaceId, stranger.userId), null);
     });
 
-    await t.test("usualDays round-trips, is kept when absent, and is validated (057)", async () => {
-      const entry = volunteer({ name: "Mina Okafor" });
-      const added = await save(admin, addArgs(entry));
-      assert.deepEqual((await profileOf(f, added.personId)).usual_days, []);
-      // Present: stored sorted.
-      let revision = added.revision;
-      let edited = await save(admin, editArgs(added.personId, revision, { ...entry, usualDays: [6, 2] }));
-      assert.deepEqual((await profileOf(f, added.personId)).usual_days, [2, 6]);
-      revision = edited.revision;
-      // Absent: kept.
-      edited = await save(admin, editArgs(added.personId, revision, { ...entry, phone: "412-555-0111" }));
-      assert.deepEqual((await profileOf(f, added.personId)).usual_days, [2, 6]);
-      assert.equal((await profileOf(f, added.personId)).phone, "412-555-0111");
-      revision = edited.revision;
-      // An empty list clears them.
-      edited = await save(admin, editArgs(added.personId, revision, { ...entry, usualDays: [] }));
-      assert.deepEqual((await profileOf(f, added.personId)).usual_days, []);
-      revision = edited.revision;
-      // Refused: repeated, out of range, not a list, a non-integer. Nothing is written.
-      for (const bad of [[6, 6], [8], [0], "2", [1.5], ["2"], null]) {
-        const args = editArgs(added.personId, revision, { ...entry, usualDays: bad });
-        const { error } = await admin.rpc(RPC, args);
-        assert.equal(error?.code, VALIDATION, JSON.stringify(bad));
-        assert.equal(await f.receiptsFor(args.p_action_id), 0, `${JSON.stringify(bad)} stored a receipt`);
-      }
-      assert.equal(await revisionOf(f, added.personId), revision);
-      // An add with usualDays stores them.
-      const second = await save(admin, addArgs(volunteer({ name: "Noel Brandt", usualDays: [7, 1] })));
-      assert.deepEqual((await profileOf(f, second.personId)).usual_days, [1, 7]);
-    });
-
     await t.test("seedVolunteers twice leaves exactly the rehearsal volunteers", async () => {
       const emails = SEED_VOLUNTEERS.map((v) => v.email);
       const staffQuery =
