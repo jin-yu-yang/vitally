@@ -43,7 +43,7 @@ test("vitally_my_clearance uploads against real Supabase", async (t) => {
       await t.test("an uncleared volunteer's items carry a null sentAt", async () => {
         const member = await f.staff({ key: "upl_none", name: "Ula Prentiss", capabilities: [], cleared: false });
         const result = await myClearance(member.client);
-        assert.deepEqual(result.missing, [{ kind: "form13615", sentAt: null }]);
+        assert.deepEqual(result.missing, [{ kind: "form13615", sentAt: null, reviewedAt: null, reviewReason: null }]);
       });
 
       await t.test("a set sent date is reported", async () => {
@@ -95,7 +95,7 @@ test("vitally_my_clearance uploads against real Supabase", async (t) => {
         );
         const result = await myClearance(member.client);
         assert.equal(result.cleared, false);
-        assert.deepEqual(result.missing, [{ kind: "photoId", sentAt: null }]);
+        assert.deepEqual(result.missing, [{ kind: "photoId", sentAt: null, reviewedAt: null, reviewReason: null }]);
         assert.deepEqual(result.capabilities, []);
       });
 
@@ -106,7 +106,7 @@ test("vitally_my_clearance uploads against real Supabase", async (t) => {
           [f.workspaceId, member.personId, season - 1],
         );
         const result = await myClearance(member.client);
-        assert.deepEqual(result.missing, [{ kind: "form13615", sentAt: null }]);
+        assert.deepEqual(result.missing, [{ kind: "form13615", sentAt: null, reviewedAt: null, reviewReason: null }]);
       });
     } finally {
       await setLink(null);
