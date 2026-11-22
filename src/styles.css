@@ -6920,9 +6920,45 @@ html:lang(zh-Hant) {
 .account-row .btn.account-link .account-name {
   font-weight: 400;
 }
+/* The sections are cards like Season settings': inner padding, a smaller
+   heading, and no extra rule above the form, since the card already frames it. */
 .my-profile-section {
   margin-bottom: 20px;
+  padding: 20px 22px;
+  border-radius: var(--vt-radius);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .my-profile-section h2 {
+  margin: 0 0 16px;
+  font-size: 17px;
+  letter-spacing: 0;
+}
+.my-profile-section .staff-form {
+  border-top: 0;
+  padding-top: 0;
   margin-top: 0;
+}
+/* The email is the sign-in and can't be changed here: show it as read-only. */
+.my-profile-section input[readonly] {
+  background: var(--vt-background);
+  color: var(--vt-muted);
+  cursor: default;
+}
+.my-profile-status {
+  margin: 0 0 22px;
+  font-size: 14px;
+}
+/* `.field` sets `display: block`, which beats the browser's own [hidden]:
+   without this, "Other language" shows before Other is ticked. */
+.my-profile-section .field[hidden] {
+  display: none;
+}
+/* Short choices sit side by side and wrap, so Works, Languages and Usual days
+   don't make a long single column. Each keeps its full tap height. */
+.my-profile-section .check-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 20px;
+  margin-bottom: 18px;
 }
