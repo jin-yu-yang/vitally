@@ -10,6 +10,9 @@ async function scheduleContext(f) {
       from public.workspaces w where w.id=$1`,
     [f.workspaceId],
   );
+  const before = (
+    await f.sql("select site_hours,revision from public.schedule_settings where workspace_id=$1", [f.workspaceId])
+  ).rows[0];
   await f.sql(
     `insert into public.schedule_settings(workspace_id,site_hours) values($1,'{"6":{"open":10,"close":16}}')
       on conflict (workspace_id) do update set site_hours=excluded.site_hours,revision=public.schedule_settings.revision+1`,
@@ -20,7 +23,26 @@ async function scheduleContext(f) {
       values($1,$2,$3,$4,12,13,'preparer') returning id`,
     [f.workspaceId, rows[0].season, f.preparerId, rows[0].d],
   );
-  return { scheduleVolunteerId: f.preparerId, scheduleSaturday: rows[0].d, scheduleShiftId: shift.rows[0].id };
+  return {
+    scheduleVolunteerId: f.preparerId,
+    scheduleSaturday: rows[0].d,
+    scheduleShiftId: shift.rows[0].id,
+    scheduleSettingsBefore: before ?? null,
+  };
+}
+
+// Leaves the workspace's shifts and schedule settings as scheduleContext found
+// them (the suite calls an entry's `cleanup` after its member call).
+async function scheduleCleanup(f, context) {
+  await f.sql("delete from public.shifts where workspace_id=$1", [f.workspaceId]);
+  const before = context.scheduleSettingsBefore;
+  if (before)
+    await f.sql("update public.schedule_settings set site_hours=$2,revision=$3 where workspace_id=$1", [
+      f.workspaceId,
+      before.site_hours,
+      before.revision,
+    ]);
+  else await f.sql("delete from public.schedule_settings where workspace_id=$1", [f.workspaceId]);
 }
 
 // Every public application entry point installed so far, with a valid argument
@@ -337,6 +359,7 @@ export const RPC_SIGNATURES = Object.freeze([
     authorized: (f) => f.siteCoordinator,
     receiptKeys: Object.freeze(["revision", "shiftId"]),
     context: async (f) => scheduleContext(f),
+    cleanup: scheduleCleanup,
     args: (context) => ({
       p_action_id: crypto.randomUUID(),
       p_shift_id: null,
@@ -356,6 +379,7 @@ export const RPC_SIGNATURES = Object.freeze([
     authorized: (f) => f.siteCoordinator,
     receiptKeys: Object.freeze(["removed", "revision", "shiftId"]),
     context: async (f) => scheduleContext(f),
+    cleanup: scheduleCleanup,
     args: (context) => ({
       p_action_id: crypto.randomUUID(),
       p_shift_id: context.scheduleShiftId,

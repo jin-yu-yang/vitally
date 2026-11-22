@@ -27,7 +27,7 @@
 -- overflows an integer. Extra keys inside a day are not refused here; the save
 -- (section 4) stores only open and close.
 create function vitally_private.valid_site_hours(p_hours jsonb)
-returns boolean language sql immutable set search_path='' as $$
+returns boolean language sql immutable security definer set search_path='' as $$
  select coalesce(
   jsonb_typeof(p_hours)='object'
   and not exists(
@@ -46,7 +46,7 @@ revoke all on function vitally_private.valid_site_hours(jsonb) from public,anon,
 -- duplicates (design D1). A check constraint cannot hold a subquery, so the
 -- test lives in a function.
 create function vitally_private.valid_usual_days(p_days smallint[])
-returns boolean language sql immutable set search_path='' as $$
+returns boolean language sql immutable security definer set search_path='' as $$
  select coalesce(
   not exists(select 1 from generate_subscripts(p_days,1) i
    where p_days[i] is null or p_days[i] not between 1 and 7

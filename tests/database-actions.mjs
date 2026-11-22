@@ -900,6 +900,8 @@ test("installed entry points deny anonymous callers and serve members", async (t
           ).contactId;
           // An entry that names targets of its own (the account entry points).
           if (entry.context) Object.assign(context, await entry.context(f));
+          // An entry that changes shared rows to build its targets puts them back.
+          const tidy = entry.cleanup ? () => entry.cleanup(f, context) : async () => {};
           // A draft update for the update action to post (add-posted-updates).
           const saveUpdate = RPC_SIGNATURES.find((candidate) => candidate.name === "vitally_save_update");
           const savedUpdate = await f.siteCoordinator.rpc(saveUpdate.name, saveUpdate.args(context));
@@ -917,6 +919,7 @@ test("installed entry points deny anonymous callers and serve members", async (t
           const allowed = await entry
             .authorized(f)
             .rpc(entry.name, entry.args(context));
+          await tidy();
           // A one-way entry point is refused here by its own domain check,
           // writing nothing: the member got past the access checks.
           if (entry.memberRefusal) {
