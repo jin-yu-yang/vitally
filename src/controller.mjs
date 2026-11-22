@@ -417,6 +417,7 @@ export function createController({
     // `notice` ({place: "links" | "coordinators", text}), `fieldErrors`
     // ({field: message}) and the SIDN dialog's `sidnError`. None persisted.
     seasonSettings: null,
+    clientDocumentsUrl: null,
     seasonSettingsUi: freshSettingsUi(),
     // My profile (a cleared staff window's): the `vitally_my_profile` answer
     // as last read, or null until then. Not persisted.
@@ -992,6 +993,9 @@ export function createController({
       if (staffWindow() !== wasStaff) return;
       if (awaitingClearance(state)) return;
     }
+    // The client documents link is read once in loadData; a wake re-reads it,
+    // since Season settings may change in another window.
+    if (wake) await readClientDocumentsUrl();
     // The feed never blocks the rest, and never fails the refresh.
     await readFeed();
     let failure = null;
@@ -1082,7 +1086,7 @@ export function createController({
     state.revealed = [];
     state.officeDraft = false;
     // Open panels are per case: a confirmation ticked on one application, or a
-    // simulated upload failure on one request, means nothing on another.
+    // client document states on another, means nothing on this application.
     state.openPanels = [];
     pendingAction = null;
     screeningStart = null;
@@ -1206,7 +1210,22 @@ export function createController({
   // `dataLoaded` is true once one whole pass has succeeded; until then a
   // refresh reads everything, not only the lists.
   let dataLoaded = false;
+  // Client windows only: staff screens no longer link to it (#245 review).
+  async function readClientDocumentsUrl() {
+    if (staffWindow()) {
+      state.clientDocumentsUrl = null;
+      return;
+    }
+    try {
+      state.clientDocumentsUrl = (await store.getClientDocumentsUrl?.()) ?? null;
+    } catch {
+      // Never display a stale or staff-only URL if this optional read fails.
+      state.clientDocumentsUrl = null;
+    }
+  }
+
   async function loadData() {
+    await readClientDocumentsUrl();
     await loadList();
     if (staffWindow()) {
       state.people = withOwnCapabilities(await store.listPeople(), state.principal);
@@ -2650,6 +2669,7 @@ export function createController({
     pendingUpdateSave = null;
     pendingUpdateAction = null;
     state.seasonSettings = null;
+    state.clientDocumentsUrl = null;
     state.seasonSettingsUi = freshSettingsUi();
     pendingSettingsWrite = null;
     state.myProfile = null;

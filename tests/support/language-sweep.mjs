@@ -19,7 +19,7 @@ export function textOf(html) {
 // lookup shows as its placeholder in every language, and the date boxes'
 // placeholders, which stay YYYY, MM and DD in Chinese (Task 3's ruling; the
 // boxes' labels are 年, 月 and 日).
-const FIXED = ["ViTally", "PCDC", "English", "W-2", "W-2s", "1099", "1098", "1095", "ITIN", "IRS", "IP", "PIN", "SSN", "EAD", "13614-C", "CP01A", "TIN", "Philadelphia", "PA", "VT-XXXX-XXXX", "YYYY", "MM", "DD"];
+const FIXED = ["ViTally", "PCDC", "OneDrive", "English", "W-2", "W-2s", "1099", "1098", "1095", "ITIN", "IRS", "IP", "PIN", "SSN", "EAD", "13614-C", "CP01A", "TIN", "Philadelphia", "PA", "VT-XXXX-XXXX", "YYYY", "MM", "DD"];
 
 function zhLatinWords() {
   const words = new Set();

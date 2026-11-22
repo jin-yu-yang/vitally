@@ -569,11 +569,11 @@ test("every errors.mjs, controller, auth and message-constant sentence is a SENT
 });
 
 test("the client's own case actions refuse in sentences the table knows", () => {
-  // The caseButtons on client screens: Submit and the sample document.
+  // Client caseButtons only submit; document uploads use the external OneDrive workflow.
   const clientActions = new Set();
   for (const file of ["client-views.mjs", "intake-views.mjs"])
     for (const m of source(file).matchAll(/caseButton\(\s*[\s\S]*?,\s*"([A-Z_]+)"/g)) clientActions.add(m[1]);
-  assert.deepEqual([...clientActions].sort(), ["RESPOND_DOCUMENT", "SUBMIT"]);
+  assert.deepEqual([...clientActions].sort(), ["SUBMIT"]);
   const messages = ["This step is not available."];
   for (const type of clientActions) {
     try {
@@ -582,7 +582,6 @@ test("the client's own case actions refuse in sentences the table knows", () => 
       messages.push(error.message);
     }
   }
-  assert.ok(messages.includes("This request is no longer on screen."));
   try {
     payloadFor("NOT_AN_ACTION");
   } catch (error) {

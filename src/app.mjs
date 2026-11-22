@@ -1248,14 +1248,6 @@ if (!config) {
       }
       if (controller.getState().dirty && !(await controller.saveAnswers())) return;
     }
-    if (type === "RESPOND_DOCUMENT" && state.openPanels.includes("upload-failure")) {
-      // The simulated failure never reaches the server, so there is nothing to
-      // duplicate: the request stays open and the same button retries.
-      if (!state.openPanels.includes("upload-failed"))
-        controller.togglePanel("upload-failed");
-      else render();
-      return;
-    }
     // A control on the work board names the case it belongs to. Opening it
     // first is what gives the action its case id and its expected revision.
     const boardCaseId = target.dataset.caseId;
@@ -1318,8 +1310,6 @@ if (!config) {
       return;
     }
     if (type === "RESPOND_DOCUMENT") {
-      if (controller.getState().openPanels.includes("upload-failed"))
-        controller.togglePanel("upload-failed");
       notify("success", t("toast.document_sent", {}, screenLang()), by);
       return;
     }
@@ -2717,14 +2707,6 @@ if (!config) {
       case "reconcile-server":
         await reconcile(false, by);
         break;
-      case "toggle-upload-failure": {
-        controller.togglePanel("upload-failure");
-        // The page is rebuilt around the checkbox, so give it back the focus —
-        // the box that was clicked, which is the one scoped to its own request.
-        const box = fieldId("simulate-upload-failure", target.dataset.requestId ?? "");
-        root.querySelector(`#${CSS.escape(box)}`)?.focus();
-        break;
-      }
       case "toggle-contact-edit": {
         const id = target.dataset.contactId ?? "";
         const panel = `contact-edit:${id}`;

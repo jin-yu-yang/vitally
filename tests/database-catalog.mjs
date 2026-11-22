@@ -50,7 +50,7 @@ const POLICIES = Object.freeze([
   ["volunteer_profiles", "admin_volunteer_profiles"],
   ["workspaces", "member_workspace"],
 ]);
-// The thirty-three public RPCs after 057, by name and identity arguments.
+// The thirty-four public RPCs after 057, by name and identity arguments.
 const RPCS = Object.freeze([
   "vitally_apply_action(p_action_id uuid, p_case_id uuid, p_expected_revision bigint, p_type text, p_payload jsonb)",
   "vitally_assistance_action(p_action_id uuid, p_item_id uuid, p_expected_revision bigint, p_type text, p_note text)",
@@ -77,6 +77,7 @@ const RPCS = Object.freeze([
   "vitally_mark_updates(p_update_ids uuid[], p_confirm boolean)",
   "vitally_my_updates()",
   "vitally_posted_updates()",
+  "vitally_client_documents_link()",
   "vitally_season_settings()",
   "vitally_save_season_settings(p_action_id uuid, p_expected_revision bigint, p_settings jsonb)",
   "vitally_set_site_number(p_action_id uuid, p_sidn text)",
@@ -93,6 +94,8 @@ const RPCS = Object.freeze([
 // vitally_mark_updates (add-posted-updates) is naturally idempotent.
 const READ_ONLY_RPCS = Object.freeze([
   "vitally_activate_client_account",
+  "vitally_client_documents_link()",
+  "vitally_client_documents_link",
   "vitally_client_invitations",
   "vitally_complete_site_check",
   "vitally_expire_invitations",
@@ -198,7 +201,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
     });
 
-    await t.test("the public API is exactly thirty-three RPCs", async () => {
+    await t.test("the public API is exactly thirty-four RPCs", async () => {
       const { rows } = await sql(
         `select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as signature
            from pg_proc p where p.pronamespace='public'::regnamespace`,

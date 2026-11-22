@@ -122,7 +122,7 @@ sign-in (`sendCode`, `verifyCode`, `editAuthEmail`, `editAuthCode`, `restartSign
 **`staffWindow()`** is everything a staff screen does (its reads, its eligibility rules and its
 actions), true only for a `staff` account (`isStaffWindow` in [`src/contracts.mjs`](../../src/contracts.mjs)
 says the same for the views). The person acting is always the account's own `principal.personId`; a
-client sends none. None of the thirty-three RPCs takes the acting person, so the browser never claims an identity (`vitally_save_volunteer` takes a volunteer's person id, but as the record to change, not as who is acting); the
+client sends none. None of the thirty-four RPCs takes the acting person, so the browser never claims an identity (`vitally_save_volunteer` takes a volunteer's person id, but as the record to change, not as who is acting); the
 database resolves it ([Database: who is acting](database.md#who-is-acting)). An account with any
 other access (a former presenter) gets the "This account has no access" screen and nothing is
 loaded for it.
@@ -1141,3 +1141,35 @@ If you migrate, keep the parts that are framework-independent and already tested
 A build step also means GitHub Pages needs a build workflow, or a host that builds for you. Keep
 `public-config.json` loaded at runtime, not baked in at build time, so one build can serve several
 environments.
+
+
+### Client document uploads (Issue #157)
+
+The site coordinator sets **Client documents upload link** in Season settings; use a
+OneDrive **file request** (upload-only) link. Client Intake document cards and open
+document requests open that URL in a new tab. They do not send file bytes or
+filenames to ViTally. Clients name their OneDrive file with the case's `VT-…`
+reference, which stays the same after submit and is never reused in a later season
+(client numbers restart each season).
+
+`I've uploaded it` is a client declaration only: the corresponding card moves
+from `not_done` / `later` to `sent`, or an open document request becomes
+`awaiting_verification`. The database refuses both while the workspace has no
+client documents link; the office's `RECORD_DOCUMENT_RESPONSE` needs none. Until
+staff confirm it, a client who reported a card by mistake can still mark it
+Later, Don't have or not done. Staff see the date it was reported, then confirm a
+card as `received` / `verified` (with **Undo received** and **Undo verified** to
+take a mis-click back one step) or verify a document request using its existing
+`VERIFY_DOCUMENT` action. Staff get no OneDrive folder link: the client link is
+upload-only, so site coordinators open the folder in OneDrive themselves. If
+there is no configured URL, the client is told to bring documents to PCDC and no
+upload control appears. The application never reads OneDrive or checks whether a
+file arrived.
+
+A client window reads the link (`readClientDocumentsUrl`) when it loads its data and
+on each wake (focus, tab visible, `online`), not on every realtime refresh. Staff
+windows don't read it. The staff note "Client reported it <date>" uses the card's
+`reported_at`, so an undo doesn't change the date.
+
+Migration `056_onedrive_client_documents.sql` adds an applicant-safe URL read
+RPC and expands card statuses; *clients cannot set* `received` or `verified`.
