@@ -40,6 +40,7 @@ import {
 } from "./volunteer-views.mjs";
 import { volunteerTabs, renderWorkload, assignDrawerBody, assignDrawerTitle, DEFAULT_WORKLOAD_SORT } from "./workload-views.mjs";
 import { workloadRows, unassignedCases, candidates } from "./volunteer-workload.mjs";
+import { returningCandidates } from "./volunteer-roster.mjs";
 import { awaitingClearance, ceilingAdmin, scheduleViewer, siteCoordinator } from "./clearance.mjs";
 import { setupScreen, siteCheckScreen } from "./setup-views.mjs";
 import { myProfilePage } from "./profile-views.mjs";
@@ -384,6 +385,7 @@ const rosterPage = (state, { workload = false } = {}) => {
       : renderRoster(state.volunteers ?? [], {
           list: state.lists?.volunteers ?? "ready",
           filters: state.volunteerFilters ?? {},
+          exportable: true,
         });
   return frame(
     "OFFICE · VOLUNTEERS",
@@ -832,14 +834,28 @@ export function dialog(state) {
         ui,
       });
     } else if (state.dialog === "volunteer") {
-      const volunteerId = state.dialogContext?.volunteerId ?? null;
+      // A picked returning volunteer (change add-returning-volunteers-and-roster-csv)
+      // is not on this season's list: the drawer stays Add, filled from them.
+      const earlier = state.earlierVolunteers ?? [];
+      const returningPick = state.dialogContext?.returning === true;
+      const picked = returningPick
+        ? (earlier.find((entry) => entry?.id === state.dialogContext?.volunteerId) ?? null)
+        : null;
+      const volunteerId = returningPick ? null : (state.dialogContext?.volunteerId ?? null);
       const volunteer = volunteerId
         ? ((state.volunteers ?? []).find((entry) => entry?.id === volunteerId) ?? null)
         : null;
+      // A pick whose person is gone can't be added: it says so, like a gone Edit.
+      const stalePick = returningPick && !picked;
+      const query = state.returningSearch ?? "";
       title = volunteerId ? (volunteer?.name ?? "Edit a volunteer") : "Add a volunteer";
       body = volunteerDrawerBody({
         volunteer,
-        isNew: !volunteerId,
+        isNew: !volunteerId && !stalePick,
+        returning:
+          !volunteerId && !stalePick && (picked || earlier.length)
+            ? { query, candidates: picked ? [] : returningCandidates(earlier, query), picked }
+            : null,
         canChangeAdmin: siteCoordinator(state.principal),
         ui: {
           ...ui,

@@ -10,8 +10,11 @@ import {
 import {
   CASE_LABEL_ASSIGNMENTS,
   ROLE_ACCOUNT_CLEARANCE,
+  SEED_PAST_ALSO_CURRENT_EMAIL,
+  SEED_PAST_VOLUNTEERS,
   SEED_VOLUNTEERS,
 } from "../tools/admin/seed-values.mjs";
+import { missingFor } from "../src/volunteer-roster.mjs";
 import { runSeed } from "../tools/admin/seed.mjs";
 
 const code = (expected) => (error) => error.code === expected;
@@ -125,6 +128,24 @@ test("every seed volunteer's roles are backed by their certificates", () => {
   assert.deepEqual(waiting[0].certificates, []);
   assert.ok(SEED_VOLUNTEERS.some((v) => v.isNew && v.photoIdChecked));
   assert.ok(SEED_VOLUNTEERS.some((v) => v.isNew && !v.photoIdChecked));
+});
+
+test("the previous season's volunteers are fictional, new and backed", () => {
+  assert.equal(SEED_PAST_VOLUNTEERS.length, 3);
+  const current = new Set(SEED_VOLUNTEERS.map((v) => v.email));
+  const emails = SEED_PAST_VOLUNTEERS.map((v) => v.email);
+  assert.equal(new Set(emails).size, 3);
+  for (const v of SEED_PAST_VOLUNTEERS) {
+    assert.ok(v.email.endsWith("@example.org"), v.name);
+    assert.ok(!current.has(v.email), v.name);
+    assert.match(v.phone, /^\(215\) 555-01\d\d$/);
+    assert.ok(v.roles.length > 0, v.name);
+    for (const role of v.roles)
+      assert.deepEqual(missingFor(role, v.certificates), [], `${v.name}: ${role}`);
+  }
+  assert.ok(SEED_PAST_VOLUNTEERS.some((v) => v.usualDays.length > 0));
+  assert.ok(current.has(SEED_PAST_ALSO_CURRENT_EMAIL));
+  assert.ok(!emails.includes(SEED_PAST_ALSO_CURRENT_EMAIL));
 });
 
 test("the role accounts' clearance is fixed and backed", () => {

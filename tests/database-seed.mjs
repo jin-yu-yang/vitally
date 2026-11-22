@@ -18,6 +18,7 @@ import {
   runFilePath,
   SEED_SCENARIOS,
   seedCases,
+  seedPastSeason,
   seedVolunteers,
   seedWorkspace,
 } from "../tools/admin/seed-cases.mjs";
@@ -904,6 +905,96 @@ test("seed command against real Supabase", async (t) => {
         await rm(runDir, { recursive: true, force: true });
       }
     });
+    // Spec local-seed-data, "The local seed adds a previous season's roster".
+    await t.test("the previous season's roster is added, and replaced on a re-run", async () => {
+      const past = SEED_VALUES.SEED_PAST_VOLUNTEERS.map((v) => v.email);
+      const alsoCurrent = SEED_VALUES.SEED_PAST_ALSO_CURRENT_EMAIL;
+      const seedClient = await openDatabase({ kind: "test" });
+      const args = { workspaceId: f.workspaceId, actorPersonId: f.siteCoordinatorId };
+      const rowsFor = async () =>
+        (
+          await f.sql(
+            `select v.email, w.current_season,
+                    array(select e.season::int from public.roster_entries e
+                           where e.person_id=p.id order by e.season) as seasons,
+                    (select count(*)::int from public.certificates c
+                      where c.person_id=p.id and c.season=w.current_season-1) as certs
+               from public.people p
+               join public.volunteer_profiles v on v.person_id=p.id
+               join public.workspaces w on w.id=p.workspace_id
+              where p.workspace_id=$1 and v.email=any($2)`,
+            [f.workspaceId, [...past, alsoCurrent]],
+          )
+        ).rows;
+      const rosterCount = async () =>
+        (
+          await f.sql(
+            `select count(*)::int n from public.roster_entries e
+               join public.workspaces w on w.id=e.workspace_id
+              where e.workspace_id=$1 and e.season=w.current_season`,
+            [f.workspaceId],
+          )
+        ).rows[0].n;
+      try {
+        await seedVolunteers(seedClient, {
+          workspaceId: f.workspaceId,
+          actorUserId: f.siteCoordinatorUserId,
+        });
+        const before = await rosterCount();
+        for (let run = 0; run < 2; run += 1) {
+          assert.equal(await seedPastSeason(seedClient, args), 3);
+          const rows = await rowsFor();
+          const pastOnly = rows.filter((r) => past.includes(r.email));
+          assert.equal(pastOnly.length, 3);
+          for (const r of pastOnly) {
+            assert.deepEqual(r.seasons, [r.current_season - 1]);
+            assert.ok(r.certs > 0);
+          }
+          const both = rows.find((r) => r.email === alsoCurrent);
+          assert.deepEqual(both.seasons, [both.current_season - 1, both.current_season]);
+          assert.equal(await rosterCount(), before);
+        }
+        // A picked person (added to the current season, no sign-in) is replaced.
+        await f.sql(
+          `insert into public.roster_entries(workspace_id,person_id,season,roles)
+           select p.workspace_id,p.id,w.current_season,'{}'
+             from public.people p join public.volunteer_profiles v on v.person_id=p.id
+             join public.workspaces w on w.id=p.workspace_id
+            where p.workspace_id=$1 and v.email=$2`,
+          [f.workspaceId, past[0]],
+        );
+        assert.equal(await rosterCount(), before + 1);
+        assert.equal(await seedPastSeason(seedClient, args), 3);
+        assert.equal(await rosterCount(), before);
+        const rows = await rowsFor();
+        assert.equal(rows.filter((r) => past.includes(r.email)).length, 3);
+        assert.ok(rows.filter((r) => past.includes(r.email)).every((r) => r.seasons.length === 1));
+      } finally {
+        await seedClient.end();
+      }
+    });
+
+    await t.test("the story's use of the seed module adds no previous-season people", async () => {
+      const past = SEED_VALUES.SEED_PAST_VOLUNTEERS.map((v) => v.email);
+      await f.sql(
+        `delete from public.people p using public.volunteer_profiles v
+          where v.person_id=p.id and p.workspace_id=$1 and p.user_id is null and v.email=any($2)`,
+        [f.workspaceId, past],
+      );
+      const runDir = await tempRunDir();
+      try {
+        await seedCases(client, await targetsFor(), { runDir });
+        const { rows } = await f.sql(
+          `select count(*)::int n from public.volunteer_profiles
+            where workspace_id=$1 and email=any($2)`,
+          [f.workspaceId, past],
+        );
+        assert.equal(rows[0].n, 0);
+      } finally {
+        await rm(runDir, { recursive: true, force: true });
+      }
+    });
+
     await t.test("a seed re-run keeps a seed volunteer who got an account", async () => {
       const emails = SEED_VALUES.SEED_VOLUNTEERS.map((v) => v.email);
       const args = { workspaceId: f.workspaceId, actorUserId: f.siteCoordinatorUserId };

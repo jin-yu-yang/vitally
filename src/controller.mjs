@@ -396,6 +396,10 @@ export function createController({
     // save, never live. Its filters and the drawer's own sentence are
     // window-local and never persisted.
     volunteers: [],
+    // People with a profile and no entry this season, for the Add drawer's
+    // returning-volunteer picker, and its search text (window-local).
+    earlierVolunteers: [],
+    returningSearch: "",
     volunteerFilters: { search: "", role: "all" },
     volunteerFormError: null,
     // The document whose Mark reviewed reason row is open in the drawer; window-local.
@@ -1379,7 +1383,9 @@ export function createController({
   async function readVolunteers() {
     if (!staffWindow() || !ceilingAdmin(state.principal)) return;
     try {
-      state.volunteers = await store.listVolunteers();
+      const [volunteers, earlier] = await Promise.all([store.listVolunteers(), store.listEarlierVolunteers()]);
+      state.volunteers = volunteers;
+      state.earlierVolunteers = earlier;
       state.lists.volunteers = "ready";
       noteConnected();
     } catch (error) {
@@ -1439,6 +1445,29 @@ export function createController({
       noteLocalFailure(error, loadVolunteers);
       return;
     }
+    show();
+  }
+
+  // The Add drawer's returning-volunteer picker: choosing an earlier volunteer
+  // makes the drawer an Edit of that person (saving creates this season's entry);
+  // Not them clears it back to a plain add.
+  function pickReturningVolunteer(id) {
+    if (state.dialog !== "volunteer" || state.busy) return;
+    if (!state.earlierVolunteers.some((entry) => entry?.id === id)) return;
+    state.dialogContext = { volunteerId: id, returning: true };
+    state.volunteerFormError = null;
+    show();
+  }
+
+  function unpickReturningVolunteer() {
+    if (!state.dialogContext?.returning) return;
+    state.dialogContext = null;
+    state.volunteerFormError = null;
+    show();
+  }
+
+  function setReturningSearch(text) {
+    state.returningSearch = String(text ?? "");
     show();
   }
 
@@ -3157,6 +3186,8 @@ export function createController({
     dataLoaded = false;
     state.people = [];
     state.volunteers = [];
+    state.earlierVolunteers = [];
+    state.returningSearch = "";
     state.volunteerFilters = { search: "", role: "all" };
     state.volunteerFormError = null;
     state.reviewReasonFor = null;
@@ -3294,6 +3325,7 @@ export function createController({
     if (name === "start-season") state.seasonSettingsUi = { ...state.seasonSettingsUi, startRefusal: null };
     state.dialog = name;
     state.dialogContext = context ? { ...context } : null;
+    if (name === "volunteer") state.returningSearch = "";
     // Start next season is about the season the page read when it opened.
     if (name === "start-season" && state.seasonSettings?.season != null)
       state.dialogContext = { ...state.dialogContext, expectedSeason: Number(state.seasonSettings.season) };
@@ -5002,6 +5034,7 @@ export function createController({
   async function saveVolunteer(values) {
     if (state.busy) return false;
     const volunteerId = state.dialogContext?.volunteerId ?? null;
+    const returning = state.dialogContext?.returning === true;
     // `values` is what the form held; the request may send fewer roles, so the
     // kept save is matched on the form's values.
     let request =
@@ -5012,12 +5045,16 @@ export function createController({
         : null;
     pendingVolunteerSave = null;
     if (!request) {
+      // A picked earlier volunteer is not on this season's list yet.
       const current = volunteerId
-        ? (state.volunteers.find((entry) => entry?.id === volunteerId) ?? null)
+        ? ((returning ? state.earlierVolunteers : state.volunteers).find((entry) => entry?.id === volunteerId) ?? null)
         : null;
       if (volunteerId && !current)
         throw refuse("NOT_FOUND", STAFF_VOLUNTEER_GONE_MESSAGE);
-      const problem = volunteerProblem(values, state.volunteers, volunteerId);
+      // The earlier-volunteer sentence is for Add only; an Edit of a current
+      // volunteer is sent and the server decides.
+      const earlierList = !volunteerId || returning ? state.earlierVolunteers : [];
+      const problem = volunteerProblem(values, state.volunteers, volunteerId, earlierList);
       if (problem) {
         state.volunteerFormError = problem;
         show();
@@ -5573,6 +5610,7 @@ export function createController({
       people: [...state.people],
       assistance: [...state.assistance],
       volunteers: state.volunteers.map((entry) => ({ ...entry })),
+      earlierVolunteers: state.earlierVolunteers.map((entry) => ({ ...entry })),
       volunteerFilters: { ...state.volunteerFilters },
       weekShifts: state.weekShifts.map((entry) => ({ ...entry })),
       workload: {
@@ -5639,6 +5677,9 @@ export function createController({
     cancelInvitation,
     completeSiteCheck,
     setVolunteerFilter,
+    pickReturningVolunteer,
+    unpickReturningVolunteer,
+    setReturningSearch,
     saveVolunteer,
     markUploadReviewed,
     setReviewReasonFor,

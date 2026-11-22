@@ -172,6 +172,8 @@ so each tool must prove it is pointed at the intended target before doing anythi
 | `seed.mjs` | `npm run seed:local`: builds rehearsal cases on the **local test stack only**. Needs `VITALLY_ALLOW_LOCAL_SEED=1` (checked before any file is read) and refuses any other target as `TARGET_REJECTED`. Records its case ids in `.vitally-runs/seed-<workspaceId>.json`, which the next run uses to replace the previous set. Never prints an address |
 | `seed-cases.mjs` | The cases it builds, acting as the role accounts through `vitally_create_case` and `vitally_apply_action`. The only direct insert is the help request |
 
+`seed:local` also adds a previous-season roster (change `add-returning-volunteers-and-roster-csv`): three fictional people with no current-season entry, and a previous-season entry for one of the 8 volunteers, so the Roster's returning-volunteer picker has someone to find. `seedPastSeason` writes these rows directly with SQL in one transaction, the one exception to going through `vitally_save_volunteer` (which writes only the current season). A re-run replaces the three, never a person with a sign-in.
+
 The database has no sample cases, reset or checkpoints (removed in #135, migration 040). Rehearsal cases come from `seed.mjs`.
 
 A guard failure is always `TARGET_REJECTED` and deliberately does not say which check failed;

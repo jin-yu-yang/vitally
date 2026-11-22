@@ -6704,6 +6704,11 @@ const rosterStore = (overrides = {}) => {
     }
     return store.volunteers.map((entry) => ({ ...entry }));
   };
+  store.earlier = [];
+  store.listEarlierVolunteers = async () => {
+    store.calls.push("listEarlierVolunteers");
+    return store.earlier.map((entry) => ({ ...entry }));
+  };
   store.saveVolunteer = async (request) => {
     store.calls.push("saveVolunteer");
     store.writes.push({ type: "saveVolunteer", ...request });
@@ -12539,4 +12544,99 @@ test("saveVolunteer sends usualDays when the values carry them", async () => {
   assert.equal(await built.controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
   assert.equal("usualDays" in store.writes.at(-1).volunteer, false);
   built.controller.stop();
+});
+
+// Returning volunteers (change add-returning-volunteers-and-roster-csv)
+const EARLIER_NADIA = Object.freeze({
+  id: "e-1", name: "Nadia Kerr", email: "nadia@example.org", phone: null, works: "remote",
+  languages: ["english"], otherLanguage: null, usualDays: ["tue"], revision: "7", hasSignIn: false, lastSeason: true,
+});
+const earlierRoster = async (store) => {
+  store.earlier = [{ ...EARLIER_NADIA }];
+  const ids = ["action-1", "action-2"];
+  const built = build({ store, newActionId: () => ids.shift() });
+  await built.controller.start();
+  built.controller.navigate("office-volunteers");
+  await built.controller.loadVolunteers();
+  return built.controller;
+};
+const earlierReads = (store) => store.calls.filter((entry) => entry === "listEarlierVolunteers").length;
+
+test("readVolunteers also reads the earlier volunteers", async () => {
+  const store = rosterStore();
+  const controller = await earlierRoster(store);
+  assert.deepEqual(controller.getState().earlierVolunteers.map((e) => e.id), ["e-1"]);
+  assert.deepEqual(controller.getState().volunteers.map((e) => e.id), ["v-1"]);
+  controller.stop();
+});
+
+test("a picked earlier volunteer is saved as an Edit on their profile revision", async () => {
+  const store = rosterStore();
+  const controller = await earlierRoster(store);
+  controller.openDialog("volunteer", null);
+  controller.pickReturningVolunteer("e-1");
+  assert.deepEqual(controller.getState().dialogContext, { volunteerId: "e-1", returning: true });
+  const values = { ...VOLUNTEER_PAYLOAD, email: "nadia@example.org", name: "Nadia Kerr" };
+  assert.equal(await controller.saveVolunteer(values), true);
+  assert.deepEqual(store.writes.at(-1), {
+    type: "saveVolunteer", actionId: "action-1", volunteerId: "e-1", expectedRevision: 7, volunteer: values,
+  });
+  controller.stop();
+});
+
+test("a conflict on a picked save says so and re-reads both lists", async () => {
+  const store = rosterStore();
+  const controller = await earlierRoster(store);
+  controller.openDialog("volunteer", null);
+  controller.pickReturningVolunteer("e-1");
+  store.failSave = Object.assign(new Error("stale"), { code: "CONFLICT" });
+  const reads = volunteerReads(store);
+  const before = earlierReads(store);
+  await assert.rejects(() => controller.saveVolunteer({ ...VOLUNTEER_PAYLOAD, email: "nadia@example.org" }));
+  assert.equal(controller.getState().error.message, VOLUNTEER_CONFLICT_MESSAGE);
+  assert.equal(volunteerReads(store), reads + 1);
+  assert.equal(earlierReads(store), before + 1);
+  controller.stop();
+});
+
+test("unpicking returns to a plain add, and opening the drawer clears the pick and the search", async () => {
+  const store = rosterStore();
+  const controller = await earlierRoster(store);
+  controller.openDialog("volunteer", null);
+  controller.setReturningSearch("nad");
+  assert.equal(controller.getState().returningSearch, "nad");
+  controller.pickReturningVolunteer("e-1");
+  controller.unpickReturningVolunteer();
+  assert.equal(controller.getState().dialogContext, null);
+  assert.equal(await controller.saveVolunteer({ ...VOLUNTEER_PAYLOAD, email: "noor@example.test", name: "Noor Haddad" }), true);
+  assert.equal(store.writes.at(-1).volunteerId, null);
+  controller.pickReturningVolunteer("e-1");
+  controller.openDialog("volunteer", null);
+  assert.equal(controller.getState().dialogContext, null);
+  assert.equal(controller.getState().returningSearch, "");
+  controller.stop();
+});
+
+test("an unpicked add with an earlier volunteer's email is not sent", async () => {
+  const store = rosterStore();
+  const controller = await earlierRoster(store);
+  controller.openDialog("volunteer", null);
+  assert.equal(await controller.saveVolunteer({ ...VOLUNTEER_PAYLOAD, email: "Nadia@example.org" }), false);
+  assert.equal(
+    controller.getState().volunteerFormError,
+    "That email belongs to an earlier volunteer. Pick them above.",
+  );
+  assert.equal(store.calls.includes("saveVolunteer"), false);
+  controller.stop();
+});
+
+test("an Edit of a current volunteer to an earlier volunteer's email does not get the earlier-volunteer sentence", async () => {
+  const store = rosterStore();
+  const controller = await earlierRoster(store);
+  controller.openDialog("volunteer", { volunteerId: "v-1" });
+  assert.equal(await controller.saveVolunteer({ ...VOLUNTEER_PAYLOAD, email: "Nadia@example.org" }), true);
+  assert.equal(controller.getState().volunteerFormError ?? null, null);
+  assert.equal(store.writes.at(-1).type, "saveVolunteer");
+  assert.equal(store.writes.at(-1).volunteerId, "v-1");
+  controller.stop();
 });
