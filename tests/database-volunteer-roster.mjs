@@ -1172,6 +1172,155 @@ test("volunteer roster records against real Supabase", async (t) => {
       const staffAfter = await f.sql(staffQuery, [f.workspaceId]);
       assert.deepEqual(staffAfter.rows, staffBefore.rows);
     });
+
+    // A past volunteer has a profile and certificates in an earlier season and
+    // no current entry. Edit saves them into the current season.
+    await t.test("Edit adds a past-season volunteer to the current season", async () => {
+      const { current_season: season } = await one(
+        f,
+        "select current_season from public.workspaces where id=$1",
+        [f.workspaceId],
+      );
+      const past = season - 1;
+      // Moves the person's entry and certificates to the previous season. The
+      // certificates reference the entry, and roles need their certificates,
+      // so the roles are cleared on the way and put back on the past entry. The past
+      // entry is added by Pat, not the caller, so a current entry that records the
+      // caller did not copy it.
+      const makePast = async (personId) => {
+        const ids = [f.workspaceId, personId];
+        const { roles } = await one(f, "select roles from public.roster_entries where workspace_id=$1 and person_id=$2 and season=$3", [...ids, season]);
+        await f.sql("update public.roster_entries set roles='{}' where workspace_id=$1 and person_id=$2 and season=$3", [...ids, season]);
+        await f.sql(
+          `insert into public.roster_entries(workspace_id,person_id,season,roles,added_by_person_id,is_new,photo_id_checked_at)
+           select workspace_id,person_id,$3,roles,$5,is_new,photo_id_checked_at
+             from public.roster_entries where workspace_id=$1 and person_id=$2 and season=$4`,
+          [...ids, past, season, prep.personId],
+        );
+        await f.sql("update public.certificates set season=$3 where workspace_id=$1 and person_id=$2 and season=$4", [...ids, past, season]);
+        await f.sql("delete from public.roster_entries where workspace_id=$1 and person_id=$2 and season=$3", [...ids, season]);
+        await f.sql("update public.roster_entries set roles=$4 where workspace_id=$1 and person_id=$2 and season=$3", [...ids, past, roles]);
+      };
+      const entriesIn = (personId, inSeason) =>
+        count(f, "select count(*) n from public.roster_entries where person_id=$1 and season=$2", [personId, inSeason]);
+      const entryIn = (personId, inSeason) =>
+        one(f, "select * from public.roster_entries where person_id=$1 and season=$2", [personId, inSeason]);
+
+      const entry = volunteer({ usualDays: ["tue", "thu"], roles: ["greeter"], certificates: ["vsc"] });
+      const { personId } = await save(admin, addArgs(entry));
+      await makePast(personId);
+      assert.equal(await entriesIn(personId, season), 0, "no current entry to start");
+      const pastBefore = await entryIn(personId, past);
+      const certificatesBefore = await certificatesOf(f, personId);
+      assert.equal(certificatesBefore.length, 1);
+      const revision = await revisionOf(f, personId);
+
+      const edit = editArgs(
+        personId,
+        revision,
+        volunteer({
+          email: entry.email,
+          roles: [],
+          certificates: [],
+          isNew: false,
+          photoIdChecked: false,
+          usualDays: ["tue", "thu"],
+        }),
+      );
+      const first = await save(admin, edit);
+      const current = await entryIn(personId, season);
+      assert.deepEqual(current.roles, []);
+      assert.equal(current.is_new, false);
+      assert.equal(pastBefore.added_by_person_id, prep.personId);
+      assert.equal(current.added_by_person_id, f.siteCoordinatorId);
+      assert.equal(await revisionOf(f, personId), revision + 1);
+      assert.deepEqual((await profileOf(f, personId)).usual_days, ["tue", "thu"]);
+      assert.deepEqual(await entryIn(personId, past), pastBefore, "the past entry is unchanged");
+      assert.deepEqual(
+        (
+          await f.sql(
+            "select certificate,status,confirmed_at::text as confirmed_at,confirmed_by_person_id from public.certificates where person_id=$1 and season=$2 order by certificate",
+            [personId, past],
+          )
+        ).rows,
+        certificatesBefore,
+        "the past certificates are unchanged",
+      );
+      assert.equal(await count(f, "select count(*) n from public.certificates where person_id=$1 and season=$2", [personId, season]), 0);
+
+      // A replay of the same action returns the stored result and adds nothing.
+      assert.deepEqual(await save(admin, edit), first);
+      assert.equal(await entriesIn(personId, season), 1);
+      // A second save at the old revision is a conflict and adds nothing.
+      await refusedWith(
+        admin,
+        editArgs(personId, revision, volunteer({ email: entry.email, roles: [], certificates: [] })),
+        CONFLICT,
+      );
+      assert.equal(await entriesIn(personId, season), 1);
+
+      // Preparer needs VSC, IT&QR and Basic; the ticked ones are confirmed.
+      const ready = volunteer({ roles: ["greeter"], certificates: ["vsc"] });
+      const readyId = (await save(admin, addArgs(ready))).personId;
+      await makePast(readyId);
+      await save(
+        admin,
+        editArgs(
+          readyId,
+          await revisionOf(f, readyId),
+          volunteer({ email: ready.email, roles: ["preparer"], certificates: ["vsc", "itqr", "basic"] }),
+        ),
+      );
+      assert.deepEqual((await entryIn(readyId, season)).roles, ["preparer"]);
+      const confirmed = (
+        await f.sql(
+          "select certificate,status,confirmed_by_person_id from public.certificates where person_id=$1 and season=$2 order by certificate",
+          [readyId, season],
+        )
+      ).rows;
+      assert.deepEqual(
+        confirmed.map((row) => row.certificate),
+        ["basic", "itqr", "vsc"],
+      );
+      for (const row of confirmed) {
+        assert.equal(row.status, "confirmed");
+        assert.equal(row.confirmed_by_person_id, f.siteCoordinatorId);
+      }
+
+      // Preparer with only VSC is refused, and nothing is written.
+      const short = volunteer({ roles: ["greeter"], certificates: ["vsc"] });
+      const shortId = (await save(admin, addArgs(short))).personId;
+      await makePast(shortId);
+      const shortRevision = await revisionOf(f, shortId);
+      const { error } = await admin.rpc(
+        RPC,
+        editArgs(shortId, shortRevision, volunteer({ email: short.email, roles: ["preparer"], certificates: ["vsc"] })),
+      );
+      assert.equal(error?.code, VALIDATION);
+      assert.equal(error.message, "ROLE_NEEDS");
+      assert.equal(await entriesIn(shortId, season), 0);
+      assert.equal(await revisionOf(f, shortId), shortRevision);
+
+      // A past volunteer who has a sign-in keeps their address and is saved.
+      const account = await f.provision();
+      const linked = volunteer({ name: "Sam Rowe", email: account.email, roles: ["greeter"], certificates: ["vsc"] });
+      const linkedId = (await save(admin, addArgs(linked))).personId;
+      await addStaffMember(f, account.userId, "sam_past_link", "Sam Rowe");
+      assert.equal((await personOf(f, linkedId)).user_id, account.userId, "linked to the sign-in");
+      await makePast(linkedId);
+      assert.equal(await entriesIn(linkedId, season), 0);
+      await save(
+        admin,
+        editArgs(
+          linkedId,
+          await revisionOf(f, linkedId),
+          volunteer({ email: account.email, roles: [], certificates: [] }),
+        ),
+      );
+      assert.equal(await entriesIn(linkedId, season), 1);
+      assert.equal((await profileOf(f, linkedId)).email, account.email.toLowerCase());
+      assert.equal((await personOf(f, linkedId)).user_id, account.userId);
+    });
   } finally {
     await f.close();
   }

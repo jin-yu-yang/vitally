@@ -92,7 +92,8 @@ src/
                            when its capability is gone while its text stays.
   pool-views.mjs           The office's case pool (every case, by phase).
   volunteer-views.mjs      The admin-only Volunteers Roster page and its Add / Edit drawer.
-  volunteer-roster.mjs     The Roster's pure logic: roles, certificates, search, form reading, validation.
+  volunteer-roster.mjs     The Roster's pure logic: roles, certificates, search, form reading, validation, the returning-volunteer picker, the CSV rows.
+  csv.mjs                  `toCsv`: the shared CSV encoder (UTF-8 BOM, RFC 4180 quoting, CR LF, formula guard).
   workload-views.mjs       The Volunteers > Workload tab (admins) and its Assign / Reassign drawer; the tab strip.
   volunteer-workload.mjs   The Workload's pure logic: per-volunteer counts, stalled cases, Unassigned, drawer candidates.
   update-views.mjs         The Notifications panel, the admin's Post an update screen, and their dialogs.

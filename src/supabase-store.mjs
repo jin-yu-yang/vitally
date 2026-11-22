@@ -823,6 +823,44 @@ export function createStore(client) {
       return combineVolunteers({ profiles, entries, certificates, people, accounts });
     },
 
+    // Earlier volunteers (change add-returning-volunteers-and-roster-csv): people
+    // with a profile and no roster entry for the current season, so the Roster's
+    // Add can pick one instead of retyping them. `lastSeason` marks those who
+    // had an entry the season before. Staff only; none without a season.
+    async listEarlierVolunteers() {
+      await requireStaffAccess();
+      const season = (await read(client.from("workspaces").select("current_season")))[0]
+        ?.current_season;
+      if (season == null) return [];
+      const [profiles, people, entries] = await Promise.all([
+        read(client.from("volunteer_profiles").select("*")),
+        read(client.from("people").select("id,name,user_id")),
+        read(client.from("roster_entries").select("person_id,season").in("season", [season, season - 1])),
+      ]);
+      const now = new Set(entries.filter((e) => e.season === season).map((e) => e.person_id));
+      const last = new Set(entries.filter((e) => e.season === season - 1).map((e) => e.person_id));
+      const profileById = new Map(profiles.map((p) => [p.person_id, p]));
+      const list = [];
+      for (const person of people) {
+        const profile = profileById.get(person.id);
+        if (!profile || now.has(person.id)) continue;
+        list.push({
+          id: person.id,
+          name: person.name,
+          email: profile.email,
+          phone: profile.phone ?? null,
+          works: profile.works,
+          languages: [...(profile.languages ?? [])],
+          otherLanguage: profile.other_language ?? null,
+          usualDays: [...(profile.usual_days ?? [])],
+          revision: profile.revision,
+          hasSignIn: Boolean(person.user_id),
+          lastSeason: last.has(person.id),
+        });
+      }
+      return list.sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
+    },
+
     async saveVolunteer(request) {
       return await call("vitally_save_volunteer", {
         p_action_id: actionId(request),

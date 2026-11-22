@@ -927,6 +927,23 @@ The database side is in [Database: clearance uploads](database.md#clearance-uplo
   id, or the same one when the last send's outcome was unknown, then re-reads the clearance as Check
   again does. `VALIDATION` details `PHOTO_ID_NOT_NEEDED` and `NO_ROSTER_ENTRY` get their own
   sentences; other failures use the usual notice.
+- **The returning-volunteer picker** (change `add-returning-volunteers-and-roster-csv`). The Add a
+  volunteer drawer can pick an earlier volunteer instead of retyping them. The controller's
+  `readVolunteers` reads `store.listEarlierVolunteers()` beside `listVolunteers()` into
+  `state.earlierVolunteers` (people with a profile and no current-season roster entry, each marked
+  `lastSeason` when they had an entry the season before). `returningCandidates` in
+  [`volunteer-roster.mjs`](../../src/volunteer-roster.mjs) lists last season's people matching the
+  search, plus an older volunteer whose full email was typed (flagged `earlier`); `returningFill`
+  builds the drawer's volunteer from a pick, with no roles or certificates. A pick sets
+  `dialogContext = { volunteerId, returning: true }`, and Save sends the existing Edit call to
+  `vitally_save_volunteer` with the person id and profile revision, which creates the current-season
+  roster entry. No RPC or migration changed.
+- **Export CSV.** The Roster's **Export CSV** button (disabled while no row passes the filters)
+  downloads the filtered rows. `rosterCsv` and `rosterCsvFilename` in `volunteer-roster.mjs` build
+  the text and the name `roster-<season>-<YYYY-MM-DD>.csv` (the date in New York time); `toCsv` in
+  [`csv.mjs`](../../src/csv.mjs) encodes it: a UTF-8 BOM, RFC 4180 quoting, CR LF line ends, and an
+  apostrophe before any cell starting `=`, `+`, `-`, `@`, tab or CR. The later season export (#256)
+  reuses `toCsv`.
 - **The Roster's Show filter.** `SHOW_VIEWS` in [`volunteer-roster.mjs`](../../src/volunteer-roster.mjs)
   lists the views (`all` "Everyone", `uploads` "Uploads to review"); `filterVolunteers` ANDs the
   chosen view's predicate with Role and search, and `setVolunteerFilter` accepts `show`. A new view
