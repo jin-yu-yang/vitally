@@ -3026,6 +3026,15 @@ if (!config) {
     document.body.classList.remove("print-summary");
   });
 
+  // Enter in the reason note is Send back (when it is on), never the drawer's
+  // Save: the note sits inside #volunteer-form, so the default would submit it.
+  root.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || !event.target.matches?.('[name="review-note"]')) return;
+    event.preventDefault();
+    const send = event.target.closest(".volunteer-review")?.querySelector('[data-action="send-back"]');
+    if (send && !send.disabled) send.click();
+  });
+
   // The case page's tabs follow the ARIA tab pattern: arrows, Home and End move
   // to a tab and show it, and the keyboard stays on the tab.
   root.addEventListener("keydown", (event) => {

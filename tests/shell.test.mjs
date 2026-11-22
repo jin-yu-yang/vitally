@@ -1570,3 +1570,11 @@ test("the Volunteers link keeps the current page marker beside the count", () =>
 test("a non-admin has no Volunteers link, whatever the count", () => {
   assert.doesNotMatch(sidebarWith({ uploadsToReview: 3 }, false), /open-volunteers/);
 });
+
+test("app.mjs: Enter in the Mark reviewed note is Send back, never the drawer's Save", () => {
+  const app = readFileSync(fileURLToPath(new URL("../src/app.mjs", import.meta.url)), "utf8");
+  assert.match(
+    app,
+    /event\.key !== "Enter" \|\| !event\.target\.matches\?\.\('\[name="review-note"\]'\)\) return;\s*event\.preventDefault\(\);[^]*?send && !send\.disabled\) send\.click\(\)/,
+  );
+});
