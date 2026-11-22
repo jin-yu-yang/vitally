@@ -901,44 +901,6 @@ test("seed command against real Supabase", async (t) => {
         await rm(runDir, { recursive: true, force: true });
       }
     });
-    await t.test("a seed re-run keeps a seed volunteer who got an account", async () => {
-      const emails = SEED_VALUES.SEED_VOLUNTEERS.map((v) => v.email);
-      const args = { workspaceId: f.workspaceId, actorUserId: f.siteCoordinatorUserId };
-      const seedClient = await openDatabase({ kind: "test" });
-      try {
-        await seedVolunteers(seedClient, args);
-        // What Create account does to the person: give them a sign-in.
-        const account = await f.provision();
-        // One statement, so the staff membership and the link exist together at commit.
-        const linked = await f.sql(
-          `with m as (
-             insert into public.memberships(workspace_id,user_id,access)
-             values($1,$3,'staff') returning user_id
-           )
-           update public.people p set user_id=(select user_id from m)
-             from public.volunteer_profiles v
-            where v.person_id=p.id and v.workspace_id=p.workspace_id
-              and p.workspace_id=$1 and v.email=$2 returning p.id`,
-          [f.workspaceId, emails[0], account.userId],
-        );
-        assert.equal(linked.rows.length, 1);
-        assert.equal(await seedVolunteers(seedClient, args), 8);
-      } finally {
-        await seedClient.end();
-      }
-      const rows = (
-        await f.sql(
-          `select v.email, count(*)::int n, max(p.user_id::text) as user_id
-             from public.people p join public.volunteer_profiles v on v.person_id=p.id
-            where p.workspace_id=$1 and v.email=any($2) group by v.email`,
-          [f.workspaceId, emails],
-        )
-      ).rows;
-      assert.equal(rows.length, 8);
-      assert.ok(rows.every((r) => r.n === 1));
-      assert.ok(rows.find((r) => r.email === emails[0]).user_id);
-    });
-
     // Spec local-seed-data, "The local seed adds a previous season's roster".
     await t.test("the previous season's roster is added, and replaced on a re-run", async () => {
       const past = SEED_VALUES.SEED_PAST_VOLUNTEERS.map((v) => v.email);
@@ -970,12 +932,6 @@ test("seed command against real Supabase", async (t) => {
           )
         ).rows[0].n;
       try {
-        // The test before this one gave a seed volunteer a sign-in; undo that.
-        await f.sql(
-          `update public.people p set user_id=null from public.volunteer_profiles v
-            where v.person_id=p.id and p.workspace_id=$1 and v.email=$2`,
-          [f.workspaceId, alsoCurrent],
-        );
         await seedVolunteers(seedClient, {
           workspaceId: f.workspaceId,
           actorUserId: f.siteCoordinatorUserId,
@@ -1033,6 +989,44 @@ test("seed command against real Supabase", async (t) => {
       } finally {
         await rm(runDir, { recursive: true, force: true });
       }
+    });
+
+    await t.test("a seed re-run keeps a seed volunteer who got an account", async () => {
+      const emails = SEED_VALUES.SEED_VOLUNTEERS.map((v) => v.email);
+      const args = { workspaceId: f.workspaceId, actorUserId: f.siteCoordinatorUserId };
+      const seedClient = await openDatabase({ kind: "test" });
+      try {
+        await seedVolunteers(seedClient, args);
+        // What Create account does to the person: give them a sign-in.
+        const account = await f.provision();
+        // One statement, so the staff membership and the link exist together at commit.
+        const linked = await f.sql(
+          `with m as (
+             insert into public.memberships(workspace_id,user_id,access)
+             values($1,$3,'staff') returning user_id
+           )
+           update public.people p set user_id=(select user_id from m)
+             from public.volunteer_profiles v
+            where v.person_id=p.id and v.workspace_id=p.workspace_id
+              and p.workspace_id=$1 and v.email=$2 returning p.id`,
+          [f.workspaceId, emails[0], account.userId],
+        );
+        assert.equal(linked.rows.length, 1);
+        assert.equal(await seedVolunteers(seedClient, args), 8);
+      } finally {
+        await seedClient.end();
+      }
+      const rows = (
+        await f.sql(
+          `select v.email, count(*)::int n, max(p.user_id::text) as user_id
+             from public.people p join public.volunteer_profiles v on v.person_id=p.id
+            where p.workspace_id=$1 and v.email=any($2) group by v.email`,
+          [f.workspaceId, emails],
+        )
+      ).rows;
+      assert.equal(rows.length, 8);
+      assert.ok(rows.every((r) => r.n === 1));
+      assert.ok(rows.find((r) => r.email === emails[0]).user_id);
     });
 
   } finally {
