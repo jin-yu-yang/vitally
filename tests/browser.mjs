@@ -9758,6 +9758,216 @@ test(
   },
 );
 
+// The volunteer schedule (change add-volunteer-schedule) has its own walk,
+// outside the story and its time limit, like Season settings': it adds no
+// phase to either order. Chrome only, on a fixture of its own, so the shift it
+// adds goes with the fixture and a re-run starts clean. The Site Coordinator
+// saves Saturday 10 am to 4 pm in Season settings and opens the Schedule on the
+// next Saturday; the Preparer, whose window is open on the same day, sees the
+// shift the Site Coordinator adds with "+ Add shift" arrive without a reload
+// (no tags, no coverage row). The Site Coordinator drags its end one cell to
+// the right with the pointer: the coverage row changes, the drag does not open
+// the drawer, and the next press on the shift does. The Preparer saves Tue and
+// Sat on My profile. Fictional people only.
+test(
+  "A site coordinator schedules a volunteer, and the volunteer sees it",
+  { timeout: 300_000 },
+  async (t) => {
+    const fixture = await createBrowserFixture();
+    const alertMark = (page) => page.evaluate(() => (window.__vitallyAlerts ?? []).length);
+    const toastSince = (page, text, mark) =>
+      waitFor(
+        page,
+        `the toast ${JSON.stringify(text)}`,
+        ([wanted, from]) =>
+          (window.__vitallyAlerts ?? []).slice(from).some((line) => line.startsWith("toast: ") && line.includes(wanted)),
+        [text, mark],
+        ARRIVAL_MS,
+      );
+    // Days from today (New York) to the next Saturday, 0 when it is one.
+    const newYork = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" });
+    const WEEKDAY_INDEX = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
+    const daysToSaturday = (6 - WEEKDAY_INDEX[newYork.format(new Date())] + 7) % 7;
+    const openSaturday = async (page) => {
+      await clickAction(page, "open-schedule");
+      await page.getByRole("heading", { name: "Schedule", exact: true }).waitFor({ timeout: ARRIVAL_MS });
+      await waitFor(page, "the Schedule's day", () => Boolean(document.querySelector("#schedule-day")?.textContent), undefined, ARRIVAL_MS);
+      for (let i = 0; i < daysToSaturday; i += 1) {
+        const before = await page.locator("#schedule-day").innerText();
+        await clickAction(page, "schedule-next");
+        await waitFor(
+          page,
+          "the next day",
+          (was) => (document.querySelector("#schedule-day")?.textContent ?? "") !== was,
+          before,
+          ARRIVAL_MS,
+        );
+      }
+      await waitFor(
+        page,
+        "the day to be a Saturday",
+        () => (document.querySelector("#schedule-day")?.textContent ?? "").startsWith("Saturday"),
+        undefined,
+        ARRIVAL_MS,
+      );
+    };
+    // The sidebar is an overlay at the evidence widths: closed for the shot.
+    const shootDay = async (page, name) => {
+      await waitForQuiet(page);
+      await page.locator('[data-action="toggle-sidebar"]').click({ timeout: CLICK_MS });
+      await waitFor(
+        page,
+        "the sidebar to be closed",
+        () => document.querySelector('[data-action="toggle-sidebar"]')?.getAttribute("aria-expanded") === "false",
+        undefined,
+        RENDER_MS,
+      );
+      await waitForQuiet(page);
+      await page.evaluate(() => window.scrollTo(0, 0));
+      const shot = await capture(page, SHOTS, name);
+      assert.equal(shot.overflow.scrollWidth, shot.overflow.clientWidth, `${name}: the page scrolls sideways at ${MOBILE_WIDTH}px`);
+      // Open again, for the next step.
+      await page.locator('[data-action="toggle-sidebar"]').click({ timeout: CLICK_MS });
+      await waitFor(
+        page,
+        "the sidebar to be open",
+        () => document.querySelector('[data-action="toggle-sidebar"]')?.getAttribute("aria-expanded") === "true",
+        undefined,
+        RENDER_MS,
+      );
+    };
+    const coverageText = (page, hour) => page.locator(`.coverage-cell[data-hour="${hour}"]`).innerText();
+    const started = Date.now();
+    try {
+      const engine = await fixture.launch("chrome");
+      const adminWin = await engine.newPage({ viewport: DESKTOP });
+      const admin = adminWin.page;
+      await guardToast(admin);
+      await loginTestUser({ page: admin, actor: fixture.actor("siteCoordinator"), fixture, heading: OFFICE_BOARD_HEADING });
+      await watchAlerts(admin);
+      const preparerWin = await engine.newPage({ viewport: DESKTOP });
+      const preparer = preparerWin.page;
+      await guardToast(preparer);
+      await loginTestUser({ page: preparer, actor: fixture.actor("preparer"), fixture, heading: WORK_BOARD_HEADING });
+      assert.equal(await readSignedInAs(preparer), ROLE_NAMES.preparer);
+      await watchAlerts(preparer);
+
+      // 1. Saturday 10 am to 4 pm in Season settings; the other days as the
+      // card has them (the save sends the whole week).
+      await clickAction(admin, "open-season-settings");
+      await admin.getByRole("heading", { name: "Season settings", exact: true }).waitFor({ timeout: ARRIVAL_MS });
+      await admin.locator("#site-day-6-open").waitFor({ timeout: ARRIVAL_MS });
+      await waitForQuiet(admin);
+      await admin.locator("#site-day-6-open").check();
+      await admin.locator("#site-day-6-from").selectOption("10");
+      await admin.locator("#site-day-6-to").selectOption("16");
+      let mark = await alertMark(admin);
+      await pressControl(admin, admin.locator('#site-hours-form button[type="submit"]'), { selector: "button", what: "Save" });
+      await toastSince(admin, "Site hours saved", mark);
+      await waitForQuiet(admin);
+      const { rows: saved } = await fixture.database.sql(
+        "select site_hours->'6' as saturday from public.schedule_settings where workspace_id=$1",
+        [fixture.database.workspaceId],
+      );
+      assert.deepEqual(saved.map((row) => row.saturday), [{ open: 10, close: 16 }], "the stored Saturday hours");
+
+      // 2. Both windows on the same Saturday's Schedule.
+      await openSaturday(admin);
+      await openSaturday(preparer);
+      assert.equal(await preparer.locator(".schedule-closed").count(), 0, "the Preparer sees Saturday closed");
+      assert.equal(await admin.locator(".schedule-grid.can-drag").count(), 1, "the Site Coordinator's grid cannot be dragged");
+      assert.equal(await preparer.locator(".schedule-grid.can-drag").count(), 0, "the Preparer's grid can be dragged");
+
+      // 3. Add a Preparer shift for the Preparer, 10 am to 1 pm.
+      await pressControl(admin, admin.locator('[data-action="open-add-shift"]'), { selector: "button", what: "+ Add shift" });
+      await admin.locator("#shift-form").waitFor({ timeout: ARRIVAL_MS });
+      await admin.getByText(ROLE_NAMES.preparer, { exact: true }).click({ timeout: CLICK_MS });
+      await admin.locator("#shift-role").selectOption("preparer");
+      await admin.locator("#shift-start").selectOption("10");
+      await admin.locator("#shift-end").selectOption("13");
+      await pressControl(admin, admin.locator('#shift-form [data-action="save-shift"]'), { selector: "button", what: "Save" });
+      await waitFor(admin, "the shift drawer to close", () => !document.querySelector("#shift-form"), undefined, ARRIVAL_MS);
+      const shiftLabel = (end) => `${ROLE_NAMES.preparer}, Preparer, 10 am to ${end}`;
+      const shiftButton = admin.locator(`button.schedule-shift[aria-label="${shiftLabel("1 pm")}"]`);
+      await shiftButton.waitFor({ timeout: ARRIVAL_MS });
+      await waitForQuiet(admin);
+      const hour13Before = await coverageText(admin, 13);
+      const hour12Before = await coverageText(admin, 12);
+      assert.notEqual(hour12Before, hour13Before, "the shift changes hour 12 but not hour 13");
+
+      // 4. The Preparer's window shows it without a reload: no tags, no
+      // coverage row, no gap line.
+      await waitFor(
+        preparer,
+        "the shift to arrive in the Preparer's window",
+        () => [...document.querySelectorAll(".schedule-shift")].some((s) => s.textContent.includes("10 am – 1 pm")),
+        undefined,
+        ARRIVAL_MS,
+      );
+      assert.equal(
+        await preparer.locator(".schedule-coverage, .schedule-gaps, .schedule-tags, button.schedule-shift").count(),
+        0,
+        "the Preparer sees admin parts",
+      );
+      await shootDay(preparer, "schedule-day-preparer");
+
+      // 5. Drag the shift's end one cell to the right. The coverage row moves,
+      // the drag opens no drawer, and the next press on the shift does.
+      // The grid is wider than the window (a cell is about 280 px): scroll its
+      // region so the shift's end and the next cell are both on screen, clear
+      // of the sticky name column.
+      await admin.locator(".schedule-scroll").evaluate((el) => (el.scrollLeft = 480));
+      const edgeBox = await shiftButton.locator('[data-edge="end"]').boundingBox();
+      const cellBox = await admin.locator('.schedule-row[data-volunteer-id] .schedule-cell[data-hour="12"]').first().boundingBox();
+      const y = edgeBox.y + edgeBox.height / 2;
+      const x = edgeBox.x + edgeBox.width / 2;
+      await admin.mouse.move(x, y);
+      await admin.mouse.down();
+      await admin.mouse.move(x + cellBox.width / 2, y, { steps: 4 });
+      await admin.mouse.move(x + cellBox.width, y, { steps: 4 });
+      await admin.mouse.up();
+      const longer = admin.locator(`button.schedule-shift[aria-label="${shiftLabel("2 pm")}"]`);
+      await longer.waitFor({ timeout: ARRIVAL_MS });
+      await waitForQuiet(admin);
+      assert.notEqual(await coverageText(admin, 13), hour13Before, "the coverage row did not change for the 1 pm hour");
+      assert.equal(await admin.locator("#shift-form").count(), 0, "the drag opened the drawer");
+      // The next press works, so the finished drag left nothing held.
+      await longer.click({ position: { x: 30, y: 10 }, timeout: CLICK_MS });
+      await admin.locator("#shift-form").waitFor({ timeout: ARRIVAL_MS });
+      await clickAction(admin, "close-dialog");
+      await waitFor(admin, "the shift drawer to close", () => !document.querySelector("#shift-form"), undefined, ARRIVAL_MS);
+      await waitFor(
+        preparer,
+        "the longer shift in the Preparer's window",
+        () => [...document.querySelectorAll(".schedule-shift")].some((s) => s.textContent.includes("10 am – 2 pm")),
+        undefined,
+        ARRIVAL_MS,
+      );
+      await shootDay(admin, "schedule-day-admin");
+
+      // 6. The Preparer saves Tue and Sat on My profile.
+      await clickAction(preparer, "open-my-profile");
+      await preparer.getByRole("heading", { name: "My profile", exact: true }).waitFor({ timeout: ARRIVAL_MS });
+      await preparer.locator('#my-profile-form [data-day="2"]').waitFor({ timeout: ARRIVAL_MS });
+      await waitForQuiet(preparer);
+      for (const day of [2, 6]) await preparer.locator(`#my-profile-form [data-day="${day}"]`).click({ timeout: CLICK_MS });
+      mark = await alertMark(preparer);
+      await pressControl(preparer, preparer.locator('#my-profile-form button[type="submit"]'), { selector: "button", what: "Save" });
+      await toastSince(preparer, "Usual days saved", mark);
+      const { rows: days } = await fixture.database.sql(
+        "select usual_days from public.volunteer_profiles where workspace_id=$1 and email=$2",
+        [fixture.database.workspaceId, fixture.actor("preparer").email],
+      );
+      assert.deepEqual(days.map((row) => row.usual_days), [[2, 6]], "the stored usual days");
+      assertConsoleQuiet(adminWin, { name: "the Site Coordinator's Schedule window" });
+      assertConsoleQuiet(preparerWin, { name: "the Preparer's Schedule window" });
+      t.diagnostic(`schedule walk ${((Date.now() - started) / 1000).toFixed(1)} s`);
+    } finally {
+      await fixture.close();
+    }
+  },
+);
+
 // Start next season (change add-start-next-season) has its own test, outside
 // the story and its time limit, like Season settings': it adds no phase to
 // either order. Chrome only, on a fixture of its own (a start is one-way, so
