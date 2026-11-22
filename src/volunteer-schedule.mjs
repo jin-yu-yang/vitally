@@ -23,6 +23,9 @@ export const SHIFT_REFUSALS = Object.freeze({
 
 // Monday first: ISO weekday d is WEEKDAYS[d - 1].
 export const WEEKDAYS = Object.freeze(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]);
+// Usual days as main's volunteer profile stores them (change add-my-profile):
+// ISO weekday d is WEEKDAY_KEYS[d - 1].
+export const WEEKDAY_KEYS = Object.freeze(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
@@ -114,9 +117,10 @@ export function gapHeader(rows) {
 const byName = (a, b) => a.name.localeCompare(b.name);
 
 // Rostered volunteers for Add shift: those whose usual days include the
-// weekday first, each group by name.
+// weekday (ISO 1 to 7) first, each group by name. Usual days are `mon`..`sun`.
 export function orderCandidates(candidates, weekday) {
-  const marked = candidates.map((c) => ({ ...c, usual: (c.usualDays ?? []).includes(weekday) }));
+  const key = WEEKDAY_KEYS[weekday - 1];
+  const marked = candidates.map((c) => ({ ...c, usual: key !== undefined && (c.usualDays ?? []).includes(key) }));
   return [...marked.filter((c) => c.usual).sort(byName), ...marked.filter((c) => !c.usual).sort(byName)];
 }
 

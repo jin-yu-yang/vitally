@@ -1,11 +1,13 @@
 // My profile (change add-my-profile, design D9): a cleared staff member's own
 // details, the office's records read-only, and the Form 13615 they send again.
 // Staff text, English only. Pure: `state.myProfile` is the
-// `vitally_my_profile()` answer.
+// `vitally_my_profile()` answer, and `state.myShifts` the `vitally_my_shifts()`
+// one (change add-volunteer-schedule).
 import { esc, button, icon, SENT_DAY, loadingLine, unloadedLine } from "./ui.mjs";
 import { reviewLine } from "./clearance.mjs";
 import { ROLES, CERTIFICATES, WORKS, LANGUAGES } from "./volunteer-roster.mjs";
 import { accountLabel } from "./volunteer-views.mjs";
+import { shiftLine } from "./volunteer-schedule.mjs";
 
 const when = (condition, html) => (condition ? html : "");
 const labelOf = (list, value) => list.find((entry) => entry.value === value)?.label ?? value;
@@ -88,6 +90,23 @@ function seasonSection(p) {
   )}</p><p><span class="muted">Certificates</span> ${list(p.certificates, CERTIFICATES, "None confirmed")}</p></section>`;
 }
 
+// Your shifts this week (change add-volunteer-schedule, design D8): read on
+// its own (`state.myShifts`, the `vitally_my_shifts()` answer), so a failed
+// read is said here and the rest of the page still draws.
+function shiftsSection(state) {
+  const list = state?.lists?.myShifts ?? "loading";
+  const shifts = state?.myShifts?.shifts ?? null;
+  const body =
+    list === "failed"
+      ? unloadedLine("Your shifts couldn't load.")
+      : !shifts
+        ? loadingLine("Loading your shifts…")
+        : shifts.length
+          ? `<ul class="my-profile-shifts">${shifts.map((shift) => `<li>${esc(shiftLine(shift))}</li>`).join("")}</ul>`
+          : `<p class="muted">No shifts this week.</p>`;
+  return `<section class="panel my-profile-section" id="my-profile-shifts" aria-labelledby="my-profile-shifts-title"><h2 id="my-profile-shifts-title">Your shifts this week</h2>${body}</section>`;
+}
+
 function sendSection(p, busy) {
   const item = p.form13615 ?? null;
   const sentAt = item?.sentAt ?? null;
@@ -118,5 +137,5 @@ export function myProfilePage(state) {
     return frame(loadingLine("Loading My profile…"));
   }
   const busy = state?.busy === true;
-  return frame(`${detailsSection(p, busy)}${seasonSection(p)}${sendSection(p, busy)}`);
+  return frame(`${detailsSection(p, busy)}${seasonSection(p)}${shiftsSection(state)}${sendSection(p, busy)}`);
 }

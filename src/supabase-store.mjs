@@ -982,16 +982,9 @@ export function createStore(client) {
       });
     },
 
-    async myProfile() {
-      return await call("vitally_my_profile");
-    },
-
-    async saveMyUsualDays(request) {
-      return await call("vitally_save_my_usual_days", {
-        p_action_id: actionId(request),
-        p_expected_revision: request.revision,
-        p_days: request.days,
-      });
+    // The caller's own live shifts this week, for My profile (migration 058).
+    async myShifts() {
+      return await call("vitally_my_shifts");
     },
 
     async saveScheduleSettings(request) {

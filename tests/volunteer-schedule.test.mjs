@@ -16,6 +16,7 @@ import {
   dragRole,
   ROLE_LABELS,
   SHIFT_REFUSALS,
+  WEEKDAY_KEYS,
 } from "../src/volunteer-schedule.mjs";
 
 test("nyToday gives New York's date, not the viewer's", () => {
@@ -101,14 +102,23 @@ test("gapHeader", () => {
 });
 
 test("orderCandidates puts usual-day people first, by name", () => {
+  // Usual days are main's mon..sun strings (change add-my-profile).
   const people = [
-    { volunteerId: "a", name: "Ari", usualDays: [1] },
-    { volunteerId: "w", name: "Wen", usualDays: [6, 7] },
-    { volunteerId: "h", name: "Hana", usualDays: [6] },
+    { volunteerId: "a", name: "Ari", usualDays: ["mon"] },
+    { volunteerId: "w", name: "Wen", usualDays: ["sat", "sun"] },
+    { volunteerId: "h", name: "Hana", usualDays: ["sat"] },
+    { volunteerId: "n", name: "Nia" },
   ];
   const ordered = orderCandidates(people, 6);
-  assert.deepEqual(ordered.map((c) => c.name), ["Hana", "Wen", "Ari"]);
-  assert.deepEqual(ordered.map((c) => c.usual), [true, true, false]);
+  assert.deepEqual(ordered.map((c) => c.name), ["Hana", "Wen", "Ari", "Nia"]);
+  assert.deepEqual(ordered.map((c) => c.usual), [true, true, false, false]);
+  assert.deepEqual(orderCandidates(people, 1).map((c) => c.name), ["Ari", "Hana", "Nia", "Wen"]);
+  assert.deepEqual(orderCandidates(people, 7).map((c) => c.name), ["Wen", "Ari", "Hana", "Nia"]);
+});
+
+test("WEEKDAY_KEYS: ISO weekday 1 is mon and 7 is sun", () => {
+  assert.deepEqual([...WEEKDAY_KEYS], ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
+  assert.equal(WEEKDAY_KEYS[isoWeekday("2027-02-06") - 1], "sat");
 });
 
 test("dragRole and scheduleRows", () => {

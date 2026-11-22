@@ -149,19 +149,6 @@ export function filterVolunteers(list, { search = "", role = "all", show = "all"
   });
 }
 
-// TODO(Task 15): our numeric usual days; main's are text[] (mon..sun). Remove
-// with our usual-day toggles (src/app.mjs) and our My profile code.
-// The usual-day toggles' field ("2,6") as weekdays: whole days 1 (Monday) to
-// 7 (Sunday), each once, sorted. Anything else in it is dropped.
-export function readUsualDays(text) {
-  const days = String(text ?? "")
-    .split(",")
-    .map((part) => part.trim())
-    .filter((part) => /^[1-7]$/.test(part))
-    .map(Number);
-  return [...new Set(days)].sort((a, b) => a - b);
-}
-
 // Reads the drawer's FormData into the exact RPC payload.
 export function volunteerFromForm(formData) {
   const text = (key) => String(formData.get(key) ?? "").trim();

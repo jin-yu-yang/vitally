@@ -151,3 +151,53 @@ test("a cleared window's account row is the My profile link; an uncleared one's 
   assert.doesNotMatch(plain, /<button|open-my-profile/);
   assert.match(text(plain), /Signed in as Sam &lt;b&gt;/);
 });
+
+// ---- Your shifts this week (change add-volunteer-schedule, design D8) ----
+// `state.myShifts` is the `vitally_my_shifts()` answer; `lists.myShifts` its
+// read's state. Main's sections around it are unchanged.
+
+const week = (shifts) => ({ weekStart: "2027-02-01", weekEnd: "2027-02-07", shifts });
+const withShifts = (myShifts, list = "ready") => ({ ...stateOf(), myShifts, lists: { myProfile: "ready", myShifts: list } });
+const shiftsSection = (html) => html.match(/<section[^>]*id="my-profile-shifts"[\s\S]*?<\/section>/)?.[0] ?? null;
+
+test("shifts: Your shifts this week lists each shift, between This season and the 13615 section", () => {
+  const html = myProfilePage(
+    withShifts(
+      week([
+        { shiftId: "s1", date: "2027-02-02", startHour: 17, endHour: 20, role: "preparer" },
+        { shiftId: "s2", date: "2027-02-06", startHour: 10, endHour: 14, role: "reviewer" },
+      ]),
+    ),
+  );
+  const section = shiftsSection(html);
+  assert.ok(section, "the section is drawn");
+  assert.match(section, /<h2 id="my-profile-shifts-title">Your shifts this week<\/h2>/);
+  const lines = [...section.matchAll(/<li>([^<]*)<\/li>/g)].map((m) => m[1]);
+  assert.deepEqual(lines, ["Tue, Feb 2 · 5 pm – 8 pm · Preparer", "Sat, Feb 6 · 10 am – 2 pm · Reviewer"]);
+  assert.ok(html.indexOf("This season") < html.indexOf("Your shifts this week"));
+  assert.ok(html.indexOf("Your shifts this week") < html.indexOf("Passed a higher certification?"));
+  // Main's sections are still all there, the form and its usual days included.
+  for (const heading of ["Your details", "This season", "Passed a higher certification? Send your new Form 13615"])
+    assert.ok(html.includes(heading), heading);
+  assert.match(html, /name="usualDays" value="tue" checked/);
+});
+
+test("shifts: none this week says so", () => {
+  const section = shiftsSection(myProfilePage(withShifts(week([]))));
+  assert.ok(section.includes("No shifts this week."));
+  assert.doesNotMatch(section, /<li>/);
+});
+
+test("shifts: loading and a failed read stay inside the section, and main's page still draws", () => {
+  const loading = myProfilePage({ ...stateOf(), myShifts: null, lists: { myProfile: "ready", myShifts: "loading" } });
+  assert.match(shiftsSection(loading), /Loading your shifts/);
+  // A state from before the read was asked for reads as loading too.
+  assert.match(shiftsSection(myProfilePage(stateOf())), /Loading your shifts/);
+  const failed = myProfilePage(withShifts(null, "failed"));
+  assert.ok(says(shiftsSection(failed), "Your shifts couldn't load."));
+  assert.match(failed, /<form id="my-profile-form"/);
+  assert.ok(failed.includes("Passed a higher certification?"));
+  // A failed re-read keeps showing nothing stale: the line says it failed.
+  const stale = myProfilePage(withShifts(week([{ shiftId: "s1", date: "2027-02-02", startHour: 17, endHour: 20, role: "preparer" }]), "failed"));
+  assert.ok(says(shiftsSection(stale), "Your shifts couldn't load."));
+});

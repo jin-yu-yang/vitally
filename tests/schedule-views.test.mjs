@@ -52,9 +52,9 @@ const adminDay = (over = {}) => ({
     }),
   ],
   candidates: [
-    { volunteerId: "p-ari", name: "Ari Shah", roles: ["reviewer"], usualDays: [2], cleared: true, works: "on_site", signedIn: true },
-    { volunteerId: "p-hana", name: "Hana Lee", roles: ["preparer", "reviewer"], usualDays: [6], cleared: true, works: "on_site", signedIn: true },
-    { volunteerId: "p-wen", name: "Wen Zhou", roles: ["greeter"], usualDays: [6, 7], cleared: false, works: "on_site", signedIn: false },
+    { volunteerId: "p-ari", name: "Ari Shah", roles: ["reviewer"], usualDays: ["tue"], cleared: true, works: "on_site", signedIn: true },
+    { volunteerId: "p-hana", name: "Hana Lee", roles: ["preparer", "reviewer"], usualDays: ["sat"], cleared: true, works: "on_site", signedIn: true },
+    { volunteerId: "p-wen", name: "Wen Zhou", roles: ["greeter"], usualDays: ["sat", "sun"], cleared: false, works: "on_site", signedIn: false },
   ],
   ...over,
 });

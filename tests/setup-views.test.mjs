@@ -296,11 +296,13 @@ test("an uncleared schedule viewer opens the Schedule read-only from the setup s
   assert.doesNotMatch(not, /<h1>Schedule<\/h1>/);
 });
 
-// TODO(Task 15): no "open-my-profile" nav link once our duplicate goes.
-test("an uncleared workspace admin's setup sidebar orders Volunteers, Schedule, My profile, Post an update, Season settings", () => {
+// My profile is a cleared window's (change add-my-profile): no link to it here,
+// neither in the nav nor as the account row.
+test("an uncleared workspace admin's setup sidebar orders Volunteers, Schedule, Post an update, Season settings, with no My profile", () => {
   const html = staffScreen(staffState({ isAdmin: true, scheduleViewer: true }));
   const order = [...html.matchAll(/data-action="(open-[a-z-]+)"/g)].map((m) => m[1]).filter((a) => a !== "open-help");
-  assert.deepEqual(order, ["open-board", "open-volunteers", "open-schedule", "open-my-profile", "open-post-update", "open-season-settings", "open-notifications"]);
+  assert.deepEqual(order, ["open-board", "open-volunteers", "open-schedule", "open-post-update", "open-season-settings", "open-notifications"]);
+  assert.doesNotMatch(html, /open-my-profile|My profile/);
   // The admin gets the editing controls.
   const schedule = staffScreen(
     staffState(

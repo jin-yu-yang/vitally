@@ -421,10 +421,10 @@ test("site hours: the form is read whole, closed days left out of siteHours", ()
   });
 });
 
-test("app.mjs handles the site hours form and the usual-day toggles", () => {
+test("app.mjs handles the site hours form and main's My profile, with no usual-day toggles of its own", () => {
   const app = readFileSync(new URL("../src/app.mjs", import.meta.url), "utf8");
   assert.match(app, /form\.id === "site-hours-form"/);
   assert.match(app, /form\.id === "my-profile-form"/);
-  assert.match(app, /case "toggle-usual-day"/);
+  assert.doesNotMatch(app, /toggle-usual-day|toggleUsualDay|syncUsualDays|readUsualDays/);
   assert.match(app, /case "open-my-profile"/);
 });

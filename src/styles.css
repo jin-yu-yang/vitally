@@ -7339,32 +7339,16 @@ button.schedule-shift {
   font-size: 14px;
 }
 
-/* ---- My profile, usual days and site hours (change add-volunteer-schedule) ---- */
-/* TODO(Task 15): .my-profile, .profile-card, .profile-subhead, .profile-shifts and
-   .usual-days style our duplicate My profile; main's .my-profile-section rules
-   above are the page's. The site hours and targets rules (.site-*) stay. */
-.my-profile {
-  display: grid;
-  gap: 16px;
-}
-.profile-card {
-  padding: 20px 22px;
-  border-radius: var(--vt-radius);
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.profile-card h2 {
-  font-size: 17px;
-  margin: 0 0 12px;
-}
-.profile-subhead,
+/* ---- My profile's shifts and the site hours (change add-volunteer-schedule) ---- */
+/* "Your shifts this week" is one of main's .my-profile-section cards; its
+   lines are a plain list, like the site hours. */
 .site-targets-title {
   font-size: 14px;
   font-weight: 600;
   color: var(--vt-muted);
   margin: 0 0 8px;
 }
-.profile-shifts,
+.my-profile-shifts,
 .site-hours-list {
   list-style: none;
   margin: 0 0 12px;
@@ -7372,26 +7356,13 @@ button.schedule-shift {
   display: grid;
   gap: 6px;
 }
-.usual-days {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 10px;
+.my-profile-shifts {
+  margin: 0;
+  font-size: 14px;
 }
-.usual-days .usual-day {
-  min-width: 52px;
-  min-height: var(--vt-tap);
-  padding: 6px 10px;
-  border: 1px solid var(--vt-line);
-  border-radius: var(--vt-radius-sm);
-  background: var(--vt-surface);
-  color: var(--vt-ink);
-  font-weight: 600;
-}
-.usual-days .usual-day[aria-pressed="true"] {
-  background: var(--vt-primary);
-  border-color: var(--vt-primary);
-  color: var(--vt-surface);
+#my-profile-shifts > p {
+  margin: 0;
+  font-size: 14px;
 }
 .site-days {
   display: grid;
@@ -7435,9 +7406,6 @@ button.schedule-shift {
   margin-bottom: 8px;
 }
 @media (max-width: 600px) {
-  .profile-card {
-    padding: 16px 14px;
-  }
   .site-days {
     grid-template-columns: 1fr;
   }

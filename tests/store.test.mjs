@@ -2231,6 +2231,19 @@ test("scheduleDay maps a refusal and saveShift passes its arguments", async () =
   });
 });
 
+test("myShifts calls vitally_my_shifts with no arguments, and the duplicate profile methods are gone", async () => {
+  const answer = { weekStart: "2027-02-01", weekEnd: "2027-02-07", shifts: [] };
+  const client = fakeClient({ access: "staff", rpc: () => ({ data: answer, error: null }) });
+  const store = createStore(client);
+  assert.deepEqual(await store.myShifts(), answer);
+  assert.equal(client.rpcCalls[0].name, "vitally_my_shifts");
+  assert.equal(client.rpcCalls[0].args, undefined);
+  assert.equal("myProfile" in store, false);
+  assert.equal("saveMyUsualDays" in store, false);
+  const refused = fakeClient({ rpc: async () => ({ data: null, error: { code: "VT001" } }) });
+  await assert.rejects(() => createStore(refused).myShifts(), { code: "FORBIDDEN" });
+});
+
 test("listCases attaches sorted labels from active links only", async () => {
   const rows = {
     case_labels: [

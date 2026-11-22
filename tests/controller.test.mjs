@@ -5317,6 +5317,7 @@ test("an applicant's help-request list counts as loaded, and sign-out starts ove
     seasonSettings: "loading",
     schedule: "loading",
     myProfile: "loading",
+    myShifts: "loading",
   });
   await controller.signOut();
   assert.deepEqual(controller.getState().lists, {
@@ -5328,6 +5329,7 @@ test("an applicant's help-request list counts as loaded, and sign-out starts ove
     seasonSettings: "loading",
     schedule: "loading",
     myProfile: "loading",
+    myShifts: "loading",
   });
   controller.stop();
 });
@@ -11366,7 +11368,7 @@ const scheduleAnswer = (date, canEdit = true) => ({
   ...(canEdit
     ? {
         candidates: [
-          { volunteerId: "person-rowan", name: "Rowan Diaz", roles: ["preparer"], usualDays: [6], cleared: true, works: "on_site", signedIn: true },
+          { volunteerId: "person-rowan", name: "Rowan Diaz", roles: ["preparer"], usualDays: ["sat"], cleared: true, works: "on_site", signedIn: true },
         ],
       }
     : {}),
@@ -11416,12 +11418,16 @@ const NAV_ACTIONS = Object.freeze([
   "open-cases",
   "open-volunteers",
   "open-schedule",
-  "open-my-profile",
   "open-post-update",
   "open-season-settings",
   "open-notifications",
 ]);
-const navOrder = (html) => [...html.matchAll(/data-action="(open-[a-z-]+)"/g)].map((m) => m[1]).filter((action) => NAV_ACTIONS.includes(action));
+// The links in the sidebar's nav, in order (the account row is not one of them).
+const sidebarNav = (html) => html.match(/<nav class="sidebar-nav"[\s\S]*?<\/nav>/)?.[0] ?? "";
+const navOrder = (html) =>
+  [...sidebarNav(html).matchAll(/data-action="(open-[a-z-]+)"/g)].map((m) => m[1]).filter((action) => NAV_ACTIONS.includes(action));
+// The sidebar's account row: main's My profile link for a cleared window.
+const accountRow = (html) => html.match(/<div class="account-row">[\s\S]*?<\/div>/)?.[0] ?? "";
 
 async function onSchedule(options = {}) {
   const store = scheduleStore(options);
@@ -11526,25 +11532,31 @@ test("schedule: a viewer who becomes cleared stays on the Schedule", async () =>
 test("schedule: the sidebar order for an admin and for a preparer", async () => {
   const admin = build({ store: scheduleStore(), clock: SCHEDULE_NOW });
   await admin.controller.start();
-  assert.deepEqual(navOrder(staffScreen(admin.controller.getState())), [
+  const adminHtml = staffScreen(admin.controller.getState());
+  assert.deepEqual(navOrder(adminHtml), [
     "open-board",
     "open-cases",
     "open-volunteers",
     "open-schedule",
-    "open-my-profile",
     "open-post-update",
     "open-season-settings",
     "open-notifications",
   ]);
   assert.match(
-    staffScreen(admin.controller.getState()),
-    /Follow-ups[\s\S]*All cases[\s\S]*Volunteers[\s\S]*Schedule[\s\S]*My profile[\s\S]*Post an update[\s\S]*Season settings/,
+    sidebarNav(adminHtml),
+    /Follow-ups[\s\S]*All cases[\s\S]*Volunteers[\s\S]*Schedule[\s\S]*Post an update[\s\S]*Season settings[\s\S]*Notifications/,
   );
+  // No "My profile" nav link: My profile is main's account-row link.
+  assert.doesNotMatch(sidebarNav(adminHtml), /open-my-profile|My profile/);
+  assert.match(accountRow(adminHtml), /data-action="open-my-profile"[\s\S]*<span>My profile<\/span>/);
   admin.controller.stop();
   const preparer = build({ store: scheduleStore({ clearance: PREPARER_VIEWER }), clock: SCHEDULE_NOW });
   await preparer.controller.start();
-  assert.deepEqual(navOrder(staffScreen(preparer.controller.getState())), ["open-board", "open-schedule", "open-my-profile", "open-notifications"]);
-  assert.match(staffScreen(preparer.controller.getState()), /Work board[\s\S]*Schedule/);
+  const preparerHtml = staffScreen(preparer.controller.getState());
+  assert.deepEqual(navOrder(preparerHtml), ["open-board", "open-schedule", "open-notifications"]);
+  assert.match(sidebarNav(preparerHtml), /Work board[\s\S]*Schedule[\s\S]*Notifications/);
+  assert.doesNotMatch(sidebarNav(preparerHtml), /open-my-profile|My profile/);
+  assert.match(accountRow(preparerHtml), /data-action="open-my-profile"/);
   preparer.controller.stop();
 });
 
@@ -11963,10 +11975,134 @@ test("navigate to my-profile reads the profile", async () => {
   controller.stop();
 });
 
+// ---- My profile's "Your shifts this week" (change add-volunteer-schedule, D8) ----
+
+// Riley's week, as `vitally_my_shifts()` answers it. `failNextShifts` makes
+// the next read reject.
+const myWeek = () => ({
+  weekStart: "2027-02-01",
+  weekEnd: "2027-02-07",
+  shifts: [{ shiftId: "shift-tue", date: "2027-02-02", startHour: 17, endHour: 20, role: "preparer" }],
+});
+const shiftsStore = (overrides = {}) => {
+  const store = profileStore(overrides);
+  store.week = myWeek();
+  store.failNextShifts = null;
+  store.myShifts = async () => {
+    store.calls.push("myShifts");
+    const error = store.failNextShifts;
+    store.failNextShifts = null;
+    if (error) throw error;
+    return structuredClone(store.week);
+  };
+  return store;
+};
+const shiftsReads = (store) => callCount(store, "myShifts");
+async function onMyShifts(overrides = {}) {
+  const store = shiftsStore(overrides);
+  const built = build({ store, clock: SCHEDULE_NOW });
+  await built.controller.start();
+  await built.controller.navigate("my-profile");
+  return { store, ...built };
+}
+
+test("my shifts: opening My profile reads the week and draws it in main's page", async () => {
+  const { store, controller } = await onMyShifts();
+  const state = controller.getState();
+  assert.equal(shiftsReads(store), 1);
+  assert.equal(profileReads(store), 1);
+  assert.equal(state.lists.myShifts, "ready");
+  assert.deepEqual(state.myShifts, myWeek());
+  const html = staffScreen(state);
+  assert.match(html, /<form id="my-profile-form"/);
+  assert.match(html, /Your shifts this week/);
+  assert.match(html, /<li>Tue, Feb 2 · 5 pm – 8 pm · Preparer<\/li>/);
+  controller.stop();
+});
+
+test("my shifts: focus re-reads them on My profile, and not elsewhere", async () => {
+  const { store, controller, events } = await onMyShifts();
+  const reads = shiftsReads(store);
+  await events.emit("focus");
+  assert.equal(shiftsReads(store), reads + 1);
+  controller.navigate("staff");
+  await events.emit("focus");
+  assert.equal(shiftsReads(store), reads + 1);
+  controller.stop();
+});
+
+test("my shifts: a shifts change re-reads them, not main's profile; a site hours change reads neither", async () => {
+  const { store, controller } = await onMyShifts();
+  const shifts = shiftsReads(store);
+  const profiles = profileReads(store);
+  store.week = {
+    ...myWeek(),
+    shifts: [...myWeek().shifts, { shiftId: "shift-thu", date: "2027-02-04", startHour: 10, endHour: 12, role: "preparer" }],
+  };
+  await store.handlers.onChange({ table: "shifts", eventType: "INSERT", id: "shift-thu" });
+  assert.equal(shiftsReads(store), shifts + 1);
+  assert.equal(profileReads(store), profiles);
+  assert.match(staffScreen(controller.getState()), /Thu, Feb 4 · 10 am – 12 pm · Preparer/);
+  await store.handlers.onChange({ table: "schedule_settings", eventType: "UPDATE", id: "w1" });
+  assert.equal(shiftsReads(store), shifts + 1);
+  assert.equal(profileReads(store), profiles);
+  // Off My profile, a shift change does not read them.
+  controller.navigate("staff");
+  await store.handlers.onChange({ table: "shifts", eventType: "UPDATE", id: "shift-thu" });
+  assert.equal(shiftsReads(store), shifts + 1);
+  controller.stop();
+});
+
+test("my shifts: a failed read says so in the section only, and main's page still works", async () => {
+  const store = shiftsStore();
+  store.failNextShifts = Object.assign(new Error("offline"), { code: "OFFLINE" });
+  const { controller } = build({ store, clock: SCHEDULE_NOW });
+  await controller.start();
+  await controller.navigate("my-profile");
+  const state = controller.getState();
+  assert.equal(state.lists.myShifts, "failed");
+  assert.equal(state.lists.myProfile, "ready");
+  assert.equal(state.error, null);
+  const html = staffScreen(state);
+  assert.match(html, /<form id="my-profile-form"/);
+  assert.match(html, /Your shifts couldn(?:'|&#39;)t load\./);
+  // The next read that lands draws them; a later failure keeps them.
+  await controller.navigate("my-profile");
+  assert.equal(controller.getState().lists.myShifts, "ready");
+  store.failNextShifts = Object.assign(new Error("offline"), { code: "OFFLINE" });
+  await store.handlers.onChange({ table: "shifts", eventType: "UPDATE", id: "shift-tue" });
+  assert.equal(controller.getState().lists.myShifts, "ready");
+  assert.match(staffScreen(controller.getState()), /Tue, Feb 2 · 5 pm – 8 pm · Preparer/);
+  controller.stop();
+});
+
+test("my shifts: an uncleared viewer has no My profile and no shifts read, and holds the channel only on the Schedule", async () => {
+  const store = shiftsStore({ clearance: { ...UNCLEARED_VIEWER } });
+  store.scheduleDay = async (date) => {
+    store.calls.push("scheduleDay");
+    return scheduleAnswer(date, false);
+  };
+  const { controller, events } = build({ store, clock: SCHEDULE_NOW });
+  await controller.start();
+  await controller.navigate("my-profile");
+  assert.equal(controller.getState().screen, "staff");
+  assert.doesNotMatch(staffScreen(controller.getState()), /open-my-profile/);
+  assert.equal(store.subscriptions, 0);
+  await controller.openSchedule();
+  assert.equal(store.subscriptions, 1);
+  const days = dayReads(store);
+  await store.handlers.onChange({ table: "shifts", eventType: "INSERT", id: "s-new" });
+  assert.equal(dayReads(store), days + 1);
+  await events.emit("focus");
+  assert.equal(shiftsReads(store), 0);
+  assert.equal(profileReads(store), 0);
+  controller.navigate("staff");
+  assert.equal(store.handlers, null);
+  controller.stop();
+});
+
 // ---------------------------------------------------------------------------
-// The site hours card (change add-volunteer-schedule, Task 9). TODO(Task 15):
-// tests for My profile's shifts section; this change's own My profile tests
-// were dropped in the merge with main's My profile (#262).
+// The site hours card (change add-volunteer-schedule, Task 9).
 // ---------------------------------------------------------------------------
 
 // ---- the site hours card ----

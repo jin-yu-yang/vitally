@@ -215,8 +215,8 @@ const isAdmin = (person) =>
 // and who is signed in. Screens that do not exist yet (Dashboard, Documents,
 // Messages) are not shown. `office` is the effective admin (All cases,
 // Follow-ups); `volunteers` is the workspace admin (the Roster); `schedule`
-// is a schedule viewer, with Schedule and My profile (change
-// add-volunteer-schedule, design D11), and
+// is a schedule viewer, with the Schedule (change add-volunteer-schedule,
+// design D11; My profile stays the account row's), and
 // `board` is false on the setup screen, which has no work board.
 export function staffSidebar(state, person, office, { volunteers = office, board = true, schedule = false } = {}) {
   // A staff account is its own person. A cleared window's row is the link to
@@ -279,17 +279,6 @@ export function staffSidebar(state, person, office, { volunteers = office, board
         onSchedule ? 'aria-current="page"' : "",
       )
     : "";
-  // TODO(Task 15): our My profile nav link; main's My profile is the account
-  // row above, for cleared windows only. Remove this link.
-  // My profile follows the Schedule, for the same people.
-  const profileLink = schedule
-    ? button(
-        `${icon("user")} My profile`,
-        "open-my-profile",
-        `nav-link${onProfile ? " current" : ""}`,
-        onProfile ? 'aria-current="page"' : "",
-      )
-    : "";
   // Post an update follows the Roster: the workspace admin's, cleared or not.
   const postUpdate = volunteers
     ? button(
@@ -321,8 +310,8 @@ export function staffSidebar(state, person, office, { volunteers = office, board
     `aria-haspopup="dialog"${unread > 0 ? ` aria-label="Notifications, ${unread} unread"` : ""}`,
   );
   // On the setup screen there is no board: a workspace admin's way back from
-  // the Roster, and a schedule viewer's from the Schedule or My profile, is
-  // the setup screen itself.
+  // the Roster, and a schedule viewer's from the Schedule, is the setup
+  // screen itself.
   const home = board || volunteers || schedule
     ? button(
         board ? `${icon(office ? "people" : "board")} ${label}` : `${icon("shield")} Finish your setup`,
@@ -331,7 +320,7 @@ export function staffSidebar(state, person, office, { volunteers = office, board
         onBoard ? 'aria-current="page"' : "",
       )
     : "";
-  const links = `${home}${pool}${roster}${scheduleLink}${profileLink}${postUpdate}${settings}${notifications}`;
+  const links = `${home}${pool}${roster}${scheduleLink}${postUpdate}${settings}${notifications}`;
   return `<div class="sidebar-brand"><img src="src/pcdc-logo.png" alt="PCDC" width="36" height="36"><span class="sidebar-wordmark">ViTally<span class="brand-dot">.</span></span></div>${when(links, `<nav class="sidebar-nav" aria-label="Main navigation">${links}</nav>`)}<div class="sidebar-account"><div class="account-row">${icon("user")}<span>${accountRow}</span></div>${button(
     `${icon("help")} Need help?`,
     "open-help",
@@ -445,17 +434,14 @@ export function staffScreen(state) {
   // the ceiling (design D10), so an admin can record their own roles.
   const office = isAdmin(person);
   const volunteers = ceilingAdmin(state.principal);
-  // The Schedule and My profile are every schedule viewer's, cleared or not
-  // (design D11).
+  // The Schedule is every schedule viewer's, cleared or not (design D11).
   const viewer = scheduleViewer(state.principal);
   const open = state.sidebarOpen !== false;
   // Not cleared: the setup screen, and for a workspace admin the Roster and
-  // Post an update, and for a schedule viewer the Schedule and My profile.
-  // No work.
+  // Post an update, and for a schedule viewer the Schedule. No work, and no
+  // My profile (a cleared window's).
   if (awaitingClearance(state)) {
     const onCeiling = volunteers && CEILING_SCREENS.includes(state.screen);
-    // TODO(Task 15): main's My profile opens for cleared windows only, so an
-    // uncleared window's Schedule exception no longer includes "my-profile".
     const onSchedule = viewer && state.screen === "schedule";
     return appShell({
       sidebar: staffSidebar(

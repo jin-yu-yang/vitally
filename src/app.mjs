@@ -67,7 +67,7 @@ import { t, SENTENCES } from "./client-text.mjs";
 import { createToastTimer } from "./toast.mjs";
 import { contactEntryFromForm, contactSummary, contactSummaries } from "./contact-log.mjs";
 import { decorateStaffCase, outcomeGroup, staffEligibility } from "./staff-views.mjs";
-import { volunteerFromForm, volunteerFormChanged, roleBoxesToUntick, untickedRolesMessage, readUsualDays } from "./volunteer-roster.mjs";
+import { volunteerFromForm, volunteerFormChanged, roleBoxesToUntick, untickedRolesMessage } from "./volunteer-roster.mjs";
 import { actionToast, renderUpdatePreview, saveToast, updateFormFromValues } from "./update-views.mjs";
 import { startSeasonReady, scheduleSettingsFromForm } from "./season-settings-views.mjs";
 
@@ -312,7 +312,6 @@ if (!config) {
     const v2Place = wasV2 || v2OnPage();
     restoreFormDrafts();
     syncContactForms();
-    syncUsualDays();
     syncSiteDays();
     syncCloseUnsigned();
     syncStartSeason();
@@ -476,35 +475,6 @@ if (!config) {
     const box = root.querySelector("#volunteer-language-other");
     const field = root.querySelector("#volunteer-other-language");
     if (box && field) field.hidden = !box.checked;
-  }
-
-  // TODO(Task 15): our usual-day toggles and R13 base revision duplicate main's
-  // My profile (usual days are main's check boxes); remove toggleUsualDay and
-  // syncUsualDays. syncSiteDays below is the Schedule's and stays.
-  // The usual-day toggles (change add-volunteer-schedule): each group's
-  // hidden field holds the pressed days, and is what the form sends and what
-  // a draft keeps. A press flips the button and rewrites the field; a redraw
-  // presses the buttons from the field again, so an unsent choice survives a
-  // live re-read. A field back at the saved days keeps no draft.
-  function toggleUsualDay(target) {
-    const group = target.closest(".usual-days");
-    const field = group?.dataset.for ? root.querySelector(`#${CSS.escape(group.dataset.for)}`) : null;
-    if (!field || target.disabled) return;
-    target.setAttribute("aria-pressed", String(target.getAttribute("aria-pressed") !== "true"));
-    const days = [...group.querySelectorAll('[data-day][aria-pressed="true"]')].map((day) => day.dataset.day).join(",");
-    field.value = days;
-    keepDraft(field.id, days === (group.dataset.saved ?? "") ? null : { value: days });
-    if (field.closest("#volunteer-form")) syncCreateAccount();
-  }
-
-  function syncUsualDays() {
-    for (const group of root.querySelectorAll(".usual-days[data-for]")) {
-      const field = root.querySelector(`#${CSS.escape(group.dataset.for)}`);
-      if (!field) continue;
-      const on = readUsualDays(field.value);
-      for (const day of group.querySelectorAll("[data-day]"))
-        day.setAttribute("aria-pressed", String(on.includes(Number(day.dataset.day))));
-    }
   }
 
   // A site hours tile shows its hours only while Open is ticked: at once on
@@ -2226,11 +2196,6 @@ if (!config) {
       case "open-schedule":
         if (leaveAddCaseFirst("open-schedule", target)) break;
         EXITS["open-schedule"]();
-        break;
-      // TODO(Task 15): our usual-day toggle; main's usual days are check boxes.
-      // A usual-day toggle, on My profile or in the Roster's drawer.
-      case "toggle-usual-day":
-        toggleUsualDay(target);
         break;
       case "schedule-prev":
       case "schedule-next":
