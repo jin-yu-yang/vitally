@@ -9840,6 +9840,17 @@ test(
       await waitForQuiet(page);
       await page.locator(editButton).click({ timeout: CLICK_MS });
       await drawerOpen(page, NEW_NAME);
+      // The drawer takes the keyboard on the next animation frame (render's
+      // requestAnimationFrame, onto its first field). Typing before that frame
+      // is a race: fill focuses and selects the phone, the frame moves the
+      // keyboard to the name, and the typed text lands there instead.
+      await waitFor(
+        page,
+        "the volunteer drawer to take the keyboard",
+        () => Boolean(document.activeElement?.closest(".modal")),
+        undefined,
+        RENDER_MS,
+      );
     };
     const storedPhone = async () =>
       (
@@ -9992,6 +10003,16 @@ test(
       await openDrawer(admin);
       await waitForFormLine(admin, `Form 13615 sent ${today}`);
       await admin.locator("#volunteer-phone").fill(TYPED_PHONE);
+      // The typed phone is in the field before anything else happens, so a
+      // later loss is the app's and not a fill that went elsewhere.
+      assert.deepEqual(
+        await admin.evaluate(() => ({
+          phone: document.querySelector("#volunteer-phone")?.value ?? null,
+          name: document.querySelector("#volunteer-name")?.value ?? null,
+        })),
+        { phone: TYPED_PHONE, name: NEW_NAME },
+        "the typed phone did not reach the phone field",
+      );
       await clickAction(admin, "mark-upload-reviewed", { attributes: '[data-document="form13615"]' });
       await row.waitFor({ timeout: RENDER_MS });
       const note = row.locator('input[name="review-note"]');
