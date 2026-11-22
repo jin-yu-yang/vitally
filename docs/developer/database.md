@@ -322,8 +322,8 @@ they belong.
 | `vitally_my_clearance()` | The caller's own clearance (045, [below](#roster-clearance); 053 adds the sent dates, the upload link and empty capabilities when not cleared; 057 adds `reviewedAt` and `reviewReason` and nulls the link while the site check is owed) | `{cleared, missing, capabilities, isAdmin, isSiteCoordinator, siteCoordinatorName, siteCheck, uploadUrl}`; `missing` items for `form13615` and `photoId` carry `sentAt` (053), `reviewedAt` and `reviewReason` (057); `uploadUrl` is null while the site check is owed (057) |
 | `vitally_mark_upload_sent(p_action_id uuid, p_document text)` | The caller says they sent their own `form13615` or `photoId` (053; any staff member with a current-season entry, cleared or not; [below](#clearance-uploads)) | `{actionId, document, sentAt}` |
 | `vitally_mark_upload_reviewed(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_document text, p_reason text)` | A workspace admin clears a volunteer's sent date and records why (053; 057 adds the required reason; [below](#clearance-uploads)) | `{actionId, personId, revision}` |
-| `vitally_my_profile()` | The caller's own profile (057; any staff member with a person and profile row, cleared or not; [below](#my-profile)) | `{personId, name, email, phone, works, languages, otherLanguage, usualDays, revision, accountStatus, roles, certificates, form13615, uploadUrl, siteCoordinatorName}` |
-| `vitally_save_my_profile(p_action_id uuid, p_expected_revision bigint, p_profile jsonb)` | The caller saves their own name, phone, works, languages, other language and usual days (057; [below](#my-profile)) | `{actionId, personId, revision}` |
+| `vitally_my_profile()` | The caller's own profile (057; any staff member with a person and profile row, cleared or not, once the site check is passed: `FORBIDDEN` while the account is `invited`; [below](#my-profile)) | `{personId, name, email, phone, works, languages, otherLanguage, usualDays, revision, accountStatus, roles, certificates, form13615, uploadUrl, siteCoordinatorName}` |
+| `vitally_save_my_profile(p_action_id uuid, p_expected_revision bigint, p_profile jsonb)` | The caller saves their own name, phone, works, languages, other language and usual days (057; `FORBIDDEN` while the account is `invited`; [below](#my-profile)) | `{actionId, personId, revision}` |
 | `vitally_save_update(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_update jsonb)` | Save a draft, post it, or edit a draft, a posted update or an unpublished one (049; workspace admins). An unpublished update stays unpublished, with its reads and `unpublished_at`; `post` changes nothing there and `askAgain` is refused (`VT007`, detail `askAgain`). `askAgain` on a posted update clears every read and confirmation | `{actionId, updateId, revision, status}` |
 | `vitally_update_action(p_action_id uuid, p_update_id uuid, p_expected_revision bigint, p_type text)` | `POST` a draft, `UNPUBLISH` a posted update, or `DELETE` a draft (049; workspace admins). A replayed delete answers `deleted` | `{actionId, updateId, revision, status}` |
 | `vitally_mark_updates(p_update_ids uuid[], p_confirm boolean)` | Record that the caller read up to 200 updates in their feed, and with `p_confirm` that they confirmed them (049; any staff member). No receipt: a repeat changes nothing | `{marked}` |
@@ -514,16 +514,19 @@ once archived) lets any signed-in staff member read and edit their own details, 
 a document came back.
 
 - **`vitally_my_profile`** is a read for the caller alone (`require_membership`; a client, or a staff
-  caller with no person or profile row, gets `FORBIDDEN`). It is not gated by clearance; only the screen
+  caller with no person or profile row, gets `FORBIDDEN`, and so does a caller whose account is `invited`,
+  before any other check: an invitation sent to a mistyped email must not let a stranger read the
+  volunteer's details). It is not gated by clearance; only the screen
   is. It returns the profile fields, `usualDays`, the profile `revision`, the account status, this
   season's roles and confirmed certificates, the Form 13615 item (`sentAt`, `reviewedAt`,
   `reviewReason`), the upload link and the site coordinator's name. `uploadUrl` follows
-  `vitally_my_clearance`: null with no current-season entry, and null while the site check is owed.
+  `vitally_my_clearance`: null with no current-season entry (the site check is already passed here).
 - **`vitally_save_my_profile`** writes only the caller's own `people.name` and `volunteer_profiles` row
   (phone, works, languages, other language, usual days). It never writes email, roles, certificates, the
   roster entry or another person. The payload has exactly those six keys and follows the field rules of
   `vitally_save_volunteer` (`VT007` `VALIDATION`). It shares `volunteer_profiles.revision` with the
-  admin's Roster save, so a stale revision gets `CONFLICT`. The receipt is `SAVE_MY_PROFILE`.
+  admin's Roster save, so a stale revision gets `CONFLICT`. The receipt is `SAVE_MY_PROFILE`. An
+  `invited` account is refused `FORBIDDEN` first, storing no receipt.
 - **A required reason.** `vitally_mark_upload_reviewed` now takes `p_reason` (1 to 120 characters after
   trimming) and stores it with the time in the document's `*_reviewed_at` and `*_review_reason` pair. It
   has five arguments, and 057 drops the four-argument version: a function left behind would still clear

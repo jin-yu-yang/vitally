@@ -493,8 +493,10 @@ grant execute on function public.vitally_mark_upload_reviewed(uuid,uuid,bigint,t
 
 -- 057 §6
 -- The signed-in staff member's own profile (design D1). It answers for the
--- caller alone, and is not gated by clearance. uploadUrl follows the rule of
--- vitally_my_clearance: null while the site check is owed.
+-- caller alone, and is not gated by clearance. It is refused FORBIDDEN while
+-- the caller's account is invited (the first-sign-in site check is not passed),
+-- as the upload link is withheld then: an invitation sent to a mistyped email
+-- must not let a stranger read the volunteer's details.
 create or replace function public.vitally_my_profile()
 returns jsonb language plpgsql security definer set search_path='' as $$
 declare v_member public.memberships;
@@ -503,7 +505,6 @@ declare v_member public.memberships;
  v_entry public.roster_entries;
  v_status text;
  v_coordinator text;
- v_site_check boolean;
 begin
  v_member=vitally_private.require_membership();
  if v_member.access<>'staff' then
@@ -521,7 +522,9 @@ begin
  end if;
  select a.status into v_status from public.accounts a
   where a.workspace_id=v_person.workspace_id and a.user_id=v_member.user_id;
- v_site_check=coalesce(v_status='invited',false);
+ if v_status='invited' then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
  select r.* into v_entry from public.roster_entries r
   join public.workspaces w on w.id=r.workspace_id and w.current_season=r.season
   where r.workspace_id=v_person.workspace_id and r.person_id=v_person.id;
@@ -544,7 +547,7 @@ begin
    then vitally_private.confirmed_certificates(v_entry.workspace_id,v_entry.person_id,v_entry.season) else '{}'::text[] end),
   'form13615',case when v_entry.person_id is not null then jsonb_build_object('sentAt',v_entry.form_13615_sent_at,
    'reviewedAt',v_entry.form_13615_reviewed_at,'reviewReason',v_entry.form_13615_review_reason) end,
-  'uploadUrl',case when v_entry.person_id is not null and not v_site_check
+  'uploadUrl',case when v_entry.person_id is not null
    then (select s.certificate_upload_url from public.season_settings s where s.workspace_id=v_person.workspace_id) end,
   'siteCoordinatorName',to_jsonb(v_coordinator));
 end;
@@ -556,7 +559,8 @@ grant execute on function public.vitally_my_profile() to authenticated;
 -- The signed-in staff member saves their own details (design D2): name, phone,
 -- works, languages, other language and usual days, under the field rules of
 -- vitally_save_volunteer. It writes only the caller's own people and profile
--- rows, and shares the profile revision with the admin's save.
+-- rows, and shares the profile revision with the admin's save. It is refused
+-- FORBIDDEN, before any receipt, while the caller's account is invited.
 create or replace function public.vitally_save_my_profile(p_action_id uuid, p_expected_revision bigint, p_profile jsonb)
 returns jsonb language plpgsql security definer set search_path='' as $$
 declare v_member public.memberships;
@@ -581,6 +585,10 @@ begin
   where workspace_id=v_member.workspace_id and user_id=v_member.user_id;
  if v_person.id is null or not exists(select 1 from public.volunteer_profiles
   where workspace_id=v_person.workspace_id and person_id=v_person.id) then
+  raise sqlstate 'VT001' using message='FORBIDDEN';
+ end if;
+ if exists(select 1 from public.accounts a
+  where a.workspace_id=v_person.workspace_id and a.user_id=v_member.user_id and a.status='invited') then
   raise sqlstate 'VT001' using message='FORBIDDEN';
  end if;
  if p_action_id is null or p_expected_revision is null or p_profile is null or jsonb_typeof(p_profile)<>'object' then

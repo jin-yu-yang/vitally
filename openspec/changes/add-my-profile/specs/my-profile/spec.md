@@ -10,7 +10,7 @@
 - `uploadUrl`, under the same rule as the clearance answer (capability `volunteer-clearance`);
 - the display name of the workspace's default follow-up person.
 
-It SHALL NOT be gated by clearance. It SHALL return nothing about any other person. A client, an anonymous caller, or a staff caller with no person row or no volunteer record SHALL be refused with `FORBIDDEN`. Execute SHALL be granted to `authenticated` only.
+It SHALL NOT be gated by clearance. It SHALL return nothing about any other person. A client, an anonymous caller, a staff caller with no person row or no volunteer record, or a caller whose account is `invited` (it has not passed the first-sign-in site check) SHALL be refused with `FORBIDDEN`, before any other check. Execute SHALL be granted to `authenticated` only.
 
 #### Scenario: A cleared Preparer
 - **WHEN** a cleared Preparer with VSC, IT&QR and Basic calls it
@@ -22,6 +22,10 @@ It SHALL NOT be gated by clearance. It SHALL return nothing about any other pers
 
 #### Scenario: A client
 - **WHEN** a client calls it
+- **THEN** it is refused with `FORBIDDEN`
+
+#### Scenario: An invited account before the site check
+- **WHEN** a staff member whose account is `invited` calls it
 - **THEN** it is refused with `FORBIDDEN`
 
 ### Requirement: A staff member saves their own details
@@ -47,7 +51,7 @@ It SHALL NOT change the caller's email, roles, certificates, roster entry or acc
 - **THEN** it is refused with `VALIDATION`, and nothing changes
 
 ### Requirement: Saving one's own details uses the revision and a receipt
-`vitally_save_my_profile` SHALL compare `p_expected_revision` with the caller's volunteer record, refuse a mismatch with `CONFLICT`, and raise the revision by one when it saves. It SHALL refuse a client, an anonymous caller, or a staff caller with no person row or volunteer record with `FORBIDDEN` before any other check. It SHALL refuse a call with no action id or no revision with `VALIDATION`. A repeated action id SHALL return the stored result `{actionId, personId, revision}` and write nothing more. A refusal SHALL write nothing and store no receipt.
+`vitally_save_my_profile` SHALL compare `p_expected_revision` with the caller's volunteer record, refuse a mismatch with `CONFLICT`, and raise the revision by one when it saves. It SHALL refuse a client, an anonymous caller, a staff caller with no person row or volunteer record, or a caller whose account is `invited` (it has not passed the site check) with `FORBIDDEN` before any other check. It SHALL refuse a call with no action id or no revision with `VALIDATION`. A repeated action id SHALL return the stored result `{actionId, personId, revision}` and write nothing more. A refusal SHALL write nothing and store no receipt.
 
 #### Scenario: A volunteer's stale save
 - **WHEN** a volunteer opens My profile, an admin then saves an edit of them, and the volunteer saves
@@ -64,6 +68,10 @@ It SHALL NOT change the caller's email, roles, certificates, roster entry or acc
 #### Scenario: A client
 - **WHEN** a client calls it
 - **THEN** it is refused with `FORBIDDEN`, and no receipt is stored
+
+#### Scenario: An invited account before the site check
+- **WHEN** a staff member whose account is `invited` calls it
+- **THEN** it is refused with `FORBIDDEN`, nothing changes, and no receipt is stored
 
 ### Requirement: A cleared staff member opens My profile from the sidebar
 For a cleared `staff` window, the account row in the sidebar's bottom block SHALL be a link that opens the My profile screen. Its first line SHALL read "My profile", with the signed-in name as a smaller second line. This SHALL hold for admins as well. A window that is not cleared, admins included, SHALL keep the account row as plain text and SHALL NOT offer My profile; it keeps the setup screen. When a window loses clearance while My profile is open, it SHALL switch to the setup screen.

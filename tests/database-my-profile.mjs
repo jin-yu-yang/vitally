@@ -462,23 +462,44 @@ test("my profile RPCs against real Supabase", async (t) => {
         assert.equal(form13615.reviewReason, "Already on file");
       });
 
-      await t.test("uploadUrl follows the site check", async () => {
+      const setStatus = (m, status) =>
+        f.sql("update public.accounts set status=$3 where workspace_id=$1 and user_id=$2", [
+          f.workspaceId,
+          m.userId,
+          status,
+        ]);
+
+      await t.test("vitally_my_profile refuses an invited account before the site check", async () => {
         const m = await preparer("mp_site", "Kirra Beaumont");
-        const setStatus = (status) =>
-          f.sql("update public.accounts set status=$3 where workspace_id=$1 and user_id=$2", [
-            f.workspaceId,
-            m.userId,
-            status,
-          ]);
-        await setStatus("invited");
+        await setStatus(m, "invited");
         try {
-          const owed = await read(m);
-          assert.equal(owed.accountStatus, "invited");
-          assert.equal(owed.uploadUrl, null);
+          const owed = await m.client.rpc("vitally_my_profile");
+          assert.equal(owed.error?.code, "VT001");
+          assert.equal(owed.error?.message, "FORBIDDEN");
         } finally {
-          await setStatus("active");
+          await setStatus(m, "active");
         }
-        assert.equal((await read(m)).uploadUrl, LINK);
+        const open = await read(m);
+        assert.equal(open.accountStatus, "active");
+        assert.equal(open.uploadUrl, LINK);
+      });
+
+      await t.test("vitally_save_my_profile refuses an invited account before the site check (no receipt)", async () => {
+        const m = await preparer("mp_site_save", "Ines Calloway");
+        const before = await profileOf(m);
+        const nameBefore = await nameOf(m);
+        const receipts = await receiptCount(m);
+        await setStatus(m, "invited");
+        try {
+          const saved = await save(m, { phone: "555-0199" });
+          assert.equal(saved.error?.code, "VT001");
+          assert.equal(saved.error?.message, "FORBIDDEN");
+        } finally {
+          await setStatus(m, "active");
+        }
+        assert.deepEqual(await profileOf(m), before);
+        assert.equal(await nameOf(m), nameBefore);
+        assert.equal(await receiptCount(m), receipts);
       });
 
       await t.test("a client is refused FORBIDDEN, and the save stores no receipt", async () => {

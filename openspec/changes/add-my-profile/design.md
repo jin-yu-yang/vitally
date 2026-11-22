@@ -49,6 +49,7 @@
   - `uploadUrl`, under the clearance answer's rule (D4);
   - `siteCoordinatorName`.
   It is refused with `FORBIDDEN` for a client, an anonymous caller, or a staff caller with no person or profile row. It is not gated by clearance; only the screen is.
+  - **Invited accounts:** it is also refused with `FORBIDDEN` while the caller's account is `invited` (the site check is not passed), for the reason the upload link is withheld (#246): an invitation sent to a mistyped email must not let a stranger read the volunteer's details.
 - **Rationale:** the clearance answer stays lean and keeps its job. My profile needs the revision for its save.
 - **Alternative considered:** adding these fields to `vitally_my_clearance()`. That would make every wake-event re-read heavier, and the clearance spec says that answer carries no profile data.
 
@@ -60,6 +61,7 @@
   - **Concurrency:** it locks the profile row and compares `revision`, refusing with `CONFLICT` and raising the revision by one.
   - **Receipt:** reserved through `reserve_receipt` with operation `SAVE_MY_PROFILE` and a digest of the call. A repeated action id returns the stored `{actionId, personId, revision}`.
   - **Refusals:** a client, an anonymous caller, or a staff caller with no person or profile row is refused with `FORBIDDEN` before anything is written. A refusal stores no receipt.
+  - **Invited accounts:** refused with `FORBIDDEN` first, before the arguments and the receipt, while the caller's account is `invited`, so a stranger at a mistyped invitation cannot change the volunteer's details.
 - **Rationale:** the revision is shared with the admin's save and 053's RPCs. An admin's drawer opened before the volunteer saved is refused, and the volunteer's stale screen is refused after an admin save.
 - **Alternative considered:** letting the volunteer call `vitally_save_volunteer` on themselves. It is admin-gated, and it carries roles and email.
 
