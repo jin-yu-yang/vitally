@@ -41,6 +41,7 @@ import {
   visibleAnswers,
 } from "./intake-catalogue.mjs";
 import { cardsFor } from "./document-cards.mjs";
+import { uploadControls } from "./document-upload.mjs";
 import { sourceText, viewLang } from "./language.mjs";
 import { t } from "./client-text.mjs";
 
@@ -319,6 +320,9 @@ const STATUS = Object.freeze({
   not_done: { word: "Not done", key: "doc.status.not_done", icon: "upload" },
   later: { word: "Later", key: "doc.status.later", icon: "clock" },
   none: { word: "Don't have", key: "doc.status.none", icon: "close" },
+  sent: { word: "Uploaded · to check", key: "doc.status.sent", icon: "clock" },
+  received: { word: "Received by PCDC", key: "doc.status.received", icon: "check" },
+  verified: { word: "Verified by PCDC", key: "doc.status.verified", icon: "check" },
 });
 const statusOf = (card) => STATUS[card.status] ?? STATUS.not_done;
 const statusWord = (card, lang = "en") => (lang === "en" ? statusOf(card).word : t(statusOf(card).key, {}, lang));
@@ -334,12 +338,10 @@ const CARD_WORDS = Object.freeze({
   client: {
     later: "doc.later",
     none: "doc.none",
-    note: "doc.note",
   },
   office: {
     later: "Later",
     none: "Don't have",
-    note: "Uploads come later. Mark what the client will send later or doesn't have.",
   },
 });
 
@@ -351,7 +353,7 @@ const CARD_WORDS = Object.freeze({
 // English: a hint or owner line with an `office` version shows that one;
 // otherwise `lang` is the client's language (spec 2026-10-05 §3).
 // Card text reaches the screen through sourceText.
-export function docCard(card, { links = true, off = "", office = false, lang = "en", answers } = {}) {
+export function docCard(card, { links = true, off = "", office = false, lang = "en", answers, uploadLink = null, record = null } = {}) {
   const id = `doc-${esc(dashed(card.slotId))}`;
   const optional = card.group === "optional";
   const language = office ? "en" : lang;
@@ -371,12 +373,19 @@ export function docCard(card, { links = true, off = "", office = false, lang = "
       : "";
   const hintText = card.hint?.en ? shown(card.hint) : "";
   const hint = hintText ? `<p class="doc-hint">${esc(hintText)}</p>` : "";
-  const noteId = `${id}-note`;
-  const upload = `<div class="doc-upload"><button type="button" class="btn secondary" disabled aria-describedby="${noteId}">${icon("camera")} ${esc(say("doc.take_photo"))}</button><button type="button" class="btn secondary" disabled aria-describedby="${noteId}">${icon("upload")} ${esc(say("doc.choose_file"))}</button></div><p class="doc-note" id="${noteId}">${esc(words.note)}</p>`;
+  const sent = ["sent", "received", "verified"].includes(card.status);
+  // Only staff's received / verified is final for the client. A "sent" they
+  // reported by mistake can still be changed to Later, Don't have or not done.
+  const confirmed = ["received", "verified"].includes(card.status);
+  const upload = office || card.status === "verified" || card.status === "received" ? "" : uploadControls({
+    url: uploadLink, record, lang: language, sent,
+    off,
+    action: `data-action="mark-card" data-slot="${esc(card.slotId)}" data-status="sent"`,
+  });
   const status = statusOf(card);
-  const marks = optional
+  const marks = optional && card.status === "not_done"
     ? ""
-    : `<div class="doc-marks">${markButton(card.slotId, "later", words.later, off)}${markButton(card.slotId, "none", words.none, off)}${when(card.status !== "not_done", markButton(card.slotId, "not_done", say("doc.mark_not_done"), off))}</div><p class="doc-status is-${esc(card.status)}" id="${id}-status" tabindex="-1">${icon(status.icon)}<span class="sr-only">${esc(say("doc.status"))}</span>${esc(statusWord(card, language))}</p>`;
+    : `<div class="doc-marks">${confirmed || optional ? "" : markButton(card.slotId, "later", words.later, off)}${confirmed || optional ? "" : markButton(card.slotId, "none", words.none, off)}${when(card.status !== "not_done" && !confirmed, markButton(card.slotId, "not_done", say("doc.mark_not_done"), off))}</div><p class="doc-status is-${esc(card.status)}" id="${id}-status" tabindex="-1">${icon(status.icon)}<span class="sr-only">${esc(say("doc.status"))}</span>${esc(statusWord(card, language))}</p>`;
   return `<article class="doc-card" id="${id}" data-slot="${esc(card.slotId)}" tabindex="-1"><h3>${esc(text(card.label))}</h3><p class="doc-owner">${esc(shown(card.ownerLine))}</p>${why}${hint}${upload}${marks}</article>`;
 }
 
@@ -399,7 +408,7 @@ function documentsBody(view) {
   const mine = cards.filter((card) => card.substep === substep.cards);
   const main = mine.filter((card) => card.group !== "maybe");
   const maybe = mine.filter((card) => card.group === "maybe");
-  const one = (card) => docCard(card, { off: view.off, lang });
+  const one = (card) => docCard(card, { off: view.off, lang, uploadLink: view.state.clientDocumentsUrl, record: view.record });
   if (!maybe.length) return `<div class="doc-list">${main.map(one).join("")}</div>`;
   const panel = `maybe:${substep.id}`;
   const open = view.openPanels.includes(panel);
@@ -656,7 +665,7 @@ export function progressDocumentsV2(state, lang = "en") {
     `<div class="section-head"><h2 id="open-documents-title">${title}</h2></div>`;
   if (isSameDay(answers))
     return `<section class="panel open-documents" aria-labelledby="open-documents-title"><div class="summary-print">${head(say("doc.bring"))}${row(t("id.application", {}, lang), record.reference)}${bringList(cards, lang)}</div><div class="summary-tools">${button(`${icon("print")} ${say("doc.print")}`, "print-summary", "secondary")}</div></section>`;
-  const open = cards.filter((card) => card.group === "needed" && (card.status === "not_done" || card.status === "later"));
+  const open = cards.filter((card) => card.group === "needed" && card.status !== "none" && card.status !== "verified" && card.status !== "received");
   if (!open.length) return "";
-  return `<section class="panel open-documents" aria-labelledby="open-documents-title">${head(say("doc.open"))}<p class="field-note">${say("doc.open_note")}</p><div class="doc-list">${open.map((card) => docCard(card, { links: false, off: offWhileBusy(state), lang })).join("")}</div></section>`;
+  return `<section class="panel open-documents" aria-labelledby="open-documents-title">${head(say("doc.open"))}<p class="field-note">${say("doc.open_note")}</p><div class="doc-list">${open.map((card) => docCard(card, { links: false, off: offWhileBusy(state), lang, uploadLink: state.clientDocumentsUrl, record })).join("")}</div></section>`;
 }

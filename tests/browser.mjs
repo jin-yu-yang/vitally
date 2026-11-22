@@ -77,7 +77,7 @@ import {
   watchAlerts,
 } from "./support/story-pages.mjs";
 import { REFERENCE_PATTERN, SQLSTATE_ERROR_CODES } from "../src/contracts.mjs";
-import { SAMPLE_DOCUMENT_FILENAME, screeningCheckKeys } from "../src/case-actions.mjs";
+import { screeningCheckKeys } from "../src/case-actions.mjs";
 import { DRAFT_FONT_FIXTURES } from "../src/draft-pdf.mjs";
 import { cardsFor } from "../src/document-cards.mjs";
 import { CONTACT_NOT_SHOWN } from "../src/staff-views.mjs";
@@ -2912,7 +2912,15 @@ async function runPermutation(t, roles) {
       }
     });
 
-    await phase("the client sends the sample document for their own case", async () => {
+    await phase("the client reports a OneDrive upload for their own case", async () => {
+      // A fictional upload-only URL belongs only to this isolated test workspace.
+      // The earlier intake screenshots still exercise the no-link fallback.
+      await fixture.database.sql(
+        "insert into public.season_settings(workspace_id,client_documents_url) values($1,$2) on conflict(workspace_id) do update set client_documents_url=excluded.client_documents_url",
+        [fixture.database.workspaceId, "https://example.org/pcdc-client-file-request"],
+      );
+      await client.reload();
+      await waitForText(client, "Upload to PCDC", RENDER_MS);
       // The office has just finished working on this case, so this click can
       // meet a revision that moved a moment ago. The application refuses it and
       // says to try again — which is what this does, and counts.
@@ -2931,7 +2939,7 @@ async function runPermutation(t, roles) {
           `a refusal left the screen before the client acted on it: ${JSON.stringify(refusal)}`,
         );
       }
-      await waitForText(client, SAMPLE_DOCUMENT_FILENAME, RENDER_MS);
+      await waitForText(client, "You reported this upload", RENDER_MS);
       await use("preparer", classReference);
       await waitForBadge(staff, "Received, not verified yet");
     });
@@ -5142,7 +5150,7 @@ async function runPermutation(t, roles) {
       );
       assert.deepEqual(recorded, {
         source: "staff_recorded",
-        filename: SAMPLE_DOCUMENT_FILENAME,
+        filename: "Received by PCDC office",
       });
 
       await use("preparer", assistedReference);
@@ -6277,20 +6285,13 @@ async function runPermutation(t, roles) {
         // ---- Documents (spec 2026-10-04 §6) ------------------------------
         await jump("documents.identity");
         const photo = page.locator("#doc-photo_id-tp");
-        assert.deepEqual(
-          await photo.evaluate((card) =>
-            [...card.querySelectorAll(".doc-upload button")].map((button) => ({
-              text: button.textContent.trim(),
-              disabled: button.disabled,
-              note: document.getElementById(button.getAttribute("aria-describedby"))?.textContent.trim() ?? null,
-            })),
-          ),
-          ["Take a photo", "Choose a file"].map((text) => ({
-            text,
-            disabled: true,
-            note: "Uploading arrives soon. For now, bring it or mark it below.",
-          })),
-        );
+        const photoText = await photo.textContent();
+        assert.match(photoText, /Upload to PCDC/);
+        assert.match(photoText, /I've uploaded it/);
+        assert.match(photoText, /The file goes to PCDC's OneDrive, not ViTally/);
+        assert.match(photoText, /Only PCDC staff can confirm receipt/);
+        assert.equal(await photo.locator(".doc-upload a").count(), 1);
+        assert.equal(await photo.locator(".doc-upload button").count(), 1);
         assert.deepEqual(await cardStatus("photo_id.tp"), {
           className: "doc-status is-not_done",
           text: "Status: Not done",

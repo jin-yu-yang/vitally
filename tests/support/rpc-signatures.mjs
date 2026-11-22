@@ -288,6 +288,15 @@ export const RPC_SIGNATURES = Object.freeze([
       p_granted: true,
     }),
   }),
+  // Applicant-safe OneDrive read: returns only the client upload URL and never
+  // the certificate / photo-ID link reserved for site coordinators.
+  Object.freeze({
+    name: "vitally_client_documents_link",
+    signature: "vitally_client_documents_link()",
+    authorized: (f) => f.applicantA,
+    receiptKeys: Object.freeze(["clientDocumentsUrl"]),
+    args: () => ({}),
+  }),
   // The Season settings page in one read, for a workspace admin (change
   // add-season-settings, design D5). It never carries the SIDN.
   Object.freeze({

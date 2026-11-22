@@ -203,7 +203,8 @@ test("visits and document cards on the server", async (t) => {
       ).rows.map((row) => row.column_name);
       assert.deepEqual(
         columns,
-        ["workspace_id", "case_id", "slot_id", "status", "group_override", "changed_at"].sort(),
+        // 056 adds reported_at: a time, still no person.
+        ["workspace_id", "case_id", "slot_id", "status", "group_override", "changed_at", "reported_at"].sort(),
       );
     });
 

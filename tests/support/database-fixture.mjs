@@ -20,6 +20,9 @@ import { createStore, camelRow } from "../../src/supabase-store.mjs";
 // The site number every fixture workspace gets (change add-account-invitations,
 // design D12): fictional, and never a real site's SIDN.
 export const TEST_SITE_NUMBER = "S00000000";
+// A fictional upload-only link (#157). A client may report an upload only once
+// the workspace has a client documents link, so tests that do set it.
+export const TEST_CLIENT_DOCUMENTS_URL = "https://example.org/pcdc-client-file-request";
 
 export const screeningChecks = (service) => ({
   phone: true,
@@ -751,6 +754,12 @@ export async function createDatabaseFixture({ afterInitialize } = {}) {
   // certificates for them, on the workspace's current-season roster entry, in
   // one transaction (the roles trigger is deferred to commit). A site
   // coordinator also gets SC, so they stay cleared.
+  // Set (or, with null, clear) the workspace's client documents link.
+  f.setClientDocumentsLink = (url = TEST_CLIENT_DOCUMENTS_URL, workspaceId = f.workspaceId) =>
+    f.sql(
+      "insert into public.season_settings(workspace_id,client_documents_url) values($1,$2) on conflict(workspace_id) do update set client_documents_url=excluded.client_documents_url",
+      [workspaceId, url],
+    );
   f.clearStaff = async (personId, capabilities, workspaceId = f.workspaceId, { siteCoordinator = false } = {}) => {
     await f.sql("begin");
     try {
