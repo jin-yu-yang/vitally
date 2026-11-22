@@ -119,7 +119,7 @@ export const ROLE_ACCOUNT_CLEARANCE = Object.freeze({
 export const SEED_VOLUNTEERS = Object.freeze([
   Object.freeze({
     name: "Maya Lindgren",
-    usualDays: [2, 4],
+    usualDays: ["tue", "thu"],
     email: "volunteer-01@example.org",
     phone: "(215) 555-0141",
     works: "on_site",
@@ -132,7 +132,7 @@ export const SEED_VOLUNTEERS = Object.freeze([
   }),
   Object.freeze({
     name: "Tomas Abara",
-    usualDays: [6],
+    usualDays: ["sat"],
     email: "volunteer-02@example.org",
     phone: "(215) 555-0142",
     works: "remote",
@@ -145,7 +145,7 @@ export const SEED_VOLUNTEERS = Object.freeze([
   }),
   Object.freeze({
     name: "Wen Tao Liu",
-    usualDays: [2, 6],
+    usualDays: ["tue", "sat"],
     email: "volunteer-03@example.org",
     phone: "(215) 555-0143",
     works: "on_site",
@@ -158,7 +158,7 @@ export const SEED_VOLUNTEERS = Object.freeze([
   }),
   Object.freeze({
     name: "Priya Venkat",
-    usualDays: [4],
+    usualDays: ["thu"],
     email: "volunteer-04@example.org",
     phone: null,
     works: "on_site_and_remote",
@@ -183,7 +183,7 @@ export const SEED_VOLUNTEERS = Object.freeze([
   }),
   Object.freeze({
     name: "Hana Moretti",
-    usualDays: [6],
+    usualDays: ["sat"],
     email: "volunteer-06@example.org",
     phone: "(215) 555-0146",
     works: "remote",

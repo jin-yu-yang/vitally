@@ -986,7 +986,7 @@ test("seed command against real Supabase", async (t) => {
           )
         ).rows.map((r) => r.usual_days);
         assert.ok(days.filter((d) => d.length > 0).length >= 4, "four volunteers have usual days");
-        assert.ok(days.filter((d) => d.includes(6)).length >= 2, "two usually come on Saturdays");
+        assert.ok(days.filter((d) => d.includes("sat")).length >= 2, "two usually come on Saturdays");
 
         const first = await liveShifts();
         assert.ok(first.length >= 5 && first.length <= 8, `about six shifts, got ${first.length}`);
