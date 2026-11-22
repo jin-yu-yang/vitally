@@ -61,7 +61,7 @@
   - the grid with shift buttons, tags and the coverage row (admin);
   - the read-only variant;
   - the shift drawer with the picker, role, start/end, Save, and Remove shift with the shared confirmation dialog (D7).
-- [ ] 4.4 Drag in `src/app.mjs`: pointer events with pointer capture to create across empty cells and to resize by an edge. Save at once, and redraw on a refusal. Admin screens only (D7).
+- [x] 4.4 Drag in `src/app.mjs`: pointer events with pointer capture to create across empty cells and to resize by an edge. Save at once, and redraw on a refusal. Admin screens only (D7).
 - [ ] 4.5 New My profile view module: roles, usual-days toggles with Save and the privacy note, and the week list (D8).
 - [ ] 4.6 Season settings: the "Site hours and coverage" card, editable for site coordinators and text for other admins, with its own Save and revision (`src/season-settings-views.mjs`).
 - [ ] 4.7 Roster Edit drawer: the Usual days toggles after Works, sent as `usualDays` (`src/volunteer-views.mjs`, `src/volunteer-roster.mjs`).
