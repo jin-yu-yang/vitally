@@ -228,3 +228,115 @@ The ledger (`.superpowers/sdd/plan/progress.md`) is deleted after this retrospec
 - **Seed**: a skipped shift is silent; no Saturday gap when Saturday has one or no open hours; no tests for a missing run-file id or the OVERLAP skip; the Saturday-only test asserts only that there is at least one shift.
 - **Docs**: the `weekHours` week argument has no doc comment; the 40 s browser budget isn't enforced.
 - **Pre-existing, outside this change**: the Season settings links card can overwrite a concurrent change after a focus re-read.
+
+---
+
+## 8. Follow-up: reconciliation with main's My profile (written 2026-11-22, after re-verify)
+
+> This section follows the forward-pointer at the top. §0–§7 above record the state at c597a21 and are not rewritten.
+
+### 8.0 Evidence
+
+- **Commit range**: `c597a21..c57f3f5`, 16 first-parent commits:
+  - the `/opsx:update` (18b34d6);
+  - the merge of main (d279fc1);
+  - Tasks 14–17 (98ced18, d386f36, d5cb4a4, c7d4950, 8212f9e);
+  - one final-review fix wave (cdd6bb5);
+  - the spec narrowing (a763639);
+  - verify (c57f3f5);
+  - six tasks.md tick commits.
+- **Whole change on main**: `086c473..c57f3f5`, 58 files, +8332 / −90.
+- **Tasks done**: 38/38 (group 8 added 8).
+- **Active hours**: about 6 hours (2026-11-22, about 14:00 to 20:40 New York time), including the full suites.
+- **Subagent dispatches**: 14 fresh dispatches, plus 2 resumes.
+  - Implementers: 5 tasks, plus 1 final fix wave.
+  - Reviewers: 5 task reviews, 1 scoped re-review, 1 final whole-branch review, and 1 re-review of the fix wave.
+- **Migration**: renumbered to `058_volunteer_schedule.sql`. It replaces `vitally_my_clearance` (main's 057 body plus `scheduleViewer`) and `vitally_season_settings` (052). It adds `vitally_my_shifts()`. It no longer owns usual days, `vitally_my_profile` or a `vitally_save_volunteer` replacement.
+- **Checks at verify (a763639)**:
+  - `npm test`: 2430/2430.
+  - `test:database`: 924/925. The one failure is env-only, in `database-accounts-function.mjs`.
+  - `test:browser`: **96/96**. Both story legs passed this time.
+  - `build:hant`: clean.
+  - `openspec validate`: 24/24.
+
+### 8.1 Wins
+
+- **[evidence: the Task 13 remerge-diff review]** Reviewing the merge as `git show --remerge-diff` instead of a plain diff isolated the hand-made resolutions. The reviewer confirmed in one pass that main's My profile files were byte-identical and that every schedule file survived.
+- **[evidence: a line-by-line check of 058 against 057]** `vitally_my_clearance` was rebuilt from main's 057 with exactly one added line, so main's review fields (`reviewedAt`, `reviewReason`, the site-check `uploadUrl`) survived. The two clearance delta requirements were re-based on main's text, so archive drops none of main's lines.
+- **[evidence: 8212f9e]** The task review caught that the browser walk asserted nothing about the shift on Sundays. After the fix the positive path runs every day with an exact line.
+- **[evidence: a763639]** The final review found the spec-versus-code drift on live re-reads before archive, where it would have become a permanent conflict. The user settled it in one decision.
+
+### 8.2 Misses
+
+- 🔴 **[blocking | evidence: the archive attempt, 18b34d6]** A parallel change (`add-my-profile`, #262) built the same My profile and usual days while this change was in review. Nobody noticed until archive. The work was duplicated, and reconciling it took a full extra round: an update, 5 tasks, re-review and re-verify. #129's step list placed My profile under #138 and the schedule under #140, but this change's brainstorm still added its own My profile, and nothing cross-checked the two.
+- 🟡 **[painful | evidence: the Task 13 report]** The merge auto-resolved our duplicates in ways that would have silently overridden main, through last-one-wins object keys and a duplicate `const`. The implementer had to go beyond textual conflicts to keep the modules loading.
+- 📌 **[nit | evidence: the Task 17 report]** The walk's Saturday path hasn't executed, because every local run was on a Sunday. A weekday run or CI will cover it.
+
+### 8.3 Plan deviations
+
+| Plan task | What changed | Why |
+|---|---|---|
+| Group 8 (new) | 8 new tasks after verify and the retrospective | The user decided to adopt main's My profile (brainstorm Q11, Q12) |
+| 13 | Kept main's side beyond the textual conflicts | Our duplicates would have overridden main's page and broken module loading (R17) |
+| 14 | Restored `tests/database-volunteer-roster.mjs` to main's version | The only test of ours in it covered the dropped numeric save |
+| 17 | The walk's shift moved into the current week | The review found the Sunday gap |
+| (spec) | The live re-read rule was narrowed | The user's decision (brainstorm Q13). The code was already correct. |
+
+### 8.4 Skill / workflow compliance (round 2)
+
+| Skill | Used |
+|---|---|
+| openspec update (`/opsx:update`) | ✓, twice (the reconciliation and the spec narrowing) |
+| superpowers:subagent-driven-development | ✓ (Tasks 13–17, the final review, one fix wave) |
+| (transitive) superpowers:test-driven-development | ✓ (red-first reported per task; the seed's red interval was planned, R20) |
+| (transitive) superpowers:requesting-code-review | ✓ |
+| superpowers:finishing-a-development-branch | Not yet: step 9, after archive |
+
+### Deliberately Skipped Skills
+
+(none)
+
+### 8.5 Surprises
+
+- Main shipped a third migration (057, My profile) in the same week, and it touched the very column and function names this change had chosen.
+- Both story legs, which failed locally all through round 1 and on untouched main, passed in this verify run. The earlier failures were environmental.
+
+### 8.6 Promote candidates
+
+- [ ] 🔴 **Before brainstorming a feature, check open and recently merged changes for the same screen or column.** → **Promote to** project CLAUDE.md (§2, step 1, Explore)
+  > **Why**: this change and #262 both built My profile and `usual_days`, and the overlap surfaced only at archive.
+  > **How to apply**: in explore or brainstorm, grep `openspec/changes/` and `openspec/changes/archive/` on main, and open PRs, for the screen and table names the design will touch.
+- [ ] 🟡 **Review a merge commit with `git show --remerge-diff`.** → **Promote to** skill (the subagent-driven-development reviewer guidance)
+  > **Why**: it showed exactly the hand-made resolutions in Task 13, where a plain diff against either parent is mostly noise.
+  > **How to apply**: whenever a task's deliverable is a merge commit.
+- [ ] 📌 **Date-dependent browser steps must take the same path every day.** → **One-off**
+  > **Why**: the walk's weekday branch hid its positive path on Sundays.
+  > **How to apply**: compute dates inside the current week rather than branching on the weekday.
+
+### 8.7 Ledger summary (round 2; CLAUDE.md §7)
+
+The round-2 ledger is deleted after this section. It recorded the following.
+
+**Rulings:**
+- **R17**: Task 13 only merges, taking main's side for My profile and usual days and ours for the schedule. Tests could be red until Tasks 14–15.
+- **R18**: every dispatch carried the plan's added constraints verbatim.
+- **R19**: `vitally_my_shifts` refuses exactly the four cases the spec lists. A caller with no volunteer profile row gets an empty week.
+- **R20**: the seed stayed red from Task 14 until Task 16.
+
+The user decided two things: adopt main's My profile with My profile cleared-only (Q11, Q12), and narrow the live re-read spec (Q13).
+
+**Parked findings**: none. Every Important finding was fixed within one round. Task 17 needed one fix round, for the walk's Sunday gap.
+
+**Deferred minors, closed later**:
+- Task 13's leftover `profileLink` and `touchesProfile`: closed in Task 15.
+- Duplicate RPC rows in database.md and the stale 058 header: closed in Task 17.
+- The final review's stale "057" references: closed in cdd6bb5.
+
+**Deferred minors, still open** (triaged as LEAVE by the final review):
+- no test for the "no person row" refusal of `vitally_my_shifts`;
+- the `pastSeason` fixture's naming;
+- a `profile-views.test.mjs` comment that describes a state the app can't reach;
+- `readMyShifts` catching every error (intended by D8);
+- the walk's "Saturday" names on Sundays;
+- reopening My profile shows the last visit's shifts until the re-read lands (main's keep-what-loaded rule);
+- during the site check, an invited admin's sidebar can show the Schedule link, as main's Roster link already does.
