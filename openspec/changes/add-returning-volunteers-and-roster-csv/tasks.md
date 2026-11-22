@@ -23,7 +23,7 @@
 
 ## 5. Database contract
 
-- [ ] 5.1 Database test in `tests/database-volunteer-roster.mjs`: saving a past-season volunteer through Edit creates their current-season entry (no roles, not new, added by the caller), raises the revision, keeps usual days, leaves earlier entries and certificates unchanged; a stale revision is `CONFLICT` with one entry; a repeated action id returns the stored result. Iterate with `database-quick.yml`
+- [x] 5.1 Database test in `tests/database-volunteer-roster.mjs`: saving a past-season volunteer through Edit creates their current-season entry (no roles, not new, added by the caller), raises the revision, keeps usual days, leaves earlier entries and certificates unchanged; a stale revision is `CONFLICT` with one entry; a repeated action id returns the stored result. Iterate with `database-quick.yml`
 
 ## 6. Local seed
 
