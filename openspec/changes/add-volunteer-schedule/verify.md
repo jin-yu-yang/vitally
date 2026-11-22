@@ -128,3 +128,27 @@ plan.md has no `[~]` deferred rows, so this section is empty and counts as a pas
 - [ ] ❌ FAIL
 
 **Next step**: add the round-2 follow-up to the retrospective (lifecycle step 7), summarising this round's ledger (R17–R20, deferred minors). Then merge main and archive (step 8), and push and open the PR with the CI run linked (step 9).
+
+---
+
+## Re-check after the pre-archive merge (2026-11-22, at 704664b)
+
+**What changed since the run above:**
+- main's #267 ("Returning volunteers and the Roster CSV") was merged in (e86d6a5), with a docs fix (05cd26a). The merge was reviewed from a `--remerge-diff` and approved.
+- The seed's live-shift exception, which the merge introduced for main's previous-season people, was settled by the user (brainstorm Q14). It is now recorded as MODIFIED seed requirements (57d1945).
+- tasks.md group 9 (plan Task 18) added a test for that exception and narrowed the guard (d5cb18f). It also made an existing flaky seed test deterministic (704664b, ruling R21). Both were reviewed and approved.
+
+**Checks:**
+
+| Check | Result |
+|---|---|
+| `npm test` | 2457 / 2457 pass (at 704664b) |
+| `npm run db:migrate:test` and `npm run test:database` | 927 / 928 at the merge (e86d6a5). The single failure is the same env-only `database-accounts-function.mjs`. |
+| `tests/database-seed.mjs` | 33 / 33 at 704664b, five runs in a row green after the determinism fix |
+| `npm run test:browser` | Filtered at the merge: 4 / 4 (schedule walk, Season settings, main's My profile, #267's "An admin re-adds a returning volunteer and exports the Roster"). **The full suite has not re-run since e86d6a5; CI on the PR must pass both story legs before merge**, and the run must be linked in the PR body. |
+| `npm run build:hant -- --check` | Clean |
+| `npx openspec validate --all` | 24 / 24 |
+
+**Spec sync addendum:** `local-seed-data` now also carries 2 MODIFIED requirements ("The local seed command adds fictional volunteers" and "A seed re-run replaces the previous season's people"). Both are copied verbatim from the current canonical text and add only the live-shift exception and its scenarios. Main's "A picked person is re-seeded" scenario is narrowed to "no sign-in and no shift".
+
+**Decision unchanged:** ⚠️ PASS WITH WARNINGS (warnings 1 and 2 above). There is one further condition for merge: CI's full browser run must pass on the PR's head commit.

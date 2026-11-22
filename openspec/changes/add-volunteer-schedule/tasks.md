@@ -128,6 +128,6 @@ Decided by the user on 2026-11-22: adopt main's merged My profile (`add-my-profi
 
 Decided by the user on 2026-11-22: record the seed exception. A fictional person, current or previous-season, who holds a live shift the seed did not add is kept rather than re-created. See the MODIFIED requirements in specs/local-seed-data/spec.md.
 
-- [ ] 9.1 Database test: a previous-season fictional person, picked into the current season and given a shift by an admin, survives a seed re-run with the same id, a live shift, and both roster entries.
-- [ ] 9.2 Narrow the guard in `seedPastSeason` so it skips only the delete and re-insert, and merge its comment.
-- [ ] 9.3 Re-run `tests/database-seed.mjs`, `npm test` and `npx openspec validate --all`, and update verify.md.
+- [x] 9.1 Database test: a previous-season fictional person, picked into the current season and given a shift by an admin, survives a seed re-run with the same id, a live shift, and both roster entries.
+- [x] 9.2 Narrow the guard in `seedPastSeason` so it skips only the delete and re-insert, and merge its comment.
+- [x] 9.3 Re-run `tests/database-seed.mjs`, `npm test` and `npx openspec validate --all`, and update verify.md.
