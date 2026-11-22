@@ -91,7 +91,7 @@ For a cleared `staff` window, the account row in the sidebar's bottom block SHAL
 
 ### Requirement: My profile shows the office's records read-only
 My profile SHALL show:
-- this season's roles and confirmed certificates, read-only, under "Managed by the office", with "Ask <name>, your site coordinator" naming the default follow-up person when there is one;
+- this season's roles and confirmed certificates, read-only, under "Managed by the office";
 - the email, read-only, saying it is the sign-in and only a site coordinator changes it;
 - the account status, read-only.
 
@@ -99,7 +99,7 @@ The screen SHALL offer no way to change these. The text SHALL be English only.
 
 #### Scenario: Roles and certificates
 - **WHEN** a cleared Reviewer opens My profile
-- **THEN** they see Reviewer and their confirmed certificates, "Managed by the office", the site coordinator's name, and no control that changes them
+- **THEN** they see Reviewer and their confirmed certificates and "Managed by the office", with no line naming the site coordinator, and no control that changes them
 
 #### Scenario: Email locked
 - **WHEN** a cleared Preparer opens My profile
@@ -122,10 +122,10 @@ My profile SHALL offer name, phone, works, languages (with the other language's 
 
 ### Requirement: My profile sends a new Form 13615
 My profile SHALL have a section "Passed a higher certification? Send your new Form 13615" that offers:
-- **Upload**, which opens `uploadUrl` in a new tab; when there is no link, the text "Ask your site coordinator how to send it." in its place;
+- **Upload**, which opens `uploadUrl` in a new tab, and nothing in its place when there is no link;
 - **I've uploaded it**, which marks the Form 13615 sent through `vitally_mark_upload_sent` (capability `volunteer-clearance`) and then reads the profile again.
 
-Once the Form 13615 has a sent date, I've uploaded it SHALL be replaced by "Waiting for review · sent <date>", and Upload, or the text in its place, SHALL stay. When the Form 13615 has no sent date and has a review reason, the section SHALL show the setup screen's line for it:
+Once the Form 13615 has a sent date, I've uploaded it SHALL be replaced by "Waiting for review · sent <date>", and Upload, when there is a link, SHALL stay. When the Form 13615 has no sent date and has a review reason, the section SHALL show the setup screen's line for it:
 - "Your site coordinator says this is already on file. You don't need to send it again." for exactly "Already on file";
 - otherwise, "Your site coordinator looked at this: <reason>. Please send it again or ask them."
 

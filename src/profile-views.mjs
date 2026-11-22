@@ -81,12 +81,11 @@ function seasonSection(p) {
           .map((value) => `<span class="volunteer-chip">${esc(labelOf(all, value))}</span>`)
           .join("")}</span>`
       : `<span class="muted">${none}</span>`;
-  const ask = p.siteCoordinatorName ? `<p>Ask ${esc(p.siteCoordinatorName)}, your site coordinator.</p>` : "";
   return `<section class="panel my-profile-section" id="my-profile-season" aria-labelledby="my-profile-season-title"><h2 id="my-profile-season-title">This season</h2><p class="muted">Managed by the office</p><p><span class="muted">Roles</span> ${list(
     p.roles,
     ROLES,
     "No roles this season",
-  )}</p><p><span class="muted">Certificates</span> ${list(p.certificates, CERTIFICATES, "None confirmed")}</p>${ask}</section>`;
+  )}</p><p><span class="muted">Certificates</span> ${list(p.certificates, CERTIFICATES, "None confirmed")}</p></section>`;
 }
 
 function sendSection(p, busy) {
@@ -95,7 +94,7 @@ function sendSection(p, busy) {
   const day = sentAt ? new Date(sentAt) : null;
   const upload = p.uploadUrl
     ? `<a class="btn secondary" href="${esc(p.uploadUrl)}" target="_blank" rel="noopener">Upload</a>`
-    : "<span>Ask your site coordinator how to send it.</span>";
+    : "";
   const sent = sentAt
     ? `<span>Waiting for review${Number.isNaN(day.getTime()) ? "" : ` · sent ${esc(SENT_DAY.format(day))}`}</span>`
     : button(

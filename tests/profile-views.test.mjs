@@ -70,20 +70,20 @@ test("roles and certificates have no control", () => {
   assert.match(text(page({ roles: [], certificates: [] })), /No roles this season/);
 });
 
-test("names the site coordinator, or leaves the ask out when there is none", () => {
-  assert.ok(page().includes("Ask Dana Wu, your site coordinator."));
-  assert.ok(!page({ siteCoordinatorName: null }).includes("Ask "));
-  assert.ok(page({ siteCoordinatorName: "<b>Dana</b>" }).includes("Ask &lt;b&gt;Dana&lt;/b&gt;, your site coordinator."));
+test("does not name the site coordinator (Hailey, Nov 22: the line isn't needed)", () => {
+  assert.ok(!page().includes("Dana Wu"));
+  assert.ok(!page().includes(", your site coordinator."));
 });
 
-test("Upload opens the link in a new tab, or the ask text with no link", () => {
+test("Upload opens the link in a new tab, and nothing takes its place with no link", () => {
   const html = page();
   assert.match(html, /<a class="btn secondary" href="https:\/\/example\.org\/upload" target="_blank" rel="noopener">Upload<\/a>/);
   assert.match(html, /data-action="mark-upload-sent"[^>]*data-document="form13615"/);
   assert.ok(says(html, "I've uploaded it"));
   const none = page({ uploadUrl: null });
-  assert.ok(none.includes("Ask your site coordinator how to send it."));
+  assert.ok(!none.includes("Ask your site coordinator"));
   assert.doesNotMatch(none, /<a [^>]*>Upload/);
+  assert.ok(says(none, "I've uploaded it"));
   const hostile = page({ uploadUrl: 'https://example.org/"><script>' });
   assert.doesNotMatch(hostile, /<script>/);
 });
@@ -94,7 +94,7 @@ test("a sent 13615 shows Waiting for review · sent <date>", () => {
   assert.ok(html.includes("Waiting for review · sent Nov 20"));
   assert.ok(!says(html, "I've uploaded it"));
   assert.match(html, /Upload<\/a>/);
-  assert.ok(page({ uploadUrl: null, form13615: sent }).includes("Ask your site coordinator how to send it."));
+  assert.ok(!page({ uploadUrl: null, form13615: sent }).includes("Ask your site coordinator"));
 });
 
 test("a returned 13615 shows the reason with I've uploaded it", () => {

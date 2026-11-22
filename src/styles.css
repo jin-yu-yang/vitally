@@ -7013,3 +7013,53 @@ html:lang(zh-Hant) {
   gap: 0 20px;
   margin-bottom: 18px;
 }
+/* My profile's "This season" card: the office's records as label / value rows
+   (Roles, Certificates), and "Managed by the office" as the card's subtitle. */
+#my-profile-season > h2 {
+  margin-bottom: 2px;
+}
+#my-profile-season > p {
+  margin: 0;
+  font-size: 14px;
+}
+#my-profile-season > p.muted:first-of-type {
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+#my-profile-season > p:has(> span.muted:first-child) {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid var(--vt-line);
+}
+#my-profile-season > p > span.muted:first-child {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vt-muted);
+}
+#my-profile-season .volunteer-chips {
+  gap: 6px;
+}
+#my-profile-season .volunteer-chip {
+  padding: 3px 10px;
+  border-color: var(--vt-primary-line);
+  background: var(--vt-primary-soft);
+  color: var(--vt-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+/* Inside the app the page column is up to 1240px wide; a one-column form
+   that wide is hard to read, so the My profile cards stop at 720px. */
+.my-profile-section {
+  max-width: 720px;
+}
+#my-profile-send .setup-upload > span {
+  font-size: 14px;
+  color: var(--vt-muted);
+}
+#my-profile-send .setup-reason {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
