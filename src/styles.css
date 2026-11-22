@@ -7014,8 +7014,7 @@ html:lang(zh-Hant) {
   margin-bottom: 18px;
 }
 /* My profile's "This season" card: the office's records as label / value rows
-   (Roles, Certificates), "Managed by the office" as the card's subtitle, and
-   the site coordinator line set apart at the bottom. CSS only. */
+   (Roles, Certificates), and "Managed by the office" as the card's subtitle. */
 #my-profile-season > h2 {
   margin-bottom: 2px;
 }
@@ -7050,13 +7049,6 @@ html:lang(zh-Hant) {
   color: var(--vt-primary);
   font-size: 13px;
   font-weight: 600;
-}
-#my-profile-season > p:last-child:not(:has(> span)) {
-  margin-top: 6px;
-  padding-top: 12px;
-  border-top: 1px solid var(--vt-line);
-  color: var(--vt-muted);
-  font-size: 13px;
 }
 /* Inside the app the page column is up to 1240px wide; a one-column form
    that wide is hard to read, so the My profile cards stop at 720px. */

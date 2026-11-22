@@ -91,7 +91,7 @@ For a cleared `staff` window, the account row in the sidebar's bottom block SHAL
 
 ### Requirement: My profile shows the office's records read-only
 My profile SHALL show:
-- this season's roles and confirmed certificates, read-only, under "Managed by the office", with "Ask <name>, your site coordinator" naming the default follow-up person when there is one;
+- this season's roles and confirmed certificates, read-only, under "Managed by the office";
 - the email, read-only, saying it is the sign-in and only a site coordinator changes it;
 - the account status, read-only.
 
@@ -99,7 +99,7 @@ The screen SHALL offer no way to change these. The text SHALL be English only.
 
 #### Scenario: Roles and certificates
 - **WHEN** a cleared Reviewer opens My profile
-- **THEN** they see Reviewer and their confirmed certificates, "Managed by the office", the site coordinator's name, and no control that changes them
+- **THEN** they see Reviewer and their confirmed certificates and "Managed by the office", with no line naming the site coordinator, and no control that changes them
 
 #### Scenario: Email locked
 - **WHEN** a cleared Preparer opens My profile

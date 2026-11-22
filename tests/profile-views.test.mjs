@@ -70,10 +70,9 @@ test("roles and certificates have no control", () => {
   assert.match(text(page({ roles: [], certificates: [] })), /No roles this season/);
 });
 
-test("names the site coordinator, or leaves the ask out when there is none", () => {
-  assert.ok(page().includes("Ask Dana Wu, your site coordinator."));
-  assert.ok(!page({ siteCoordinatorName: null }).includes("Ask "));
-  assert.ok(page({ siteCoordinatorName: "<b>Dana</b>" }).includes("Ask &lt;b&gt;Dana&lt;/b&gt;, your site coordinator."));
+test("does not name the site coordinator (Hailey, Nov 22: the line isn't needed)", () => {
+  assert.ok(!page().includes("Dana Wu"));
+  assert.ok(!page().includes(", your site coordinator."));
 });
 
 test("Upload opens the link in a new tab, or the ask text with no link", () => {
