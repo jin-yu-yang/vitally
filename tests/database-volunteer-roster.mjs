@@ -1148,7 +1148,7 @@ test("volunteer roster records against real Supabase", async (t) => {
       assert.equal(await findRosterLink(f.sql, f.workspaceId, stranger.userId), null);
     });
 
-    await t.test("usualDays round-trips, is kept when absent, and is validated (056)", async () => {
+    await t.test("usualDays round-trips, is kept when absent, and is validated (057)", async () => {
       const entry = volunteer({ name: "Mina Okafor" });
       const added = await save(admin, addArgs(entry));
       assert.deepEqual((await profileOf(f, added.personId)).usual_days, []);

@@ -1,4 +1,4 @@
--- 056: the volunteer schedule (OpenSpec change add-volunteer-schedule, design
+-- 057: the volunteer schedule (OpenSpec change add-volunteer-schedule, design
 -- D1-D12).
 --
 -- An hourly schedule of who works when, with site hours and coverage targets.
@@ -229,7 +229,7 @@ begin
    'siteNumber',(select jsonb_build_object('set',n.workspace_id is not null,'updatedAt',n.updated_at)
     from (select 1) one left join vitally_private.site_numbers n on n.workspace_id=v_workspace),
    'canEdit',vitally_private.is_site_coordinator(v_workspace,v_person.id),
-   'schedule',vitally_private.schedule_settings_answer(v_workspace), -- 056
+   'schedule',vitally_private.schedule_settings_answer(v_workspace), -- 057
    'siteCoordinators',coalesce((select jsonb_agg(jsonb_build_object(
      'volunteerId',p.id,'name',p.name,'email',v.email,
      'since',(select max(c.changed_at) from public.site_coordinator_changes c
@@ -760,7 +760,7 @@ grant execute on function public.vitally_save_my_usual_days(uuid,bigint,int[]) t
 -- ---------------------------------------------------------------------------
 -- §8. The clearance answer gains scheduleViewer (design D3, D11).
 
--- From 053 §2, with these changes marked `-- 056`: scheduleViewer, true for a
+-- From 053 §2, with these changes marked `-- 057`: scheduleViewer, true for a
 -- schedule viewer (a workspace admin, or anyone on the current roster with an
 -- active staff account) whether cleared or not. Every 053 key stays.
 create or replace function public.vitally_my_clearance()
@@ -817,7 +817,7 @@ begin
   'capabilities',case when v_cleared then to_jsonb(vitally_private.effective_capabilities(v_person.workspace_id,v_person.id)) else '[]'::jsonb end, -- 053
   'isAdmin',vitally_policy.is_workspace_admin(v_person.workspace_id), -- 052
   'isSiteCoordinator',v_site_coordinator, -- 052
-  'scheduleViewer',vitally_private.schedule_viewer(v_person.workspace_id,v_person.id) or vitally_policy.is_workspace_admin(v_person.workspace_id), -- 056
+  'scheduleViewer',vitally_private.schedule_viewer(v_person.workspace_id,v_person.id) or vitally_policy.is_workspace_admin(v_person.workspace_id), -- 057
   'siteCoordinatorName',to_jsonb(v_coordinator),
   'siteCheck',exists(select 1 from public.accounts a where a.workspace_id=v_person.workspace_id and a.user_id=v_member.user_id and a.status='invited'),
   'uploadUrl',case when v_entry.person_id is not null then (select s.certificate_upload_url from public.season_settings s where s.workspace_id=v_person.workspace_id) end); -- 053
@@ -830,7 +830,7 @@ grant execute on function public.vitally_my_clearance() to authenticated;
 -- ---------------------------------------------------------------------------
 -- §9. Usual days on the Roster save (design D8).
 
--- From 053 §4, with these changes marked `-- 056`: the payload may carry
+-- From 053 §4, with these changes marked `-- 057`: the payload may carry
 -- `usualDays`, validated and stored sorted on the profile; a missing key keeps
 -- the stored days. The signature, every other key and every other rule stay.
 create or replace function public.vitally_save_volunteer(p_action_id uuid,p_volunteer_id uuid,p_expected_revision bigint,p_volunteer jsonb)
@@ -868,7 +868,7 @@ declare v_member public.memberships;
  v_caller_coordinator boolean; -- 052
  v_open_work jsonb;
  v_clear_13615 boolean=false; -- 053
- v_usual_days smallint[]; -- 056
+ v_usual_days smallint[]; -- 057
  v_result jsonb;
 begin
  v_member=vitally_private.require_membership();
@@ -916,7 +916,7 @@ begin
  end if;
 
  -- The payload: exactly these keys, each of its type.
- if array(select k from jsonb_object_keys(p_volunteer) k where k<>'usualDays' order by k collate "C") -- 056
+ if array(select k from jsonb_object_keys(p_volunteer) k where k<>'usualDays' order by k collate "C") -- 057
    <>array['certificates','email','isNew','languages','name','otherLanguage','phone','photoIdChecked','roles','works']::text[]
   or jsonb_typeof(p_volunteer->'name')<>'string' or jsonb_typeof(p_volunteer->'email')<>'string'
   or jsonb_typeof(p_volunteer->'works')<>'string'
@@ -932,19 +932,19 @@ begin
    raise sqlstate 'VT007' using message='VALIDATION';
   end if;
  end loop;
- -- The optional usual days (design D8): a list of distinct whole weekdays 1-7, -- 056
- -- stored sorted. A missing key keeps the stored days, so a caller that does -- 056
- -- not know the field never clears it. -- 056
- if p_volunteer ? 'usualDays' then -- 056
-  if jsonb_typeof(p_volunteer->'usualDays')<>'array' -- 056
-   or exists(select 1 from jsonb_array_elements(p_volunteer->'usualDays') e -- 056
-    where jsonb_typeof(e)<>'number' or (e #>> '{}') !~ '^[1-7]$') -- 056
-   or jsonb_array_length(p_volunteer->'usualDays') -- 056
-    <>(select count(distinct e) from jsonb_array_elements(p_volunteer->'usualDays') e) then -- 056
-   raise sqlstate 'VT007' using message='VALIDATION',detail='usualDays'; -- 056
-  end if; -- 056
-  v_usual_days=array(select (e #>> '{}')::smallint from jsonb_array_elements(p_volunteer->'usualDays') e order by 1); -- 056
- end if; -- 056
+ -- The optional usual days (design D8): a list of distinct whole weekdays 1-7, -- 057
+ -- stored sorted. A missing key keeps the stored days, so a caller that does -- 057
+ -- not know the field never clears it. -- 057
+ if p_volunteer ? 'usualDays' then -- 057
+  if jsonb_typeof(p_volunteer->'usualDays')<>'array' -- 057
+   or exists(select 1 from jsonb_array_elements(p_volunteer->'usualDays') e -- 057
+    where jsonb_typeof(e)<>'number' or (e #>> '{}') !~ '^[1-7]$') -- 057
+   or jsonb_array_length(p_volunteer->'usualDays') -- 057
+    <>(select count(distinct e) from jsonb_array_elements(p_volunteer->'usualDays') e) then -- 057
+   raise sqlstate 'VT007' using message='VALIDATION',detail='usualDays'; -- 057
+  end if; -- 057
+  v_usual_days=array(select (e #>> '{}')::smallint from jsonb_array_elements(p_volunteer->'usualDays') e order by 1); -- 057
+ end if; -- 057
  v_name=btrim(p_volunteer->>'name');
  v_email=lower(btrim(p_volunteer->>'email'));
  v_phone=nullif(btrim(p_volunteer->>'phone'),'');
@@ -1045,12 +1045,12 @@ begin
    insert into public.people(workspace_id,person_key,name,capabilities)
     values(v_member.workspace_id,'v_'||substr(replace(gen_random_uuid()::text,'-',''),1,12),v_name,'{}')
     returning id into v_target_id;
-   insert into public.volunteer_profiles(workspace_id,person_id,email,phone,works,languages,other_language,usual_days) -- 056
-    values(v_member.workspace_id,v_target_id,v_email,v_phone,v_works,v_languages,v_other,coalesce(v_usual_days,'{}'::smallint[])); -- 056
+   insert into public.volunteer_profiles(workspace_id,person_id,email,phone,works,languages,other_language,usual_days) -- 057
+    values(v_member.workspace_id,v_target_id,v_email,v_phone,v_works,v_languages,v_other,coalesce(v_usual_days,'{}'::smallint[])); -- 057
   else
    update public.people set name=v_name where id=p_volunteer_id;
    update public.volunteer_profiles set email=v_email,phone=v_phone,works=v_works,languages=v_languages,
-     other_language=v_other,usual_days=coalesce(v_usual_days,usual_days),revision=v_revision,updated_at=now() -- 056
+     other_language=v_other,usual_days=coalesce(v_usual_days,usual_days),revision=v_revision,updated_at=now() -- 057
     where workspace_id=v_member.workspace_id and person_id=p_volunteer_id;
   end if;
   insert into public.roster_entries(workspace_id,person_id,season,roles,added_by_person_id,is_new,photo_id_checked_at)

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createDatabaseFixture } from "./support/database-fixture.mjs";
 
-// OpenSpec change add-volunteer-schedule (design D1, D3, D10), migration 056
+// OpenSpec change add-volunteer-schedule (design D1, D3, D10), migration 057
 // sections 1 to 4: the shifts and schedule_settings tables, the usual days on
 // the volunteer profile, the site hours validator, who reads which rows
 // directly (for realtime), and the publication, the site hours and targets save, and (section 5) saving and removing shifts. The other RPCs come in later tasks.

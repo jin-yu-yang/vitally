@@ -14,7 +14,7 @@ import { openDatabase } from "../tools/admin/database.mjs";
 // sixteen staff-only policies and drops or adds none; 044 adds the three
 // admin-only Roster policies; 047 adds the admin-only accounts policy;
 // 049 adds the two posted_updates policies (an admin's and the audience's).
-// 051 adds the two staff-only case label policies. 056 adds the two schedule
+// 051 adds the two staff-only case label policies. 057 adds the two schedule
 // viewer policies (shifts and schedule_settings). update_reads has none.
 const POLICIES = Object.freeze([
   ["accounts", "admin_accounts"],
@@ -365,7 +365,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
       const [cleared, audience, viewer, admin, readWindow] = rows;
       assert.equal(cleared.proargnames, null);
       assert.equal(cleared.pronargs, 0);
-      assert.deepEqual(viewer.proargnames, ["p_workspace_id"]); // 056
+      assert.deepEqual(viewer.proargnames, ["p_workspace_id"]); // 057
       assert.equal(viewer.pronargs, 1);
       assert.deepEqual(admin.proargnames, ["p_workspace_id"]);
       assert.equal(admin.pronargs, 1);

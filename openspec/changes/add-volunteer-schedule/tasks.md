@@ -1,4 +1,4 @@
-## 1. Migration 056: storage and visibility
+## 1. Migration 057: storage and visibility
 
 - [x] 1.1 Add `volunteer_profiles.usual_days smallint[] not null default '{}'`, with a check for values 1–7, no duplicates, sorted (design D1).
 - [x] 1.2 Add `public.schedule_settings` (one row per workspace; `site_hours jsonb` keyed `"1"`…`"7"` with `{open, close}`; three targets 0–9 defaulting 2/1/1; revision; updater) and a private validator for `site_hours` (D1).
@@ -14,7 +14,7 @@
   - realtime: a non-admin gets no change for a no-sign-in person's shift, and an admin does;
   - no direct writes.
 
-## 2. Migration 056: RPCs
+## 2. Migration 057: RPCs
 
 - [x] 2.1 `vitally_save_schedule_settings` and the replaced `vitally_season_settings` (adds `schedule: {siteHours, targets, revision}`). Site coordinator only, in the 052 order: FORBIDDEN → VALIDATION → lock → receipt → CONFLICT (D4, D5).
 - [x] 2.2 `vitally_save_shift`:
@@ -26,7 +26,7 @@
   - for viewers: hours, targets, `canEdit`, and shifts with name, role, hours and revision, with no-sign-in shifts left out for non-admins;
   - for admins only: `flags`, `counts` (the D6 rule in SQL) and `candidates` with roles, usual days, cleared and works.
 - [x] 2.5 `vitally_my_profile()` (name, roles, usual days, profile revision, shifts this NY week) and `vitally_save_my_usual_days` (own profile only; validation; raises the profile revision; CONFLICT) (D5, D8).
-- [x] 2.6 Replace `vitally_save_volunteer`. Copy 053's body verbatim and add an optional `usualDays` (missing = keep), with the added lines marked `-- 056` (D8).
+- [x] 2.6 Replace `vitally_save_volunteer`. Copy 053's body verbatim and add an optional `usualDays` (missing = keep), with the added lines marked `-- 057` (D8).
 - [x] 2.7 Replace `vitally_my_clearance`. Copy 053's body and add `scheduleViewer` (D11).
 - [x] 2.8 Add `tests/database-schedule.mjs`, which covers every `volunteer-schedule` database scenario:
   - the refusal order;

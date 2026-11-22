@@ -124,7 +124,7 @@ The volunteer saves their usual days through their own RPC, which raises the pro
 
 ## Approaches considered (whole design)
 
-1. **One change, new `volunteer-schedule` capability (chosen).** New shift and site-hours storage in migration 056, RPCs for the writes, and three surfaces: the Schedule screen, My profile and the Season settings sections. It touches Roster, Workload and the sidebar. It delivers the Nov 6 decision at once, but it is a large change for Dec 6.
+1. **One change, new `volunteer-schedule` capability (chosen).** New shift and site-hours storage in migration 057, RPCs for the writes, and three surfaces: the Schedule screen, My profile and the Season settings sections. It touches Roster, Workload and the sidebar. It delivers the Nov 6 decision at once, but it is a large change for Dec 6.
 2. **Split: schedule now, profile and availability later.** Faster to the first merge. But the Nov 6 hint would be missing while admins first schedule, and volunteers couldn't see their week anywhere but the Schedule.
 3. **Schedule only.** The smallest change. Admins would schedule blind to availability, which is the pain the interviews named.
 
@@ -171,7 +171,7 @@ The user picked approach 1.
 ## Acceptance (as agreed)
 
 **Deliverables:**
-- Migration 056: tables, RPCs, RLS, realtime.
+- Migration 057: tables, RPCs, RLS, realtime.
 - Views and controller changes.
 - Delta specs: new `volunteer-schedule`; modified `season-settings`, `volunteer-roster`, `volunteer-workload`, `volunteer-clearance` (setup-screen sidebar), `local-seed-data` (site hours, usual days, a few shifts).
 
