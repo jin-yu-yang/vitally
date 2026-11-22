@@ -87,7 +87,7 @@
   - `no account: only the entry is deleted`: a volunteer saved with `vitally_save_volunteer` and no account. The entry is gone, no account row exists, and `account_deactivated=false`.
   - `invited account is deactivated, not cancelled`: after Create account (as `tests/database-accounts.mjs` does), the status is `deactivated`, the membership row still exists, and `people.user_id` is still set.
   - `already deactivated: entry deleted, account unchanged`: the account row (status, revision, `deactivated_at`) is identical before and after, and `account_deactivated=false`.
-  - `earlier seasons and case history are kept`: insert a past-season entry and certificate with `f.sql`, and an accepted case naming the volunteer as preparer. Both are unchanged afterwards.
+  - `earlier seasons and case history are kept`: insert a past-season entry and certificate with `f.sql`, and a current-season case in stage `closed` naming the volunteer as preparer (not Accepted, which is open work). Both are unchanged afterwards.
   - `refuses a caller who is not a workspace admin`: `f.preparer` gets `FORBIDDEN`, and `f.receiptsFor(actionId)` is 0.
   - `refuses ADMIN_ROLE for a non-site-coordinator caller`: an admin made with `f.staff({capabilities:["admin","followup"]})` removing another Admin-role person gets `ADMIN_ROLE`, with no receipt.
   - `a site coordinator removes an Admin-role person`: succeeds.
@@ -102,9 +102,10 @@
     This pins that `deactivate_account` is never called. It would have recorded a removal and cleared the mark. The removed site coordinator's own `vitally_my_clearance()` then answers not cleared, which gives the setup screen, while `vitally_policy.is_workspace_admin` is still true for them.
   - `refuses OPEN_WORK`, one case each:
     - an open current-season case as preparer;
+    - a current-season case in stage `accepted` naming the volunteer as preparer, with the label "preparing client <n>";
     - the default follow-up person.
 
-    Both get `OPEN_WORK` with the label in `details`, and nothing changes.
+    Each gets `OPEN_WORK` with the label in `details`, and nothing changes.
   - `a stale Save after removal gets CONFLICT and does not re-add`: `vitally_save_volunteer` with the pre-removal profile revision gets `CONFLICT`, and there is still no current-season entry.
   - `Deactivate first, then Remove`: Remove succeeds, `account_deactivated=false`, and the account stays `deactivated`. Never `INVALID_TRANSITION`.
   - `Remove first, then Deactivate`: `vitally_deactivate_account` with the pre-removal account revision gets `CONFLICT`.
@@ -240,7 +241,7 @@
 - Consumes the UI from Tasks 3 and 4, and migration 058.
 
 - [ ] **Step 1: Write the test.** Name it `removing a volunteer from this season's roster`. Steps:
-  1. An admin (a site coordinator) creates a fictional volunteer Nadia Kerr (`nadia.kerr@example.org`), gives her an account, and has her sign in in a second page. She is cleared as a Greeter.
+  1. Create a fictional volunteer Nadia Kerr the way the other separate blocks create their staff (for example the uploads block): `fixture.database.staff({ key: "remove_volunteer", name: "Nadia Kerr", capabilities: [] })` (a Greeter has no capabilities). If her current-season entry doesn't carry the Greeter role, set `roles` with `fixture.database.sql`, as the uploads block adjusts its entries. Her email is the one `staff` provisions. Sign her in in a second page with `loginTestUser({ page, actor: { key: "remove_volunteer", email: nadia.email, userId: nadia.userId }, fixture, heading })`; don't build a new sign-in path. The admin (`fixture.actor("siteCoordinator")`) signs in with `loginTestUser` as the other blocks do. Use `nadia.email` wherever the steps below name her email.
   2. The admin opens her drawer and presses "Remove from this season's roster…". The dialog shows her email and "Their account is deactivated, so they can no longer sign in."
   3. The admin presses "Remove from roster". The Roster no longer lists her.
   4. Her page is focused (a wake) and shows "This account has no access".

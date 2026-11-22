@@ -32,7 +32,7 @@ Earlier seasons' rosters SHALL be unchanged. Only the current season's entry SHA
 - **THEN** their 2025 entry and certificates are unchanged
 
 #### Scenario: Case history is kept
-- **WHEN** a volunteer who prepared an Accepted case this season is removed
+- **WHEN** a volunteer who prepared a Closed case this season is removed
 - **THEN** the case still names them as its preparer
 
 #### Scenario: Retrying the same removal
@@ -47,13 +47,17 @@ Earlier seasons' rosters SHALL be unchanged. Only the current season's entry SHA
 - with `NOT_FOUND` (VT002) a volunteer with no profile in the caller's workspace or no current-season roster entry;
 - with `CONFLICT` (VT003) a profile revision other than the stored one;
 - with `FORBIDDEN` (VT001) a caller who is not a site coordinator when the volunteer is a site coordinator (capability `site-coordinators`);
-- with `OPEN_WORK` (VT004), the open work as its detail, while the volunteer holds open work as listed for Deactivate: an open current-season case as preparer or reviewer, an open follow-up, a claimed help request, or being the default follow-up person.
+- with `OPEN_WORK` (VT004), the open work as its detail, while the volunteer holds open work as listed for Deactivate: a current-season case (or one with no season) in any stage except closed, Accepted included, as preparer or reviewer; an open follow-up; a claimed help request; or being the default follow-up person.
 
 A repeated action id SHALL return the stored result before the revision is compared, so a retry after a lost reply is not a `CONFLICT`.
 
 #### Scenario: A volunteer with open work
 - **WHEN** an admin removes a volunteer who is preparing an open case this season
 - **THEN** it is refused with `OPEN_WORK` listing that case, and the roster entry, certificates and account are unchanged
+
+#### Scenario: An Accepted case this season is open work
+- **WHEN** an admin removes a volunteer who prepared a case this season that is now Accepted
+- **THEN** it is refused with `OPEN_WORK` listing "preparing client <n>", and the roster entry, certificates and account are unchanged
 
 #### Scenario: The default follow-up person
 - **WHEN** an admin removes the default follow-up person

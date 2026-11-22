@@ -148,6 +148,7 @@ When shifts exist, removing someone from this season's roster must also remove o
 - [Risk] A second admin's stale drawer could re-add the person. → Mitigation: D5. Their save gets `CONFLICT`, and a test pins it.
 - [Risk] A Remove races a Deactivate. → Mitigation: D6, and a test pins that Remove never answers `INVALID_TRANSITION`.
 - [Risk] Locks could deadlock with Save, the account RPCs or Start next season. → Mitigation: the workspace lock comes first and the lock order is Save's (D4).
+- [Trade-off] `open_work` counts every current-season case not in stage closed, Accepted included, as it does for Deactivate. Mid-season, a volunteer who has touched a case can be removed only once those cases are Closed or handed over. Kept as is, the same rule as Deactivate.
 - [Trade-off] Other admins' open Rosters go stale until a reopen or reload (D11). Accepted, because that is the existing Roster behaviour.
 - [Trade-off] First-season removals can't be found from the picker's list (D9). Accepted, with the email shown in the dialog.
 - [Trade-off] A removed site coordinator keeps their admin screens with no roles. That's the same state Start next season leaves the starter in.
