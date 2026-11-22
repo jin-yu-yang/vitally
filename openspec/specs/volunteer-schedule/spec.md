@@ -1,7 +1,15 @@
 # volunteer-schedule Specification
 
 ## Purpose
-TBD - created by archiving change add-volunteer-schedule. Update Purpose after archive.
+The hourly volunteer Schedule for a workspace. It covers:
+- shifts: one volunteer, one date, whole hours inside site hours, and one role the volunteer holds this season;
+- who changes shifts (workspace admins, by drag or by buttons) and who reads them (every rostered staff member with an active account, read-only for non-admins, with no-sign-in volunteers' shifts hidden from them);
+- the one-day view and its coverage row, which counts cleared volunteers by role against the site's targets;
+- the usual-days hint in Add shift, which reads the volunteer profile's usual days;
+- "Your shifts this week" on My profile, through `vitally_my_shifts()`;
+- how open screens follow changes live and on focus.
+
+Site hours and targets live in Season settings (capability `season-settings`), and the Workload's hours in `volunteer-workload`.
 
 ## Requirements
 
