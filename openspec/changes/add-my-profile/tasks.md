@@ -89,5 +89,5 @@
   - the reason on My profile;
   - sending again, which clears it.
 - [x] 6.2 Extend "A volunteer says their uploads were sent, and an admin reviews them": Mark reviewed gives a reason, and the setup screen shows the reason line.
-- [ ] 6.3 Docs: the developer guide's migration and RPC counts and its RPC list; the roadmap entries for #242 and #246; the database notes for the new columns.
-- [ ] 6.4 Run `npm test`. Push, and get the PR's full CI run green (`checks`, `database`, `sign-in`, both `story` legs). Record per-phase story timings, and review the story screenshots from the run's artifacts.
+- [x] 6.3 Docs: the developer guide's migration and RPC counts and its RPC list; the roadmap entries for #242 and #246; the database notes for the new columns.
+- [x] 6.4 Run `npm test`. Push, and get the PR's full CI run green (`checks`, `database`, `sign-in`, both `story` legs). Record per-phase story timings, and review the story screenshots from the run's artifacts.
