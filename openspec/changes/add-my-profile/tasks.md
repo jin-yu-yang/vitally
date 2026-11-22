@@ -14,21 +14,21 @@
 
 ## 2. Migration 057: Mark reviewed and the admin save
 
-- [ ] 2.1 §5 drop `vitally_mark_upload_reviewed(uuid,uuid,bigint,text)` and create the five-argument version with `p_reason` (design D6):
+- [x] 2.1 §5 drop `vitally_mark_upload_reviewed(uuid,uuid,bigint,text)` and create the five-argument version with `p_reason` (design D6):
   - trim the reason and require 1–120 characters, checked after the admin check;
   - include the reason in the digest;
   - set the reviewed time and reason only when a sent date is cleared;
   - grants as in 053.
-- [ ] 2.2 §4 `vitally_save_volunteer`, copied from 053:
+- [x] 2.2 §4 `vitally_save_volunteer`, copied from 053:
   - accept the ten keys, or the ten plus `usualDays`, validating them and storing them in week order;
   - leave the days unchanged without the key;
   - clear each document's reviewed time and reason under the conditions that clear its sent date (design D3, D5).
-- [ ] 2.3 Update `tests/database-clearance-uploads.mjs` callers of Mark reviewed to pass a reason. Add tests for:
+- [x] 2.3 Update `tests/database-clearance-uploads.mjs` callers of Mark reviewed to pass a reason. Add tests for:
   - the reason stored;
   - a missing, blank or 121-character reason refused;
   - nothing waiting leaves the first reason;
   - the four-argument call gone.
-- [ ] 2.4 Database tests for the save:
+- [x] 2.4 Database tests for the save:
   - usual days set, kept without the key, refused when unknown or repeated;
   - the reason cleared by a role or certificate change, and by Photo ID checked;
   - the reason kept by a phone-only edit;
