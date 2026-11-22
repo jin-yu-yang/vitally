@@ -44,10 +44,10 @@ Slack). Screening stays in Airtable. Dates are targets.
 | --- | --- | --- | --- | --- |
 | Adoption | Roster: Form 13615 and photo ID uploads to PCDC's OneDrive link with "I've uploaded it" | [#138](https://github.com/jin-yu-yang/vitally/issues/138) | Nov 29 | **Done** (#243, Nov 21) |
 | Adoption | Season settings, site coordinator role, Start next season | [#138](https://github.com/jin-yu-yang/vitally/issues/138) | Nov 29 | **Done**: Season settings and site coordinators (#237, Nov 20), Start next season (#255, Nov 21) |
-| Adoption | My profile, with the reason an upload came back | [#242](https://github.com/jin-yu-yang/vitally/issues/242) [#246](https://github.com/jin-yu-yang/vitally/issues/246) | Nov 29 | Decided; next (`add-my-profile`) |
-| Adoption | Returning-volunteer picker; Roster CSV export | [#138](https://github.com/jin-yu-yang/vitally/issues/138) | Nov 29 | Decided; picker can be cut |
+| Adoption | My profile: a volunteer reads and edits their own details, and sees why an upload came back; the reason an admin gives when a document comes back; the upload link waits for the site check | [#242](https://github.com/jin-yu-yang/vitally/issues/242), [#246](https://github.com/jin-yu-yang/vitally/issues/246) | Nov 29 | **Done** (#262, Nov 22) |
+| Adoption | Returning-volunteer picker; Roster CSV export | [#138](https://github.com/jin-yu-yang/vitally/issues/138) | Nov 29 | Decided, not started; picker can be cut |
 | Adoption | Remove a volunteer from this season's roster | [#232](https://github.com/jin-yu-yang/vitally/issues/232) | Nov 29 | Decided; first to cut |
-| Adoption | Client documents through PCDC's OneDrive upload link | [#157](https://github.com/jin-yu-yang/vitally/issues/157) | Nov 29 | In review (#245) |
+| Adoption | Client documents through PCDC's OneDrive upload link | [#157](https://github.com/jin-yu-yang/vitally/issues/157) | Nov 29 | **Done** (#245, Nov 21) |
 | Adoption | Clearance fixes: role changes without a reload, a self-cleared admin, screen-reader announcement | [#190](https://github.com/jin-yu-yang/vitally/issues/190) #191 #192 | Nov 22 | **Done**: #191 and #192 (Nov 18), #190 (#234, Nov 19) |
 | Adoption | Workload and Reassign | #139 | — | **Done** |
 | Adoption | Hourly volunteer schedule with a role per shift | [#140](https://github.com/jin-yu-yang/vitally/issues/140) | Dec 6 | Decided |
