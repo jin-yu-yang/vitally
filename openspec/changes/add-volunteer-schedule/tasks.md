@@ -56,7 +56,7 @@
   - the save, remove and usual-days actions with the refusal and CONFLICT messages;
   - realtime and focus re-reads for the Schedule, My profile and Season settings (D10, D11).
 - [ ] 4.2 Sidebar (`src/views.mjs`) and the setup screen (`src/setup-views.mjs`): the Schedule and My profile links in the D11 order. Drop Schedule from the "does not exist yet" comment.
-- [ ] 4.3 New Schedule view module:
+- [x] 4.3 New Schedule view module:
   - header, day picker, closed and no-site-hours states;
   - the grid with shift buttons, tags and the coverage row (admin);
   - the read-only variant;
