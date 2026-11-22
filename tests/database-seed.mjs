@@ -970,6 +970,12 @@ test("seed command against real Supabase", async (t) => {
           )
         ).rows[0].n;
       try {
+        // The test before this one gave a seed volunteer a sign-in; undo that.
+        await f.sql(
+          `update public.people p set user_id=null from public.volunteer_profiles v
+            where v.person_id=p.id and p.workspace_id=$1 and v.email=$2`,
+          [f.workspaceId, alsoCurrent],
+        );
         await seedVolunteers(seedClient, {
           workspaceId: f.workspaceId,
           actorUserId: f.siteCoordinatorUserId,
