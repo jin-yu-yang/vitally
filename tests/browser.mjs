@@ -10867,14 +10867,15 @@ test(
         ARRIVAL_MS,
       );
 
-      // 4. Robin's window regains focus, and the work board opens.
+      // 4. Robin's window regains focus, and the office opens (an Intaker works
+      //    in the office, #104).
       await regainFocusUntil(
         robinPage,
-        "the work board",
+        "the office queue",
         (heading) => [...document.querySelectorAll("h1, h2")].some((h) => h.textContent.trim() === heading),
-        WORK_BOARD_HEADING,
+        OFFICE_BOARD_HEADING,
       );
-      await robinPage.getByRole("heading", { name: WORK_BOARD_HEADING, exact: true }).first().waitFor({ timeout: RENDER_MS });
+      await robinPage.getByRole("heading", { name: OFFICE_BOARD_HEADING, exact: true }).first().waitFor({ timeout: RENDER_MS });
       assert.equal(await robinPage.getByRole("heading", { name: SETUP_HEADING, exact: true }).count(), 0);
       assertConsoleQuiet(robinWin, { name: "Robin's window" });
 
