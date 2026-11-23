@@ -1046,7 +1046,7 @@ test("seed command against real Supabase", async (t) => {
     const liveShifts = async () =>
       (
         await f.sql(
-          `select s.id, s.revision, s.shift_date::text as date, s.start_hour, s.end_hour, s.role,
+          `select s.id, s.person_id, s.revision, s.shift_date::text as date, s.start_hour, s.end_hour, s.role,
                   p.user_id is null as no_sign_in
              from public.shifts s join public.people p on p.id=s.person_id
             where s.workspace_id=$1 and s.removed_at is null order by s.shift_date, s.start_hour, s.id`,
@@ -1084,13 +1084,27 @@ test("seed command against real Supabase", async (t) => {
         assert.ok(days.filter((d) => d.includes("sat")).length >= 2, "two usually come on Saturdays");
 
         const first = await liveShifts();
-        // About six this week, plus at most three the check-ins follow on past days.
-        assert.ok(first.length >= 5 && first.length <= 11, `about six shifts, got ${first.length}`);
-        for (const shift of first) {
+        // About six in the current week, as before. Any other seeded shift is
+        // one the check-ins follow: on a past day, with a seeded check-in on it.
+        const inWeek = first.filter((s) => s.date >= monday && s.date <= sunday);
+        const extra = first.filter((s) => !(s.date >= monday && s.date <= sunday));
+        assert.ok(inWeek.length >= 5 && inWeek.length <= 8, `about six shifts this week, got ${inWeek.length}`);
+        const seededCheckIns = (
+          await f.sql(
+            `select c.person_id, c.check_in_date::text as date from public.check_ins c
+              where c.workspace_id=$1 and c.removed_at is null`,
+            [f.workspaceId],
+          )
+        ).rows;
+        assert.ok(extra.length <= 3, "at most three shifts added for check-ins");
+        for (const s of extra) {
+          assert.ok(s.date < today, `${s.date} is a past day`);
           assert.ok(
-            (shift.date >= monday && shift.date <= sunday) || shift.date < today,
-            `${shift.date} is outside this week and not a past day`,
+            seededCheckIns.some((c) => c.person_id === s.person_id && c.date === s.date),
+            "an extra shift has a seeded check-in on it",
           );
+        }
+        for (const shift of first) {
           const hours = settings.site_hours[isoDay(shift.date)];
           assert.ok(hours && shift.start_hour >= hours.open && shift.end_hour <= hours.close, "inside site hours");
         }
