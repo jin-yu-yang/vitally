@@ -90,14 +90,14 @@
 
 ## 6. Browser story and docs
 
-- [ ] 6.1 The browser story's check-in walk (D11):
+- [x] 6.1 The browser story's check-in walk (D11):
   - the preparer checks in from the strip at 390 px, with no sideways scroll;
   - the site coordinator's Schedule shows the bar tagged "Not scheduled", corrects its in time, and the bar reads "Corrected";
   - the preparer checks out;
   - the Workload's Hours this week shows the formatted number.
 
   Keep it short. Run `npm run test:browser`.
-- [ ] 6.2 Docs:
+- [x] 6.2 Docs:
   - `docs/developer/database.md`: the table, the RPCs, the realtime table and the migration row;
   - the frontend notes: the strip and the check-in drawer;
   - `docs/setup.md`'s migration table if it lists migrations;
