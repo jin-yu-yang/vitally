@@ -23,6 +23,7 @@ import {
   seedWorkspace,
 } from "../tools/admin/seed-cases.mjs";
 import * as SEED_VALUES from "../tools/admin/seed-values.mjs";
+import { addDays, coverageRows, weekBounds } from "../src/volunteer-schedule.mjs";
 
 // The fixture's role account (f.roleAccounts) for each person key.
 const ROLE_BY_KEY = Object.freeze({
@@ -336,6 +337,7 @@ test("seed command against real Supabase", async (t) => {
           workspaceId,
           caseIds: [],
           assistanceIds: [],
+          shifts: [],
         });
         assert.equal(
           runFilePath(workspaceId, runDir),
@@ -354,6 +356,7 @@ test("seed command against real Supabase", async (t) => {
           workspaceId: randomUUID(),
           caseIds: [randomUUID(), randomUUID()],
           assistanceIds: [randomUUID()],
+          shifts: [{ id: randomUUID(), revision: 1 }],
         };
         await recordRun(run, runDir);
         assert.deepEqual(await readRun(run.workspaceId, runDir), run);
@@ -374,6 +377,7 @@ test("seed command against real Supabase", async (t) => {
           workspaceId,
           caseIds: [],
           assistanceIds: [],
+          shifts: [],
         });
       } finally {
         await rm(runDir, { recursive: true, force: true });
@@ -1027,6 +1031,317 @@ test("seed command against real Supabase", async (t) => {
       assert.equal(rows.length, 8);
       assert.ok(rows.every((r) => r.n === 1));
       assert.ok(rows.find((r) => r.email === emails[0]).user_id);
+    });
+
+    // Change add-volunteer-schedule (spec local-seed-data, "The local seed
+    // fills a week of the schedule"). Every test puts the schedule back.
+    const resetSchedule = async () => {
+      await f.sql("delete from public.shifts where workspace_id=$1", [f.workspaceId]);
+      await f.sql("delete from public.schedule_settings where workspace_id=$1", [f.workspaceId]);
+    };
+    const liveShifts = async () =>
+      (
+        await f.sql(
+          `select s.id, s.revision, s.shift_date::text as date, s.start_hour, s.end_hour, s.role,
+                  p.user_id is null as no_sign_in
+             from public.shifts s join public.people p on p.id=s.person_id
+            where s.workspace_id=$1 and s.removed_at is null order by s.shift_date, s.start_hour, s.id`,
+          [f.workspaceId],
+        )
+      ).rows;
+    const isoDay = (date) => new Date(`${date}T12:00:00Z`).getUTCDay() || 7;
+
+    await t.test("seeds site hours, usual days and a week of shifts, and a re-run keeps an admin's shift", async () => {
+      const runDir = await tempRunDir();
+      const args = { workspaceId: f.workspaceId, clientAEmail: f.applicantAEmail, runDir };
+      const today = (await f.sql("select (now() at time zone 'America/New_York')::date::text as d")).rows[0].d;
+      const { monday, sunday } = weekBounds(today);
+      const saturday = addDays(monday, 5);
+      try {
+        await resetSchedule();
+        await seedWorkspace(args);
+        const settings = (
+          await f.sql("select site_hours, preparers_needed, reviewers_needed, on_site_needed from public.schedule_settings where workspace_id=$1", [f.workspaceId])
+        ).rows[0];
+        assert.deepEqual(settings.site_hours, {
+          2: { open: 17, close: 20 },
+          4: { open: 17, close: 20 },
+          6: { open: 10, close: 16 },
+        });
+        assert.deepEqual([settings.preparers_needed, settings.reviewers_needed, settings.on_site_needed], [2, 1, 1]);
+
+        const days = (
+          await f.sql(
+            "select v.usual_days from public.volunteer_profiles v where v.workspace_id=$1 and v.email=any($2)",
+            [f.workspaceId, SEED_VALUES.SEED_VOLUNTEERS.map((v) => v.email)],
+          )
+        ).rows.map((r) => r.usual_days);
+        assert.ok(days.filter((d) => d.length > 0).length >= 4, "four volunteers have usual days");
+        assert.ok(days.filter((d) => d.includes("sat")).length >= 2, "two usually come on Saturdays");
+
+        const first = await liveShifts();
+        assert.ok(first.length >= 5 && first.length <= 8, `about six shifts, got ${first.length}`);
+        for (const shift of first) {
+          assert.ok(shift.date >= monday && shift.date <= sunday, `${shift.date} is outside this week`);
+          const hours = settings.site_hours[isoDay(shift.date)];
+          assert.ok(hours && shift.start_hour >= hours.open && shift.end_hour <= hours.close, "inside site hours");
+        }
+        assert.ok(first.some((s) => s.no_sign_in), "one shift is a volunteer with no sign-in");
+        assert.ok(first.some((s) => !s.no_sign_in), "role accounts have shifts");
+        const run = await readRunFile(f.workspaceId, runDir);
+        assert.deepEqual(run.shifts.map((s) => s.id).sort(), first.map((s) => s.id).sort());
+        assert.ok(run.shifts.every((s) => Number.isInteger(s.revision)));
+
+        // This week's Saturday, read by the site coordinator, has a gap.
+        const { data: day, error } = await f.siteCoordinator.rpc("vitally_schedule_day", { p_date: saturday });
+        assert.equal(error, null);
+        assert.ok(day.shifts.length > 0);
+        const rows = coverageRows({ hours: day.hours, targets: day.targets, shifts: day.shifts });
+        assert.ok(rows.some((r) => r.text !== "OK"), "a Saturday hour has a gap");
+
+        // An admin adds a shift of their own; a re-run keeps it and one seeded set.
+        const maya = (await f.sql("select person_id from public.volunteer_profiles where workspace_id=$1 and email=$2", [f.workspaceId, SEED_VALUES.SEED_VOLUNTEERS[0].email])).rows[0].person_id;
+        const { data: own, error: ownError } = await f.siteCoordinator.rpc("vitally_save_shift", {
+          p_action_id: randomUUID(),
+          p_shift_id: null,
+          p_expected_revision: null,
+          p_shift: { volunteerId: maya, date: saturday, startHour: 15, endHour: 16, role: "preparer" },
+        });
+        assert.equal(ownError, null);
+        await seedWorkspace(args);
+        const second = await liveShifts();
+        assert.equal(second.length, first.length + 1);
+        assert.ok(second.some((s) => s.id === own.shiftId), "the admin's shift is kept");
+        assert.ok(first.every((s) => !second.some((x) => x.id === s.id)), "the first seeded set is gone");
+        const run2 = await readRunFile(f.workspaceId, runDir);
+        assert.equal(run2.shifts.length, first.length);
+        assert.ok(run2.shifts.every((s) => second.some((x) => x.id === s.id)));
+      } finally {
+        await deletePreviousRun(client, await readRun(f.workspaceId, runDir));
+        await resetSchedule();
+        await rm(runDir, { recursive: true, force: true });
+      }
+    });
+
+    await t.test("a re-run keeps a seed volunteer an admin gave a shift, and soft-removes the seeded shifts", async () => {
+      const runDir = await tempRunDir();
+      const args = { workspaceId: f.workspaceId, clientAEmail: f.applicantAEmail, runDir };
+      const emails = SEED_VALUES.SEED_VOLUNTEERS.map((v) => v.email);
+      const today = (await f.sql("select (now() at time zone 'America/New_York')::date::text as d")).rows[0].d;
+      const saturday = addDays(weekBounds(today).monday, 5);
+      try {
+        await resetSchedule();
+        await seedWorkspace(args);
+        const first = await liveShifts();
+        assert.ok(first.length > 0);
+        // A seed volunteer with no sign-in and no seeded shift, so the admin's shift cannot overlap.
+        const candidates = (
+          await f.sql(
+            `select p.id, v.email, e.roles[1] as role from public.people p
+               join public.workspaces w on w.id=p.workspace_id
+               join public.volunteer_profiles v on v.person_id=p.id and v.workspace_id=p.workspace_id
+               join public.roster_entries e on e.person_id=p.id and e.workspace_id=p.workspace_id and e.season=w.current_season
+              where p.workspace_id=$1 and p.user_id is null and v.email=any($2)
+                and e.roles[1] is not null
+                and exists (select 1 from public.certificates c
+                             where c.person_id=p.id and c.workspace_id=p.workspace_id
+                               and c.season=w.current_season and c.status='confirmed')
+                and not exists (select 1 from public.shifts s where s.person_id=p.id and s.removed_at is null)
+              order by v.email`,
+            [f.workspaceId, emails],
+          )
+        ).rows;
+        assert.ok(candidates.length > 0, "a seed volunteer without a shift");
+        const volunteer = candidates[0];
+        const { data: own, error } = await f.siteCoordinator.rpc("vitally_save_shift", {
+          p_action_id: randomUUID(),
+          p_shift_id: null,
+          p_expected_revision: null,
+          p_shift: { volunteerId: volunteer.id, date: saturday, startHour: 15, endHour: 16, role: volunteer.role },
+        });
+        assert.equal(error, null);
+
+        await seedWorkspace(args);
+
+        const mine = (await f.sql("select id, removed_at from public.shifts where id=$1", [own.shiftId])).rows;
+        assert.equal(mine.length, 1, "the admin's shift row is still there");
+        assert.equal(mine[0].removed_at, null, "and still live");
+        const person = (
+          await f.sql(
+            "select p.id from public.people p join public.volunteer_profiles v on v.person_id=p.id where p.workspace_id=$1 and v.email=$2",
+            [f.workspaceId, volunteer.email],
+          )
+        ).rows;
+        assert.deepEqual(person.map((r) => r.id), [volunteer.id], "the same person");
+        const old = (
+          await f.sql("select id, removed_at from public.shifts where id=any($1::uuid[])", [first.map((s) => s.id)])
+        ).rows;
+        // A re-created no-sign-in volunteer takes their (already soft-removed)
+        // shift rows with them; a role account's shifts stay as removed rows.
+        const roleAccountShifts = first.filter((s) => !s.no_sign_in);
+        assert.ok(roleAccountShifts.length > 0);
+        const kept = old.filter((r) => roleAccountShifts.some((s) => s.id === r.id));
+        assert.equal(kept.length, roleAccountShifts.length, "the role accounts' shifts are still rows");
+        assert.ok(old.every((r) => r.removed_at), "and every shift still there is soft-removed");
+        const count = (
+          await f.sql(
+            `select count(distinct v.email)::int n from public.people p
+               join public.volunteer_profiles v on v.person_id=p.id and v.workspace_id=p.workspace_id
+              where p.workspace_id=$1 and v.email=any($2)`,
+            [f.workspaceId, emails],
+          )
+        ).rows[0].n;
+        assert.equal(count, 8);
+      } finally {
+        await deletePreviousRun(client, await readRun(f.workspaceId, runDir));
+        await resetSchedule();
+        await rm(runDir, { recursive: true, force: true });
+      }
+    });
+
+    // Change add-volunteer-schedule (spec local-seed-data, "A picked person with a shift is kept").
+    await t.test("a re-run keeps a previous-season person an admin added and gave a shift", async () => {
+      const runDir = await tempRunDir();
+      const args = { workspaceId: f.workspaceId, clientAEmail: f.applicantAEmail, runDir };
+      const past = SEED_VALUES.SEED_PAST_VOLUNTEERS;
+      const today = (await f.sql("select (now() at time zone 'America/New_York')::date::text as d")).rows[0].d;
+      const saturday = addDays(weekBounds(today).monday, 5);
+      const personRows = async (email) =>
+        (
+          await f.sql(
+            `select p.id, array(select e.season::int from public.roster_entries e
+                                 where e.person_id=p.id order by e.season) as seasons
+               from public.people p join public.volunteer_profiles v on v.person_id=p.id
+              where p.workspace_id=$1 and v.email=$2`,
+            [f.workspaceId, email],
+          )
+        ).rows;
+      try {
+        await resetSchedule();
+        await seedWorkspace(args);
+        const picked = past[0];
+        const [before] = await personRows(picked.email);
+        const others = [];
+        for (const v of past.slice(1)) others.push((await personRows(v.email))[0].id);
+        // The admin adds the picked person to the current season and confirms the role's certificates.
+        await f.sql(
+          `insert into public.roster_entries(workspace_id,person_id,season,roles)
+           select p.workspace_id,p.id,w.current_season,'{}'
+             from public.people p join public.workspaces w on w.id=p.workspace_id
+            where p.id=$1 and p.workspace_id=$2`,
+          [before.id, f.workspaceId],
+        );
+        for (const certificate of picked.certificates)
+          await f.sql(
+            `insert into public.certificates(workspace_id,person_id,season,certificate,status,confirmed_at,confirmed_by_person_id)
+             select $1,$2,w.current_season,$3,'confirmed',now(),$4 from public.workspaces w where w.id=$1
+             on conflict do nothing`,
+            [f.workspaceId, before.id, certificate, f.siteCoordinatorId],
+          );
+        await f.sql(
+          `update public.roster_entries e set roles=$3::text[]
+             from public.workspaces w
+            where e.workspace_id=w.id and w.id=$1 and e.person_id=$2 and e.season=w.current_season`,
+          [f.workspaceId, before.id, picked.roles],
+        );
+        const { data: own, error } = await f.siteCoordinator.rpc("vitally_save_shift", {
+          p_action_id: randomUUID(),
+          p_shift_id: null,
+          p_expected_revision: null,
+          p_shift: { volunteerId: before.id, date: saturday, startHour: 11, endHour: 12, role: picked.roles[0] },
+        });
+        assert.equal(error, null);
+
+        await seedWorkspace(args);
+
+        const after = await personRows(picked.email);
+        assert.equal(after.length, 1);
+        assert.equal(after[0].id, before.id, "the same person");
+        assert.equal(after[0].seasons.length, 2, "both roster entries are still there");
+        const mine = (await f.sql("select removed_at from public.shifts where id=$1", [own.shiftId])).rows;
+        assert.equal(mine.length, 1, "the admin's shift row is still there");
+        assert.equal(mine[0].removed_at, null, "and still live");
+        for (const [i, v] of past.slice(1).entries()) {
+          const rows = await personRows(v.email);
+          assert.equal(rows.length, 1);
+          assert.notEqual(rows[0].id, others[i], "the other previous-season people are re-seeded");
+          assert.equal(rows[0].seasons.length, 1);
+        }
+      } finally {
+        await deletePreviousRun(client, await readRun(f.workspaceId, runDir));
+        await resetSchedule();
+        await rm(runDir, { recursive: true, force: true });
+      }
+    });
+
+    await t.test("a plain re-run leaves one seeded set and the same eight volunteers", async () => {
+      const runDir = await tempRunDir();
+      const args = { workspaceId: f.workspaceId, clientAEmail: f.applicantAEmail, runDir };
+      const emails = SEED_VALUES.SEED_VOLUNTEERS.map((v) => v.email);
+      try {
+        await resetSchedule();
+        await seedWorkspace(args);
+        const first = await liveShifts();
+        await seedWorkspace(args);
+        const second = await liveShifts();
+        assert.equal(second.length, first.length);
+        assert.ok(first.every((s) => !second.some((x) => x.id === s.id)));
+        const run = await readRunFile(f.workspaceId, runDir);
+        assert.deepEqual(run.shifts.map((s) => s.id).sort(), second.map((s) => s.id).sort());
+        const volunteers = (
+          await f.sql(
+            `select count(distinct p.id)::int n from public.people p
+               join public.volunteer_profiles v on v.person_id=p.id and v.workspace_id=p.workspace_id
+              where p.workspace_id=$1 and v.email=any($2)`,
+            [f.workspaceId, emails],
+          )
+        ).rows[0].n;
+        assert.equal(volunteers, 8);
+      } finally {
+        await deletePreviousRun(client, await readRun(f.workspaceId, runDir));
+        await resetSchedule();
+        await rm(runDir, { recursive: true, force: true });
+      }
+    });
+
+    await t.test("saved site hours are kept and the seeded shifts fit inside them", async () => {
+      const runDir = await tempRunDir();
+      const args = { workspaceId: f.workspaceId, clientAEmail: f.applicantAEmail, runDir };
+      try {
+        await resetSchedule();
+        await f.sql(
+          "insert into public.schedule_settings(workspace_id,site_hours) values($1,$2)",
+          [f.workspaceId, JSON.stringify({ 6: { open: 9, close: 13 } })],
+        );
+        await seedWorkspace(args);
+        const settings = (await f.sql("select site_hours, revision from public.schedule_settings where workspace_id=$1", [f.workspaceId])).rows[0];
+        assert.deepEqual(settings.site_hours, { 6: { open: 9, close: 13 } });
+        assert.equal(Number(settings.revision), 1);
+        const shifts = await liveShifts();
+        assert.ok(shifts.length > 0, "shifts are placed on the open day");
+        for (const s of shifts) {
+          assert.equal(isoDay(s.date), 6);
+          assert.ok(s.start_hour >= 9 && s.end_hour <= 13);
+        }
+      } finally {
+        await deletePreviousRun(client, await readRun(f.workspaceId, runDir));
+        await resetSchedule();
+        await rm(runDir, { recursive: true, force: true });
+      }
+    });
+
+    await t.test("the story's seedCases adds no site hours, usual days or shifts", async () => {
+      const runDir = await tempRunDir();
+      try {
+        await resetSchedule();
+        await seedCases(client, await targetsFor(), { runDir });
+        assert.equal((await f.sql("select count(*)::int n from public.schedule_settings where workspace_id=$1", [f.workspaceId])).rows[0].n, 0);
+        assert.equal((await liveShifts()).length, 0);
+        assert.equal((await readRunFile(f.workspaceId, runDir)).shifts, undefined);
+      } finally {
+        await deletePreviousRun(client, await readRun(f.workspaceId, runDir));
+        await rm(runDir, { recursive: true, force: true });
+      }
     });
 
   } finally {

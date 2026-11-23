@@ -4,6 +4,7 @@ import { databaseError, openDatabase } from "./database.mjs";
 import * as SEED_VALUES from "./seed-values.mjs";
 import { assertTestTarget } from "./test-target.mjs";
 import { rejected } from "./target-common.mjs";
+import { addDays, isoWeekday, weekBounds } from "../../src/volunteer-schedule.mjs";
 
 // Runs `fn` as the given auth user: the same role and claims PostgREST sets,
 // so the public RPCs see auth.uid() and apply their own permission checks.
@@ -172,6 +173,7 @@ export async function readRun(workspaceId, runDir) {
     ...run,
     caseIds: list(run?.caseIds),
     assistanceIds: list(run?.assistanceIds),
+    shifts: list(run?.shifts),
   };
 }
 
@@ -225,7 +227,13 @@ export async function seedCases(
     ...previous,
     workspaceId,
   });
-  const run = { workspaceId, caseIds: [], assistanceIds: [] };
+  // The schedule shifts are `seedSchedule`'s; a case seed keeps them listed.
+  const run = {
+    workspaceId,
+    caseIds: [],
+    assistanceIds: [],
+    ...(previous.shifts.length ? { shifts: previous.shifts } : {}),
+  };
   await recordRun(run, runDir);
 
   const refused = (scenario, type) => (error) => {
@@ -516,7 +524,9 @@ export async function ensureSiteNumber(client, { workspaceId, actorUserId }) {
 // Adds the rehearsal volunteers to the Roster. A re-run first removes the
 // earlier ones (a person with no sign-in and one of these addresses; the
 // foreign keys remove their profile, roster entry and certificates), so
-// the count stays at eight. Only `seedWorkspace` calls this: the browser story
+// the count stays at eight. One who holds a live shift (an admin added it; a
+// re-run has already removed the seeded ones, see `removeSeededShifts`) stays
+// as is, so no shift is deleted with them. Only `seedWorkspace` calls this: the browser story
 // calls `seedCases` directly and must not gain Roster rows.
 export async function seedVolunteers(client, { workspaceId, actorUserId }) {
   await client.query(
@@ -524,24 +534,32 @@ export async function seedVolunteers(client, { workspaceId, actorUserId }) {
       where p.workspace_id = $1 and p.user_id is null
         and exists (select 1 from public.volunteer_profiles v
                      where v.person_id = p.id and v.workspace_id = p.workspace_id
-                       and v.email = any($2::text[]))`,
+                       and v.email = any($2::text[]))
+        and not exists (select 1 from public.shifts s
+                         where s.person_id = p.id and s.workspace_id = p.workspace_id
+                           and s.removed_at is null)`,
     [workspaceId, SEED_VALUES.SEED_VOLUNTEERS.map((v) => v.email)],
   );
   // A seed volunteer who has since been given an account (the demo's Create
-  // account) stays as is: the save below would refuse the address.
-  const withSignIn = new Set(
+  // account), or who holds a live shift, stays as is: the save below would
+  // refuse the address.
+  const kept = new Set(
     (
       await client.query(
         `select lower(v.email) as email
            from public.people p join public.volunteer_profiles v
              on v.person_id = p.id and v.workspace_id = p.workspace_id
-          where p.workspace_id = $1 and p.user_id is not null`,
+          where p.workspace_id = $1
+            and (p.user_id is not null
+                 or exists (select 1 from public.shifts s
+                             where s.person_id = p.id and s.workspace_id = p.workspace_id
+                               and s.removed_at is null))`,
         [workspaceId],
       )
     ).rows.map((row) => row.email),
   );
   for (const volunteer of SEED_VALUES.SEED_VOLUNTEERS) {
-    if (withSignIn.has(volunteer.email.toLowerCase())) continue;
+    if (kept.has(volunteer.email.toLowerCase())) continue;
     await callRpc(client, actorUserId, "vitally_save_volunteer", {
       p_action_id: randomUUID(),
       p_volunteer_id: null,
@@ -552,16 +570,158 @@ export async function seedVolunteers(client, { workspaceId, actorUserId }) {
   return SEED_VALUES.SEED_VOLUNTEERS.length;
 }
 
+// Removes the shifts an earlier run recorded, through the shift removal RPC
+// (a soft delete), acting as the Site Coordinator. A shift already gone is
+// skipped and no other shift is touched. `seedWorkspace` calls this before
+// `seedVolunteers`, so no seeded shift is deleted with its volunteer; it is
+// safe to call again. Answers how many it removed. Local only.
+export async function removeSeededShifts(
+  client,
+  { workspaceId, actorUserId },
+  { runDir = ".vitally-runs" } = {},
+) {
+  const run = await readRun(workspaceId, runDir);
+  let shiftsRemoved = 0;
+  for (const previous of run.shifts) {
+    const { rows } = await client.query(
+      "select revision from public.shifts where workspace_id=$1 and id=$2 and removed_at is null",
+      [workspaceId, previous.id],
+    );
+    if (!rows.length) continue;
+    await callRpc(client, actorUserId, "vitally_remove_shift", {
+      p_action_id: randomUUID(),
+      p_shift_id: previous.id,
+      p_expected_revision: rows[0].revision,
+    });
+    shiftsRemoved += 1;
+  }
+  run.shifts = [];
+  await recordRun(run, runDir);
+  return shiftsRemoved;
+}
+
+// Fills a week of the schedule through the public RPCs, acting as the Site
+// Coordinator (change add-volunteer-schedule, design D12). Site hours are saved
+// only when never saved; saved hours are kept and the shifts go on this week's
+// open days inside them. The shift ids go to the run file, and a re-run removes
+// exactly those (a shift already gone is skipped) and no other. Only
+// `seedWorkspace` calls this: the browser story calls `seedCases` directly.
+export async function seedSchedule(
+  client,
+  { workspaceId, actorUserId },
+  { runDir = ".vitally-runs", values = SEED_VALUES } = {},
+) {
+  const shiftsRemoved = await removeSeededShifts(
+    client,
+    { workspaceId, actorUserId },
+    { runDir },
+  );
+  const run = await readRun(workspaceId, runDir);
+
+  let settings = (
+    await callRpc(client, actorUserId, "vitally_season_settings", {})
+  ).schedule;
+  let savedHours = false;
+  if (settings.revision === 0) {
+    settings = await callRpc(client, actorUserId, "vitally_save_schedule_settings", {
+      p_action_id: randomUUID(),
+      p_expected_revision: 0,
+      p_settings: {
+        siteHours: values.SEED_SITE_HOURS,
+        targets: values.SEED_SCHEDULE_TARGETS,
+      },
+    });
+    savedHours = true;
+  }
+
+  const today = (
+    await client.query(
+      "select (now() at time zone 'America/New_York')::date::text as day",
+    )
+  ).rows[0].day;
+  const { monday } = weekBounds(today);
+  const open = [];
+  for (let n = 0; n < 7; n += 1) {
+    const date = addDays(monday, n);
+    const hours = settings.siteHours[String(isoWeekday(date))];
+    if (hours) open.push({ date, weekday: isoWeekday(date), ...hours });
+  }
+
+  const { rows: people } = await client.query(
+    `select p.id, p.person_key, p.user_id is not null as signed_in, v.email, e.roles
+       from public.people p
+       join public.workspaces w on w.id = p.workspace_id
+       join public.volunteer_profiles v
+         on v.workspace_id = p.workspace_id and v.person_id = p.id
+       join public.roster_entries e
+         on e.workspace_id = p.workspace_id and e.person_id = p.id
+        and e.season = w.current_season
+      where p.workspace_id = $1`,
+    [workspaceId],
+  );
+  const find = (who) =>
+    people.find((p) =>
+      who.includes("@")
+        ? !p.signed_in && p.email.toLowerCase() === who
+        : p.signed_in && p.person_key === who,
+    );
+
+  const placed = [];
+  const taken = [];
+  for (const spec of values.SEED_SHIFTS) {
+    const person = find(spec.who);
+    if (!person || !person.roles.includes(spec.role) || !open.length) continue;
+    const day = open.find((d) => d.weekday === spec.weekday) ?? open[placed.length % open.length];
+    // Saturday keeps its later hours open, so the coverage row shows a gap.
+    const end =
+      day.weekday === 6 && day.close - day.open > 1
+        ? day.open + Math.max(1, Math.floor((day.close - day.open) / 2))
+        : day.close;
+    if (
+      taken.some(
+        (t) => t.id === person.id && t.date === day.date && t.start < end && t.end > day.open,
+      )
+    )
+      continue;
+    // A shift an admin added for the same person and hours is theirs: skip.
+    const saved = await callRpc(client, actorUserId, "vitally_save_shift", {
+      p_action_id: randomUUID(),
+      p_shift_id: null,
+      p_expected_revision: null,
+      p_shift: {
+        volunteerId: person.id,
+        date: day.date,
+        startHour: day.open,
+        endHour: end,
+        role: spec.role,
+      },
+    }).catch((error) => {
+      if (error.cause?.detail === "OVERLAP") return null;
+      throw error;
+    });
+    if (!saved) continue;
+    taken.push({ id: person.id, date: day.date, start: day.open, end });
+    placed.push(saved.shiftId);
+    run.shifts.push({ id: saved.shiftId, revision: saved.revision });
+    await recordRun(run, runDir);
+  }
+  return { shiftsRemoved, shiftsAdded: placed.length, savedHours };
+}
+
 // Adds the previous season's roster after the volunteers (spec
 // local-seed-data, "The local seed adds a previous season's roster"): three
 // people with no current-season entry, and a previous-season entry for one of
 // the 8 volunteers (kept if already there, so a repeat call is safe). This is the spec's one exception to going through
 // `vitally_save_volunteer`, which writes only the current season: these rows
 // are written directly with SQL, in one transaction. A re-run first deletes
-// the earlier three (no sign-in only; the foreign keys remove their rows), so
-// a person an admin has since added to the current season is replaced too. A
-// person with a sign-in is left alone. Only `seedWorkspace` calls this, like
-// `seedVolunteers`. Local only. Returns the number of people added.
+// the earlier three (the foreign keys remove their rows), so a person an
+// admin has since added to the current season is replaced too. The exception
+// is a person with a sign-in, or one who holds a live shift (an admin gave it;
+// the seeded ones are already removed): they are neither deleted nor
+// re-created, so no shift goes with them (change add-volunteer-schedule). The
+// previous-season entry for one of the 8 volunteers only adds a row, so only
+// a sign-in stops it. Only `seedWorkspace` calls this, like `seedVolunteers`.
+// Local only. Returns the number of people added.
 export async function seedPastSeason(client, { workspaceId, actorPersonId }) {
   const { rows } = await client.query(
     "select current_season from public.workspaces where id=$1",
@@ -578,19 +738,29 @@ export async function seedPastSeason(client, { workspaceId, actorPersonId }) {
         where p.workspace_id = $1 and p.user_id is null
           and exists (select 1 from public.volunteer_profiles v
                        where v.person_id = p.id and v.workspace_id = p.workspace_id
-                         and v.email = any($2::text[]))`,
+                         and v.email = any($2::text[]))
+          and not exists (select 1 from public.shifts s
+                           where s.person_id = p.id and s.workspace_id = p.workspace_id
+                             and s.removed_at is null)`,
       [workspaceId, past.map((v) => v.email)],
     );
-    const withSignIn = new Set(
-      (
-        await client.query(
-          `select lower(v.email) as email
-             from public.people p join public.volunteer_profiles v
-               on v.person_id = p.id and v.workspace_id = p.workspace_id
-            where p.workspace_id = $1 and p.user_id is not null`,
-          [workspaceId],
-        )
-      ).rows.map((row) => row.email),
+    const emailsWhere = async (condition) =>
+      new Set(
+        (
+          await client.query(
+            `select lower(v.email) as email
+               from public.people p join public.volunteer_profiles v
+                 on v.person_id = p.id and v.workspace_id = p.workspace_id
+              where p.workspace_id = $1 and ${condition}`,
+            [workspaceId],
+          )
+        ).rows.map((row) => row.email),
+      );
+    const withSignIn = await emailsWhere("p.user_id is not null");
+    const withShift = await emailsWhere(
+      `exists (select 1 from public.shifts s
+                where s.person_id = p.id and s.workspace_id = p.workspace_id
+                  and s.removed_at is null)`,
     );
     const entry = async (personId, roles, certificates) => {
       await client.query(
@@ -612,7 +782,8 @@ export async function seedPastSeason(client, { workspaceId, actorPersonId }) {
     };
     let added = 0;
     for (const v of past) {
-      if (withSignIn.has(v.email.toLowerCase())) continue;
+      const key = v.email.toLowerCase();
+      if (withSignIn.has(key) || withShift.has(key)) continue;
       const { rows: created } = await client.query(
         `insert into public.people (workspace_id, person_key, name, capabilities)
          values ($1, 'v_' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 12), $2, '{}')
@@ -675,6 +846,12 @@ export async function seedWorkspace({
     const { casesRemoved, casesCreated } = await seedCases(client, targets, {
       runDir,
     });
+    // Before volunteers are re-created: their shifts cascade on delete.
+    await removeSeededShifts(
+      client,
+      { workspaceId, actorUserId: targets.siteCoordinator.userId },
+      { runDir },
+    );
     const volunteersCreated = await seedVolunteers(client, {
       workspaceId,
       actorUserId: targets.siteCoordinator.userId,
@@ -683,6 +860,11 @@ export async function seedWorkspace({
       workspaceId,
       actorPersonId: targets.siteCoordinator.personId,
     });
+    await seedSchedule(
+      client,
+      { workspaceId, actorUserId: targets.siteCoordinator.userId },
+      { runDir },
+    );
     return { casesRemoved, casesCreated, volunteersCreated };
   } finally {
     await client.end();

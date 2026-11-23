@@ -1001,6 +1001,7 @@ test("vitally_my_clearance against real Supabase", async (t) => {
         capabilities: [],
         isAdmin: false,
         isSiteCoordinator: false,
+        scheduleViewer: true,
         siteCheck: false,
         siteCoordinatorName: "Avery Lin",
         uploadUrl: null,
@@ -1014,6 +1015,7 @@ test("vitally_my_clearance against real Supabase", async (t) => {
         capabilities: ["prepare"],
         isAdmin: false,
         isSiteCoordinator: false,
+        scheduleViewer: true,
         siteCheck: false,
         siteCoordinatorName: "Avery Lin",
         uploadUrl: null,
@@ -1021,8 +1023,9 @@ test("vitally_my_clearance against real Supabase", async (t) => {
     });
 
     // 047 (add-account-invitations, design D12) adds siteCheck; 052 (design
-    // D4) adds isSiteCoordinator; 053 (add-clearance-uploads, D5) adds uploadUrl.
-    await t.test("the answer has exactly eight keys", async () => {
+    // D4) adds isSiteCoordinator; 053 (add-clearance-uploads, D5) adds uploadUrl; 058
+    // (add-volunteer-schedule, D3) adds scheduleViewer.
+    await t.test("the answer has exactly nine keys", async () => {
       const result = await myClearance(f.preparer);
       assert.deepEqual(Object.keys(result).sort(), [
         "capabilities",
@@ -1030,6 +1033,7 @@ test("vitally_my_clearance against real Supabase", async (t) => {
         "isAdmin",
         "isSiteCoordinator",
         "missing",
+        "scheduleViewer",
         "siteCheck",
         "siteCoordinatorName",
         "uploadUrl",
@@ -1099,6 +1103,18 @@ test("vitally_my_clearance against real Supabase", async (t) => {
       } finally {
         await f.clearStaff(member.personId, ["prepare"]);
       }
+    });
+
+    // 058 (add-volunteer-schedule): the schedule is for anyone on the current roster and for
+    // admins, cleared or not.
+    await t.test("scheduleViewer is true for a rostered member with no roles, false without an entry", async () => {
+      const rostered = await f.staff({ key: "rhea_no_roles", name: "Rhea Castellan", capabilities: [], cleared: false });
+      await f.sql("update public.roster_entries set roles='{}' where person_id=$1", [rostered.personId]);
+      assert.equal((await myClearance(rostered.client)).scheduleViewer, true);
+      const bare = await f.staff({ key: "bram_no_entry", name: "Bram Ostrow", capabilities: [], cleared: false });
+      await f.sql("delete from public.roster_entries where person_id=$1", [bare.personId]);
+      assert.equal((await myClearance(bare.client)).scheduleViewer, false);
+      assert.equal((await myClearance(f.siteCoordinator)).scheduleViewer, true);
     });
 
     await t.test("a client is refused with FORBIDDEN", async () => {

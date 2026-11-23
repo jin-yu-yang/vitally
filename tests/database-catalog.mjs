@@ -14,7 +14,8 @@ import { openDatabase } from "../tools/admin/database.mjs";
 // sixteen staff-only policies and drops or adds none; 044 adds the three
 // admin-only Roster policies; 047 adds the admin-only accounts policy;
 // 049 adds the two posted_updates policies (an admin's and the audience's).
-// 051 adds the two staff-only case label policies. update_reads has none.
+// 051 adds the two staff-only case label policies. 058 adds the two schedule
+// viewer policies (shifts and schedule_settings). update_reads has none.
 const POLICIES = Object.freeze([
   ["accounts", "admin_accounts"],
   ["admin_followups", "staff_admin_followups"],
@@ -47,10 +48,12 @@ const POLICIES = Object.freeze([
   ["reviewer_questionnaires", "staff_reviewer_questionnaires"],
   ["reviews", "staff_reviews"],
   ["roster_entries", "admin_roster_entries"],
+  ["schedule_settings", "viewer_schedule_settings"],
+  ["shifts", "viewer_shifts"],
   ["volunteer_profiles", "admin_volunteer_profiles"],
   ["workspaces", "member_workspace"],
 ]);
-// The thirty-four public RPCs after 057, by name and identity arguments.
+// The thirty-four public RPCs after 058, by name and identity arguments.
 const RPCS = Object.freeze([
   "vitally_apply_action(p_action_id uuid, p_case_id uuid, p_expected_revision bigint, p_type text, p_payload jsonb)",
   "vitally_assistance_action(p_action_id uuid, p_item_id uuid, p_expected_revision bigint, p_type text, p_note text)",
@@ -80,6 +83,11 @@ const RPCS = Object.freeze([
   "vitally_client_documents_link()",
   "vitally_season_settings()",
   "vitally_save_season_settings(p_action_id uuid, p_expected_revision bigint, p_settings jsonb)",
+  "vitally_save_schedule_settings(p_action_id uuid, p_expected_revision bigint, p_settings jsonb)",
+  "vitally_save_shift(p_action_id uuid, p_shift_id uuid, p_expected_revision bigint, p_shift jsonb)",
+  "vitally_remove_shift(p_action_id uuid, p_shift_id uuid, p_expected_revision bigint)",
+  "vitally_schedule_day(p_date date)",
+  "vitally_my_shifts()",
   "vitally_set_site_number(p_action_id uuid, p_sidn text)",
   "vitally_mark_upload_sent(p_action_id uuid, p_document text)",
   "vitally_mark_upload_reviewed(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_document text, p_reason text)",
@@ -101,9 +109,11 @@ const READ_ONLY_RPCS = Object.freeze([
   "vitally_mark_updates",
   "vitally_my_clearance",
   "vitally_my_profile",
+  "vitally_my_shifts",
   "vitally_my_updates",
   "vitally_posted_updates",
   "vitally_prepare_account",
+  "vitally_schedule_day",
   "vitally_season_settings",
 ]);
 // The signatures 043 and 052 drop by name.
@@ -336,7 +346,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
     });
 
-    await t.test("vitally_policy holds exactly the admin check, the clearance check, the update audience check and the unpublished window, with exactly their grants", async () => {
+    await t.test("vitally_policy holds exactly the admin check, the clearance check, the update audience check, the schedule viewer check and the unpublished window, with exactly their grants", async () => {
       const { rows } = await sql(
         `select p.oid, p.oid::regprocedure::text as signature, p.prosecdef, p.provolatile, p.proconfig,
                 p.proargnames, p.pronargs
@@ -348,13 +358,16 @@ test("the catalog after the sample-case tools and presenter access are removed",
         [
           "cleared_workspace_id()",
           "in_update_audience(uuid,text,text[])",
+          "is_schedule_viewer(uuid)",
           "is_workspace_admin(uuid)",
           "unpublished_read_window()",
         ],
       );
-      const [cleared, audience, admin, readWindow] = rows;
+      const [cleared, audience, viewer, admin, readWindow] = rows;
       assert.equal(cleared.proargnames, null);
       assert.equal(cleared.pronargs, 0);
+      assert.deepEqual(viewer.proargnames, ["p_workspace_id"]); // 058
+      assert.equal(viewer.pronargs, 1);
       assert.deepEqual(admin.proargnames, ["p_workspace_id"]);
       assert.equal(admin.pronargs, 1);
       assert.deepEqual(audience.proargnames, ["p_workspace_id", "p_audience", "p_roles"]);

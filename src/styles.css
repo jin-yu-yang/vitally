@@ -6962,6 +6962,281 @@ html:lang(zh-Hant) {
   }
 }
 
+/* Volunteers: the Schedule (change add-volunteer-schedule, design D7). One
+   day: a column per open hour after the names, a row per volunteer. The grid
+   scrolls sideways inside .schedule-scroll, never the page. Each row is its
+   own grid on the same columns; its hour cells (data-hour) and its shifts
+   share the row's one track, the shifts drawn over the cells. Every colour is
+   a token, so it follows the theme. */
+.schedule-panel {
+  min-width: 0;
+}
+.schedule-daybar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 0 0 12px;
+}
+.schedule-daybar h2 {
+  margin: 0;
+  font-size: 18px;
+  min-width: 12ch;
+  text-align: center;
+}
+.schedule-gaps {
+  margin: 0 0 10px;
+  font-weight: 600;
+}
+.schedule-closed,
+.schedule-empty {
+  margin: 12px 0 0;
+}
+.schedule-notice {
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 12px 0 0;
+  padding: 14px 16px;
+  background: var(--vt-attention-bg);
+}
+.schedule-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--vt-line);
+  border-radius: var(--vt-radius-sm);
+  background: var(--vt-surface);
+}
+.schedule-scroll:focus-visible {
+  outline: 2px solid var(--vt-primary);
+  outline-offset: 2px;
+}
+.schedule-grid {
+  --schedule-name: 9.5rem;
+  /* As wide as the names plus the narrowest hour column, so a long day or a
+     narrow window scrolls inside the box; otherwise the hours share the box's
+     width and coverage text wraps inside its own cell. Not max-content: each
+     row is its own grid, so that would size every hour to the widest
+     coverage text. */
+  min-width: calc(var(--schedule-name) + var(--schedule-hours) * 5.5rem);
+}
+.schedule-row {
+  display: grid;
+  grid-template-columns: var(--schedule-name) repeat(var(--schedule-hours), minmax(5.5rem, 1fr));
+  border-bottom: 1px solid var(--vt-line);
+}
+.schedule-row:last-child {
+  border-bottom: 0;
+}
+.schedule-row > * {
+  grid-row: 1;
+  min-width: 0;
+}
+.schedule-name {
+  grid-column: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-weight: 600;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--vt-surface);
+  border-right: 1px solid var(--vt-line);
+}
+.schedule-hour {
+  padding: 8px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vt-muted);
+  border-left: 1px solid var(--vt-line);
+}
+.schedule-head {
+  background: var(--vt-background);
+}
+.schedule-head .schedule-name {
+  background: var(--vt-background);
+}
+.schedule-cell {
+  min-height: 52px;
+  border-left: 1px solid var(--vt-line);
+}
+.schedule-shift {
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  margin: 4px 3px;
+  padding: 6px 8px;
+  border: 1px solid var(--vt-primary-line);
+  border-radius: var(--vt-radius-sm);
+  background: var(--vt-primary-soft);
+  color: var(--vt-ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+button.schedule-shift {
+  cursor: pointer;
+  min-height: var(--vt-tap);
+}
+button.schedule-shift:hover {
+  border-color: var(--vt-primary);
+}
+button.schedule-shift:focus-visible {
+  outline: 2px solid var(--vt-primary);
+  outline-offset: 2px;
+}
+.schedule-shift.flagged {
+  border-style: dashed;
+  border-color: var(--vt-office);
+}
+.schedule-shift.off-hours {
+  margin: 0;
+  font-weight: 400;
+}
+/* Drag (design D7): empty cells and a shift's edge handles take the pointer
+   and stop the page scrolling under it; the page still scrolls everywhere
+   else. The edges are small zones; keyboard users change hours in the drawer. */
+.schedule-grid.can-drag .schedule-cell,
+.schedule-edge {
+  touch-action: none;
+}
+.schedule-cell.drag-preview {
+  background: var(--vt-primary-soft);
+  outline: 1px dashed var(--vt-primary);
+  outline-offset: -2px;
+}
+.schedule-grid.dragging {
+  user-select: none;
+}
+button.schedule-shift {
+  position: relative;
+}
+.schedule-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  cursor: ew-resize;
+}
+.schedule-edge.start {
+  left: 0;
+}
+.schedule-edge.end {
+  right: 0;
+}
+.schedule-edge:hover {
+  background: var(--vt-primary-line);
+}
+.schedule-role {
+  font-weight: 600;
+}
+.schedule-time {
+  color: var(--vt-muted);
+  white-space: nowrap;
+}
+.schedule-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.schedule-off {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.schedule-coverage {
+  background: var(--vt-background);
+}
+.schedule-coverage .schedule-name {
+  background: var(--vt-background);
+  color: var(--vt-muted);
+}
+.coverage-cell {
+  padding: 8px 6px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  border-left: 1px solid var(--vt-line);
+}
+.coverage-cell.ok {
+  color: var(--vt-progress);
+}
+.coverage-cell.gap {
+  background: var(--vt-attention-bg);
+  color: var(--vt-ink);
+  font-weight: 600;
+}
+/* The shift drawer: the volunteer picker, then role, start and end. */
+.shift-pick {
+  margin: 0 0 18px;
+  padding: 0;
+  border: 0;
+}
+.shift-pick legend {
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+.shift-candidates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+.shift-candidate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-height: var(--vt-tap);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--vt-line);
+  cursor: pointer;
+}
+.shift-candidate-name {
+  font-weight: 600;
+}
+.shift-candidate-roles {
+  font-size: 13px;
+}
+.shift-saved {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 16px;
+}
+.shift-hours {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 16px;
+}
+.shift-hours .field {
+  flex: 1 1 8rem;
+}
+.shift-form .drawer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+@media (max-width: 480px) {
+  .schedule-grid {
+    --schedule-name: 7rem;
+  }
+  .schedule-daybar h2 {
+    flex: 1 0 100%;
+    order: -1;
+    text-align: left;
+  }
+}
+/* end Schedule */
+
 /* Volunteers: the Mark reviewed reason row and the setup screen's reason (change add-my-profile) */
 .volunteer-review {
   margin: 0 0 12px;
@@ -7124,4 +7399,76 @@ html:lang(zh-Hant) {
 #my-profile-send .setup-reason {
   margin: 0 0 12px;
   font-size: 14px;
+}
+
+/* ---- My profile's shifts and the site hours (change add-volunteer-schedule) ---- */
+/* "Your shifts this week" is one of main's .my-profile-section cards; its
+   lines are a plain list, like the site hours. */
+.site-targets-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--vt-muted);
+  margin: 0 0 8px;
+}
+.my-profile-shifts,
+.site-hours-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.my-profile-shifts {
+  margin: 0;
+  font-size: 14px;
+}
+#my-profile-shifts > p {
+  margin: 0;
+  font-size: 14px;
+}
+.site-days {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.site-day {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--vt-line);
+  border-radius: var(--vt-radius-sm);
+  min-width: 0;
+}
+.site-day legend {
+  font-weight: 600;
+  padding: 0 4px;
+}
+.site-day-hours {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+.site-day-hours[hidden] {
+  display: none;
+}
+.site-day .field-error {
+  margin: 6px 0 0;
+}
+.site-targets {
+  margin: 0 0 16px;
+  padding: 0;
+  border: 0;
+  display: grid;
+  gap: 4px;
+  max-width: 320px;
+}
+.site-targets legend {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+@media (max-width: 600px) {
+  .site-days {
+    grid-template-columns: 1fr;
+  }
 }

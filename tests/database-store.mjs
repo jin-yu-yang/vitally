@@ -330,6 +330,10 @@ test("the browser adapter reads, acts and subscribes against real Supabase", asy
         rejected("FORBIDDEN"),
       );
       await assert.rejects(() => applicant.listPeople(), rejected("FORBIDDEN"));
+      assert.ok(SUBSCRIBED_TABLES.staff.includes("shifts"));
+      assert.ok(SUBSCRIBED_TABLES.staff.includes("schedule_settings"));
+      // The schedule RPCs refuse an applicant, mapped to FORBIDDEN.
+      await assert.rejects(() => applicant.scheduleDay("2027-02-06"), rejected("FORBIDDEN"));
       assert.ok(
         (await office.listPeople()).some((person) => person.id === f.preparerId),
       );

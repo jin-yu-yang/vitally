@@ -1,4 +1,5 @@
-import { awaitingClearance, ceilingAdmin, withOwnCapabilities } from "./clearance.mjs";
+import { awaitingClearance, ceilingAdmin, scheduleViewer, withOwnCapabilities } from "./clearance.mjs";
+import { nyToday, addDays, weekBounds, SHIFT_REFUSALS, WEEKDAYS } from "./volunteer-schedule.mjs";
 import {
   CASE_ACTIONS,
   ASSISTANCE_ACTIONS,
@@ -81,10 +82,18 @@ const STAFF_SCREENS = Object.freeze([
   // (`screenAllowed`).
   "office-updates",
   "office-settings",
+  // The Schedule (change add-volunteer-schedule): a schedule viewer's only,
+  // cleared or not (`screenAllowed`).
+  "schedule",
   // My profile (change add-my-profile, design D9): a cleared window's only
   // (`screenAllowed`).
   "my-profile",
 ]);
+// The screens only a schedule viewer may be on (design D11).
+// My profile is main's (change add-my-profile), a cleared window's, not a
+// schedule viewer's; its "Your shifts this week" follows a cleared window's
+// channel (design D8).
+const SCHEDULE_SCREENS = Object.freeze(["schedule"]);
 // The admin screens an uncleared workspace admin keeps (design D10 of
 // add-volunteer-clearance, add-posted-updates and add-season-settings).
 const ADMIN_SETUP_SCREENS = Object.freeze(["office-volunteers", "office-updates", "office-settings"]);
@@ -147,6 +156,20 @@ const SETTINGS_LINK_FIELDS = Object.freeze(["certificateUploadUrl", "clientDocum
 // Start next season (change add-start-next-season, design D8).
 const STAFF_SEASON_MOVED_MESSAGE = "The season has already moved.";
 const freshSettingsUi = () => ({ notice: null, fieldErrors: null, sidnError: null, startRefusal: null });
+// The Schedule (change add-volunteer-schedule, design D7 and D10). Staff-only.
+const STAFF_SHIFT_CONFLICT_MESSAGE = "Someone changed this shift. The schedule has been refreshed.";
+const STAFF_SHIFT_ORDER_MESSAGE = "The shift must end after it starts.";
+const STAFF_SHIFT_VOLUNTEER_MESSAGE = "Choose a volunteer.";
+// The day on screen (null: today in New York, set when it opens), the
+// `vitally_schedule_day` answer as last read, and the open shift drawer's
+// draft. None persisted but the screen itself.
+const freshSchedule = () => ({ date: null, day: null, drawer: null });
+// The site hours card on Season settings: what its save says, and the
+// sentence for each field the database can name (VT007 detail).
+const STAFF_SITE_HOURS_SAVED = "Site hours saved";
+const STAFF_TARGET_MESSAGE = "Enter a whole number from 0 to 9.";
+const SITE_TARGET_FIELDS = Object.freeze(["preparersNeeded", "reviewersNeeded", "onSiteNeeded"]);
+const siteHoursMessage = (day) => `${WEEKDAYS[day - 1]} must close after it opens.`;
 // My profile (change add-my-profile, design D9). Staff-only text.
 export const STAFF_MY_PROFILE_CONFLICT_MESSAGE = "Someone else changed these details. Here they are now.";
 const STAFF_MY_PROFILE_SAVED = "Profile saved";
@@ -163,7 +186,7 @@ const EDIT_CONFLICT_MESSAGE =
   "Someone else changed this application while you were editing. Choose which answers to keep.";
 
 // The Workload's sortable columns (workload-views.mjs) and its starting view.
-const WORKLOAD_SORT_KEYS = Object.freeze(["name", "open", "preparing", "review", "waiting", "stalled"]);
+const WORKLOAD_SORT_KEYS = Object.freeze(["name", "open", "preparing", "review", "waiting", "stalled", "hours"]);
 const freshWorkloadView = () => ({ sort: { key: "open", dir: "desc" }, search: "", expanded: [] });
 
 function controllerError(code, message, cause) {
@@ -364,7 +387,9 @@ export function createController({
       updates: "loading",
       postedUpdates: "loading",
       seasonSettings: "loading",
+      schedule: "loading",
       myProfile: "loading",
+      myShifts: "loading",
     },
     people: [],
     // The Roster (admin only): read when its screen opens and after each
@@ -395,6 +420,9 @@ export function createController({
     // tab is only ever set for a cleared, effective admin (`canSeeWorkload`).
     volunteerTab: "roster",
     workload: freshWorkloadView(),
+    // The live shifts of the week holding today, for the Workload's Hours
+    // this week (design D9); read only while the Workload is open.
+    weekShifts: [],
     // Posted updates (change add-posted-updates). The feed is every staff
     // window's, cleared or not: `updates` is the RPC's items as read,
     // `updatesUnread` its own badge count (never recounted here), and
@@ -423,9 +451,17 @@ export function createController({
     seasonSettings: null,
     clientDocumentsUrl: null,
     seasonSettingsUi: freshSettingsUi(),
+    // The Schedule (a schedule viewer's): `{date, day, drawer}`, where the
+    // drawer is `{mode: "add" | "edit", shiftId, revision, volunteerId, name,
+    // role, startHour, endHour, actionId}` or null.
+    schedule: freshSchedule(),
     // My profile (a cleared staff window's): the `vitally_my_profile` answer
     // as last read, or null until then. Not persisted.
     myProfile: null,
+    // My profile's "Your shifts this week" (change add-volunteer-schedule,
+    // design D8): the `vitally_my_shifts` answer `{weekStart, weekEnd,
+    // shifts}` as last read, or null until then. Not persisted.
+    myShifts: null,
     // The caller's own workspace row, read only for a staff window: the
     // office's defaults.
     workspace: null,
@@ -524,6 +560,15 @@ export function createController({
   // A Season settings write whose answer never came: the same press sends
   // that very request again, so the database replays its receipt.
   let pendingSettingsWrite = null;
+  // A shift save or removal whose answer never came: `{key, request}`, sent
+  // again unchanged when the same values are pressed again.
+  let pendingShiftWrite = null;
+  // The revision a draft of the site hours card started from (ruling R13):
+  // set at the person's first change since the last save, CONFLICT re-read
+  // or page open, and sent by Save, so a live or focus re-read that moves the
+  // page never lets an unsent draft overwrite a change it never saw. null
+  // while there is no draft.
+  let siteHoursBaseRevision = null;
   // A My profile save whose answer never came: `{ key, request }`, the key
   // being the values as typed.
   let pendingProfileSave = null;
@@ -620,6 +665,7 @@ export function createController({
   const screenAllowed = (screen) =>
     screens().includes(screen) &&
     (!CEILING_ONLY_SCREENS.includes(screen) || ceilingAdmin(state.principal)) &&
+    (!SCHEDULE_SCREENS.includes(screen) || scheduleViewer(state.principal)) &&
     (!CLEARED_ONLY_SCREENS.includes(screen) || !awaitingClearance(state));
 
   // Where "back to the list" goes for whoever is signed in.
@@ -988,6 +1034,7 @@ export function createController({
       // window has no realtime channel).
       if (awaitingClearance(state) && state.screen === "office-updates") await loadPostedUpdates();
       if (awaitingClearance(state) && state.screen === "office-settings") await loadSeasonSettings();
+      if (awaitingClearance(state) && state.screen === "schedule") await loadScheduleDay();
       return;
     }
     // A wake event re-reads the clearance first: role changes never come
@@ -1045,12 +1092,26 @@ export function createController({
         } catch (error) {
           failure = failure ?? error;
         }
+      if (state.screen === "schedule")
+        try {
+          await readScheduleDay();
+        } catch (error) {
+          failure = failure ?? error;
+        }
       if (state.screen === "my-profile")
         try {
           await readMyProfile();
         } catch (error) {
           failure = failure ?? error;
         }
+      // Its shifts this week too (design D8); that read never throws.
+      if (state.screen === "my-profile") await readMyShifts();
+      // A wake, focus or reconnect re-reads the week too (it may have turned).
+      try {
+        await readWorkloadHours();
+      } catch (error) {
+        failure = failure ?? error;
+      }
     }
     try {
       await loadSelected();
@@ -1150,6 +1211,16 @@ export function createController({
     };
   }
 
+  // An uncleared schedule viewer's window follows the Schedule live (design
+  // D10): it holds the channel while it is on the Schedule, and only then.
+  // (My profile is a cleared window's.) A cleared window's channel is
+  // loadWork's and is left alone.
+  function syncScheduleChannel() {
+    if (!staffWindow() || !awaitingClearance(state)) return;
+    if (SCHEDULE_SCREENS.includes(state.screen) && scheduleViewer(state.principal)) subscribe();
+    else unsubscribe();
+  }
+
   function unsubscribe() {
     const release = releaseStore;
     releaseStore = null;
@@ -1160,6 +1231,19 @@ export function createController({
   // through the same access-scoped path — never the payload itself.
   async function handleChange(change) {
     if (!state.principal || !change) return;
+    // An uncleared window holds a channel only while it is on the Schedule
+    // (syncScheduleChannel), and hears nothing but its two tables: it never
+    // reads a case, a list or the workspace, only the schedule day.
+    if (staffWindow() && awaitingClearance(state)) {
+      if (state.screen !== "schedule" || (change.table !== "shifts" && change.table !== "schedule_settings")) return;
+      try {
+        await readScheduleDay();
+      } catch (error) {
+        noteFailure(error);
+      }
+      show();
+      return;
+    }
     // A workspace change names no case and carries nothing private, so
     // everything this window holds may have changed: all of it is re-read
     // through the same access-scoped paths.
@@ -1188,7 +1272,31 @@ export function createController({
     // A posted update reaches the feed, and the admin's table when it shows
     // (a workspace change may move the season, and so every audience).
     const touchesUpdates = touchesWorkspace || change.table === "posted_updates";
-    if (!touchesList && !touchesOpen && !touchesAssistance && !touchesUpdates) return;
+    // A shift or the site hours move the day on the Schedule (design D10).
+    const touchesSchedule =
+      state.screen === "schedule" &&
+      (touchesWorkspace || change.table === "shifts" || change.table === "schedule_settings");
+    // ... and My profile's shifts this week, which a new season changes too
+    // (design D8). The site hours do not: they move no shift.
+    const touchesProfile = state.screen === "my-profile" && (touchesWorkspace || change.table === "shifts");
+    // The site hours card on Season settings.
+    const touchesSettings = state.screen === "office-settings" && change.table === "schedule_settings";
+    // A shift moves the Workload's Hours this week (a new season too).
+    const touchesHours =
+      state.screen === "office-volunteers" &&
+      state.volunteerTab === "workload" &&
+      (touchesWorkspace || change.table === "shifts");
+    if (
+      !touchesList &&
+      !touchesOpen &&
+      !touchesAssistance &&
+      !touchesUpdates &&
+      !touchesSchedule &&
+      !touchesProfile &&
+      !touchesSettings &&
+      !touchesHours
+    )
+      return;
     try {
       if (touchesUpdates) await readFeed();
       if (touchesList) await loadList();
@@ -1201,6 +1309,15 @@ export function createController({
       }
       if (touchesAssistance) await loadAssistance();
       if (touchesUpdates && state.screen === "office-updates") await readPostedUpdates();
+      if (touchesSchedule && state.screen === "schedule") await readScheduleDay();
+      if (touchesProfile && state.screen === "my-profile") await readMyShifts();
+      if (touchesSettings && state.screen === "office-settings") await readSeasonSettings();
+      if (touchesHours)
+        try {
+          await readWorkloadHours();
+        } catch (error) {
+          noteFailure(error);
+        }
       // The open case comes last, because it is the one read that may
       // legitimately find nothing: a case that is gone must not stop the
       // lists around it from being refreshed.
@@ -1247,7 +1364,11 @@ export function createController({
       await readInvitations();
       if (state.screen === "office-updates") await readPostedUpdates();
       if (state.screen === "office-settings") await readSeasonSettings();
-      if (state.screen === "my-profile") await readMyProfile();
+      if (state.screen === "schedule") await readScheduleDay();
+      if (state.screen === "my-profile") {
+        await readMyProfile();
+        await readMyShifts();
+      }
     } else {
       state.lists.assistance = "ready";
     }
@@ -1318,6 +1439,8 @@ export function createController({
   async function loadVolunteers() {
     try {
       await readVolunteers();
+      // The Workload's Hours this week come with its rows, on every arrival.
+      await readWorkloadHours();
     } catch (error) {
       noteLocalFailure(error, loadVolunteers);
       return;
@@ -1371,6 +1494,14 @@ export function createController({
     show();
     await loadVolunteers();
   }
+
+  // The Workload's Hours this week: the live shifts dated Monday to Sunday of
+  // the week holding today in New York. A failed read keeps the last hours.
+  async function readWorkloadHours() {
+    if (!canSeeWorkload() || state.screen !== "office-volunteers" || state.volunteerTab !== "workload") return;
+    state.weekShifts = (await store.weekShifts(weekBounds(nyToday(clock())))) ?? [];
+  }
+
 
   // The Workload's search, sort and open rows, one change at a time:
   // `search` (text), `sortBy` (a header pressed: the same key again reverses
@@ -1625,6 +1756,290 @@ export function createController({
     show();
   }
 
+  // ---- The Schedule (change add-volunteer-schedule, design D7 and D10) ------
+  //
+  // A schedule viewer's page, cleared or not: one day, read on open, on each
+  // day move, on focus, on a shifts or schedule_settings change (a cleared
+  // window's channel), and after each write. Like Season settings, a first
+  // read that fails marks it failed, and one that loaded once keeps what it
+  // shows. It throws, for loadData and refresh.
+  async function readScheduleDay() {
+    if (!staffWindow() || !scheduleViewer(state.principal)) return;
+    const date = state.schedule.date ?? nyToday(clock());
+    if (!state.schedule.date) state.schedule = { ...state.schedule, date };
+    try {
+      const day = await store.scheduleDay(date);
+      // A newer move asked for another day: this answer is not it.
+      if (state.schedule.date !== date) return;
+      state.schedule = { ...state.schedule, day };
+      state.lists = { ...state.lists, schedule: "ready" };
+      noteConnected();
+    } catch (error) {
+      if (state.schedule.date === date && state.lists.schedule !== "ready")
+        state.lists = { ...state.lists, schedule: "failed" };
+      throw error;
+    }
+  }
+
+  // Reads the day and says a failure with its own Try again. Never rejects.
+  async function loadScheduleDay() {
+    try {
+      await readScheduleDay();
+    } catch (error) {
+      noteLocalFailure(error, loadScheduleDay);
+      return;
+    }
+    show();
+  }
+
+  // The sidebar link: the Schedule on today's New York date.
+  async function openSchedule() {
+    navigate("schedule");
+    if (state.screen !== "schedule") return;
+    state.schedule = { ...freshSchedule(), date: nyToday(clock()) };
+    state.lists = { ...state.lists, schedule: "loading" };
+    show();
+    await loadScheduleDay();
+  }
+
+  // ‹ Prev, Next › and Today. Past days stay readable, and editable for admins.
+  async function scheduleGo(direction) {
+    if (state.screen !== "schedule" || !scheduleViewer(state.principal)) return;
+    const from = state.schedule.date ?? nyToday(clock());
+    const date =
+      direction === "prev" ? addDays(from, -1) : direction === "next" ? addDays(from, 1) : nyToday(clock());
+    state.schedule = { date, day: null, drawer: null };
+    state.lists = { ...state.lists, schedule: "loading" };
+    state.error = null;
+    dropLocalRetry();
+    show();
+    await loadScheduleDay();
+  }
+
+  const scheduleShift = (shiftId) =>
+    (state.schedule.day?.shifts ?? []).find((entry) => entry?.shiftId === shiftId) ?? null;
+  const shiftCandidate = (volunteerId) =>
+    (state.schedule.day?.candidates ?? []).find((entry) => entry?.volunteerId === volunteerId) ?? null;
+
+  // "+ Add shift" (null) or a shift pressed: the drawer, for an admin only
+  // (the read's own `canEdit`). A new shift starts at the opening hour.
+  function openShiftDrawer(shiftId = null) {
+    const day = state.schedule.day;
+    if (state.screen !== "schedule" || day?.canEdit !== true) return;
+    let drawer;
+    if (shiftId) {
+      const shift = scheduleShift(shiftId);
+      if (!shift) return;
+      drawer = {
+        mode: "edit",
+        shiftId: shift.shiftId,
+        revision: Number(shift.revision),
+        volunteerId: shift.volunteerId,
+        name: shift.name,
+        role: shift.role,
+        startHour: shift.startHour,
+        endHour: shift.endHour,
+        actionId: null,
+      };
+    } else {
+      if (!day.hours) return;
+      drawer = {
+        mode: "add",
+        shiftId: null,
+        revision: null,
+        volunteerId: null,
+        name: null,
+        role: null,
+        startHour: day.hours.open,
+        endHour: Math.min(day.hours.open + 3, day.hours.close),
+        actionId: null,
+      };
+    }
+    endNotifications();
+    state.schedule = { ...state.schedule, drawer };
+    state.dialog = "shift";
+    state.dialogContext = { shiftId: drawer.shiftId };
+    state.error = null;
+    dropLocalRetry();
+    show();
+  }
+
+  // What the drawer holds as chosen: hours as numbers, and for a new shift a
+  // role the chosen volunteer holds (their first when the one held does not
+  // fit). An edit keeps its volunteer.
+  const draftValues = (drawer, values = {}) => {
+    const hour = (value, fallback) => {
+      const n = Number.parseInt(value, 10);
+      return Number.isInteger(n) ? n : fallback;
+    };
+    const edit = drawer.mode === "edit";
+    const volunteerId = edit ? drawer.volunteerId : (values.volunteerId ?? drawer.volunteerId);
+    let role = values.role || drawer.role;
+    const roles = shiftCandidate(volunteerId)?.roles ?? [];
+    if (!edit && roles.length && !roles.includes(role)) role = roles[0];
+    return {
+      ...drawer,
+      volunteerId: volunteerId || null,
+      name: edit ? drawer.name : (shiftCandidate(volunteerId)?.name ?? null),
+      role: role || null,
+      startHour: hour(values.startHour, drawer.startHour),
+      endHour: hour(values.endHour, drawer.endHour),
+    };
+  };
+
+  // A change in the drawer (a volunteer picked): redrawn, so the roles follow.
+  function editShiftDraft(values = {}) {
+    const drawer = state.schedule.drawer;
+    if (!drawer) return;
+    state.schedule = { ...state.schedule, drawer: draftValues(drawer, values) };
+    show();
+  }
+
+  // One shift write: busy while it is out, the request kept for a lost answer
+  // (matched on `key`). After any answer the day is read again. CONFLICT
+  // closes the dialog and says the schedule was refreshed; another refusal is
+  // said in the dialog, which stays. Resolves to `{done, toast}` when the
+  // dialog is done with (`toast` the warning to show, or null), or null.
+  async function shiftWrite(key, makeRequest, send) {
+    let request = pendingShiftWrite?.key === key ? pendingShiftWrite.request : null;
+    pendingShiftWrite = null;
+    if (!request) request = makeRequest();
+    if (state.schedule.drawer)
+      state.schedule = { ...state.schedule, drawer: { ...state.schedule.drawer, actionId: request.actionId } };
+    state.busy = true;
+    state.error = null;
+    dropLocalRetry();
+    show();
+    const done = (toast) => {
+      state.dialog = null;
+      state.dialogContext = null;
+      state.schedule = { ...state.schedule, drawer: null };
+      return { done: true, toast };
+    };
+    try {
+      await send(request);
+    } catch (error) {
+      state.busy = false;
+      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingShiftWrite = { key, request };
+      let result = null;
+      if (error?.code === "CONFLICT") result = done(STAFF_SHIFT_CONFLICT_MESSAGE);
+      else {
+        const reason = error?.code === "VALIDATION" ? SHIFT_REFUSALS[String(error?.cause?.details ?? "")] : null;
+        noteFailure(error, reason ? { message: reason } : {});
+      }
+      // What the write did, or what changed under it: the day as it is now.
+      await readScheduleDay().catch(() => {});
+      show();
+      return result;
+    }
+    state.busy = false;
+    noteConnected();
+    const result = done(null);
+    try {
+      await readScheduleDay();
+    } catch (error) {
+      noteFailure(error);
+    }
+    show();
+    return result;
+  }
+
+  // Save in the drawer: the values as chosen, for the day on screen, at the
+  // revision the drawer opened with.
+  async function saveShift(values = {}) {
+    const open = state.schedule.drawer;
+    if (state.busy || !staffWindow() || !open || state.schedule.day?.canEdit !== true) return null;
+    const drawer = draftValues(open, values);
+    state.schedule = { ...state.schedule, drawer };
+    if (!drawer.volunteerId) {
+      noteFailure({ code: "VALIDATION" }, { message: STAFF_SHIFT_VOLUNTEER_MESSAGE });
+      show();
+      return null;
+    }
+    if (!(drawer.endHour > drawer.startHour)) {
+      noteFailure({ code: "VALIDATION" }, { message: STAFF_SHIFT_ORDER_MESSAGE });
+      show();
+      return null;
+    }
+    const shift = {
+      volunteerId: drawer.volunteerId,
+      date: state.schedule.date,
+      startHour: drawer.startHour,
+      endHour: drawer.endHour,
+      role: drawer.role,
+    };
+    const edit = drawer.mode === "edit";
+    const key = JSON.stringify({ save: drawer.shiftId, revision: drawer.revision, shift });
+    return await shiftWrite(
+      key,
+      () => ({
+        actionId: newActionId(),
+        shiftId: edit ? drawer.shiftId : null,
+        revision: edit ? drawer.revision : null,
+        shift,
+      }),
+      (request) => store.saveShift(request),
+    );
+  }
+
+  // A drag on the grid (design D7): a draft from `schedule-drag.mjs`, saved
+  // through the same write as the drawer's Save, so a CONFLICT, a refusal and
+  // a lost answer are handled identically. There is no drawer: a refusal is
+  // the page's banner, and the day is read again either way. The draft's
+  // `actionId` is the gesture's, and so is its `date`: a draft from another
+  // day than the one on screen (the day changed mid-drag) sends nothing, so a
+  // resize never moves a shift to another date.
+  async function saveShiftDrag(draft) {
+    if (state.busy || state.dialog || !staffWindow() || state.screen !== "schedule" || state.schedule.day?.canEdit !== true) return null;
+    if (!draft?.volunteerId || !(draft.endHour > draft.startHour)) return null;
+    if (!draft.date || draft.date !== state.schedule.date) return null;
+    const shift = {
+      volunteerId: draft.volunteerId,
+      date: draft.date,
+      startHour: draft.startHour,
+      endHour: draft.endHour,
+      role: draft.role,
+    };
+    const edit = Boolean(draft.shiftId);
+    const key = JSON.stringify({ save: draft.shiftId ?? null, revision: draft.revision ?? null, shift });
+    return await shiftWrite(
+      key,
+      () => ({
+        actionId: draft.actionId ?? newActionId(),
+        shiftId: edit ? draft.shiftId : null,
+        revision: edit ? draft.revision : null,
+        shift,
+      }),
+      (request) => store.saveShift(request),
+    );
+  }
+
+  // Remove shift, once its confirmation is pressed, at the revision read.
+  // The re-read revision on purpose: the confirmation shows the re-read hours.
+  async function removeShift(shiftId) {
+    if (state.busy || !staffWindow() || !shiftId || state.schedule.day?.canEdit !== true) return null;
+    const shift = scheduleShift(shiftId);
+    const revision = Number(shift?.revision ?? state.schedule.drawer?.revision);
+    if (!Number.isFinite(revision)) return null;
+    const key = JSON.stringify({ remove: shiftId, revision });
+    return await shiftWrite(
+      key,
+      () => ({ actionId: newActionId(), shiftId, revision }),
+      (request) => store.removeShift(request),
+    );
+  }
+
+  // Leaving the Schedule because this person may no longer be on it: its data
+  // goes with it. (My profile is main's, change add-my-profile.)
+  function leaveSchedule() {
+    if (state.dialog === "shift" || state.dialog === "remove-shift") {
+      state.dialog = null;
+      state.dialogContext = null;
+    }
+    state.schedule = freshSchedule();
+    state.screen = homeScreen();
+  }
+
   // ---- My profile (change add-my-profile, design D9) ---------------------
   //
   // A cleared staff window's own details. It is read when the screen opens,
@@ -1656,6 +2071,25 @@ export function createController({
       return;
     }
     show();
+    // Then its shifts this week (change add-volunteer-schedule, design D8).
+    await readMyShifts();
+    show();
+  }
+
+  // My profile's "Your shifts this week" (design D8): the caller's own live
+  // shifts, read when the page opens, on focus and on a `shifts` change. A
+  // cleared window's only, as the page is. A first read that fails marks the
+  // section failed, and one that loaded once keeps what it shows. The rest of
+  // the page is never touched: this never throws, and raises no banner.
+  async function readMyShifts() {
+    if (!staffWindow() || awaitingClearance(state)) return;
+    try {
+      state.myShifts = await store.myShifts();
+      state.lists = { ...state.lists, myShifts: "ready" };
+      noteConnected();
+    } catch {
+      if (state.lists.myShifts !== "ready") state.lists = { ...state.lists, myShifts: "failed" };
+    }
   }
 
   // The six fields the save sends, and nothing else: strings trimmed, an
@@ -1752,7 +2186,8 @@ export function createController({
   // ---- Season settings (change add-season-settings, design D10) ----------
   //
   // A workspace admin's page, cleared or not. It is read on open, on focus and
-  // after each of its writes; there is no realtime for it. Like the Roster's
+  // after each of its writes, and a cleared window reads it again on a
+  // schedule_settings change (the site hours card). Like the Roster's
   // list, a first read that fails marks it failed, and one that loaded once
   // keeps what it shows. It throws, for loadData and refresh.
   async function readSeasonSettings() {
@@ -1844,6 +2279,51 @@ export function createController({
       },
     );
     return answer ? STAFF_SETTINGS_SAVED : null;
+  }
+
+  // The site hours card's Save (change add-volunteer-schedule): the whole
+  // settings as the form holds them, every open day's hours and all three
+  // targets, at the revision the page read. A refused day or target is named
+  // beside it; a CONFLICT is said in the card, which the re-read redraws.
+  // Resolves to the toast's text, or null.
+  async function saveScheduleSettings(settings) {
+    const revision = siteHoursBaseRevision ?? Number(state.seasonSettings?.schedule?.revision ?? 0);
+    const answer = await settingsWrite(
+      JSON.stringify({ type: "site-hours", settings, revision }),
+      () => ({ actionId: newActionId(), revision, settings }),
+      (request) => store.saveScheduleSettings(request),
+      (error) => {
+        const field = String(error?.cause?.details ?? "");
+        const day = /^siteHours\.([1-7])$/.exec(field);
+        if (error?.code === "VALIDATION" && (day || SITE_TARGET_FIELDS.includes(field))) {
+          state.seasonSettingsUi = {
+            ...state.seasonSettingsUi,
+            fieldErrors: { [field]: day ? siteHoursMessage(Number(day[1])) : STAFF_TARGET_MESSAGE },
+          };
+          return true;
+        }
+        if (error?.code === "CONFLICT") {
+          state.seasonSettingsUi = {
+            ...state.seasonSettingsUi,
+            notice: { place: "site-hours", text: STAFF_SETTINGS_CONFLICT_MESSAGE },
+          };
+          // The re-read is what the next draft starts from.
+          siteHoursBaseRevision = null;
+          return true;
+        }
+        return false;
+      },
+    );
+    if (answer) siteHoursBaseRevision = null;
+    return answer ? STAFF_SITE_HOURS_SAVED : null;
+  }
+
+  // The person's first change to the site hours card since the last save,
+  // CONFLICT re-read or page open: the draft starts from the revision on
+  // screen (ruling R13).
+  function beginSiteHoursEdit() {
+    if (siteHoursBaseRevision !== null || state.screen !== "office-settings" || !state.seasonSettings) return;
+    siteHoursBaseRevision = Number(state.seasonSettings.schedule?.revision ?? 0);
   }
 
   // Change the SIDN. Spaces, hyphens and case are ignored here as they are
@@ -2370,6 +2850,8 @@ export function createController({
   // An uncleared staff window shows the setup screen and holds no work: no
   // case, no help request, no workspace row and no realtime channel. A
   // workspace admin's window keeps the Roster, which needs none of them.
+  // A schedule viewer keeps the Schedule, cleared or not (design D11).
+  const keepsSchedule = () => SCHEDULE_SCREENS.includes(state.screen) && scheduleViewer(state.principal);
   function dropWork() {
     unsubscribe();
     clearSelection();
@@ -2382,8 +2864,10 @@ export function createController({
     // The Workload is case data: back to the Roster.
     state.volunteerTab = "roster";
     endNotifications();
-    if (!(ceilingAdmin(state.principal) && ADMIN_SETUP_SCREENS.includes(state.screen)))
+    if (!(ceilingAdmin(state.principal) && ADMIN_SETUP_SCREENS.includes(state.screen)) && !keepsSchedule())
       state.screen = "staff";
+    // A viewer kept on the Schedule keeps a channel for it alone.
+    syncScheduleChannel();
   }
 
   async function holdForClearance() {
@@ -2396,6 +2880,7 @@ export function createController({
     if (state.screen === "office-volunteers") await loadVolunteers();
     if (state.screen === "office-updates") await loadPostedUpdates();
     if (state.screen === "office-settings") await loadSeasonSettings();
+    if (state.screen === "schedule") await loadScheduleDay();
   }
 
   // An action refused NOT_CLEARED: the window is not cleared any more. It
@@ -2492,6 +2977,9 @@ export function createController({
     state.principal = { ...state.principal, clearance: answer };
     // No longer a workspace admin: a later regain must not flash an old number.
     if (!ceilingAdmin(state.principal)) state.uploadsToReview = 0;
+    // No longer a schedule viewer: the Schedule and its data go.
+    const leftSchedule = SCHEDULE_SCREENS.includes(state.screen) && !scheduleViewer(state.principal);
+    if (leftSchedule) leaveSchedule();
     // The person's own entry follows what they may do now.
     state.people = withOwnCapabilities(state.people, state.principal);
     // An earlier failed check's notice is answered.
@@ -2501,7 +2989,7 @@ export function createController({
     }
     const now = !awaitingClearance(state);
     if (now && !was) {
-      if (!ADMIN_SETUP_SCREENS.includes(state.screen)) state.screen = homeScreen();
+      if (!ADMIN_SETUP_SCREENS.includes(state.screen) && !keepsSchedule()) state.screen = homeScreen();
       // The setup screen is replaced by the work: the keyboard goes to it.
       await loadWork({ focus: true });
       return;
@@ -2510,10 +2998,10 @@ export function createController({
       // Cleared before and after: nothing to reload, and nothing to draw unless
       // what the person may do changed. Their entry is already narrowed above.
       // The uploads count is the one thing that can still have moved.
-      if (sameStanding(oldClearance, answer)) return redrawIfUploadsChanged(same);
+      if (sameStanding(oldClearance, answer) && !leftSchedule) return redrawIfUploadsChanged(same);
       // All cases is Admin's; the other screens stay, and Admin coming back
       // moves nobody.
-      let focus = false;
+      let focus = leftSchedule;
       if (!answer.capabilities?.includes("admin") && state.screen === "office-cases") {
         state.screen = homeScreen();
         focus = true;
@@ -2523,7 +3011,9 @@ export function createController({
       return redrawIfUploadsChanged(same);
     }
     if (!now && was) dropWork();
-    // Still not cleared: the feed re-reads with the check.
+    // Still not cleared: the Schedule's channel follows the screen (it may
+    // have been left above), and the feed re-reads with the check.
+    syncScheduleChannel();
     await readFeed();
     persistSession();
     show();
@@ -2689,7 +3179,9 @@ export function createController({
       updates: "loading",
       postedUpdates: "loading",
       seasonSettings: "loading",
+      schedule: "loading",
       myProfile: "loading",
+      myShifts: "loading",
     };
     dataLoaded = false;
     state.people = [];
@@ -2725,7 +3217,11 @@ export function createController({
     state.clientDocumentsUrl = null;
     state.seasonSettingsUi = freshSettingsUi();
     pendingSettingsWrite = null;
+    siteHoursBaseRevision = null;
+    state.schedule = freshSchedule();
+    pendingShiftWrite = null;
     state.myProfile = null;
+    state.myShifts = null;
     pendingProfileSave = null;
     profileFormRevision = null;
     state.assistance = [];
@@ -2772,10 +3268,16 @@ export function createController({
     // Post an update and Season settings are a workspace admin's: anyone else
     // lands on their home.
     if (CEILING_ONLY_SCREENS.includes(screen) && !screenAllowed(screen)) screen = homeScreen();
+    // The Schedule is a schedule viewer's (design D11).
+    if (SCHEDULE_SCREENS.includes(screen) && !screenAllowed(screen)) screen = homeScreen();
+    // Leaving the Schedule leaves its drawer.
+    if (screen !== "schedule") state.schedule = { ...state.schedule, drawer: null };
     // My profile is a cleared window's: an uncleared one stays on its home.
     if (CLEARED_ONLY_SCREENS.includes(screen) && !screenAllowed(screen)) screen = homeScreen();
     // Season settings starts without an earlier visit's sentences.
     if (screen === "office-settings") state.seasonSettingsUi = freshSettingsUi();
+    // Leaving or opening a page ends its draft, and the revision it began at.
+    siteHoursBaseRevision = null;
     // A new office draft belongs to the Add a case page: leaving drops it.
     if (screen !== "office-add-case") {
       state.officeDraft = false;
@@ -2788,6 +3290,8 @@ export function createController({
     state.dialog = null;
     state.dialogContext = null;
     endNotifications();
+    // An uncleared window opens or releases the Schedule's channel.
+    syncScheduleChannel();
     persistSession();
     show(true);
     // My profile is read each time it opens. The promise is returned for
@@ -2813,6 +3317,8 @@ export function createController({
   const DRAWER_QUESTIONS = Object.freeze(["send-invitation", "cancel-invitation"]);
 
   function openDialog(name, context = null) {
+    // The shift drawer opens only on the Schedule, for an admin (openShiftDrawer).
+    if (name === "shift") return openShiftDrawer(context?.shiftId ?? null);
     if (name !== "notifications") endNotifications();
     // Change the SIDN and Start next season open without an earlier refusal.
     if (name === "change-sidn") state.seasonSettingsUi = { ...state.seasonSettingsUi, sidnError: null };
@@ -2827,6 +3333,15 @@ export function createController({
   }
 
   function closeDialog() {
+    // Keeping the shift goes back to its drawer; closing the drawer drops its draft.
+    if (state.dialog === "remove-shift" && state.schedule.drawer) {
+      state.dialog = "shift";
+      state.dialogContext = { shiftId: state.schedule.drawer.shiftId };
+      show();
+      return;
+    }
+    if (state.dialog === "shift" || state.dialog === "remove-shift")
+      state.schedule = { ...state.schedule, drawer: null };
     // Keeping the account (or not sending, or keeping the invitation) goes
     // back to the drawer it was asked from.
     if (
@@ -5097,6 +5612,7 @@ export function createController({
       volunteers: state.volunteers.map((entry) => ({ ...entry })),
       earlierVolunteers: state.earlierVolunteers.map((entry) => ({ ...entry })),
       volunteerFilters: { ...state.volunteerFilters },
+      weekShifts: state.weekShifts.map((entry) => ({ ...entry })),
       workload: {
         ...state.workload,
         sort: { ...state.workload.sort },
@@ -5184,6 +5700,17 @@ export function createController({
     loadPostedUpdates,
     loadSeasonSettings,
     saveSeasonSettings,
+    openSchedule,
+    scheduleGo,
+    readScheduleDay,
+    loadScheduleDay,
+    saveScheduleSettings,
+    beginSiteHoursEdit,
+    openShiftDrawer,
+    editShiftDraft,
+    saveShift,
+    saveShiftDrag,
+    removeShift,
     loadMyProfile,
     saveMyProfile,
     saveSidn,

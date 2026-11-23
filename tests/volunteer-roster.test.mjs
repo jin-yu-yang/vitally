@@ -7,6 +7,7 @@ import {
   accountMessage, volunteerFormChanged, roleBoxesToUntick, rosterCsv, rosterCsvFilename,
   returningCandidates, returningFill
 } from "../src/volunteer-roster.mjs";
+import { volunteerDrawerBody } from "../src/volunteer-views.mjs";
 
 const people = [
   { id: "p2", name: "Zed Tran", user_id: null },
@@ -478,6 +479,28 @@ test("an unknown show value keeps everyone", () => {
 
 test("SHOW_VIEWS lists Everyone then Uploads to review", () => {
   assert.deepEqual(SHOW_VIEWS.map((v) => [v.value, v.label]), [["all", "Everyone"], ["uploads", "Uploads to review"]]);
+});
+
+// ---- Usual days in the Roster's drawer (change add-volunteer-schedule) ----
+// Main's usual days (change add-my-profile) are check boxes holding mon..sun;
+// this change adds no toggles of its own.
+
+test("the drawer shows main's usual-days check boxes only, ticked from the volunteer's days", () => {
+  const v = { ...sample.find((entry) => entry.id === "p1"), usualDays: ["tue", "sat"] };
+  const html = volunteerDrawerBody({ volunteer: v, isNew: false, ui: {} });
+  const boxes = [...html.matchAll(/<input type="checkbox" name="usualDays" value="([a-z]+)"( checked)?/g)];
+  assert.deepEqual(boxes.map((m) => m[1]), ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
+  assert.deepEqual(boxes.filter((m) => m[2]).map((m) => m[1]), ["tue", "sat"]);
+  assert.doesNotMatch(html, /toggle-usual-day|data-day=|id="volunteer-usual-days"/);
+});
+
+test("form reading sends the ticked usual days as main's strings", () => {
+  const fd = new FormData();
+  fd.set("name", "Ana");
+  fd.set("email", "ana@x.org");
+  fd.append("usualDays", "mon");
+  fd.append("usualDays", "sat");
+  assert.deepEqual(volunteerFromForm(fd).usualDays, ["mon", "sat"]);
 });
 
 test("combine keeps the confirmed date of each confirmed certificate only", () => {

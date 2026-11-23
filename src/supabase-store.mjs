@@ -49,6 +49,8 @@ const STAFF_TABLES = Object.freeze([
   "case_labels",
   "case_label_links",
   "posted_updates",
+  "shifts",
+  "schedule_settings",
 ]);
 export const SUBSCRIBED_TABLES = Object.freeze({
   applicant: CLIENT_TABLES,
@@ -993,6 +995,57 @@ export function createStore(client) {
         p_expected_revision: request.expectedRevision,
         p_settings: request.settings,
       });
+    },
+
+    // The volunteer Schedule (migration 058). The RPCs enforce who may call
+    // them; the answers are described in the volunteer-schedule spec.
+    async scheduleDay(date) {
+      return await call("vitally_schedule_day", { p_date: date });
+    },
+
+    async saveShift(request) {
+      return await call("vitally_save_shift", {
+        p_action_id: actionId(request),
+        p_shift_id: request.shiftId ?? null,
+        p_expected_revision: request.revision ?? null,
+        p_shift: request.shift,
+      });
+    },
+
+    async removeShift(request) {
+      return await call("vitally_remove_shift", {
+        p_action_id: actionId(request),
+        p_shift_id: request.shiftId,
+        p_expected_revision: request.revision,
+      });
+    },
+
+    // The caller's own live shifts this week, for My profile (migration 058).
+    async myShifts() {
+      return await call("vitally_my_shifts");
+    },
+
+    async saveScheduleSettings(request) {
+      return await call("vitally_save_schedule_settings", {
+        p_action_id: actionId(request),
+        p_expected_revision: request.revision,
+        p_settings: request.settings,
+      });
+    },
+
+    // The admin's direct read of live shifts in the current season for the
+    // week monday..sunday (the table is readable by admins under RLS).
+    async weekShifts({ monday, sunday }) {
+      await requireStaffAccess();
+      const season = await staffSeason();
+      let query = client
+        .from("shifts")
+        .select("*")
+        .is("removed_at", null)
+        .gte("shift_date", monday)
+        .lte("shift_date", sunday);
+      if (season != null) query = query.eq("season", season);
+      return await read(query);
     },
 
     // The SIDN is write-only: the answer is `{set, updatedAt}`, never the number.
