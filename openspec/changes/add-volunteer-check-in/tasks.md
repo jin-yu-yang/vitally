@@ -70,8 +70,8 @@
   - the read-only Schedule unchanged.
 
   CSS for the bars and tags.
-- [ ] 4.5 Workload (`src/controller.mjs`, `src/volunteer-workload.mjs`, `src/workload-views.mjs`): `readWorkloadHours` calls `hoursThisWeek`, and the rows carry minutes, formatted and sorted by minutes. It re-reads on `check_ins`, `shifts` and `schedule_settings` changes and on a new season (D8).
-- [ ] 4.6 Unit tests:
+- [x] 4.5 Workload (`src/controller.mjs`, `src/volunteer-workload.mjs`, `src/workload-views.mjs`): `readWorkloadHours` calls `hoursThisWeek`, and the rows carry minutes, formatted and sorted by minutes. It re-reads on `check_ins`, `shifts` and `schedule_settings` changes and on a new season (D8).
+- [x] 4.6 Unit tests:
   - the strip's gates: cleared, uncleared, setup screen and client;
   - the strip's states and quiet refusals;
   - the Schedule's admin and read-only variants with check-ins;
