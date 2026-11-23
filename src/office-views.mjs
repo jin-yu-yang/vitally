@@ -190,10 +190,31 @@ export function followupQueue(cases = [], assistance = [], now = Date.now()) {
     );
 }
 
-export function officeFilters(filters) {
+// What a person without effective admin may act on in Follow-ups (design D8):
+// open help, or help assigned to them, with assist; document waits with no
+// client account and an open request, with receive_documents. An admin (and a
+// signed-in person with no linked volunteer) keeps the full queue.
+const holds = (person, capability) => Array.isArray(person?.capabilities) && person.capabilities.includes(capability);
+const isIntaker = (person) => Boolean(person) && !holds(person, "admin");
+export function intakerKinds(person) {
+  return [holds(person, "receive_documents") && "documents", holds(person, "assist") && "help"].filter(Boolean);
+}
+export function intakerRows(rows, person) {
+  const canHelp = holds(person, "assist");
+  const canReceive = holds(person, "receive_documents");
+  return rows.filter((row) => {
+    if (row.kind === "help")
+      return canHelp && (row.item?.status === "open" || (row.item?.status === "assigned" && row.item?.assigneeId === person?.id));
+    if (row.kind === "documents")
+      return canReceive && row.record?.ownerUserId === null && Number(row.record?.openRequests ?? 0) > 0;
+    return false;
+  });
+}
+
+export function officeFilters(filters, allowed = KIND_VALUES) {
   const kind = String(filters?.officeKind ?? "");
   return {
-    kind: KIND_VALUES.includes(kind) ? kind : "all",
+    kind: allowed.includes(kind) ? kind : "all",
     language: boardFilters(filters).language,
   };
 }
@@ -381,8 +402,10 @@ export function renderFollowups(cases = [], assistance = [], ui = {}) {
       view.list === "loading" ? loadingLine("Loading cases…") : unloadedLine("The cases couldn't load.")
     }</section>`;
   const person = view.person ?? null;
-  const chosen = officeFilters(view.filters);
-  const rows = followupQueue(cases, assistance, view.now ?? Date.now());
+  const narrow = isIntaker(person);
+  const chosen = officeFilters(view.filters, narrow ? intakerKinds(person) : KIND_VALUES);
+  const queue = followupQueue(cases, assistance, view.now ?? Date.now());
+  const rows = narrow ? intakerRows(queue, person) : queue;
   const counts = queueCounts(rows, chosen);
   const scoped = rows.filter((row) => inLanguage(row, chosen));
   const over3 = scoped.filter((row) => (row.days ?? 0) >= 3).length;
@@ -391,7 +414,7 @@ export function renderFollowups(cases = [], assistance = [], ui = {}) {
 
   const toggles = `<div class="board-filters"><div class="filter-group" role="group" aria-label="Task type">${[
     ["all", "All"],
-    ...QUEUE_KINDS,
+    ...QUEUE_KINDS.filter(([value]) => !narrow || intakerKinds(person).includes(value)),
   ]
     .map(([value, label]) =>
       button(
@@ -423,7 +446,11 @@ export function renderFollowups(cases = [], assistance = [], ui = {}) {
   // volunteer board's saved choices, so it is never used here.
   const empty = emptyState({
     icon: "check",
-    text: kindOn || languageOn ? "Nothing here matches these filters." : "Nothing is waiting on the office right now.",
+    text: kindOn || languageOn
+      ? "Nothing here matches these filters."
+      : narrow
+        ? "Nothing waiting for you. Help requests and documents to receive show here."
+        : "Nothing is waiting on the office right now.",
     actions: [
       when(kindOn, button("Show every task", "set-board-filter", "secondary", 'data-filter="officeKind" data-value="all"')),
       when(languageOn, button("Show all languages", "set-board-filter", "secondary", 'data-filter="language" data-value="all"')),

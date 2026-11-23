@@ -188,10 +188,11 @@ test("Follow-ups shows new applications, screening, signing and e-filing", () =>
   const overDone = renderFollowups([{ ...rec("G", "review_approved"), goOverOpen: false }], [], ui);
   assert.match(overDone, /Waiting for the client to sign\./);
   assert.match(overDone, /open-mark-ready-to-efile/);
-  // Only an administrator is offered the marks.
+  // Only an administrator is offered the marks; someone without admin sees no
+  // signing or e-filing row at all (change add-workspace-switch, D8).
   const forAlex = renderFollowups([rec("C", "review_approved"), rec("D", "ready_to_efile")], [], { ...ui, person: ALEX });
   assert.doesNotMatch(forAlex, /open-mark-/);
-  assert.match(forAlex, /Needs office administrator access\./);
+  assert.doesNotMatch(forAlex, /queue-row/);
   // The new kinds have their own icon and pill class, filter chips and counts.
   for (const kind of ["screening", "signing", "efiling"]) {
     assert.match(html, new RegExp(`<span class="kind-pill ${kind}">`));
@@ -234,9 +235,10 @@ test("an unclaimed row offers a reminder to the office and a reason to everyone 
   assert.doesNotMatch(rowOf(page([record]), "d"), /No external message sent/);
   const reminded = { ...record, lastRemindedAt: "2026-09-26T09:00:00.000Z" };
   assert.match(page([reminded]), /No external message sent\./);
+  // Unclaimed work is not an Intaker's row (change add-workspace-switch, D8).
   const forAlex = page([record], [], ALEX);
   assert.deepEqual(actions(forAlex), []);
-  assert.match(forAlex, /Needs office administrator access\./);
+  assert.doesNotMatch(forAlex, /queue-row/);
 });
 
 test("a call row opens the log-a-call drawer and names the assignees as a label", () => {
@@ -258,12 +260,11 @@ test("a help row offers the one action its status allows", () => {
   assert.match(rowOf(html, "h2"), /data-action="open-resolve-help"[^>]*data-item-id="h2"/);
   assert.match(rowOf(html, "h2"), /Helper: Sam/);
   assert.doesNotMatch(rowOf(html, "h2"), /data-assistance-action="CLAIM"/);
-  // Somebody else holds h2: the reason, no button.
-  // A refused row carries no id attribute, so find it by its title.
+  // Somebody else holds h2: an Intaker does not see the row at all
+  // (change add-workspace-switch, D8); they still get h1 to claim.
   const forCasey = page([], items, casey);
-  const refused = forCasey.split('<tr class="queue-row"').find((row) => row.includes("Second request"));
-  assert.match(refused, /Only the helper holding this request resolves it\./);
-  assert.doesNotMatch(refused, /open-resolve-help/);
+  assert.doesNotMatch(forCasey, /Second request/);
+  assert.match(rowOf(forCasey, "h1"), /data-assistance-action="CLAIM"/);
   // A linked case is shown as a case, with its own stage, not the request status.
   const linked = page(
     [kase({ id: "k", reference: "VT-LINK", stage: "preparing" })],
@@ -962,7 +963,7 @@ test("Follow-ups while the cases or help requests load, and when they couldn't",
   assert.match(failed, /The cases couldn&#39;t load\./);
   assert.doesNotMatch(failed, /Nothing is waiting on the office right now/);
   assert.match(
-    renderFollowups([], [], { person: ALEX, filters: {}, busy: false, now: NOW }),
+    renderFollowups([], [], { person: sam, filters: {}, busy: false, now: NOW }),
     /Nothing is waiting on the office right now\./,
     "ready by default",
   );
@@ -1438,4 +1439,78 @@ test("a locked Add a case page keeps the typed answers and Cancel, and drops bot
   assert.match(html, /id="add-case-cancel"/);
   assert.match(html, /value="Lena"/);
   assert.match(html, /Your roles changed, so you can&#39;t send this any more\./);
+});
+
+// ---------------------------------------------------------------------------
+// An Intaker's Follow-ups (change add-workspace-switch, design D8)
+// ---------------------------------------------------------------------------
+
+const INTAKER = { id: "p1", name: "Ines", capabilities: ["receive_documents", "assist"] };
+const helpItem = (id, status, assigneeId = null) => ({ id, status, assigneeId, title: "Help", createdAt: daysAgo(1) });
+const waiting = (id, ownerUserId, openRequests = 1) =>
+  kase({ id, stage: "awaiting_documents", ownerUserId, openRequests });
+const rowIds = (html) =>
+  html
+    .split('<tr class="queue-row"')
+    .slice(1)
+    .map((row) => row.slice(0, row.indexOf("</tr>")).match(/data-(?:case|item)-id="([^"]+)"/)?.[1]);
+
+test("an Intaker sees open help and their own", () => {
+  const html = page([], [helpItem("h1", "open"), helpItem("h2", "assigned", "p1"), helpItem("h3", "assigned", "p2")], INTAKER);
+  assert.deepEqual(rowIds(html).sort(), ["h1", "h2"]);
+});
+
+test("an Intaker sees office-owned document waits only", () => {
+  const html = page([waiting("w1", null), waiting("w2", "u9"), waiting("w3", null, 0)], [], INTAKER);
+  assert.deepEqual(rowIds(html), ["w1"]);
+});
+
+test("an Intaker without assist sees no help rows, and without receive_documents no document rows", () => {
+  const cases = [waiting("w1", null)];
+  const help = [helpItem("h1", "open")];
+  const docsOnly = page(cases, help, { ...INTAKER, capabilities: ["receive_documents"] });
+  assert.deepEqual(rowIds(docsOnly), ["w1"]);
+  const helpOnly = page(cases, help, { ...INTAKER, capabilities: ["assist"] });
+  assert.deepEqual(rowIds(helpOnly), ["h1"]);
+});
+
+test("an Intaker's kind chips are help and documents only", () => {
+  const html = page([], [], INTAKER);
+  const kinds = [...html.matchAll(/data-filter="officeKind" data-value="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(kinds, ["all", "documents", "help"]);
+  const docsOnly = page([], [], { ...INTAKER, capabilities: ["receive_documents"] });
+  assert.deepEqual(
+    [...docsOnly.matchAll(/data-filter="officeKind" data-value="([^"]+)"/g)].map((m) => m[1]),
+    ["all", "documents"],
+  );
+});
+
+test("a stale officeKind reads as all", () => {
+  const html = page([waiting("w1", null)], [helpItem("h1", "open")], INTAKER, { officeKind: "signing" });
+  assert.deepEqual(rowIds(html).sort(), ["h1", "w1"]);
+  assert.doesNotMatch(html, /Nothing here matches/);
+});
+
+test("an Intaker's empty queue says what fills it", () => {
+  const html = page([kase({ id: "r" }), kase({ id: "s", stage: "screening" })], [], INTAKER);
+  assert.match(html, /Nothing waiting for you\. Help requests and documents to receive show here\./);
+  assert.match(html, /class="empty[^"]*"[^]*?Nothing waiting for you/);
+  assert.doesNotMatch(html, /Nothing is waiting on the office right now/);
+  const narrowed = page([], [], INTAKER, { officeKind: "help" });
+  assert.match(narrowed, /Nothing here matches these filters\./);
+  assert.match(narrowed, /Show every task/);
+});
+
+test("no season-end close for an Intaker", () => {
+  const html = page([kase({ id: "g", stage: "review_approved" })], [], INTAKER);
+  assert.doesNotMatch(html, /Close unsigned cases/);
+});
+
+test("the admin queue is unchanged", () => {
+  const cases = [kase({ id: "a" }), waiting("w2", "u9"), kase({ id: "g", stage: "review_approved" })];
+  const html = page(cases, [helpItem("h3", "open")], sam);
+  assert.deepEqual(rowIds(html).sort(), ["a", "g", "h3", "w2"]);
+  assert.match(page([], [helpItem("h4", "assigned", "p2")], sam), /Help request/);
+  assert.match(html, /Close unsigned cases/);
+  assert.match(html, /Nothing is waiting on the office right now|data-kind="intake"/);
 });
