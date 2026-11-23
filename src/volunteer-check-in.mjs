@@ -53,8 +53,8 @@ const minutesOfDay = (iso) => {
 export function barPlacement(checkIn, hours) {
   const span = (hours.close - hours.open) * 60;
   const start = minutesOfDay(checkIn.checkedInAt);
-  let end = minutesOfDay(checkIn.endsAt);
-  if (end <= start) end += 24 * 60;
+  // The length comes from the instants, so midnight and same-minute cases hold.
+  const end = start + (Date.parse(checkIn.endsAt) - Date.parse(checkIn.checkedInAt)) / 60000;
   const from = Math.max(start, hours.open * 60);
   const to = Math.min(end, hours.close * 60);
   if (span <= 0 || to <= from) return null;

@@ -43,6 +43,23 @@ test("barPlacement is a percentage of the open span, cut to the span", () => {
   assert.equal(barPlacement({ checkedInAt: "2027-02-06T22:00:00Z", endsAt: "2027-02-06T23:00:00Z" }, hours), null);
 });
 
+test("barPlacement works from the instants, not the minute of day", () => {
+  const hours = { open: 10, close: 16 };
+  // Same minute: a sliver, never a bar running to close.
+  const sliver = barPlacement({ checkedInAt: "2027-02-06T16:00:10Z", endsAt: "2027-02-06T16:00:40Z" }, hours);
+  assert.ok(sliver.width < 0.2);
+  // Zero length (same instant): no bar.
+  assert.equal(barPlacement({ checkedInAt: "2027-02-06T16:00:10Z", endsAt: "2027-02-06T16:00:10Z" }, hours), null);
+  // An end at the next New York midnight reaches 100.
+  const late = barPlacement({ checkedInAt: "2027-02-06T22:00:00Z", endsAt: "2027-02-07T05:00:00Z" }, { open: 17, close: 24 });
+  assert.equal(late.left, 0);
+  assert.equal(late.width, 100);
+  // An open bar capped mid-span.
+  const open = barPlacement({ checkedInAt: "2027-02-06T15:00:00Z", endsAt: "2027-02-06T17:30:00Z" }, hours);
+  assert.equal(Math.round(open.left * 1000) / 1000, 0);
+  assert.equal(Math.round(open.width * 1000) / 1000, 41.667);
+});
+
 test("timeOptions steps by five minutes and keeps an off-step saved time", () => {
   const o = timeOptions("09:52");
   const i = o.indexOf("09:52");
