@@ -2517,6 +2517,8 @@ if (!config) {
           root.querySelector("#field-poolStage")?.focus();
         break;
       case "set-workspace-side":
+        // The pressed side is already where the person is: nothing happens.
+        if (target.getAttribute("aria-pressed") === "true") break;
         if (leaveAddCaseFirst("set-workspace-side", target)) break;
         await EXITS["set-workspace-side"](target.dataset.side);
         break;

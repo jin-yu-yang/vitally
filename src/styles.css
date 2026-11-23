@@ -7487,8 +7487,7 @@ button.schedule-shift {
 }
 
 /* ---- The Office / Cases switch (change add-workspace-switch, D4) ----
-   It sits under the brand, inside the sidebar's top padding, so the fixed
-   sidebar toggle never covers it. */
+   It sits under the brand, inside the sidebar's top padding. */
 .workspace-switch {
   display: flex;
   gap: 4px;
@@ -7500,6 +7499,9 @@ button.schedule-shift {
 .workspace-switch .btn.nav-link {
   flex: 1;
   justify-content: center;
+}
+.workspace-switch .btn.nav-link:not(.current):hover {
+  background: var(--vt-primary-soft);
 }
 .workspace-switch .btn.nav-link.current {
   background: var(--vt-surface);

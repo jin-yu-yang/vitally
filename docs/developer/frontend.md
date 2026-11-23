@@ -168,7 +168,7 @@ buttons `set-workspace-side` with `aria-pressed`) at the top of the cleared side
 the controller keeps the open case (on its Overview tab), sends the Office-only pages to the work board,
 and writes the side to `localStorage` per user (`vitally.workspace-side:<userId>`, in
 [`workspace-side.mjs`](../../src/workspace-side.mjs), kept through sign-out). The Office side's
-All cases and Workload stay tied to `admin`. An Intaker (no `admin`) has the office with no
+All cases (Office side) and the Workload (either side) stay tied to `admin`. An Intaker (no `admin`) has the office with no
 switch: Follow-ups lists only help requests and documents to receive, with no Add a case. An office
 case page says when the person could claim or work the case on the Cases side, with a Switch to
 Cases button. An office screen chosen while the Cases side is showing shows the work board instead. A version-2 case's page reads its answers by sub-step, with the contact,
@@ -360,7 +360,7 @@ Result uses, so a value left in a hidden field is never sent.
   missing or invalid answers saves the draft and is refused: "Needs an answer" shows, every part
   that counts opens, and the keyboard goes to the count.
 - Leaving with unsaved answers (Cancel, the breadcrumb's Work board, "Back to Follow-ups", or
-  the sidebar's Work board and All cases) asks "Leave without saving?" first; Sign out leaves
+  the sidebar's Work board and All cases, or the Office / Cases switch) asks "Leave without saving?" first; Sign out leaves
   without asking. The guard also covers `open-add-case`, though that button
   isn't shown on the page. A conflict with another window shows the shared reconcile choice.
 - The same redraw rules as the client's form bind `#add-case-v2-form`.
@@ -654,7 +654,7 @@ that has methods was returned to signing, and its message asks the client to sig
 An admin opening a `received` case's page starts its screening. `startScreeningIfDue` in
 [`controller.mjs`](../../src/controller.mjs) sends `START_SCREENING` (empty payload) when all of
 these hold: the open case is at `received`, the screen is `staff-case`, the acting person has
-the `admin` capability, and nothing else is busy or pending. It runs after a case is opened
+the `admin` capability, the window is on the Office side, and nothing else is busy or pending. Switching to Office on a `received` case also starts screening. It runs after a case is opened
 (`selectCase`), after a reload on a case page, after a
 refresh or reconnect, and when a busy action ends. Nothing is pressed, so:
 

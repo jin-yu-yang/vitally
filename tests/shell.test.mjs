@@ -755,6 +755,12 @@ test("app.mjs wires the version-2 Add a case", () => {
   assert.match(app, /"open-cases": \(\) => \{\s+formDrafts\.clear\(\);\s+controller\.navigate\("office-cases"\);/);
   assert.match(app, /"open-add-case": async \(\) => \{\s+formDrafts\.clear\(\);\s+await controller\.openAddCase\(\);/);
   assert.match(handler("continue-add-case"), /controller\.openAddCase\(\{ caseId: target\.dataset\.caseId \}\)/);
+  // Pressing the pressed side does nothing: no leave dialog, no draft clear.
+  const sw = handler("set-workspace-side");
+  assert.match(sw, /if \(target\.getAttribute\("aria-pressed"\) === "true"\) break;\s+if \(leaveAddCaseFirst\("set-workspace-side", target\)\) break;/);
+  assert.match(sw, /EXITS\["set-workspace-side"\]\(target\.dataset\.side\)/);
+  // The confirm hands the pressed side on to the exit.
+  assert.match(handler("confirm-leave-add-case"), /const side = state\.dialogContext\?\.side;[\s\S]*await exit\(side\);/);
   const confirm = handler("confirm-leave-add-case");
   assert.match(confirm, /EXITS\[state\.dialogContext\?\.to\]/);
   assert.match(app, /openDialog\("leave-add-case", \{ to: action, side: target\?\.dataset\?\.side \}, describeFocus\(target\)\)/);

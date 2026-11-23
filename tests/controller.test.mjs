@@ -12946,6 +12946,23 @@ test("pressing Cases on All cases lands on the board; on Volunteers it stays", a
   controller.stop();
 });
 
+test("pressing Cases on Add a case lands on the board and clears the office draft", async () => {
+  const { controller } = build({ store: bothSidesStore(), localStorage: fakeSession() });
+  await controller.start();
+  await controller.openAddCase();
+  assert.equal(controller.getState().screen, "office-add-case");
+  assert.equal(controller.getState().officeDraft, true);
+  await controller.setWorkspaceSide("cases");
+  const state = controller.getState();
+  assert.equal(state.screen, "staff");
+  assert.equal(state.workspaceSide, "cases");
+  assert.equal(state.officeDraft, false);
+  assert.equal(state.officeDraftCaseId, null);
+  assert.equal(state.addCaseShowMissing, false);
+  assert.equal(state.error, null);
+  controller.stop();
+});
+
 test("pressing the pressed side does nothing", async () => {
   const localStorage = fakeSession();
   const { controller, renders } = build({ store: bothSidesStore(), localStorage });

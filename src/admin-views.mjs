@@ -1163,15 +1163,6 @@ export function resumeFromHoldDialogBody(state = {}) {
   });
 }
 
-/**
- * One case, as the office sees it: what the client answered, the screening
- * checks, documents taken in at the desk, the contact tasks, and the two
- * office decisions, alongside the preparer and reviewer tabs, read-only, in
- * the same tabbed case page the preparer and reviewer use.
- *
- * @param {object} caseRecord a decorated staff Case (`decorateStaffCase`)
- * @param {object} ui `{person, busy, error, retryable, draftAnswers, openPanels, caseTab}`
- */
 // The first Cases-side work this person may do on the case, as one line and a
 // button to the Cases side. Nothing when none is allowed.
 const CASES_HINTS = [
@@ -1186,6 +1177,15 @@ function casesHint(staffRights) {
   return `<p class="field-note" role="note">${esc(found[1])}</p><p>${button("Switch to Cases", "set-workspace-side", "secondary", `data-side="cases"`)}</p>`;
 }
 
+/**
+ * One case, as the office sees it: what the client answered, the screening
+ * checks, documents taken in at the desk, the contact tasks, and the two
+ * office decisions, alongside the preparer and reviewer tabs, read-only, in
+ * the same tabbed case page the preparer and reviewer use.
+ *
+ * @param {object} caseRecord a decorated staff Case (`decorateStaffCase`)
+ * @param {object} ui `{person, busy, error, retryable, draftAnswers, openPanels, caseTab}`
+ */
 export function renderAdminCase(caseRecord, ui = {}) {
   const record = caseRecord ?? {};
   const view = ui ?? {};

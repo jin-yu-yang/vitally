@@ -3455,9 +3455,10 @@ export function createController({
     writeWorkspaceSide(state.principal.userId, side, { storage: localStorage });
     state.workspaceSide = side;
     if (state.screen === "staff-case") state.caseTab = "overview";
-    if (state.screen === "office-cases" || state.screen === "office-add-case") state.screen = "staff";
     persistSession();
-    show(true);
+    // An office-only screen lands on the Work board through navigate's cleanup.
+    if (state.screen === "office-cases" || state.screen === "office-add-case") navigate("staff");
+    else show(true);
     await startScreeningIfDue();
   }
 
