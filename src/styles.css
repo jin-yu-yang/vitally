@@ -7485,3 +7485,23 @@ button.schedule-shift {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---- The Office / Cases switch (change add-workspace-switch, D4) ----
+   It sits under the brand, inside the sidebar's top padding, so the fixed
+   sidebar toggle never covers it. */
+.workspace-switch {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--vt-line);
+  border-radius: var(--vt-radius-sm);
+  background: var(--vt-background);
+}
+.workspace-switch .btn.nav-link {
+  flex: 1;
+  justify-content: center;
+}
+.workspace-switch .btn.nav-link.current {
+  background: var(--vt-surface);
+  box-shadow: 0 0 0 1px var(--vt-primary-line);
+}

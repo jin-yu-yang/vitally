@@ -1,6 +1,6 @@
 import { esc, icon, button, officeContact, formatClientNumber, loadingLine, confirmBody } from "./ui.mjs";
 import { viewLang } from "./language.mjs";
-import { isStaffWindow } from "./contracts.mjs";
+import { isStaffWindow, hasWorkspaceSwitch, workspaceSide } from "./contracts.mjs";
 import { withdrawDialogBody } from "./client-views.mjs";
 import { t, sentence } from "./client-text.mjs";
 import { TOAST_ICONS } from "./toast.mjs";
@@ -220,7 +220,14 @@ const isAdmin = (person) =>
 // is a schedule viewer, with the Schedule (change add-volunteer-schedule,
 // design D11; My profile stays the account row's), and
 // `board` is false on the setup screen, which has no work board.
-export function staffSidebar(state, person, office, { volunteers = office, board = true, schedule = false } = {}) {
+// `side` and `canSwitch` (change add-workspace-switch, D4): with the switch,
+// an Office / Cases group sits between the brand and the navigation.
+export function staffSidebar(
+  state,
+  person,
+  office,
+  { volunteers = office, board = true, schedule = false, side = office ? "office" : "cases", canSwitch = false } = {},
+) {
   // A staff account is its own person. A cleared window's row is the link to
   // My profile (change add-my-profile, D9); on the setup screen it stays the
   // plain "Signed in as".
@@ -242,7 +249,7 @@ export function staffSidebar(state, person, office, { volunteers = office, board
   const onSchedule = state?.screen === "schedule";
   const label = office ? "Follow-ups" : "Work board";
   // All cases, then the Roster (admin only, change add-volunteer-roster-records).
-  const pool = office && board
+  const pool = office && board && isAdmin(person)
     ? button(
         `${icon("folder")} All cases`,
         "open-cases",
@@ -322,8 +329,19 @@ export function staffSidebar(state, person, office, { volunteers = office, board
         onBoard ? 'aria-current="page"' : "",
       )
     : "";
+  const sideButton = (name, text) =>
+    button(
+      text,
+      "set-workspace-side",
+      `nav-link${side === name ? " current" : ""}`,
+      `data-side="${name}" aria-pressed="${side === name}"`,
+    );
+  const switcher =
+    canSwitch && board
+      ? `<div class="workspace-switch" role="group" aria-label="Workspace">${sideButton("office", "Office")}${sideButton("cases", "Cases")}</div>`
+      : "";
   const links = `${home}${pool}${roster}${scheduleLink}${postUpdate}${settings}${notifications}`;
-  return `<div class="sidebar-brand"><img src="src/pcdc-logo.png" alt="PCDC" width="36" height="36"><span class="sidebar-wordmark">ViTally<span class="brand-dot">.</span></span></div>${when(links, `<nav class="sidebar-nav" aria-label="Main navigation">${links}</nav>`)}<div class="sidebar-account"><div class="account-row">${icon("user")}<span>${accountRow}</span></div>${button(
+  return `<div class="sidebar-brand"><img src="src/pcdc-logo.png" alt="PCDC" width="36" height="36"><span class="sidebar-wordmark">ViTally<span class="brand-dot">.</span></span></div>${switcher}${when(links, `<nav class="sidebar-nav" aria-label="Main navigation">${links}</nav>`)}<div class="sidebar-account"><div class="account-row">${icon("user")}<span>${accountRow}</span></div>${button(
     `${icon("help")} Need help?`,
     "open-help",
     "text",
@@ -435,7 +453,12 @@ export function staffScreen(state) {
     people.find((entry) => entry.id === state.principal?.personId) ?? null;
   // The office screens follow the effective capabilities; the Roster follows
   // the ceiling (design D10), so an admin can record their own roles.
-  const office = isAdmin(person);
+  // The side decides the frame (change add-workspace-switch, D5); capabilities
+  // still decide All cases, the Workload and Add a case.
+  const admin = isAdmin(person);
+  const canSwitch = hasWorkspaceSwitch(state.principal, person);
+  const side = workspaceSide(state.principal, person, state.workspaceSide);
+  const office = side === "office";
   const volunteers = ceilingAdmin(state.principal);
   // The Schedule is every schedule viewer's, cleared or not (design D11).
   const viewer = scheduleViewer(state.principal);
@@ -451,7 +474,7 @@ export function staffScreen(state) {
         { ...state, screen: onCeiling || onSchedule ? state.screen : "staff" },
         person,
         false,
-        { volunteers, board: false, schedule: viewer },
+        { volunteers, board: false, schedule: viewer, side },
       ),
       // An invited volunteer's first sign-in confirms the site first (the
       // site check, change add-account-invitations); nothing else shows.
@@ -472,16 +495,19 @@ export function staffScreen(state) {
   const allowed = (name) =>
     name === "office-updates" || name === "office-settings"
       ? volunteers
-      : // Add a case stays for a staff person who lost admin: its submits drop instead.
-        office ||
-        (name === "office-volunteers" && volunteers) ||
-        (name === "office-add-case" && state.principal?.access === "staff");
+      : name === "office-cases"
+        ? office && admin
+        : name === "office-volunteers"
+          ? admin || volunteers
+          : // Add a case stays for a staff person who lost admin: its submits drop instead.
+            // On the Cases side of a switch it goes back to the work board.
+            name === "office-add-case" && state.principal?.access === "staff" && !(canSwitch && !office);
   const screen =
     (OFFICE_SCREENS.includes(state.screen) && !allowed(state.screen)) || (state.screen === "schedule" && !viewer)
       ? "staff"
       : state.screen;
   const main = (() => {
-    const addCaseAction = button(`${icon("plus")} Add a case`, "open-add-case", "primary");
+    const addCaseAction = admin ? button(`${icon("plus")} Add a case`, "open-add-case", "primary") : "";
     if (screen === "staff-case" && state.savedCase) {
       const record = decorateStaffCase(state.savedCase, people);
       const ui = {
@@ -537,7 +563,7 @@ export function staffScreen(state) {
       );
     // Past the setup screen above, so cleared: the Workload follows the effective admin.
     if (screen === "my-profile") return myProfilePage(state);
-    if (screen === "office-volunteers") return rosterPage(state, { workload: office });
+    if (screen === "office-volunteers") return rosterPage(state, { workload: admin });
     if (screen === "office-updates") return postUpdatePage(state);
     if (screen === "office-settings") return seasonSettingsPage(state);
     if (screen === "schedule") return scheduleScreen(state);
@@ -598,7 +624,7 @@ export function staffScreen(state) {
         );
   })();
   return appShell({
-    sidebar: staffSidebar({ ...state, screen }, person, office, { volunteers, schedule: viewer }),
+    sidebar: staffSidebar({ ...state, screen }, person, office, { volunteers, schedule: viewer, side, canSwitch }),
     body: main,
     open,
   });

@@ -8388,7 +8388,9 @@ test("a screening start refused NOT_CLEARED switches the window to the setup scr
   controller.stop();
 });
 
-test("a ceiling admin whose only role is Intaker gets Volunteers, and none of the office admin's screens", async () => {
+// Change add-workspace-switch: an Intaker is office-capable, so the Office side
+// draws Follow-ups and the office case page; All cases stays the admin's.
+test("a ceiling admin whose only role is Intaker gets Volunteers and Follow-ups, and none of the office admin's screens", async () => {
   const store = rosterStore({
     people: [{ id: "person-sam", name: "Sam", capabilities: ["admin", "followup", "assist", "receive_documents"] }],
     clearance: { cleared: true, missing: [], capabilities: ["assist", "receive_documents"], isAdmin: true, siteCoordinatorName: null },
@@ -8399,14 +8401,15 @@ test("a ceiling admin whose only role is Intaker gets Volunteers, and none of th
   const board = staffScreen(controller.getState());
   assert.match(board, /data-action="open-volunteers"/);
   assert.doesNotMatch(board, /data-action="open-cases"/);
-  assert.doesNotMatch(board, /Follow-ups/);
-  assert.match(board, /Work board/);
+  assert.match(board, /Follow-ups/);
+  assert.doesNotMatch(board, /Work board/);
+  assert.doesNotMatch(board, /data-action="open-add-case"/);
   controller.navigate("office-cases");
   assert.doesNotMatch(staffScreen(controller.getState()), /Case pool/);
   await controller.selectCase("case-a");
   const onCase = staffScreen(controller.getState());
-  assert.doesNotMatch(onCase, /OFFICE WORKSPACE/);
-  assert.match(onCase, /VOLUNTEER WORKSPACE/);
+  assert.match(onCase, /OFFICE WORKSPACE/);
+  assert.doesNotMatch(onCase, /VOLUNTEER WORKSPACE/);
   controller.navigate("office-volunteers");
   await controller.loadVolunteers();
   assert.equal(volunteerReads(store), 1);
@@ -10265,7 +10268,12 @@ test("an added Preparer role and an assignment show the preparation form after f
   store.records.set("case-a", { ...other, preparerId: "person-riley", participants: ["person-riley"], revision: 2 });
   store.nextClearance = { ...RILEY_CLEARED, capabilities: ["receive_documents", "assist", "prepare"], isAdmin: false };
   await events.emit("focus");
-  assert.match(staffScreen(controller.getState()), /Record that preparation is complete in TaxSlayer/);
+  // Now on both sides: Office by default, so the preparation form is on the Cases side.
+  assert.doesNotMatch(staffScreen(controller.getState()), /Record that preparation is complete in TaxSlayer/);
+  assert.match(
+    staffScreen({ ...controller.getState(), workspaceSide: "cases" }),
+    /Record that preparation is complete in TaxSlayer/,
+  );
   controller.stop();
 });
 
