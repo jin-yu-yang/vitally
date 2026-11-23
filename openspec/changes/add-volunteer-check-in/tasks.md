@@ -18,7 +18,7 @@
 
 ## 2. Migration: RPCs
 
-- [ ] 2.1 `vitally_my_check_in`, `vitally_check_in` and `vitally_check_out` (D3):
+- [x] 2.1 `vitally_my_check_in`, `vitally_check_in` and `vitally_check_out` (D3):
   - the refusals FORBIDDEN, then NOT_CLEARED, with no receipt;
   - the lock, then the receipt;
   - `ALREADY_CHECKED_IN` and `NOT_CHECKED_IN`;
