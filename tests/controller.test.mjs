@@ -10270,10 +10270,12 @@ test("an added Preparer role and an assignment show the preparation form after f
   await events.emit("focus");
   // Now on both sides: Office by default, so the preparation form is on the Cases side.
   assert.doesNotMatch(staffScreen(controller.getState()), /Record that preparation is complete in TaxSlayer/);
-  assert.match(
-    staffScreen({ ...controller.getState(), workspaceSide: "cases" }),
-    /Record that preparation is complete in TaxSlayer/,
-  );
+  assert.equal(controller.getState().screen, "staff-case", "the office case page stays");
+  const office = staffScreen(controller.getState());
+  assert.match(office, /role="group" aria-label="Workspace"/);
+  assert.match(office, /You&#39;re preparing this case — switch to Cases/);
+  await controller.setWorkspaceSide("cases");
+  assert.match(staffScreen(controller.getState()), /Record that preparation is complete in TaxSlayer/);
   controller.stop();
 });
 
@@ -13003,5 +13005,88 @@ test("the Workload is readable on Cases for an admin", async () => {
   await controller.setVolunteerTab("workload");
   assert.equal(controller.getState().volunteerTab, "workload");
   assert.equal(volunteerReads(store), 1);
+  controller.stop();
+});
+
+// ---------------------------------------------------------------------------
+// Capability changes mid-session (change add-workspace-switch, design D10)
+// ---------------------------------------------------------------------------
+const SIDE_KEY_RILEY = "vitally.workspace-side:user-riley";
+const writesTo = (storage) => {
+  const writes = [];
+  const set = storage.setItem;
+  storage.setItem = (key, value) => {
+    writes.push(key);
+    set(key, value);
+  };
+  return writes;
+};
+const caps = (capabilities, isAdmin = capabilities.includes("admin")) => ({ ...RILEY_CLEARED, capabilities, isAdmin });
+const sideStart = async (capabilities, remembered) => {
+  const localStorage = fakeSession(remembered ? { [SIDE_KEY_RILEY]: remembered } : {});
+  const store = staffStore({ cases: [{ ...SETUP_CASE }], clearance: caps(capabilities) });
+  const built = build({ store, localStorage });
+  await built.controller.start();
+  return { ...built, store, localStorage, writes: writesTo(localStorage) };
+};
+
+test("gaining Admin keeps the board and the storage", async () => {
+  const { controller, store, localStorage, writes } = await sideStart(["prepare"], "cases");
+  assert.equal(controller.getState().screen, "staff");
+  store.nextClearance = caps(["prepare", "admin", "followup"]);
+  await controller.checkClearance();
+  const state = controller.getState();
+  assert.equal(state.screen, "staff");
+  assert.equal(state.workspaceSide, "cases");
+  assert.match(staffScreen(state), /Work board/);
+  assert.deepEqual(writes, []);
+  assert.equal(localStorage.raw(SIDE_KEY_RILEY), "cases");
+  controller.stop();
+});
+
+test("losing the current side lands on the other", async () => {
+  const { controller, store, localStorage, writes } = await sideStart(["admin", "followup", "review"], "cases");
+  assert.equal(controller.getState().workspaceSide, "cases");
+  store.nextClearance = caps(["admin", "followup"]);
+  await controller.checkClearance();
+  assert.equal(controller.getState().workspaceSide, "office");
+  assert.deepEqual(writes, []);
+  assert.equal(localStorage.raw(SIDE_KEY_RILEY), "cases", "the remembered side is not rewritten");
+  controller.stop();
+});
+
+test("losing the other side keeps the screen", async () => {
+  const { controller, store, writes } = await sideStart(["admin", "followup", "review"], "cases");
+  await controller.selectCase("case-a");
+  store.nextClearance = caps(["followup", "review"], false);
+  await controller.checkClearance();
+  const state = controller.getState();
+  assert.equal(state.workspaceSide, "cases");
+  assert.equal(state.screen, "staff-case");
+  assert.deepEqual(writes, []);
+  controller.stop();
+});
+
+test("a reload after gaining Admin with nothing stored opens Office", async () => {
+  const first = await sideStart(["prepare"]);
+  first.store.nextClearance = caps(["prepare", "admin", "followup"]);
+  await first.controller.checkClearance();
+  assert.equal(first.localStorage.raw(SIDE_KEY_RILEY), null);
+  first.controller.stop();
+  const store = staffStore({ cases: [{ ...SETUP_CASE }], clearance: caps(["prepare", "admin", "followup"]) });
+  const second = build({ store, localStorage: first.localStorage });
+  await second.controller.start();
+  assert.equal(second.controller.getState().workspaceSide, "office");
+  second.controller.stop();
+});
+
+test("losing the Office side on All cases goes home", async () => {
+  const { controller, store } = await sideStart(["admin", "followup", "prepare"], "office");
+  controller.navigate("office-cases");
+  store.nextClearance = caps(["prepare"], false);
+  await controller.checkClearance();
+  const state = controller.getState();
+  assert.equal(state.screen, "staff");
+  assert.equal(state.workspaceSide, "cases");
   controller.stop();
 });

@@ -512,6 +512,8 @@ export function staffScreen(state) {
       const record = decorateStaffCase(state.savedCase, people);
       const ui = {
         person,
+        // The office case page hints toward Cases for a person with both sides.
+        canSwitch: hasWorkspaceSwitch(state.principal, person),
         // The case header says "Signed in as" for a staff account.
         principal: state.principal,
         // The case header's labels and its open menu.

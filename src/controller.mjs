@@ -2987,6 +2987,7 @@ export function createController({
     noteConnected();
     const was = !awaitingClearance(state);
     const oldClearance = state.principal.clearance;
+    const oldPerson = currentPerson();
     state.principal = { ...state.principal, clearance: answer };
     // No longer a workspace admin: a later regain must not flash an old number.
     if (!ceilingAdmin(state.principal)) state.uploadsToReview = 0;
@@ -3008,6 +3009,14 @@ export function createController({
       return;
     }
     if (now && was) {
+      // The side on screen follows what the person may do now (design D10): a
+      // side gained moves nothing, a side lost lands on the one that remains.
+      // Never written to storage: the remembered choice is the person's own.
+      state.workspaceSide = workspaceSide(
+        state.principal,
+        currentPerson(),
+        workspaceSide(state.principal, oldPerson, state.workspaceSide),
+      );
       // Cleared before and after: nothing to reload, and nothing to draw unless
       // what the person may do changed. Their entry is already narrowed above.
       // The uploads count is the one thing that can still have moved.
@@ -3015,7 +3024,10 @@ export function createController({
       // All cases is Admin's; the other screens stay, and Admin coming back
       // moves nobody.
       let focus = leftSchedule;
-      if (!answer.capabilities?.includes("admin") && state.screen === "office-cases") {
+      if (
+        (!answer.capabilities?.includes("admin") || state.workspaceSide !== "office") &&
+        state.screen === "office-cases"
+      ) {
         state.screen = homeScreen();
         focus = true;
       }
