@@ -54,7 +54,17 @@ import {
 } from "./update-views.mjs";
 import { renderSeasonSettings, changeSidnDialogBody, startSeasonDialogBody } from "./season-settings-views.mjs";
 import { timeLabel } from "./volunteer-check-in.mjs";
-import { scheduleScreen, shiftDrawer, shiftDrawerTitle, removeShiftDialogBody, removeShiftTitle } from "./schedule-views.mjs";
+import {
+  scheduleScreen,
+  shiftDrawer,
+  shiftDrawerTitle,
+  removeShiftDialogBody,
+  removeShiftTitle,
+  checkInDrawer,
+  checkInDrawerTitle,
+  removeCheckInDialogBody,
+  removeCheckInTitle,
+} from "./schedule-views.mjs";
 
 // The shared shell: the frame every screen sits in, the dialogs, the two
 // screens that belong to nobody in particular (setup needed, no access), and
@@ -821,6 +831,16 @@ export function dialog(state) {
     title = removeShiftTitle(state);
     body = removeShiftDialogBody(state);
   }
+  // The check-in drawer and its Remove check-in confirmation (change
+  // add-volunteer-check-in, design D7), the same way.
+  if (state.dialog === "check-in") {
+    title = checkInDrawerTitle(state);
+    body = checkInDrawer(state);
+  }
+  if (state.dialog === "remove-check-in") {
+    title = removeCheckInTitle(state);
+    body = removeCheckInDialogBody(state);
+  }
   if (state.dialog === "notifications") {
     title = "Notifications";
     // A drawer says its own failure (a confirm that did not go through).
@@ -902,7 +922,7 @@ export function dialog(state) {
     title = t("print.title", {}, lang);
     body = `<div class="print-card"><strong>${say("print.org")}</strong><span>${say("id.application_caps")}</span><b>${esc(state.savedCase?.reference)}</b>${state.savedCase?.clientNumber != null ? `<span>${say("id.client_number_caps")}</span><b>${esc(formatClientNumber(state.savedCase.clientNumber))}</b>` : ""}<p>${say("print.return")}</p></div><p class="field-note">${say("print.note")}</p>${button(`${icon("print")} ${say("print.button")}`, "print-now", "primary full")}`;
   }
-  const drawer = DRAWERS.includes(state.dialog) || state.dialog === "shift";
+  const drawer = DRAWERS.includes(state.dialog) || state.dialog === "shift" || state.dialog === "check-in";
   const overline =
     state.dialog === "volunteer"
       ? "OFFICE · VOLUNTEERS"
@@ -912,7 +932,7 @@ export function dialog(state) {
           ? "FROM THE OFFICE"
           : ["update-people", "unpublish-update", "delete-update", "change-sidn", "start-season"].includes(state.dialog)
             ? "OFFICE · ADMIN"
-            : state.dialog === "shift" || state.dialog === "remove-shift"
+            : ["shift", "remove-shift", "check-in", "remove-check-in"].includes(state.dialog)
               ? "VOLUNTEERS · SCHEDULE"
               : drawer
                 ? "OFFICE FOLLOW-UP"

@@ -7197,6 +7197,81 @@ button.schedule-shift {
   color: var(--vt-ink);
   font-weight: 600;
 }
+/* Check-ins on an admin's Schedule (change add-volunteer-check-in, design
+   D7). A row with check-ins gains a second line under its cells: the track,
+   across every hour column, where each bar is placed by the minute (left and
+   width are percentages of the open hours). The track is not a cell, so a
+   bar takes no part in a drag. On a closed day they are a list instead. */
+.schedule-row.has-check-ins > .schedule-name {
+  grid-row: 1 / span 2;
+}
+.schedule-row > .check-in-track {
+  grid-row: 2;
+  position: relative;
+  min-height: var(--vt-tap);
+  border-top: 1px dashed var(--vt-line);
+}
+.check-in-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--vt-line);
+  border-left: 3px solid var(--vt-progress);
+  border-radius: var(--vt-radius-sm);
+  background: var(--vt-background);
+  color: var(--vt-ink);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+}
+.check-in-track > .check-in-bar {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  box-sizing: border-box;
+  white-space: nowrap;
+}
+.check-in-bar.flagged {
+  border-left-color: var(--vt-office);
+}
+.check-in-bar:hover {
+  border-color: var(--vt-primary);
+}
+.check-in-bar:focus-visible {
+  outline: 2px solid var(--vt-primary);
+  outline-offset: 2px;
+  z-index: 1;
+}
+.check-in-bar .schedule-tags {
+  flex-wrap: nowrap;
+}
+.schedule-off > .check-in-bar,
+.check-in-list .check-in-bar {
+  flex-wrap: wrap;
+  min-height: var(--vt-tap);
+  font-weight: 400;
+}
+.check-in-name {
+  font-weight: 600;
+}
+.check-in-time {
+  white-space: nowrap;
+}
+.check-in-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.check-in-note {
+  margin: 0 0 8px;
+}
 /* The shift drawer: the volunteer picker, then role, start and end. */
 .shift-pick {
   margin: 0 0 18px;

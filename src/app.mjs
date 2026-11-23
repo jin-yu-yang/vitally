@@ -60,7 +60,7 @@ import * as client from "./client-views.mjs";
 import { POOL_FILTER_KEYS } from "./pool-views.mjs";
 import { createSidebarPeek, peekZone, toggleLabel } from "./sidebar-peek.mjs";
 import { createRedrawHold } from "./redraw-hold.mjs";
-import { createGesture, dragResult, gestureLive } from "./schedule-drag.mjs";
+import { createGesture, dragIgnores, dragResult, gestureLive } from "./schedule-drag.mjs";
 import { STORAGE_KEY, createLanguageRequests, isLang, loadHantWithin, viewLang } from "./language.mjs";
 import { createHantLoader, hantReady } from "./hant.mjs";
 import { t, SENTENCES } from "./client-text.mjs";
@@ -1101,12 +1101,18 @@ if (!config) {
       root.querySelector('#shift-form [data-action="remove-shift"]')?.focus();
       return;
     }
+    // Keeping a check-in, the same (change add-volunteer-check-in).
+    if (dialog === "remove-check-in" && controller.getState().schedule?.checkInDrawer) {
+      controller.closeDialog();
+      root.querySelector('#check-in-form [data-action="remove-check-in"]')?.focus();
+      return;
+    }
     // The volunteer and assign drawers open from the Volunteers page, and the
     // shift drawer from the Schedule, which have no queue; the Notifications
     // panel from the sidebar.
     const fallback =
       fallbackFocusSelector ??
-      (dialog === "shift" || dialog === "remove-shift" || dialog === "assign" || dialog === "volunteer"
+      (dialog === "shift" || dialog === "remove-shift" || dialog === "check-in" || dialog === "remove-check-in" || dialog === "assign" || dialog === "volunteer"
         ? "#main"
         : dialog === "notifications"
           ? '[data-action="open-notifications"]'
@@ -1150,6 +1156,22 @@ if (!config) {
     const form = root.querySelector("#shift-form");
     if (!form) return;
     shiftDone(await controller.saveShift(shiftFormValues(form)), by);
+  }
+
+  // The check-in drawer's choices as the form holds them (change
+  // add-volunteer-check-in): the volunteer (a new one only), Checked in and
+  // Checked out ("" when left empty). The times go as the selects hold them.
+  function checkInFormValues(form) {
+    const values = new FormData(form ?? undefined);
+    const pick = (name) => (values.has(name) ? String(values.get(name)) : undefined);
+    return { volunteerId: pick("volunteerId"), checkedIn: pick("checkedIn"), checkedOut: pick("checkedOut") };
+  }
+
+  // A check-in write's answer is handled like a shift's (shiftDone).
+  async function saveCheckInFromDrawer(by) {
+    const form = root.querySelector("#check-in-form");
+    if (!form) return;
+    shiftDone(await controller.saveCheckIn(checkInFormValues(form)), by);
   }
 
   function fictional(replaceEverything) {
@@ -2241,6 +2263,21 @@ if (!config) {
       case "confirm-remove-shift":
         shiftDone(await controller.removeShift(target.dataset.shiftId), by);
         break;
+      // Check-ins on the Schedule (change add-volunteer-check-in, design D7).
+      case "add-check-in":
+      case "open-check-in":
+        openDialog("check-in", { checkInId: target.dataset.checkInId || null }, describeFocus(target));
+        break;
+      case "save-check-in":
+        await saveCheckInFromDrawer(by);
+        break;
+      case "remove-check-in":
+        // Asked over the drawer; the drawer's opener stays the one to go back to.
+        controller.openDialog("remove-check-in", { checkInId: target.dataset.checkInId });
+        break;
+      case "confirm-remove-check-in":
+        shiftDone(await controller.removeCheckIn(target.dataset.checkInId), by);
+        break;
       // ---- Season settings (change add-season-settings) ----
       case "open-change-sidn":
         // A fresh dialog: no earlier refusal, and no number typed before.
@@ -2973,7 +3010,7 @@ if (!config) {
     const day = state.schedule?.day;
     if (state.screen !== "schedule" || day?.canEdit !== true || state.busy || state.dialog) return;
     const row = event.target.closest?.(".schedule-grid .schedule-row[data-volunteer-id]");
-    if (!row) return;
+    if (!row || dragIgnores(event.target)) return;
     const edge = event.target.closest("[data-edge]");
     const shift = edge ? (day.shifts ?? []).find((entry) => entry.shiftId === edge.closest("[data-shift-id]")?.dataset.shiftId) : null;
     if (edge && !shift) return;
@@ -3121,6 +3158,11 @@ if (!config) {
       controller.editShiftDraft(shiftFormValues(field.form));
       return;
     }
+    // The check-in drawer keeps its choices the same way.
+    if (field.closest?.("#check-in-form")) {
+      controller.editCheckInDraft(checkInFormValues(field.form));
+      return;
+    }
     if (field.matches?.(V2_CONTROLS)) {
       // The version-2 form (spec §2.4 rule 2): the draft, quietly, then the
       // note, the rail mark and a longtext's count in place, never a redraw.
@@ -3255,6 +3297,14 @@ if (!config) {
     if (form.id === "shift-form") {
       try {
         await saveShiftFromDrawer(by);
+      } catch (error) {
+        safetyNet(error, by, shown);
+      }
+      return;
+    }
+    if (form.id === "check-in-form") {
+      try {
+        await saveCheckInFromDrawer(by);
       } catch (error) {
         safetyNet(error, by, shown);
       }

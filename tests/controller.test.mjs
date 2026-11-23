@@ -12852,3 +12852,210 @@ test("strip: canCheckIn false draws no strip, and a failed read keeps what it sh
   assert.doesNotMatch(staffScreen(controller.getState()), /check-in-strip/);
   controller.stop();
 });
+
+// ---------------------------------------------------------------------------
+// Check-ins on the admin Schedule (change add-volunteer-check-in, Task 6)
+// ---------------------------------------------------------------------------
+
+// Ari Moss (fictional) checked in at 9:52 am and out at 1:10 pm New York time.
+const ARI_CHECK_IN = Object.freeze({
+  checkInId: "ci-ari",
+  revision: 4,
+  volunteerId: "person-ari",
+  name: "Ari Moss",
+  checkedInAt: "2027-02-06T14:52:00.000Z",
+  checkedOutAt: "2027-02-06T18:10:00.000Z",
+  endsAt: "2027-02-06T18:10:00.000Z",
+  state: "out",
+  minutes: 198,
+  flags: Object.freeze({ noCheckOut: false, notScheduled: true, corrected: false, outsideSiteHours: false }),
+  correctedByName: null,
+});
+// The schedule store, with check-ins on an admin's day and the two writes.
+const checkInScheduleStore = (options = {}) => {
+  const store = scheduleStore(options);
+  const read = store.scheduleDay;
+  store.scheduleDay = async (date) => {
+    const day = await read(date);
+    return day.canEdit ? { ...day, checkIns: [structuredClone(ARI_CHECK_IN)] } : day;
+  };
+  store.failNextCheckIn = null;
+  const fail = () => {
+    const error = store.failNextCheckIn;
+    store.failNextCheckIn = null;
+    if (error) throw error;
+  };
+  store.saveCheckIn = async (request) => {
+    store.calls.push("saveCheckIn");
+    store.writes.push({ type: "saveCheckIn", ...structuredClone(request) });
+    fail();
+    return { checkInId: request.checkInId ?? "ci-new", revision: (request.revision ?? 0) + 1 };
+  };
+  store.removeCheckIn = async (request) => {
+    store.calls.push("removeCheckIn");
+    store.writes.push({ type: "removeCheckIn", ...request });
+    fail();
+    return { checkInId: request.checkInId, revision: request.revision + 1 };
+  };
+  return store;
+};
+async function onCheckInSchedule(options = {}) {
+  const store = checkInScheduleStore(options);
+  const built = build({ store, clock: SCHEDULE_NOW });
+  await built.controller.start();
+  await built.controller.openSchedule();
+  return { store, ...built };
+}
+
+test("check-in drawer: a bar opens it with its times", async () => {
+  const { controller } = await onCheckInSchedule();
+  controller.openCheckIn("ci-ari");
+  const state = controller.getState();
+  assert.equal(state.dialog, "check-in");
+  assert.deepEqual(state.schedule.checkInDrawer, {
+    mode: "edit",
+    checkInId: "ci-ari",
+    revision: 4,
+    volunteerId: "person-ari",
+    name: "Ari Moss",
+    checkedIn: "09:52",
+    checkedOut: "13:10",
+    actionId: null,
+  });
+  assert.match(dialog(state), /<h2 id="modal-title">Ari Moss<\/h2>/);
+  controller.stop();
+});
+
+test("drawer keeps 9:52 when only out changes", async () => {
+  const { store, controller } = await onCheckInSchedule();
+  controller.openCheckIn("ci-ari");
+  const reads = dayReads(store);
+  const result = await controller.saveCheckIn({ checkedIn: "09:52", checkedOut: "13:30" });
+  assert.deepEqual(result, { done: true, toast: null });
+  const write = store.writes.at(-1);
+  assert.equal(write.type, "saveCheckIn");
+  assert.equal(write.checkInId, "ci-ari");
+  assert.equal(write.revision, 4);
+  assert.deepEqual(write.checkIn, { checkedIn: "09:52", checkedOut: "13:30" });
+  assert.ok(write.actionId);
+  assert.equal(controller.getState().dialog, null);
+  assert.equal(controller.getState().schedule.checkInDrawer, null);
+  assert.equal(dayReads(store), reads + 1);
+  // Values left out keep what the drawer holds.
+  controller.openCheckIn("ci-ari");
+  await controller.saveCheckIn({ checkedOut: "13:30" });
+  assert.deepEqual(store.writes.at(-1).checkIn, { checkedIn: "09:52", checkedOut: "13:30" });
+  controller.stop();
+});
+
+test("drawer: Checked out may be empty", async () => {
+  const { store, controller } = await onCheckInSchedule();
+  controller.openAddCheckIn();
+  const drawer = controller.getState().schedule.checkInDrawer;
+  assert.equal(drawer.mode, "add");
+  assert.equal(drawer.checkedOut, null);
+  const result = await controller.saveCheckIn({ volunteerId: "person-rowan", checkedIn: "10:00", checkedOut: "" });
+  assert.deepEqual(result, { done: true, toast: null });
+  const write = store.writes.at(-1);
+  assert.equal(write.checkInId, null);
+  assert.equal(write.revision, null);
+  assert.deepEqual(write.checkIn, { volunteerId: "person-rowan", date: "2027-02-06", checkedIn: "10:00", checkedOut: null });
+  controller.stop();
+});
+
+test("check-in drawer: Add with no volunteer says so without sending", async () => {
+  const { store, controller } = await onCheckInSchedule();
+  controller.openAddCheckIn();
+  const writes = store.writes.length;
+  assert.equal(await controller.saveCheckIn({ checkedIn: "10:00", checkedOut: "" }), null);
+  assert.equal(store.writes.length, writes);
+  assert.equal(controller.getState().error.message, "Choose a volunteer.");
+  assert.equal(controller.getState().dialog, "check-in");
+  controller.stop();
+});
+
+test("check-in drawer: Add check-in opens on today and past days only, and only for an admin", async () => {
+  const { controller } = await onCheckInSchedule();
+  await controller.scheduleGo("next");
+  controller.openAddCheckIn();
+  assert.equal(controller.getState().dialog ?? null, null);
+  assert.equal(controller.getState().schedule.checkInDrawer ?? null, null);
+  await controller.scheduleGo("prev");
+  await controller.scheduleGo("prev");
+  controller.openDialog("check-in", { checkInId: null });
+  assert.equal(controller.getState().dialog, "check-in");
+  assert.equal(controller.getState().schedule.checkInDrawer.mode, "add");
+  controller.stop();
+  const viewer = await onCheckInSchedule({ clearance: PREPARER_VIEWER });
+  viewer.controller.openAddCheckIn();
+  viewer.controller.openCheckIn("ci-ari");
+  assert.equal(viewer.controller.getState().dialog ?? null, null);
+  assert.equal(await viewer.controller.saveCheckIn({ checkedIn: "10:00" }), null);
+  assert.equal(await viewer.controller.removeCheckIn("ci-ari"), null);
+  assert.equal(viewer.store.writes.length, 0);
+  viewer.controller.stop();
+});
+
+test("remove check-in asks first", async () => {
+  const { store, controller } = await onCheckInSchedule();
+  controller.openCheckIn("ci-ari");
+  controller.openDialog("remove-check-in", { checkInId: "ci-ari" });
+  const state = controller.getState();
+  assert.equal(state.dialog, "remove-check-in");
+  assert.match(dialog(state), /Remove Ari Moss&#39;s check-in\?/);
+  assert.equal(store.writes.length, 0);
+  // Keeping it goes back to the drawer.
+  controller.closeDialog();
+  assert.equal(controller.getState().dialog, "check-in");
+  assert.equal(controller.getState().schedule.checkInDrawer.checkInId, "ci-ari");
+  controller.openDialog("remove-check-in", { checkInId: "ci-ari" });
+  const result = await controller.removeCheckIn("ci-ari");
+  assert.deepEqual(result, { done: true, toast: null });
+  const write = store.writes.at(-1);
+  assert.equal(write.type, "removeCheckIn");
+  assert.equal(write.checkInId, "ci-ari");
+  assert.equal(write.revision, 4);
+  assert.equal(controller.getState().dialog, null);
+  assert.equal(controller.getState().schedule.checkInDrawer, null);
+  controller.stop();
+});
+
+test("conflict re-reads and says the check-in message", async () => {
+  const { store, controller } = await onCheckInSchedule();
+  controller.openCheckIn("ci-ari");
+  store.failNextCheckIn = shiftRefusal("CONFLICT");
+  const reads = dayReads(store);
+  const result = await controller.saveCheckIn({ checkedIn: "09:52", checkedOut: "13:30" });
+  assert.deepEqual(result, { done: true, toast: "Someone changed this check-in. The schedule has been refreshed." });
+  assert.equal(dayReads(store), reads + 1);
+  assert.equal(controller.getState().dialog, null);
+  assert.equal(controller.getState().error, null);
+  controller.stop();
+});
+
+test("check-in drawer: a refusal is said in the drawer, which stays open", async () => {
+  const { store, controller } = await onCheckInSchedule();
+  controller.openCheckIn("ci-ari");
+  store.failNextCheckIn = shiftRefusal("VALIDATION", "OVERLAP");
+  const result = await controller.saveCheckIn({ checkedIn: "09:52", checkedOut: "13:30" });
+  assert.equal(result, null);
+  const state = controller.getState();
+  assert.equal(state.dialog, "check-in");
+  assert.equal(state.error.message, "That volunteer already has a check-in at that time.");
+  assert.equal(state.schedule.checkInDrawer.checkedOut, "13:30");
+  assert.match(dialog(state), /That volunteer already has a check-in at that time\./);
+  controller.stop();
+});
+
+test("a check_ins change re-reads an admin's day, not a read-only one", async () => {
+  const admin = await onCheckInSchedule();
+  let reads = dayReads(admin.store);
+  await admin.store.handlers.onChange({ table: "check_ins", eventType: "INSERT", id: "ci-9", personId: "person-ari" });
+  assert.equal(dayReads(admin.store), reads + 1);
+  admin.controller.stop();
+  const viewer = await onCheckInSchedule({ clearance: PREPARER_VIEWER });
+  reads = dayReads(viewer.store);
+  await viewer.store.handlers.onChange({ table: "check_ins", eventType: "INSERT", id: "ci-9", personId: "person-ari" });
+  assert.equal(dayReads(viewer.store), reads);
+  viewer.controller.stop();
+});
