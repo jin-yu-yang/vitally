@@ -51,12 +51,12 @@
 
 ## 4. Screens
 
-- [ ] 4.1 Controller, the strip (D6):
+- [x] 4.1 Controller, the strip (D6):
   - its state from `vitally_my_check_in` on sign-in, restore, focus, own `check_ins` changes, and clearance changes;
   - the Check in and Check out actions with an action id and a busy state;
   - `ALREADY_CHECKED_IN` and `NOT_CHECKED_IN` re-read quietly;
   - none in uncleared windows.
-- [ ] 4.2 `src/views.mjs`: the strip at the top of the staff shell's main area, outside the sidebar, for cleared windows with `canCheckIn`. CSS: one line or wrapping, a tap target of at least 44 px, and no sideways scroll at 390 px.
+- [x] 4.2 `src/views.mjs`: the strip at the top of the staff shell's main area, outside the sidebar, for cleared windows with `canCheckIn`. CSS: one line or wrapping, a tap target of at least 44 px, and no sideways scroll at 390 px.
 - [ ] 4.3 Controller, the Schedule:
   - the check-in drawer (add and edit), its save and remove with the shared confirmation dialog, and refusals shown in the drawer;
   - the CONFLICT message "Someone changed this check-in. The schedule has been refreshed.";
