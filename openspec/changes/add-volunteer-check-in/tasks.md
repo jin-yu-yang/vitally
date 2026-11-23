@@ -37,12 +37,12 @@
 
 ## 3. Store and pure logic
 
-- [ ] 3.1 `src/supabase-store.mjs`:
+- [x] 3.1 `src/supabase-store.mjs`:
   - `myCheckIn`, `checkIn`, `checkOut`, `saveCheckIn`, `removeCheckIn` and `hoursThisWeek`;
   - `check_ins` in `STAFF_TABLES`;
   - the new refusal reasons mapped;
   - `weekShifts` removed if nothing else uses it.
-- [ ] 3.2 Pure helpers with unit tests, in `src/volunteer-schedule.mjs` or a new `src/volunteer-check-in.mjs`:
+- [x] 3.2 Pure helpers with unit tests, in `src/volunteer-schedule.mjs` or a new `src/volunteer-check-in.mjs`:
   - New York time labels ("9:52 am") and bar labels ("– now", "– no check-out");
   - the bar's left and width by the minute across the open hours, cut off at the edges;
   - 5-minute time options that keep an off-step saved time;
