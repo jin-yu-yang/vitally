@@ -54,7 +54,7 @@ const POLICIES = Object.freeze([
   ["volunteer_profiles", "admin_volunteer_profiles"],
   ["workspaces", "member_workspace"],
 ]);
-// The thirty-seven public RPCs after 059, by name and identity arguments.
+// The forty public RPCs after 059, by name and identity arguments.
 const RPCS = Object.freeze([
   "vitally_apply_action(p_action_id uuid, p_case_id uuid, p_expected_revision bigint, p_type text, p_payload jsonb)",
   "vitally_assistance_action(p_action_id uuid, p_item_id uuid, p_expected_revision bigint, p_type text, p_note text)",
@@ -92,6 +92,9 @@ const RPCS = Object.freeze([
   "vitally_my_check_in()",
   "vitally_check_in(p_action_id uuid)",
   "vitally_check_out(p_action_id uuid)",
+  "vitally_save_check_in(p_action_id uuid, p_check_in_id uuid, p_expected_revision bigint, p_check_in jsonb)",
+  "vitally_remove_check_in(p_action_id uuid, p_check_in_id uuid, p_expected_revision bigint)",
+  "vitally_hours_this_week()",
   "vitally_set_site_number(p_action_id uuid, p_sidn text)",
   "vitally_mark_upload_sent(p_action_id uuid, p_document text)",
   "vitally_mark_upload_reviewed(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_document text, p_reason text)",
@@ -110,6 +113,7 @@ const READ_ONLY_RPCS = Object.freeze([
   "vitally_client_invitations",
   "vitally_complete_site_check",
   "vitally_expire_invitations",
+  "vitally_hours_this_week",
   "vitally_mark_updates",
   "vitally_my_check_in",
   "vitally_my_clearance",
@@ -215,7 +219,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
     });
 
-    await t.test("the public API is exactly thirty-seven RPCs", async () => {
+    await t.test("the public API is exactly forty RPCs", async () => {
       const { rows } = await sql(
         `select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as signature
            from pg_proc p where p.pronamespace='public'::regnamespace`,
