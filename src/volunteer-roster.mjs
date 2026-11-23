@@ -83,7 +83,10 @@ const OTHER_LANGUAGE_MAX = 40;
 const ACCOUNT_MISSING = Object.freeze({ none: "noAccount", invited: "notSignedIn", deactivated: "deactivated" });
 
 // Joins raw PostgREST rows into volunteers. Only people with a roster entry appear.
-export function combineVolunteers({ profiles = [], entries = [], certificates = [], people = [], accounts = [] }) {
+// `shifts` are the live current-season shifts from today on (person_id only),
+// so the remove confirmation can say they go too (change add-remove-from-roster, D12).
+export function combineVolunteers({ profiles = [], entries = [], certificates = [], people = [], accounts = [], shifts = [] }) {
+  const withShifts = new Set(shifts.map((s) => s.person_id));
   const accountById = new Map(accounts.map((a) => [a.person_id, a]));
   const profileById = new Map(profiles.map((p) => [p.person_id, p]));
   const entryById = new Map(entries.map((e) => [e.person_id, e]));
@@ -154,7 +157,8 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
       account,
       isSiteCoordinator,
       cleared,
-      missing
+      missing,
+      hasShiftsFromToday: withShifts.has(person.id)
     });
   }
   return list.sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));

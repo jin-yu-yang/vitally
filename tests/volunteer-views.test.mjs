@@ -1033,6 +1033,20 @@ test("the confirmation's account line follows the account", () => {
   assert.doesNotMatch(none, /Their account/);
 });
 
+test("the confirmation says shifts from today on go, only when there are some", () => {
+  const SHIFTS = "Their shifts from today on are removed from the Schedule.";
+  const html = removeFromRosterDialogBody({ volunteer: withStatus("active", { hasShiftsFromToday: true }) });
+  // After the account line, before the last line.
+  assert.match(
+    html,
+    /so they can no longer sign in\. Their shifts from today on are removed from the Schedule\. Their cases and contact details are kept\./,
+  );
+  const none = removeFromRosterDialogBody({ volunteer: withStatus("none", { hasShiftsFromToday: true }) });
+  assert.match(none, /this season\. Their shifts from today on are removed from the Schedule\. Their cases/);
+  for (const v of [withStatus("active"), withStatus("active", { hasShiftsFromToday: false })])
+    assert.ok(!removeFromRosterDialogBody({ volunteer: v }).includes(SHIFTS));
+});
+
 test("the confirmation escapes the name and email, and shows a refusal", () => {
   const html = removeFromRosterDialogBody({ volunteer: withStatus("active", { name: "<b>X</b>", email: "a<i>@e.test" }), error: "Try again <u>" });
   assert.doesNotMatch(html, /<b>X|<i>|<u>/);

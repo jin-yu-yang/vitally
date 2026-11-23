@@ -5,10 +5,12 @@
 --   §1 the roster_removals table: one row per removal (design D7);
 --   §2 vitally_remove_from_roster: an admin takes a person off the current
 --      season's roster, and deactivates their account in the same transaction
---      unless it is a site coordinator's (design D1-D6).
--- No existing function or row is changed. D8-D11 are the browser's (the
--- drawer, the confirmation, the Reactivate pointer, other windows); they need
--- nothing more from the database.
+--      unless it is a site coordinator's (design D1-D6), and takes their
+--      shifts from today on off the Schedule (design D12).
+-- No existing function is changed. The only existing rows it changes are the
+-- removed person's own: their entry, account, profile revision and shifts.
+-- D8-D11 are the browser's (the drawer, the confirmation, the Reactivate
+-- pointer, other windows); they need nothing more from the database.
 
 -- ---------------------------------------------------------------------------
 -- §1. The record of removals (design D7). A removal deletes the season's
@@ -25,7 +27,8 @@ create table public.roster_removals (
  person_id uuid not null,
  removed_by_person_id uuid not null,
  removed_at timestamptz not null default now(),
- account_deactivated boolean not null
+ account_deactivated boolean not null,
+ shifts_removed integer not null default 0
 );
 alter table public.roster_removals enable row level security;
 revoke all on public.roster_removals from public,anon,authenticated,service_role;
@@ -42,13 +45,15 @@ revoke all on public.roster_removals from public,anon,authenticated,service_role
 -- workspace), CONFLICT (a stale profile revision), NOT_FOUND (no current-season
 -- entry), FORBIDDEN (a site coordinator, and the caller isn't one), then
 -- OPEN_WORK with the labels. Then, in order: the entry is
--- deleted, and its certificates with it; the account is deactivated as
+-- deleted, and its certificates with it; the person's live shifts from today
+-- on (America/New_York) are marked removed; the account is deactivated as
 -- Deactivate does, unless there is nothing to deactivate or it is a site
 -- coordinator's; the profile revision is raised; the removal is recorded; the
 -- receipt is stored. No email is sent.
 --
--- The lock order is Save's: the workspace lock, the profile, the entry, the
--- account. Save, Deactivate, Start next season and this all take the
+-- The lock order is Save's: the workspace lock, the profile, the entry, then
+-- the shifts and the account. Saving or removing a shift takes the workspace
+-- lock first too. Save, Deactivate, Start next season and this all take the
 -- workspace lock first, so none of them can deadlock with another.
 
 create function public.vitally_remove_from_roster(p_action_id uuid,p_volunteer_id uuid,p_expected_revision bigint)
@@ -63,6 +68,7 @@ declare v_member public.memberships;
  v_digest text;
  v_open_work jsonb;
  v_deactivated boolean=false;
+ v_shifts_removed integer=0;
  v_result jsonb;
 begin
  -- 1. A workspace admin: a site coordinator, or the Admin role this season,
@@ -103,7 +109,7 @@ begin
   return v_receipt.receipt;
  end if;
  -- 6. An invitation past its expiry is cancelled first, as the other account
- -- RPCs do, so step 12 sees the account as it now stands.
+ -- RPCs do, so step 13 sees the account as it now stands.
  perform vitally_private.expire_invitations(v_member.workspace_id);
  -- 7. The profile, whose revision the Edit drawer holds (design D5).
  select * into v_profile from public.volunteer_profiles
@@ -140,7 +146,18 @@ begin
  -- people.capabilities. The person and profile, usual days included, stay.
  delete from public.roster_entries
   where workspace_id=v_entry.workspace_id and person_id=v_entry.person_id and season=v_entry.season;
- -- 12. The account, as Deactivate does (design D1, D2). Skipped with no
+ -- 12. The person's live shifts this season from today on, where today is the
+ -- America/New_York date as in 058 (design D12). Shifts refer to people, not
+ -- to the entry, so without this they would stay on the Schedule, tagged Not
+ -- cleared and Role removed, under the person's name. They are marked removed
+ -- as Remove shift does, so Realtime announces each as an UPDATE and open
+ -- Schedule windows re-read. Earlier days stay, so this week's hours on
+ -- Workload still count what was worked. A shift already removed is left.
+ update public.shifts set removed_at=now(),revision=revision+1,updated_at=now(),updated_by_person_id=v_person.id
+  where workspace_id=v_member.workspace_id and person_id=p_volunteer_id and season=v_entry.season
+   and removed_at is null and shift_date>=(now() at time zone 'America/New_York')::date;
+ get diagnostics v_shifts_removed=row_count;
+ -- 13. The account, as Deactivate does (design D1, D2). Skipped with no
  -- account, or one already deactivated (design D6): deactivate_account would
  -- raise INVALID_TRANSITION there, and a Remove racing a Deactivate in another
  -- window must either succeed or get CONFLICT. If Deactivate ran first, this
@@ -155,18 +172,18 @@ begin
   perform vitally_private.deactivate_account(v_member.workspace_id,v_account.user_id,v_person.id);
   v_deactivated=true;
  end if;
- -- 13. The profile revision (design D5). Save inserts or updates the
+ -- 14. The profile revision (design D5). Save inserts or updates the
  -- current-season entry, so without this a second admin's open drawer could
  -- save afterwards and quietly put the person back. With it, that save gets
  -- CONFLICT.
  update public.volunteer_profiles set revision=revision+1,updated_at=now()
   where workspace_id=v_member.workspace_id and person_id=p_volunteer_id;
- -- 14. The record (design D7).
- insert into public.roster_removals(workspace_id,season,person_id,removed_by_person_id,account_deactivated)
-  values(v_member.workspace_id,v_entry.season,p_volunteer_id,v_person.id,v_deactivated);
- -- 15. The receipt.
+ -- 15. The record (design D7, D12).
+ insert into public.roster_removals(workspace_id,season,person_id,removed_by_person_id,account_deactivated,shifts_removed)
+  values(v_member.workspace_id,v_entry.season,p_volunteer_id,v_person.id,v_deactivated,v_shifts_removed);
+ -- 16. The receipt.
  v_result=jsonb_build_object('actionId',p_action_id,'volunteerId',p_volunteer_id,
-  'revision',v_profile.revision+1,'accountDeactivated',v_deactivated);
+  'revision',v_profile.revision+1,'accountDeactivated',v_deactivated,'shiftsRemoved',v_shifts_removed);
  update public.action_receipts set target_id=p_volunteer_id,receipt=v_result where id=v_receipt.id;
  return v_result;
 end;

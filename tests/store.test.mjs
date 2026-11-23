@@ -7,6 +7,7 @@ import {
   mapFollowup,
   SUBSCRIBED_TABLES,
 } from "../src/supabase-store.mjs";
+import { nyToday } from "../src/volunteer-schedule.mjs";
 
 // The staff tables an applicant read must never touch. The live file proves
 // RLS would refuse them anyway; this asserts the adapter does not even ask.
@@ -388,6 +389,15 @@ function fakeClient({
           read.within = [column, [...values]];
           return builder;
         },
+        // `is(column, null)` and `gte` (the Roster's upcoming-shifts read).
+        is(column, value) {
+          read.filters.push([column, value]);
+          return builder;
+        },
+        gte(column, value) {
+          (read.atLeast ??= []).push([column, value]);
+          return builder;
+        },
         order(column, options) {
           read.orders.push(column);
           // The descending columns, apart, so `orders` stays a list of names.
@@ -401,6 +411,7 @@ function fakeClient({
               const matches = table(name).filter(
                 (row) =>
                   read.filters.every(([column, value]) => row[column] === value) &&
+                  (read.atLeast ?? []).every(([column, value]) => row[column] >= value) &&
                   (!read.within || read.within[1].includes(row[read.within[0]])),
               );
               // PostgREST returns the columns that were asked for and no
@@ -1865,6 +1876,40 @@ test("listVolunteers reads the current season and returns combined volunteers", 
   for (const name of ["roster_entries", "certificates"])
     assert.deepEqual(client.reads.find((read) => read.table === name).filters, [["season", 2026]], name);
   assert.equal(client.reads.find((read) => read.table === "people").columns, "id,name,user_id");
+});
+
+test("listVolunteers marks who has a live current-season shift from today on", async () => {
+  const today = nyToday(Date.now());
+  const shift = (person_id, shift_date, extra = {}) => ({
+    workspace_id: "workspace-1",
+    season: 2026,
+    person_id,
+    shift_date,
+    removed_at: null,
+    ...extra,
+  });
+  const rows = {
+    ...ROSTER_ROWS,
+    shifts: [shift("person-ana", today)],
+  };
+  const client = fakeClient({ access: "staff", rows });
+  const [ana] = await createStore(client).listVolunteers();
+  assert.equal(ana.hasShiftsFromToday, true);
+  const read = client.reads.find((entry) => entry.table === "shifts");
+  assert.equal(read.columns, "person_id");
+  assert.deepEqual(read.filters, [
+    ["season", 2026],
+    ["removed_at", null],
+  ]);
+  assert.deepEqual(read.atLeast, [["shift_date", today]]);
+  for (const others of [
+    [shift("person-ana", "2000-01-03")],
+    [shift("person-ana", today, { removed_at: "2026-11-01T00:00:00Z" })],
+    [shift("person-ana", today, { season: 2025 })],
+  ]) {
+    const [plain] = await createStore(fakeClient({ access: "staff", rows: { ...ROSTER_ROWS, shifts: others } })).listVolunteers();
+    assert.equal(plain.hasShiftsFromToday, false);
+  }
 });
 
 test("listVolunteers is staff-only and maps a failed read", async () => {

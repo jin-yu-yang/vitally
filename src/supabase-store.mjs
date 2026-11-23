@@ -2,6 +2,7 @@ import { createAppError } from "./errors.mjs";
 import { SQLSTATE_ERROR_CODES } from "./contracts.mjs";
 import { isAuthTransportError } from "./auth.mjs";
 import { combineVolunteers } from "./volunteer-roster.mjs";
+import { nyToday } from "./volunteer-schedule.mjs";
 import { sortLabels } from "./case-labels.mjs";
 
 // The one data adapter. Everything the browser knows about the database goes
@@ -811,7 +812,20 @@ export function createStore(client) {
         season == null
           ? []
           : read(client.from(table).select("*").eq("season", season));
-      const [profiles, entries, certificates, people, accounts] = await Promise.all([
+      // Who has a live shift this season from today (New York's date) on: the
+      // remove confirmation says those go too (change add-remove-from-roster, D12).
+      const upcomingShifts = () =>
+        season == null
+          ? []
+          : read(
+              client
+                .from("shifts")
+                .select("person_id")
+                .eq("season", season)
+                .is("removed_at", null)
+                .gte("shift_date", nyToday(Date.now())),
+            );
+      const [profiles, entries, certificates, people, accounts, shifts] = await Promise.all([
         read(client.from("volunteer_profiles").select("*")),
         bySeason("roster_entries"),
         bySeason("certificates"),
@@ -821,8 +835,9 @@ export function createStore(client) {
             .from("accounts")
             .select("workspace_id,user_id,person_id,status,revision,activated_at,expires_at,is_site_coordinator"),
         ),
+        upcomingShifts(),
       ]);
-      return combineVolunteers({ profiles, entries, certificates, people, accounts });
+      return combineVolunteers({ profiles, entries, certificates, people, accounts, shifts });
     },
 
     // Earlier volunteers (change add-returning-volunteers-and-roster-csv): people
@@ -1007,7 +1022,7 @@ export function createStore(client) {
       });
     },
 
-    // The volunteer Schedule (migration 059). The RPCs enforce who may call
+    // The volunteer Schedule (migration 058). The RPCs enforce who may call
     // them; the answers are described in the volunteer-schedule spec.
     async scheduleDay(date) {
       return await call("vitally_schedule_day", { p_date: date });
@@ -1030,7 +1045,7 @@ export function createStore(client) {
       });
     },
 
-    // The caller's own live shifts this week, for My profile (migration 059).
+    // The caller's own live shifts this week, for My profile (migration 058).
     async myShifts() {
       return await call("vitally_my_shifts");
     },

@@ -72,15 +72,39 @@ const membershipOf = (f, userId) =>
 const removalsOf = async (f, personId) =>
   (
     await f.sql(
-      `select season,person_id,removed_by_person_id,account_deactivated,removed_at
+      `select season,person_id,removed_by_person_id,account_deactivated,shifts_removed,removed_at
         from public.roster_removals where workspace_id=$1 and person_id=$2 order by removed_at`,
       [f.workspaceId, personId],
     )
   ).rows;
 const siteCoordinatorChanges = async (f) =>
   Number((await one(f, "select count(*) as n from public.site_coordinator_changes where workspace_id=$1", [f.workspaceId])).n);
+// A shift for the person, `days` from today (the America/New_York date, as
+// migration 058 reckons it), in the current season. Returns its id.
+const addShift = async (f, personId, days, { removed = false } = {}) =>
+  (
+    await one(
+      f,
+      `insert into public.shifts(workspace_id,season,person_id,shift_date,start_hour,end_hour,role,removed_at)
+        select w.id,w.current_season,$2,(now() at time zone 'America/New_York')::date+$3::int,10,13,'preparer',
+         case when $4 then now() - interval '1 hour' end
+        from public.workspaces w where w.id=$1 returning id`,
+      [f.workspaceId, personId, days, removed],
+    )
+  ).id;
+const shiftsOf = async (f, personId) =>
+  (
+    await f.sql(
+      `select id,shift_date::text as day,revision::int as revision,removed_at,updated_by_person_id
+        from public.shifts where workspace_id=$1 and person_id=$2 order by shift_date,id`,
+      [f.workspaceId, personId],
+    )
+  ).rows;
+const shiftById = (f, id) =>
+  one(f, "select id,revision::int as revision,removed_at,updated_at,updated_by_person_id from public.shifts where id=$1", [id]);
 // Everything a refused removal must leave as it was.
 const stateOf = async (f, personId) => ({
+  shifts: await shiftsOf(f, personId),
   person: await personOf(f, personId),
   profile: await profileOf(f, personId),
   entry: await currentEntry(f, personId),
@@ -243,7 +267,9 @@ test("removing a volunteer from this season's roster", async (t) => {
         volunteerId: nadia.personId,
         revision: revision + 1,
         accountDeactivated: true,
+        shiftsRemoved: 0,
       });
+      assert.equal(Number(removals[0].shifts_removed), 0);
     });
 
     await t.test("sent and reviewed fields go with the entry", async () => {
@@ -441,6 +467,60 @@ test("removing a volunteer from this season's roster", async (t) => {
           await setDefaultFollowup(f, "site_coordinator");
         }
       });
+    });
+
+    await t.test("shifts from today on are removed, earlier ones kept", async () => {
+      const shay = await f.staff({ key: "shay_shifts", name: "Shay Morrow", capabilities: ["prepare"] });
+      const other = await f.staff({ key: "otto_other", name: "Otto Venn", capabilities: ["prepare"] });
+      const past = await addShift(f, shay.personId, -1);
+      const today = await addShift(f, shay.personId, 0);
+      const future = await addShift(f, shay.personId, 7);
+      const gone = await addShift(f, shay.personId, 3, { removed: true });
+      const theirs = await addShift(f, other.personId, 2);
+      const before = Object.fromEntries(
+        await Promise.all([past, today, future, gone, theirs].map(async (id) => [id, await shiftById(f, id)])),
+      );
+      const { data } = await removeNow(f, sc.client, shay.personId);
+      assert.equal(data.shiftsRemoved, 2);
+      assert.equal(Number((await removalsOf(f, shay.personId))[0].shifts_removed), 2);
+      for (const id of [today, future]) {
+        const after = await shiftById(f, id);
+        assert.ok(after.removed_at, "removed");
+        assert.equal(after.revision, before[id].revision + 1, "revision raised");
+        assert.equal(after.updated_by_person_id, sc.personId);
+        assert.ok(after.updated_at > before[id].updated_at, "updated_at");
+      }
+      for (const id of [past, gone, theirs]) assert.deepEqual(await shiftById(f, id), before[id], "untouched");
+    });
+
+    await t.test("a refused removal (OPEN_WORK) leaves the shifts as they were", async () => {
+      const member = await f.staff({ key: "olive_open", name: "Olive Strand", capabilities: ["prepare"] });
+      const shiftId = await addShift(f, member.personId, 1);
+      const caseId = await f.readyCase();
+      await f.act(member.client, caseId, "CLAIM_PREPARATION", {});
+      const before = await shiftById(f, shiftId);
+      await refused(f, sc.client, member.personId, { code: OPEN_WORK, message: "OPEN_WORK" });
+      assert.deepEqual(await shiftById(f, shiftId), before);
+      assert.equal(before.removed_at, null);
+    });
+
+    await t.test("a replay does not remove shifts again", async () => {
+      const member = await f.staff({ key: "remy_replay", name: "Remy Hale", capabilities: ["prepare"] });
+      await addShift(f, member.personId, 2);
+      const { data, revision, actionId } = await removeNow(f, sc.client, member.personId);
+      assert.equal(data.shiftsRemoved, 1);
+      const removed = await shiftsOf(f, member.personId);
+      // A shift added after the removal is not the replay's to remove.
+      const later = await addShift(f, member.personId, 4);
+      const laterBefore = await shiftById(f, later);
+      const again = await remove(sc.client, { actionId, volunteerId: member.personId, revision });
+      assert.equal(again.error, null, failure(again.error));
+      assert.deepEqual(again.data, data);
+      assert.deepEqual(await shiftById(f, later), laterBefore);
+      assert.deepEqual(
+        (await shiftsOf(f, member.personId)).filter((row) => row.id !== later),
+        removed,
+      );
     });
 
     await t.test("a stale Save after removal gets CONFLICT and does not re-add", async () => {
