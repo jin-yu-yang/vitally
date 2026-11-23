@@ -57,11 +57,11 @@
   - `ALREADY_CHECKED_IN` and `NOT_CHECKED_IN` re-read quietly;
   - none in uncleared windows.
 - [x] 4.2 `src/views.mjs`: the strip at the top of the staff shell's main area, outside the sidebar, for cleared windows with `canCheckIn`. CSS: one line or wrapping, a tap target of at least 44 px, and no sideways scroll at 390 px.
-- [ ] 4.3 Controller, the Schedule:
+- [x] 4.3 Controller, the Schedule:
   - the check-in drawer (add and edit), its save and remove with the shared confirmation dialog, and refusals shown in the drawer;
   - the CONFLICT message "Someone changed this check-in. The schedule has been refreshed.";
   - a `check_ins` change re-reads the day for admins (D7, D9).
-- [ ] 4.4 `src/schedule-views.mjs`:
+- [x] 4.4 `src/schedule-views.mjs`:
   - rows for volunteers with a shift or a check-in (admins);
   - the check-in bars with labels and tags, as keyboard-reachable buttons;
   - the closed-day and no-site-hours list for admins;
