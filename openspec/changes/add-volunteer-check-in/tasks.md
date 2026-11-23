@@ -80,7 +80,7 @@
 
 ## 5. Seed
 
-- [ ] 5.1 `tools/admin/seed-cases.mjs`:
+- [x] 5.1 `tools/admin/seed-cases.mjs`:
   - about four check-ins through `vitally_save_check_in` as the Site Coordinator, on the most recent open days before today;
   - most matching seeded shifts, one with no check-out, and one for a role account with no shift that day;
   - their ids in the run file, removed on a re-run through `vitally_remove_check_in`;
