@@ -11,12 +11,12 @@
 - **Commit range**: `93ea623..bfc91a4`, 18 commits of this change plus the merge of main (the two docs commits from main and `612d62c` came in through it).
 - **Diff size**: +2896 / −24 lines across 31 files against main (`git diff --shortstat 612d62c...bfc91a4`).
 - **Tasks done**: 20/20 (groups 1–6 by subagent-driven apply, group 7 after main merged the Schedule).
-- **Active hours**: about 9 hours of session time on Nov 22–23. Most of it was CI wall-clock: story legs run about 15 minutes each, and there were three full runs.
+- **Active hours**: not measured; spread over Nov 22–23. Much of it was CI wall-clock: story legs run about 15 minutes each, and four full runs (45083491322, 45085652892, 45088122274, 45110230200) came before the final 45111772982.
 - **Subagent dispatches**: 17 (6 implementers, 6 task reviewers, 2 fix-round re-reviews, 1 final whole-branch review, 1 final fix wave, 1 scoped re-review). Group 7 had none; it was done in the controller session.
 - **New external dependencies**: none.
 - **Bugs encountered post-merge**: none yet (not merged).
 - **OpenSpec validate state at archive**: pass (`validate --all`, 25 items). `--strict` gives only the seven "very long requirement" warnings.
-- **Test coverage signal**: unit 2352 → 2482 (main's Schedule added most of the difference; this change added about 30). The database suite is 961 tests in CI, with `tests/database-remove-from-roster.mjs` new. The browser test is a new block of about 13–18 s outside the story.
+- **Test coverage signal**: unit 2352 at the start, 2374 at `7816d0c`, 2482 at `361a501` after main's Schedule came in. The database suite is 961 tests in CI, with `tests/database-remove-from-roster.mjs` new. The browser test is a new block of about 13–18 s outside the story.
 
 Commit chain (in order):
 
@@ -56,7 +56,7 @@ bfc91a4 Test inventory: the remove-from-roster receipt carries shiftsRemoved
 ## 2. Misses
 
 - 🟡 [painful | evidence: CI 45083491322, CI 45110230200] The `tests/support/rpc-signatures.mjs` inventory failed the full `database` job twice: once when the RPC was added (R6, fixed in `369c979`) and again when the receipt gained `shiftsRemoved` (fixed in `bfc91a4`). Neither the quick runs nor the plan named `tests/database-actions.mjs`, which reads that inventory, so each miss cost a full CI cycle of about 20 minutes.
-- 🟡 [painful | evidence: `3baf47d`, then a revert inside `361a501`'s working tree] Renaming 058 to 059 with a blanket `sed` also changed two of main's Schedule comments in `src/supabase-store.mjs` that said "migration 058". They were caught by diffing against main before commit, but only because I looked.
+- 🟡 [painful | evidence: `3baf47d`; reverted before `b93e7d5`] Renaming 058 to 059 with a blanket `sed` also changed two of main's Schedule comments in `src/supabase-store.mjs` that said "migration 058". They were caught by diffing against main before commit, but only because I looked.
 - 📌 [nit | evidence: `tests/database-catalog.mjs`] Main's catalog comment and test name said "thirty-four" for a 39-entry list, so the merge had a wrong count on both sides. It now reads "forty".
 - 📌 [nit | evidence: ledger] Deferred minors left open (carry to follow-ups if anyone wants them):
   - "Already removed" isn't tested as a double removal (new revision → `NOT_FOUND`, old → `CONFLICT`).
