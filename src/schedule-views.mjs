@@ -66,7 +66,7 @@ function shiftElement(shift, hours, admin, { placed = true } = {}) {
   return admin
     ? `<button type="button" class="${cls}" data-action="open-shift" data-shift-id="${esc(shift.shiftId)}"${style} aria-label="${esc(
         shiftLabel(shift, tags),
-      )}">${inner}${edges}</button>`
+      )}" title="${esc(shiftLabel(shift, tags))}">${inner}${edges}</button>`
     : `<span class="${cls}"${style}>${inner}</span>`;
 }
 

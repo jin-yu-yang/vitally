@@ -7171,6 +7171,19 @@ button.schedule-shift {
   flex-wrap: wrap;
   gap: 4px;
 }
+/* A tag or the hours wrap inside a narrow (one-hour) shift instead of being
+   cut off at its edge; the shift's title shows the full label on hover. */
+.schedule-shift .schedule-tags {
+  max-width: 100%;
+}
+.schedule-shift .schedule-tags .badge {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+.schedule-shift .schedule-time {
+  white-space: normal;
+}
 .schedule-off {
   display: flex;
   flex-direction: column;
