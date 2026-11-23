@@ -6,7 +6,9 @@ import { createDatabaseFixture } from "./support/database-fixture.mjs";
 // OpenSpec change add-volunteer-check-in (design D1, D2, D5, D9), migration 059:
 // the check_ins table and its checks, who reads it, the publication, and the
 // counted span (vitally_private.check_in_day_end and check_in_span).
-// Rows are inserted as the superuser here; the RPCs come in later tasks.
+// Rows are inserted as the superuser for the table and span cases; the self
+// RPCs (vitally_my_check_in, vitally_check_in, vitally_check_out) are called
+// as the signed-in people.
 // One shared fixture; fictional people only. Span tests pass p_now explicitly.
 
 const one = async (f, text, values) => (await f.sql(text, values)).rows[0];
@@ -233,6 +235,144 @@ test("Volunteer check-in against real Supabase", async (t) => {
       } finally {
         await cleanup();
         await f.sql("delete from public.schedule_settings where workspace_id=$1", [f.workspaceId]);
+      }
+    });
+
+    await t.test("the self RPCs", async (t) => {
+      const ok = async (client, fn, args = {}) => {
+        const { data, error } = await client.rpc(fn, args);
+        assert.equal(error, null, `${fn}: ${error?.code} ${error?.message}`);
+        return data;
+      };
+      const refusal = async (client, fn, args, message, detail) => {
+        const { data, error } = await client.rpc(fn, args);
+        assert.equal(error?.message, message, `${fn}: ${error?.code} ${error?.message}`);
+        if (detail !== undefined) assert.equal(error?.details, detail, `${fn} detail`);
+        assert.equal(data, null);
+      };
+      const rows = async (personId) =>
+        (
+          await f.sql(
+            "select * from public.check_ins where workspace_id=$1 and person_id=$2 order by created_at",
+            [f.workspaceId, personId],
+          )
+        ).rows;
+      const receipts = async (actionId) =>
+        (
+          await one(
+            f,
+            "select count(*)::int n from public.action_receipts where workspace_id=$1 and action_id=$2",
+            [f.workspaceId, actionId],
+          )
+        ).n;
+      // Nora is on the roster with no roles, so she is not cleared.
+      const nora = await f.staff({ key: "nora_check_in", name: "Nora Ellis", capabilities: [] });
+      await f.sql("update public.roster_entries set roles='{}' where person_id=$1", [nora.personId]);
+      assert.equal(
+        (await one(f, "select vitally_private.cleared($1,$2) as c", [f.workspaceId, nora.personId])).c,
+        false,
+      );
+      const ula = await f.staff({ key: "ula_check_in", name: "Ula Brandt", capabilities: ["prepare"] });
+      const setStatus = (status) =>
+        f.sql("update public.accounts set status=$3 where workspace_id=$1 and user_id=$2", [
+          f.workspaceId,
+          ula.userId,
+          status,
+        ]);
+      try {
+        await t.test("check in: a cleared preparer checks in", async () => {
+          const before = await ok(f.preparer, "vitally_my_check_in");
+          assert.equal(before.canCheckIn, true);
+          assert.equal(before.open, null);
+          assert.match(before.today, /^\d{4}-\d{2}-\d{2}$/);
+          const answer = await ok(f.preparer, "vitally_check_in", { p_action_id: randomUUID() });
+          const mine = await ok(f.preparer, "vitally_my_check_in");
+          assert.equal(mine.open.checkInId, answer.open.checkInId);
+          assert.equal(mine.open.checkedInAt, answer.open.checkedInAt);
+          const [row] = await rows(f.preparerId);
+          assert.equal(row.id, answer.open.checkInId);
+          assert.equal(row.created_by_person_id, f.preparerId);
+          assert.equal(row.updated_by_person_id, f.preparerId);
+          assert.equal(row.corrected_by_person_id, null);
+          assert.equal(Number(row.revision), 1);
+          await cleanup();
+        });
+        await t.test("check in: not cleared", async () => {
+          const actionId = randomUUID();
+          await refusal(nora.client, "vitally_check_in", { p_action_id: actionId }, "NOT_CLEARED");
+          await refusal(nora.client, "vitally_check_out", { p_action_id: actionId }, "NOT_CLEARED");
+          assert.equal((await rows(nora.personId)).length, 0);
+          assert.equal(await receipts(actionId), 0);
+        });
+        await t.test("check in: forbidden for a client, and for an invited account", async () => {
+          await refusal(f.applicantA, "vitally_check_in", { p_action_id: randomUUID() }, "FORBIDDEN");
+          await refusal(f.applicantA, "vitally_check_out", { p_action_id: randomUUID() }, "FORBIDDEN");
+          await refusal(f.applicantA, "vitally_my_check_in", {}, "FORBIDDEN");
+          await setStatus("invited");
+          try {
+            await refusal(ula.client, "vitally_my_check_in", {}, "FORBIDDEN");
+            await refusal(ula.client, "vitally_check_in", { p_action_id: randomUUID() }, "FORBIDDEN");
+          } finally {
+            await setStatus("active");
+          }
+          assert.equal((await rows(ula.personId)).length, 0);
+        });
+        await t.test("check in: replay", async () => {
+          const actionId = randomUUID();
+          const first = await ok(f.preparer, "vitally_check_in", { p_action_id: actionId });
+          const second = await ok(f.preparer, "vitally_check_in", { p_action_id: actionId });
+          assert.deepEqual(second, first);
+          assert.equal((await rows(f.preparerId)).length, 1);
+          await cleanup();
+        });
+        await t.test("check in: already checked in", async () => {
+          await ok(f.preparer, "vitally_check_in", { p_action_id: randomUUID() });
+          await refusal(f.preparer, "vitally_check_in", { p_action_id: randomUUID() }, "VALIDATION", "ALREADY_CHECKED_IN");
+          assert.equal((await rows(f.preparerId)).length, 1);
+          await cleanup();
+        });
+        await t.test("check out: closes the open one", async () => {
+          const answer = await ok(f.preparer, "vitally_check_in", { p_action_id: randomUUID() });
+          // Push the check-in back so the check-out is after it.
+          await f.sql("update public.check_ins set checked_in_at=checked_in_at-interval '1 second' where id=$1", [
+            answer.open.checkInId,
+          ]);
+          const actionId = randomUUID();
+          const out = await ok(f.preparer, "vitally_check_out", { p_action_id: actionId });
+          assert.equal(out.checkInId, answer.open.checkInId);
+          assert.ok(out.checkedOutAt);
+          assert.deepEqual(await ok(f.preparer, "vitally_check_out", { p_action_id: actionId }), out, "replay");
+          const [row] = await rows(f.preparerId);
+          assert.ok(row.checked_out_at);
+          assert.equal(Number(row.revision), 2);
+          assert.equal(row.corrected_by_person_id, null);
+          assert.equal(row.updated_by_person_id, f.preparerId);
+          assert.equal((await ok(f.preparer, "vitally_my_check_in")).open, null);
+          await cleanup();
+        });
+        await t.test("check out: nothing open", async () => {
+          await refusal(f.preparer, "vitally_check_out", { p_action_id: randomUUID() }, "VALIDATION", "NOT_CHECKED_IN");
+        });
+        await t.test("my check-in: yesterday's open row is not open", async () => {
+          await f.sql(
+            `insert into public.check_ins(workspace_id,season,person_id,check_in_date,checked_in_at)
+              values($1,$2,$3,(now() at time zone '${NY}')::date-1,
+                (((now() at time zone '${NY}')::date-1)::timestamp+interval '10 hours') at time zone '${NY}')`,
+            [f.workspaceId, season, f.preparerId],
+          );
+          assert.equal((await ok(f.preparer, "vitally_my_check_in")).open, null);
+          await refusal(f.preparer, "vitally_check_out", { p_action_id: randomUUID() }, "VALIDATION", "NOT_CHECKED_IN");
+          await ok(f.preparer, "vitally_check_in", { p_action_id: randomUUID() });
+          assert.equal((await rows(f.preparerId)).length, 2);
+          await cleanup();
+        });
+        await t.test("my check-in: not gated by clearance", async () => {
+          const answer = await ok(nora.client, "vitally_my_check_in");
+          assert.equal(answer.canCheckIn, false);
+          assert.equal(answer.open, null);
+        });
+      } finally {
+        await cleanup();
       }
     });
   } finally {

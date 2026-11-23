@@ -45,6 +45,11 @@ async function scheduleCleanup(f, context) {
   else await f.sql("delete from public.schedule_settings where workspace_id=$1", [f.workspaceId]);
 }
 
+// Leaves the workspace without check-ins (for the check-in entries).
+async function checkInCleanup(f) {
+  await f.sql("delete from public.check_ins where workspace_id=$1", [f.workspaceId]);
+}
+
 // Every public application entry point installed so far, with a valid argument
 // shape, the exact receipt it answers with, and the member allowed to call it.
 // The database suite asserts this list matches exactly what the database
@@ -424,6 +429,41 @@ export const RPC_SIGNATURES = Object.freeze([
     authorized: (f) => f.siteCoordinator,
     receiptKeys: Object.freeze(["shifts", "weekEnd", "weekStart"]),
     args: () => ({}),
+  }),
+  // Self check-in and check-out (add-volunteer-check-in, design D3): the caller's
+  // own day. The site coordinator is cleared and on the roster. A check-out
+  // needs an open check-in, which its context inserts.
+  Object.freeze({
+    name: "vitally_my_check_in",
+    signature: "vitally_my_check_in()",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["canCheckIn", "open", "today"]),
+    args: () => ({}),
+  }),
+  Object.freeze({
+    name: "vitally_check_in",
+    signature: "vitally_check_in(uuid)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["open"]),
+    args: () => ({ p_action_id: crypto.randomUUID() }),
+    cleanup: checkInCleanup,
+  }),
+  Object.freeze({
+    name: "vitally_check_out",
+    signature: "vitally_check_out(uuid)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["checkInId", "checkedInAt", "checkedOutAt"]),
+    args: () => ({ p_action_id: crypto.randomUUID() }),
+    context: async (f) => {
+      await f.sql(
+        `insert into public.check_ins(workspace_id,season,person_id,check_in_date,checked_in_at)
+          select w.id,w.current_season,$2,(now() at time zone 'America/New_York')::date,now()-interval '1 second'
+          from public.workspaces w where w.id=$1`,
+        [f.workspaceId, f.siteCoordinatorId],
+      );
+      return {};
+    },
+    cleanup: checkInCleanup,
   }),
   // Setting the site's SIDN (design D5): the answer says only that it is set.
   // The fixture's own number (TEST_SITE_NUMBER), so the site check elsewhere

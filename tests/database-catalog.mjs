@@ -28,6 +28,7 @@ const POLICIES = Object.freeze([
   ["case_events", "staff_case_events"],
   ["case_materials", "staff_case_materials"],
   ["cases", "visible_cases"],
+  ["check_ins", "check_ins_read"],
   ["client_events", "visible_client_events"],
   ["contact_attempts", "staff_contact_attempts"],
   ["contact_log", "staff_contact_log"],
@@ -53,7 +54,7 @@ const POLICIES = Object.freeze([
   ["volunteer_profiles", "admin_volunteer_profiles"],
   ["workspaces", "member_workspace"],
 ]);
-// The thirty-four public RPCs after 058, by name and identity arguments.
+// The thirty-seven public RPCs after 059, by name and identity arguments.
 const RPCS = Object.freeze([
   "vitally_apply_action(p_action_id uuid, p_case_id uuid, p_expected_revision bigint, p_type text, p_payload jsonb)",
   "vitally_assistance_action(p_action_id uuid, p_item_id uuid, p_expected_revision bigint, p_type text, p_note text)",
@@ -88,6 +89,9 @@ const RPCS = Object.freeze([
   "vitally_remove_shift(p_action_id uuid, p_shift_id uuid, p_expected_revision bigint)",
   "vitally_schedule_day(p_date date)",
   "vitally_my_shifts()",
+  "vitally_my_check_in()",
+  "vitally_check_in(p_action_id uuid)",
+  "vitally_check_out(p_action_id uuid)",
   "vitally_set_site_number(p_action_id uuid, p_sidn text)",
   "vitally_mark_upload_sent(p_action_id uuid, p_document text)",
   "vitally_mark_upload_reviewed(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_document text, p_reason text)",
@@ -107,6 +111,7 @@ const READ_ONLY_RPCS = Object.freeze([
   "vitally_complete_site_check",
   "vitally_expire_invitations",
   "vitally_mark_updates",
+  "vitally_my_check_in",
   "vitally_my_clearance",
   "vitally_my_profile",
   "vitally_my_shifts",
@@ -210,7 +215,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
     });
 
-    await t.test("the public API is exactly thirty-four RPCs", async () => {
+    await t.test("the public API is exactly thirty-seven RPCs", async () => {
       const { rows } = await sql(
         `select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as signature
            from pg_proc p where p.pronamespace='public'::regnamespace`,
@@ -346,7 +351,7 @@ test("the catalog after the sample-case tools and presenter access are removed",
       );
     });
 
-    await t.test("vitally_policy holds exactly the admin check, the clearance check, the update audience check, the schedule viewer check and the unpublished window, with exactly their grants", async () => {
+    await t.test("vitally_policy holds exactly the admin check, the clearance check, the update audience check, the schedule viewer check, the own-person check and the unpublished window, with exactly their grants", async () => {
       const { rows } = await sql(
         `select p.oid, p.oid::regprocedure::text as signature, p.prosecdef, p.provolatile, p.proconfig,
                 p.proargnames, p.pronargs
@@ -358,14 +363,17 @@ test("the catalog after the sample-case tools and presenter access are removed",
         [
           "cleared_workspace_id()",
           "in_update_audience(uuid,text,text[])",
+          "is_own_person(uuid,uuid)",
           "is_schedule_viewer(uuid)",
           "is_workspace_admin(uuid)",
           "unpublished_read_window()",
         ],
       );
-      const [cleared, audience, viewer, admin, readWindow] = rows;
+      const [cleared, audience, ownPerson, viewer, admin, readWindow] = rows;
       assert.equal(cleared.proargnames, null);
       assert.equal(cleared.pronargs, 0);
+      assert.deepEqual(ownPerson.proargnames, ["p_workspace_id", "p_person_id"]); // 059
+      assert.equal(ownPerson.pronargs, 2);
       assert.deepEqual(viewer.proargnames, ["p_workspace_id"]); // 058
       assert.equal(viewer.pronargs, 1);
       assert.deepEqual(admin.proargnames, ["p_workspace_id"]);
@@ -383,7 +391,9 @@ test("the catalog after the sample-case tools and presenter access are removed",
           assert.equal(helper.provolatile, "s", helper.signature);
         }
         assert.deepEqual(helper.proconfig, ['search_path=""'], helper.signature);
-        for (const name of helper.proargnames ?? [])
+        // is_own_person (059) names the row's person, but answers only for the
+        // caller: it takes no user id, and its arguments are asserted above.
+        for (const name of helper === ownPerson ? [] : (helper.proargnames ?? []))
           assert.doesNotMatch(name, /user|account|member|person/i, helper.signature);
         const grants = await sql(
           `select a.grantee, r.rolname, a.privilege_type
