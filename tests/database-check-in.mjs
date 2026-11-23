@@ -439,9 +439,9 @@ test("Volunteer check-in against real Supabase", async (t) => {
       const sc = f.siteCoordinator;
       // A case that fails still leaves the next one a clean day.
       const it = (name, fn) =>
-        t.test(name, async () => {
+        t.test(name, async (tc) => {
           try {
-            await fn();
+            await fn(tc);
           } finally {
             await cleanup();
           }
@@ -583,6 +583,51 @@ test("Volunteer check-in against real Supabase", async (t) => {
           await refused(sc, "vitally_save_check_in", save(null, null, add(f.preparerId, d.sat, "12:00", "14:00")), "VALIDATION", "OVERLAP", "12:00-14:00");
           const after = await ok(sc, "vitally_save_check_in", save(null, null, add(f.preparerId, d.sat, "13:00", "14:00")));
           assert.equal(after.minutes, 60);
+        });
+        // Today's layouts start at 10:00, or earlier when it is too early in the
+        // New York day for them; null when even 00:00 is too late.
+        const nyMinutesNow = async () =>
+          (await one(f, `select (extract(hour from now() at time zone '${NY}')*60+extract(minute from now() at time zone '${NY}'))::int as m`)).m;
+        const baseHour = async (needMinutes) => {
+          const b = Math.min(10, Math.floor(((await nyMinutesNow()) - needMinutes) / 60));
+          return b < 0 ? null : b;
+        };
+        const hh = (h, m = 0) => `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+        const openRows = async (personId) =>
+          (
+            await one(
+              f,
+              "select count(*)::int n from public.check_ins where workspace_id=$1 and person_id=$2 and removed_at is null and checked_out_at is null",
+              [f.workspaceId, personId],
+            )
+          ).n;
+        await it("save: adding beside an open check-in", async (t2) => {
+          // Open since B:00 with a shift ending B+3, now after B+4:30. Add B+4:00 to B+4:30.
+          const b = await baseHour(4 * 60 + 31);
+          if (b === null) return t2.skip("too early in the New York day");
+          await insertShift(f.preparerId, d.today, b, b + 3);
+          await insertCheckIn(f.preparerId, `${d.today} ${hh(b)}`);
+          await refused(sc, "vitally_save_check_in", save(null, null, add(f.preparerId, d.today, hh(b + 4), hh(b + 4, 30))), "VALIDATION", "OVERLAP", "beside an open check-in");
+          // An open one added after the open one is refused too.
+          await refused(sc, "vitally_save_check_in", save(null, null, add(f.preparerId, d.today, hh(b + 4), null)), "VALIDATION", "OVERLAP", "a second open check-in");
+          assert.equal(await liveCount(f.preparerId), 1);
+          assert.equal(await openRows(f.preparerId), 1);
+          // Before the open one is allowed: an open check-in runs on, not back.
+          if (b >= 1) await ok(sc, "vitally_save_check_in", save(null, null, add(f.preparerId, d.today, hh(b - 1), hh(b))));
+        });
+        await it("save: reopening before a later check-in", async (t2) => {
+          // B:00-B+2 and B+3-B+4, both past, with a shift ending B+2. Clear the first one's out.
+          const b = await baseHour(4 * 60 + 1);
+          if (b === null) return t2.skip("too early in the New York day");
+          await insertShift(f.preparerId, d.today, b, b + 2);
+          const first = await insertCheckIn(f.preparerId, `${d.today} ${hh(b)}`, `${d.today} ${hh(b + 2)}`);
+          await insertCheckIn(f.preparerId, `${d.today} ${hh(b + 3)}`, `${d.today} ${hh(b + 4)}`);
+          const before = await row(first.id);
+          await refused(sc, "vitally_save_check_in", save(first.id, 1, { checkedIn: hh(b), checkedOut: null }), "VALIDATION", "OVERLAP", "reopening");
+          const after = await row(first.id);
+          assert.equal(Number(after.revision), 1);
+          assert.equal(after.checked_out_at.getTime(), before.checked_out_at.getTime());
+          assert.equal(after.corrected_by_person_id, null);
         });
         await it("save: outside site hours and no sign-in are allowed", async () => {
           const early = await ok(sc, "vitally_save_check_in", save(null, null, add(f.preparerId, d.mon, "06:00", "07:00")));

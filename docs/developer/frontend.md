@@ -1073,7 +1073,8 @@ which a cleared staff member opens from the sidebar account row. The database si
   the draft is `state.schedule.checkInDrawer`) opens from a bar, or from "+ Add check-in" (today and
   past days) with a volunteer picker. "Checked in" and "Checked out" are selects in 5-minute steps
   (`timeOptions`, which keeps a saved off-step time such as 9:52 so an edit that changes only the
-  other field sends it unchanged); "Checked out" can be "Not checked out" or "24:00". Save sends
+  other field sends it unchanged); "Checked out" can be "Not checked out", and offers no 12:00 am at
+  the day's start: midnight appears once, at the end, as "12:00 am (midnight)" (sent as `24:00`). Save sends
   `vitally_save_check_in` at the revision the drawer opened on; Remove check-in asks first. A saved
   check-in shows "Corrected by" and the admin's name, and a missed check-out "No check-out. Counted to 1 pm."
 

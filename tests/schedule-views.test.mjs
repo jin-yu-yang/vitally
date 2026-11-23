@@ -470,9 +470,25 @@ test("drawer: an off-step saved time stays selected, in 5-minute steps", () => {
   assert.match(select("check-in-in"), /<option value="09:50">9:50 am</);
   assert.match(select("check-in-in"), /<option value="09:55">9:55 am</);
   assert.match(select("check-in-out"), /<option value="13:10" selected>1:10 pm</);
-  assert.match(select("check-in-out"), /<option value="24:00">12:00 am</);
   // An edit keeps its volunteer.
   assert.doesNotMatch(html, /name="volunteerId"/);
+});
+
+test("drawer: Checked out offers midnight once, as the day's end", () => {
+  for (const checkedOut of [null, "13:10"]) {
+    const html = checkInDrawer(
+      checkInDrawerState({ mode: "edit", checkInId: "ci-rowan", revision: 1, volunteerId: "p-rowan", name: "Rowan Diaz", checkedIn: "09:52", checkedOut }),
+    );
+    const select = (id) => html.match(new RegExp(`<select id="${id}"[\\s\\S]*?</select>`))[0];
+    const out = select("check-in-out");
+    const midnight = [...out.matchAll(/<option value="([^"]*)"[^>]*>12:00 am[^<]*</g)];
+    assert.equal(midnight.length, 1, `${checkedOut}: one midnight option`);
+    assert.match(out, /<option value="24:00">12:00 am \(midnight\)</);
+    assert.doesNotMatch(out, /value="00:00"/);
+    assert.match(out, /<option value=""[^>]*>Not checked out</);
+    // Checked in still starts at midnight, unlabelled.
+    assert.match(select("check-in-in"), /<option value="00:00">12:00 am</);
+  }
 });
 
 test("drawer: Add check-in picks a volunteer, usual days first", () => {

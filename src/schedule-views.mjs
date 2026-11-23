@@ -298,11 +298,12 @@ export function removeShiftDialogBody(state) {
 
 // ---- the check-in drawer (change add-volunteer-check-in, design D7) -------
 
-// "09:52" as "9:52 am"; "24:00" (the midnight that ends the day) as "12:00 am".
+// "09:52" as "9:52 am"; "24:00" (the midnight that ends the day) as
+// "12:00 am (midnight)".
 const clockLabel = (value) => {
+  if (value === "24:00") return "12:00 am (midnight)";
   const [hour, minute] = String(value).split(":").map(Number);
-  const h = hour % 24;
-  return `${h % 12 === 0 ? 12 : h % 12}:${String(minute).padStart(2, "0")} ${h < 12 ? "am" : "pm"}`;
+  return `${hour % 12 === 0 ? 12 : hour % 12}:${String(minute).padStart(2, "0")} ${hour < 12 ? "am" : "pm"}`;
 };
 
 // A select's options in 5-minute steps, with the saved value kept though it is
@@ -361,7 +362,9 @@ export function checkInDrawer(state) {
   )}>${timeSelect(timeOptions(drawer.checkedIn), drawer.checkedIn)}</select></label><label class="field" for="check-in-out"><span>Checked out</span><select id="check-in-out" name="checkedOut"${disabled(
     busy,
   )}><option value=""${checkedOut === "" ? " selected" : ""}>Not checked out</option>${timeSelect(
-    timeOptions(drawer.checkedOut, { allow24: true }),
+    // No 00:00: a check-out at the day's start is never after the check-in.
+    // Midnight is offered once, as 24:00, the end of the day.
+    timeOptions(drawer.checkedOut, { allow24: true }).filter((value) => value !== "00:00" || value === checkedOut),
     checkedOut,
   )}</select></label></div><div class="drawer-actions">${button("Save", "save-check-in", "primary", disabled(busy))}${remove}${button(
     "Cancel",

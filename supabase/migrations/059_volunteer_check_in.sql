@@ -1,12 +1,12 @@
 -- 059: volunteer check-in (OpenSpec change add-volunteer-check-in, design
--- D1, D2, D5, D9).
+-- D1 to D5 and D7 to D9).
 --
 -- Who actually came, and for how long. One row per check-in: a volunteer
 -- checks in and out, and an admin may correct or add rows. In order:
 --   §1 storage (design D1): the check_ins table and its checks;
---   §2 the counted span (design D5): the day's end, and the state, end and
+--   §2 the counted span (design D2): the day's end, and the state, end and
 --      minutes of one check-in;
---   §3 who reads (design D9): a caller-only policy helper, the SELECT policy
+--   §3 who reads (design D5): a caller-only policy helper, the SELECT policy
 --      and the SELECT grant. No write grant; the RPCs are the only writers;
 --   §4 realtime (design D9): check_ins joins the publication;
 --   §5 the self RPCs (design D3): vitally_my_check_in, vitally_check_in and
@@ -56,7 +56,7 @@ alter table public.check_ins enable row level security;
 revoke all on public.check_ins from public,anon,authenticated,service_role;
 
 -- ---------------------------------------------------------------------------
--- §2. The counted span (design D5).
+-- §2. The counted span (design D2).
 
 -- When a person's day ends, as an instant, or null for no end: the latest
 -- live shift end_hour that day for the person, else the close of the site
@@ -112,7 +112,7 @@ $$;
 revoke all on function vitally_private.check_in_span(public.check_ins,timestamptz) from public,anon,authenticated,service_role;
 
 -- ---------------------------------------------------------------------------
--- §3. Who reads (design D9).
+-- §3. Who reads (design D5).
 
 -- Whether a person is the caller's own person in that workspace. It takes no
 -- user id: it answers only for the caller.
@@ -367,7 +367,10 @@ revoke all on function vitally_private.check_in_item(public.check_ins) from publ
 -- an unknown or removed check-in; CONFLICT (a stale revision); then the
 -- VALIDATION reasons that read stored state, as the detail, in this order:
 -- volunteerId and date (an edit names another person or date), NOT_ON_ROSTER,
--- DEACTIVATED, OUT_BEFORE_IN, IN_FUTURE, OVERLAP. Every save sets
+-- DEACTIVATED, OUT_BEFORE_IN, IN_FUTURE, OVERLAP (design D4: spans as
+-- check_in_span counts them, except that a check-in dated the New York today
+-- with no check-out runs on with no end, the one being saved included; spans
+-- may meet). Every save sets
 -- corrected_by_person_id; the original times are not kept. Answers the
 -- check-in as check_in_item does.
 create function public.vitally_save_check_in(p_action_id uuid,p_check_in_id uuid,p_expected_revision bigint,p_check_in jsonb)
@@ -383,6 +386,7 @@ declare v_member public.memberships;
  v_in timestamptz;
  v_out timestamptz;
  v_end timestamptz;
+ v_today date;
  v_digest text;
  v_result jsonb;
 begin
@@ -474,18 +478,28 @@ begin
  if v_in>now() or v_out>now() then
   raise sqlstate 'VT007' using message='VALIDATION',detail='IN_FUTURE';
  end if;
- -- The new span: to the check-out, else to the end the row would be counted to.
+ -- The new span: to the check-out, else to the end the row would be counted
+ -- to. For this check only, a check-in dated today with no check-out, this one
+ -- or another, runs on with no end: its capped end is only an estimate, and it
+ -- grows when the volunteer checks out.
+ v_today=(now() at time zone 'America/New_York')::date;
  v_new.workspace_id=v_member.workspace_id;
  v_new.person_id=v_volunteer;
  v_new.check_in_date=v_date;
  v_new.checked_in_at=v_in;
  v_new.checked_out_at=v_out;
- select s.ends_at into v_end from vitally_private.check_in_span(v_new,now()) s;
+ if v_out is null and v_date=v_today then
+  v_end='infinity';
+ else
+  select s.ends_at into v_end from vitally_private.check_in_span(v_new,now()) s;
+ end if;
  if exists(select 1 from public.check_ins c
    cross join lateral vitally_private.check_in_span(c,now()) s
   where c.workspace_id=v_member.workspace_id and c.person_id=v_volunteer and c.check_in_date=v_date
    and c.removed_at is null and c.id is distinct from p_check_in_id
-   and c.checked_in_at<v_end and v_in<s.ends_at) then
+   and c.checked_in_at<v_end
+   and v_in<case when c.checked_out_at is null and c.check_in_date=v_today
+    then 'infinity'::timestamptz else s.ends_at end) then
   raise sqlstate 'VT007' using message='VALIDATION',detail='OVERLAP';
  end if;
  if p_check_in_id is null then

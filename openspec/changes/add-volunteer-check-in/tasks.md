@@ -113,8 +113,8 @@
 
 Decided by the user on 2026-11-23, after the final whole-branch review (finding I1). Run 6.3 after this group.
 
-- [ ] 7.1 OVERLAP with an open check-in (design D4). For the overlap check in `vitally_save_check_in`, a live check-in dated today with no check-out runs on with no end, the saved one included. The counted minutes are unchanged. Edit 059 in place, since it is applied nowhere shared, and reset it on the local stack. Add database tests for the two new scenarios, "Adding beside an open check-in" and "Reopening before a later check-in".
-- [ ] 7.2 Review minors:
+- [x] 7.1 OVERLAP with an open check-in (design D4). For the overlap check in `vitally_save_check_in`, a live check-in dated today with no check-out runs on with no end, the saved one included. The counted minutes are unchanged. Edit 059 in place, since it is applied nowhere shared, and reset it on the local stack. Add database tests for the two new scenarios, "Adding beside an open check-in" and "Reopening before a later check-in".
+- [x] 7.2 Review minors:
   - the Checked out list shows "12:00 am" only once: drop 00:00 and label 24:00 "12:00 am (midnight)", and correct `docs/developer/frontend.md`, which says the option reads "24:00";
   - the stale `state.weekHours` comment in `src/controller.mjs`;
   - the 059 header comments name the right design decisions.

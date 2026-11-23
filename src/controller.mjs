@@ -436,8 +436,9 @@ export function createController({
     // tab is only ever set for a cleared, effective admin (`canSeeWorkload`).
     volunteerTab: "roster",
     workload: freshWorkloadView(),
-    // The live shifts of the week holding today, for the Workload's Hours
-    // this week (design D9); read only while the Workload is open.
+    // Each volunteer's counted check-in minutes in the week holding today,
+    // `[{volunteerId, minutes}]` from `vitally_hours_this_week`, for the
+    // Workload's Hours this week (design D8); read only while the Workload is open.
     weekHours: [],
     // Posted updates (change add-posted-updates). The feed is every staff
     // window's, cleared or not: `updates` is the RPC's items as read,

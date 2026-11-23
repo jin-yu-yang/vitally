@@ -662,7 +662,8 @@ behaviour is in the change's `volunteer-check-in` spec, and in `openspec/specs/`
   (`vitally_save_check_in`, `vitally_remove_check_in`) in `vitally_save_shift`'s order: `FORBIDDEN`,
   shape `VALIDATION`, the lock, the receipt, `NOT_FOUND`, `CONFLICT`, then the `VALIDATION` details
   `NOT_ON_ROSTER`, `DEACTIVATED`, `OUT_BEFORE_IN`, `IN_FUTURE` and `OVERLAP` (against another
-  check-in's counted end). Every save sets `corrected_by_person_id`; the original times are not kept.
+  check-in's counted end, except that a check-in dated today with no check-out, the saved one
+  included, runs on with no end). Every save sets `corrected_by_person_id`; the original times are not kept.
 - **The day read.** `vitally_schedule_day` (058's) is re-created with its body unchanged, except that
   an admin's answer adds `checkIns`: the day's live check-ins, each with `state`, `endsAt`, `minutes`,
   `flags` (`noCheckOut`, `notScheduled`, `corrected`, `outsideSiteHours`) and `correctedByName`. A
