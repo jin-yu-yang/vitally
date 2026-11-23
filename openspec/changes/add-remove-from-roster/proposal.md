@@ -6,7 +6,7 @@ There is no way to take a volunteer off this season's Roster. Cancel invitation 
 
 **Remove from this season's roster (new)**
 - A "Remove from this season's roster…" action in the Roster's Edit drawer, behind a confirmation that names the person and their email and says what will happen.
-- A new RPC, `vitally_remove_from_roster`. It deletes the person's current-season roster entry, so their certificates and the record of what they sent go with it. It keeps `people` and `volunteer_profiles`, raises the profile revision, and deactivates the account in the same step, except a site coordinator's. It records the removal in a new `roster_removals` table.
+- A new RPC, `vitally_remove_from_roster`. It deletes the person's current-season roster entry, so their certificates and the record of what they sent go with it. It keeps `people` and `volunteer_profiles`, raises the profile revision, and deactivates the account in the same step, except a site coordinator's. It marks the person's shifts from today on removed, so they leave the Schedule (#140), and keeps earlier ones. It records the removal in a new `roster_removals` table.
 - Refused while the person holds open work (`OPEN_WORK`), for the caller's own row (`SELF`), for a person with the Admin role unless the caller is a site coordinator (`ADMIN_ROLE`), and for a site coordinator unless the caller is a site coordinator (`FORBIDDEN`). Stale revisions get `CONFLICT`, and a repeated action id returns the stored result.
 - Current season only. Past seasons' rosters are unchanged. A removed person comes back through Add a volunteer's returning-volunteer search (#267).
 
@@ -23,16 +23,16 @@ Migration 059. No change for clients. Staff text is English only.
 (none)
 
 ### Modified Capabilities
-- `volunteer-roster`: adds removal from this season's roster (the RPC, its refusals, the confirmation, the record of removals) and the Reactivate pointer after a re-add.
+- `volunteer-roster`: adds removal from this season's roster (the RPC, its refusals, the confirmation, the record of removals, the removal of the person's shifts from today on in `volunteer-schedule`) and the Reactivate pointer after a re-add.
 - `sign-in-accounts`: removal becomes another user of the internal deactivation, alongside Deactivate and Start next season.
 - `site-coordinators`: only a site coordinator removes a site coordinator from the roster, and removal never deactivates a site coordinator's account.
 - `volunteer-clearance`: removal empties the person's capabilities mirror. A removed person's window shows "This account has no access" on its next wake, and a removed site coordinator's shows the setup screen.
 
 ## Impact
 
-- **Database:** `supabase/migrations/059_remove_from_roster.sql`, with the `roster_removals` table and `vitally_remove_from_roster`. No change to existing functions.
+- **Database:** `supabase/migrations/059_remove_from_roster.sql`, with the `roster_removals` table and `vitally_remove_from_roster`. No change to existing functions; the only existing rows written are the removed person's own, their shifts from today on included.
 - **Browser:**
-  - `src/supabase-store.mjs`: a `removeFromRoster` request.
+  - `src/supabase-store.mjs`: a `removeFromRoster` request, and the Roster read learns who has shifts from today on.
   - `src/controller.mjs`: the action, its refusals, and the #269 notice.
   - `src/volunteer-views.mjs` and `src/views.mjs`: the drawer button, the confirmation dialog, and the Reactivate note.
   - `src/app.mjs`: wiring.

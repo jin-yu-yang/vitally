@@ -33,7 +33,7 @@ Stakeholders: Hailey (owner), Zeye (reviewer, approves before hosted deploy), Ji
 - Any UI for the removal record.
 - Reactivating automatically on re-add.
 - Making the Roster live (realtime or re-read on wake).
-- Shifts (#140, not built; see the forward note).
+- Changing the Schedule's own screens or RPCs (#140, merged as 058). Removal only marks the person's shifts removed (D12).
 
 ## Decisions
 
@@ -71,12 +71,13 @@ Stakeholders: Hailey (owner), Zeye (reviewer, approves before hosted deploy), Ji
   9. The site coordinator rule from D3 (`FORBIDDEN`).
   10. `OPEN_WORK` from the full `open_work` list, with the labels as detail. The SC exception that Save makes for the default follow-up person doesn't apply here.
   11. Delete the entry.
-  12. Lock the account `FOR UPDATE`. If it is `invited` or `active` and not a site coordinator's, call `deactivate_account`.
-  13. Raise the profile revision.
-  14. Insert into `roster_removals`.
-  15. Store the receipt: `{actionId, volunteerId, revision, accountDeactivated}`.
+  12. Mark the person's live current-season shifts from today on removed (D12).
+  13. Lock the account `FOR UPDATE`. If it is `invited` or `active` and not a site coordinator's, call `deactivate_account`.
+  14. Raise the profile revision.
+  15. Insert into `roster_removals`.
+  16. Store the receipt: `{actionId, volunteerId, revision, accountDeactivated, shiftsRemoved}`.
 - **Why:**
-  - The order of locks is the same as Save's: the workspace lock, then the profile, then the entry, then the account. Save, Deactivate and Remove all take the workspace lock first, so none of them can deadlock with another.
+  - The order of locks is the same as Save's: the workspace lock, then the profile, then the entry, then the shifts and the account. Save, Deactivate, Remove, and Save shift and Remove shift (058) all take the workspace lock first, so none of them can deadlock with another.
   - The receipt is reserved before the `CONFLICT` check, so a retry after a lost reply is answered, not refused.
   - `OPEN_WORK` is checked before anything is written. `deactivate_account` checks it again, which costs nothing.
 - **Alternative considered:** the account revision as the expected revision, as Deactivate uses. Rejected, because the Edit drawer that Save uses holds the profile revision (D5).
@@ -92,7 +93,7 @@ Stakeholders: Hailey (owner), Zeye (reviewer, approves before hosted deploy), Ji
 
 ### D7: Record every removal
 - **Choice:** a new table `public.roster_removals`:
-  - `id`, `workspace_id` (references workspaces, on delete cascade), `season`, `person_id`, `removed_by_person_id`, `removed_at` (default now()) and `account_deactivated` (boolean).
+  - `id`, `workspace_id` (references workspaces, on delete cascade), `season`, `person_id`, `removed_by_person_id`, `removed_at` (default now()), `account_deactivated` (boolean) and `shifts_removed` (integer, default 0; D12).
   - Row security on, no policy, and `revoke all` from public, anon, authenticated and service_role.
   - Person ids are historical scalars, as in `season_starts`.
 - **Why:** removal destroys the season's certificates and sent/reviewed dates, and receipts have no timestamp.
@@ -111,6 +112,7 @@ Stakeholders: Hailey (owner), Zeye (reviewer, approves before hosted deploy), Ji
     > *[site coordinator]* Their account stays active because they are a site coordinator, but they will have no roles this season.
     > *[already deactivated]* Their account is already deactivated.
     > *[no account]* (no account line)
+    > *[a live shift from today on]* Their shifts from today on are removed from the Schedule.
     > Their cases and contact details are kept. To add them back, search for <email> in Add a volunteer.
     >
     > [Remove from roster] [Cancel]
@@ -140,8 +142,18 @@ Stakeholders: Hailey (owner), Zeye (reviewer, approves before hosted deploy), Ji
 - **Choice:** no new mechanism. Another admin's Roster learns when the Roster is opened again or the page is reloaded. It also learns when that admin acts on the person: a Save gets `CONFLICT`, a Remove gets `NOT_FOUND` or `CONFLICT`, and either refusal re-reads the list.
 - **Why:** this is how every Roster change already reaches other windows.
 
-### Forward note: Schedule (#140)
-When shifts exist, removing someone from this season's roster must also remove or refuse their future shifts. Nothing to build now.
+### D12: Removal takes the person's shifts from today on off the Schedule
+- **Choice:**
+  - In the same transaction, right after the entry is deleted, the RPC marks removed every live shift of the person in the current season with `shift_date` on or after today, where today is `(now() at time zone 'America/New_York')::date`, as 058 reckons it. Each gets `removed_at = now()`, `revision + 1`, `updated_at = now()` and `updated_by_person_id` = the caller, exactly as `vitally_remove_shift` marks one.
+  - Shifts before today stay, so Workload's hours this week still count what was worked. Shifts already removed, and other people's, are not touched.
+  - The receipt carries `shiftsRemoved`, and `roster_removals.shifts_removed` records the same count. A refused removal changes no shift, since everything is one transaction; a replay returns the stored receipt and removes nothing more.
+  - **The confirmation.** The Roster's read (`listVolunteers`) also reads `person_id` from the live current-season shifts dated today or later (New York's date), which admins may read directly under 058's `viewer_shifts` policy, as Workload does. A volunteer with any gets `hasShiftsFromToday`, and the dialog adds "Their shifts from today on are removed from the Schedule." before its last line. The flag is as fresh as the Roster's last read (D11): a shift added in another window after that read is still removed, but the line may not say so.
+  - **Other windows.** Nothing new. The marks are `UPDATE`s on `shifts`, which 058 publishes to Realtime, so open Schedule, My profile and Workload screens re-read as for any shift change.
+- **Why:** `public.shifts` refers to `people`, not to `roster_entries`, so deleting the entry would leave the shifts on the Schedule under the person's name, tagged Not cleared and Role removed, visible to every volunteer. A soft removal, as Remove shift does, is what Realtime already announces.
+- **Alternatives considered:**
+  - Refuse removal while the person has future shifts, as `OPEN_WORK` does. That makes the admin delete each shift first, for no gain: a shift is a plan, not work with a client.
+  - Mark every shift removed, past ones included. That would drop hours already worked from this week's Workload.
+  - Hard-delete the shifts. Realtime would then send a `DELETE`, which 058's screens don't handle, and the history would go.
 
 ## Risks / Trade-offs
 
@@ -150,13 +162,13 @@ When shifts exist, removing someone from this season's roster must also remove o
 - [Risk] A Remove races a Deactivate. → Mitigation: D6, and a test pins that Remove never answers `INVALID_TRANSITION`.
 - [Risk] Locks could deadlock with Save, the account RPCs or Start next season. → Mitigation: the workspace lock comes first and the lock order is Save's (D4).
 - [Trade-off] `open_work` counts every current-season case not in stage closed, Accepted included, as it does for Deactivate. Mid-season, a volunteer who has touched a case can be removed only once those cases are Closed or handed over. Kept as is, the same rule as Deactivate.
-- [Trade-off] Other admins' open Rosters go stale until a reopen or reload (D11). Accepted, because that is the existing Roster behaviour.
+- [Trade-off] Other admins' open Rosters go stale until a reopen or reload (D11). Accepted, because that is the existing Roster behaviour. The confirmation's shifts line (D12) is as fresh as that read.
 - [Trade-off] First-season removals can't be found from the picker's list (D9). Accepted, with the email shown in the dialog.
 - [Trade-off] A removed site coordinator keeps their admin screens with no roles. That's the same state Start next season leaves the starter in.
 
 ## Migration Plan
 
-- **The migration.** `059_remove_from_roster.sql` adds the table and the function, and changes no existing function or row. It's hand-written and final once applied.
+- **The migration.** `059_remove_from_roster.sql` adds the table and the function, and changes no existing function. The only existing rows it writes are the removed person's own (D1, D12). It's hand-written and final once applied.
 - **While iterating.** Database tests run through `gh workflow run database-quick.yml --ref <branch> -f files="tests/database-remove-from-roster.mjs"`. No local Docker or stack on this machine.
 - **The final check.** The PR's full CI: `checks`, `database`, `sign-in` and both `story` legs.
 - **Deploy.** Once the migration is final and Zeye has approved, apply 059 to the hosted database from the worktree, then merge. If the migration changes after approval, ask Zeye to look again first.
@@ -164,4 +176,4 @@ When shifts exist, removing someone from this season's roster must also remove o
 
 ## Open Questions
 
-None. The known limit (D9) and the Schedule forward note are recorded above. Neither affects this build.
+None. The known limit (D9) is recorded above. The Schedule (#140), once a forward note here, is D12.

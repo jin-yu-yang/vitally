@@ -30,3 +30,11 @@
 - [x] 6.1 Update `docs/developer/database.md` (migration 059, the RPC, `roster_removals`) and `docs/developer/frontend.md` (the remove dialog, the #269 notice)
 - [x] 6.2 Run `npm test` and `npx openspec validate --all`; confirm `npm run build:intake` leaves nothing to commit
 - [x] 6.3 Push the branch and run the full CI (`gh workflow run ci.yml --ref <branch>`); every job covering the change passes, and the story's screenshots are reviewed
+
+## 7. The Schedule (design D12, after main's 058)
+
+- [x] 7.1 Renumber the migration to `059_remove_from_roster.sql` after merging main, and update every reference
+- [x] 7.2 In 059, right after the entry is deleted, mark the person's live current-season shifts dated today or later (America/New_York) removed, as Remove shift does; `shiftsRemoved` in the receipt and `roster_removals.shifts_removed`; database tests: today's and later removed with the revision raised, earlier kept, another person's and already removed untouched, `OPEN_WORK` changes no shift, a replay removes nothing more
+- [x] 7.3 The Roster read marks `hasShiftsFromToday`, and the confirmation says "Their shifts from today on are removed from the Schedule." before its last line; unit tests for the store, `combineVolunteers` and the view
+- [x] 7.4 Update `docs/developer/database.md` and `docs/developer/frontend.md`
+- [ ] 7.5 Re-run the full CI on the new head; every job covering the change passes

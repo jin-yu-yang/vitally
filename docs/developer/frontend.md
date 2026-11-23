@@ -986,7 +986,9 @@ Change `add-remove-from-roster`. The database side is in
   roles, certificates and the record of what they sent this season." Then one account line: "Their
   account is deactivated, so they can no longer sign in." (invited or active), "Their account stays
   active because they are a site coordinator, but they will have no roles this season.", "Their
-  account is already deactivated.", or none when there is no account. Then "Their cases and contact
+  account is already deactivated.", or none when there is no account. When the volunteer has a live
+  shift this season from today on (`hasShiftsFromToday`, from the Roster read's `shifts` query in
+  `listVolunteers`), "Their shifts from today on are removed from the Schedule." Then "Their cases and contact
   details are kept. To add them back, search for <email> in Add a volunteer." The buttons are
   **Remove from roster** and **Cancel**. Nothing is sent until the first.
 - **`controller.removeFromRoster()`** calls the store's `removeFromRoster` at the profile revision the

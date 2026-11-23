@@ -175,7 +175,9 @@ mistakes. Left out; recorded as a known limit. (Hailey: agreed.)
 
 **Q11. Forward note for #140 (Schedule, not built).** When shifts exist,
 removing someone must also remove or refuse their future shifts. Note only.
-(Hailey.)
+(Hailey.) *Nov 22: the Schedule merged as 058 first, so Hailey asked for it
+now: removal marks the person's shifts from today on removed and keeps
+earlier ones. See design D12.*
 
 **Q12. How another admin's open Roster learns.** Not on a wake and not by
 realtime (existing behaviour for every Roster change). It learns when the

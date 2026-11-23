@@ -106,7 +106,7 @@ When a removal and a Deactivate of the same volunteer are sent from two windows,
 - **THEN** the Deactivate is refused with `CONFLICT`
 
 ### Requirement: Every removal from the roster is recorded
-Each removal SHALL record one row: the workspace, the season, the person removed, the person who removed them, when, and whether the account was deactivated. Signed-in users SHALL have no direct read or write grant on these records, and no screen SHALL show them.
+Each removal SHALL record one row: the workspace, the season, the person removed, the person who removed them, when, whether the account was deactivated, and how many shifts it removed. Signed-in users SHALL have no direct read or write grant on these records, and no screen SHALL show them.
 
 #### Scenario: A removal is recorded
 - **WHEN** an admin removes a volunteer whose account is active
@@ -115,6 +115,29 @@ Each removal SHALL record one row: the workspace, the season, the person removed
 #### Scenario: No direct access
 - **WHEN** a signed-in admin selects from the removal records
 - **THEN** the read is refused, and an insert, update or delete is refused too
+
+### Requirement: Removing a volunteer removes their shifts from today on
+A removal SHALL, in the same transaction, mark as removed each live current-season shift (capability `volunteer-schedule`) of the person dated today or later, today being the America/New_York date, as Remove shift does: revision raised, the remover and time recorded. Earlier shifts SHALL stay. Other people's shifts and shifts already removed SHALL NOT change. The answer SHALL say how many were removed.
+
+#### Scenario: Today's and later shifts go
+- **WHEN** an admin removes a volunteer with shifts yesterday, today and next week
+- **THEN** today's and next week's shifts are removed with their revisions raised, yesterday's stays, and the answer says two shifts were removed
+
+#### Scenario: Other shifts are untouched
+- **WHEN** the removed volunteer also has a shift already removed, and another volunteer has a shift tomorrow
+- **THEN** neither shift changes
+
+#### Scenario: A refused removal keeps the shifts
+- **WHEN** an admin tries to remove a volunteer who has a shift tomorrow and is preparing an open case
+- **THEN** the removal is refused with `OPEN_WORK`, and the shift is unchanged
+
+#### Scenario: A replay removes nothing more
+- **WHEN** the same removal is sent again with the same action id, after a new shift was added for the person
+- **THEN** the stored answer is returned and the new shift is not removed
+
+#### Scenario: An open Schedule follows
+- **WHEN** another admin has the Schedule open on a day the removed volunteer had a shift
+- **THEN** the shift leaves that Schedule without a reload
 
 ### Requirement: The Edit drawer offers removal, after a confirmation
 The Edit drawer of a saved volunteer SHALL offer "Remove from this season's roster…". On the caller's own drawer it SHALL say "You can't remove yourself from the roster." instead, whatever the caller's role. For a caller who is not a site coordinator, on someone else's drawer:
@@ -128,6 +151,7 @@ The button SHALL open a confirmation titled "Remove <name> from this season's ro
   - for a site coordinator: "Their account stays active because they are a site coordinator, but they will have no roles this season.";
   - for a `deactivated` account: "Their account is already deactivated.";
   - with no account: no account line.
+- When the Roster's read shows the volunteer has a live shift this season from today on: "Their shifts from today on are removed from the Schedule." With none, no shifts line.
 - "Their cases and contact details are kept. To add them back, search for <email> in Add a volunteer."
 
 Its buttons SHALL be "Remove from roster" and "Cancel". Nothing SHALL be sent until "Remove from roster" is pressed.
@@ -157,6 +181,10 @@ A refusal SHALL keep the confirmation open with its sentence: `OPEN_WORK` as "<n
 #### Scenario: A site coordinator's drawer, for an admin who isn't one
 - **WHEN** an admin who is not a site coordinator opens a site coordinator's drawer
 - **THEN** it offers no removal and says "Only site coordinators remove a site coordinator from the roster."
+
+#### Scenario: The confirmation for a volunteer with shifts
+- **WHEN** an admin opens the confirmation for a volunteer who has a shift tomorrow
+- **THEN** it says "Their shifts from today on are removed from the Schedule." before the line about cases and contact details, and for a volunteer with no shifts from today on it says nothing about shifts
 
 #### Scenario: The confirmation for a site coordinator
 - **WHEN** a site coordinator opens another site coordinator's drawer and presses "Remove from this season's roster…"
