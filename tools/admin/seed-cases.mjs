@@ -643,7 +643,7 @@ export async function removeSeededShifts(
 export async function seedSchedule(
   client,
   { workspaceId, actorUserId },
-  { runDir = ".vitally-runs", values = SEED_VALUES } = {},
+  { runDir = ".vitally-runs", values = SEED_VALUES, today: todayOverride } = {},
 ) {
   // Check-ins first: they belong to the same people as the shifts.
   const checkInsRemoved = await removeSeededCheckIns(
@@ -674,11 +674,14 @@ export async function seedSchedule(
     savedHours = true;
   }
 
-  const today = (
-    await client.query(
-      "select (now() at time zone 'America/New_York')::date::text as day",
-    )
-  ).rows[0].day;
+  // `today` is the New York date; tests pass a past one to cover each weekday.
+  const today =
+    todayOverride ??
+    (
+      await client.query(
+        "select (now() at time zone 'America/New_York')::date::text as day",
+      )
+    ).rows[0].day;
   const { monday } = weekBounds(today);
   const open = [];
   for (let n = 0; n < 7; n += 1) {
@@ -746,11 +749,16 @@ export async function seedSchedule(
     await recordRun(run, runDir);
   }
 
-  // Check-ins (change add-volunteer-check-in, design D10): about four, on the
-  // most recent open weekdays strictly before today in New York, which can be
-  // in last week. A day before today is wholly past, so no time is in the
-  // future and IN_FUTURE cannot fire. With no such day (the hours are saved
-  // and none falls in the last two weeks) none are seeded.
+  // Check-ins (change add-volunteer-check-in, design D10): four, on the most
+  // recent open weekdays strictly before today in New York (they can be in
+  // last week). A day before today is wholly past, so no time is in the
+  // future and IN_FUTURE cannot fire. With no such day (saved hours with no
+  // open weekday in the last two weeks) none are seeded.
+  // Three follow a volunteer's own live seeded shift dated before today (in
+  // 5-10 minutes before the start; out at the end or a little after; the
+  // third has no check-out). A person with no such shift gets one on a past
+  // open day, recorded in the run file so a re-run removes it too. The fourth
+  // is the reviewer account on a past open day with no live shift for it.
   const pastOpen = [];
   for (let n = 1; n <= 14 && pastOpen.length < 3; n += 1) {
     const date = addDays(today, -n);
@@ -765,63 +773,95 @@ export async function seedSchedule(
     day.weekday === 6 && day.close - day.open > 1
       ? day.open + Math.max(1, Math.floor((day.close - day.open) / 2))
       : day.close;
+  const pastShiftFor = async (person) =>
+    (
+      await client.query(
+        `select shift_date::text as date, start_hour, end_hour
+           from public.shifts
+          where workspace_id=$1 and person_id=$2 and removed_at is null
+            and id = any($3::uuid[]) and shift_date < $4::date
+          order by shift_date desc, start_hour limit 1`,
+        [workspaceId, person.id, run.shifts.map((x) => x.id), today],
+      )
+    ).rows[0];
   const checkIns = [];
-  if (pastOpen.length) {
-    const [first, second = first, third = first] = pastOpen;
-    const [preparerSpec, , volunteerSpec, intakerSpec] = values.SEED_SHIFTS;
-    // Two matching a shift's hours (in 5-10 minutes early, out at or a little
-    // after the end) and one matching a shift left without a check-out.
-    checkIns.push({
-      who: preparerSpec.who,
-      day: first,
-      checkedIn: hhmm(first.open * 60 - 10),
-      checkedOut: hhmm(shiftEnd(first) * 60),
+  const [preparerSpec, , volunteerSpec, intakerSpec, , otherVolunteerSpec] =
+    values.SEED_SHIFTS;
+  const matching = [
+    { specs: [preparerSpec], early: 10, after: 0, out: true },
+    // A volunteer who has since been given an account is not found by email,
+    // so another seed volunteer stands in.
+    { specs: [volunteerSpec, otherVolunteerSpec], early: 5, after: 15, out: true },
+    { specs: [intakerSpec], early: 5, after: 0, out: false },
+  ];
+  for (const [i, m] of matching.entries()) {
+    if (!pastOpen.length) break;
+    const spec = m.specs.find((x) => {
+      const who = find(x.who);
+      return who && who.roles.includes(x.role);
     });
-    checkIns.push({
-      who: volunteerSpec.who,
-      day: second,
-      checkedIn: hhmm(second.open * 60 - 5),
-      checkedOut: hhmm(Math.min(second.close * 60, shiftEnd(second) * 60 + 15)),
-    });
-    checkIns.push({
-      who: intakerSpec.who,
-      day: third,
-      checkedIn: hhmm(third.open * 60 - 5),
-      checkedOut: null,
-    });
-    // One for the reviewer account on a day with no live shift for it, inside
-    // the open hours.
-    const reviewer = find("reviewer");
-    for (const day of pastOpen) {
-      if (!reviewer) break;
-      const { rows } = await client.query(
-        `select 1 from public.shifts
-          where workspace_id=$1 and person_id=$2 and shift_date=$3 and removed_at is null`,
-        [workspaceId, reviewer.id, day.date],
-      );
-      if (rows.length) continue;
-      const to = Math.min(day.close, day.open + 2);
-      checkIns.push({
-        who: "reviewer",
-        day,
-        checkedIn: hhmm((to - 1 > day.open ? day.open + 1 : day.open) * 60),
-        checkedOut: hhmm(to * 60),
+    if (!spec) continue;
+    m.spec = spec;
+    const person = find(spec.who);
+    let shift = await pastShiftFor(person);
+    for (let k = 0; !shift && k < pastOpen.length; k += 1) {
+      const day = pastOpen[(i + k) % pastOpen.length];
+      const saved = await callRpc(client, actorUserId, "vitally_save_shift", {
+        p_action_id: randomUUID(),
+        p_shift_id: null,
+        p_expected_revision: null,
+        p_shift: {
+          volunteerId: person.id,
+          date: day.date,
+          startHour: day.open,
+          endHour: shiftEnd(day),
+          role: m.spec.role,
+        },
+      }).catch((error) => {
+        if (error.cause?.detail === "OVERLAP") return null;
+        throw error;
       });
-      break;
+      if (!saved) continue;
+      run.shifts.push({ id: saved.shiftId, revision: saved.revision });
+      await recordRun(run, runDir);
+      shift = { date: day.date, start_hour: day.open, end_hour: shiftEnd(day) };
     }
+    if (!shift) continue;
+    checkIns.push({
+      person,
+      date: shift.date,
+      checkedIn: hhmm(shift.start_hour * 60 - m.early),
+      checkedOut: m.out ? hhmm(shift.end_hour * 60 + m.after) : null,
+    });
+  }
+  const reviewer = find("reviewer");
+  for (const day of pastOpen) {
+    if (!reviewer) break;
+    const { rows } = await client.query(
+      `select 1 from public.shifts
+        where workspace_id=$1 and person_id=$2 and shift_date=$3 and removed_at is null`,
+      [workspaceId, reviewer.id, day.date],
+    );
+    if (rows.length) continue;
+    const to = Math.min(day.close, day.open + 2);
+    checkIns.push({
+      person: reviewer,
+      date: day.date,
+      checkedIn: hhmm((to - 1 > day.open ? day.open + 1 : day.open) * 60),
+      checkedOut: hhmm(to * 60),
+    });
+    break;
   }
   let checkInsAdded = 0;
   for (const spec of checkIns) {
-    const person = find(spec.who);
-    if (!person) continue;
     // A check-in an admin added that overlaps this one is theirs: skip.
     const saved = await callRpc(client, actorUserId, "vitally_save_check_in", {
       p_action_id: randomUUID(),
       p_check_in_id: null,
       p_expected_revision: null,
       p_check_in: {
-        volunteerId: person.id,
-        date: spec.day.date,
+        volunteerId: spec.person.id,
+        date: spec.date,
         checkedIn: spec.checkedIn,
         checkedOut: spec.checkedOut,
       },
@@ -961,6 +1001,7 @@ export async function seedWorkspace({
   clientAEmail,
   runDir = ".vitally-runs",
   env = process.env,
+  today,
 } = {}) {
   await assertLocalSeedTarget({ env });
   const client = await openDatabase({ kind: "test", env });
@@ -1003,7 +1044,7 @@ export async function seedWorkspace({
     await seedSchedule(
       client,
       { workspaceId, actorUserId: targets.siteCoordinator.userId },
-      { runDir },
+      { runDir, today },
     );
     return { casesRemoved, casesCreated, volunteersCreated };
   } finally {
