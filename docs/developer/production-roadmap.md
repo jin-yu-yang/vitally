@@ -50,15 +50,15 @@ of the six RPCs and the demonstration people (Alex, Morgan, Sam) are gone. See
   volunteer's open cases and lets an admin assign or reassign; its Hours this week column comes from
   the Schedule (058, #140; [Database](database.md#the-volunteer-schedule)). Since 052 there is no ceiling: site coordinators change the Admin role and
   edit Season settings ([Database](database.md#season-settings-and-site-coordinators)).
-- **One person, two workspaces** ([#104](https://github.com/jin-yu-yang/vitally/issues/104)).
-  The screens are chosen by the acting person's capabilities (ruling R55): `admin` gets the office
-  workspace, everyone else the preparation/review one. A staff account is one person and cannot
-  switch. So a staff member with `admin` and `prepare` or
-  `review` — PCDC's site coordinator, who runs the office and also reviews — reaches only the office
-  workspace and never sees *Claim review*. Found on 2026-10-30 rehearsing with real accounts; the
-  rehearsal gives the reviewer `review` alone. Needed on day 1 of the pilot: a switch between the two
-  workspaces for such a person (a view change; the database already checks every action), decided
-  together with the role mapping above.
+- **One person, two workspaces** ([#104](https://github.com/jin-yu-yang/vitally/issues/104)),
+  built by the change add-workspace-switch. The screens follow the person's capabilities (ruling
+  R55) and, for someone with both, the side they chose: the Office side (`admin`, `followup`,
+  `assist`, `receive_documents`) or the Cases side (`prepare`, `review`). A person with both sides
+  gets an Office / Cases switch at the top of the sidebar, and the side is remembered per user in
+  this browser (`localStorage`, kept through sign-out). Office-only people, such as an Intaker, get
+  the office with no switch. It is a view change only; the database already checks every action.
+  Found on 2026-10-30 rehearsing with real accounts, when PCDC's site coordinator, who runs the
+  office and also reviews, never saw *Claim review*.
 - **Roles.** Presenter access is removed (#136); renaming or splitting `staff` into real roles
   is the role mapping above.
 - **Tooling.** Staff can be added only as new people; linking an existing person is not supported.
