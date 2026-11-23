@@ -10211,6 +10211,103 @@ test(
         ARRIVAL_MS,
       );
       assert.equal(await preparer.locator("#my-profile-shifts li").count(), 1, "the Preparer's shifts this week");
+
+      // 7. Check-ins (change add-volunteer-check-in, design D11). The Preparer
+      // checks in from the strip on a 390 px phone, with the sidebar (an
+      // overlay at that width) closed.
+      await preparer.setViewportSize({ width: MOBILE_WIDTH, height: 844 });
+      if ((await preparer.locator('[data-action="toggle-sidebar"]').getAttribute("aria-expanded")) === "true") {
+        await preparer.locator('[data-action="toggle-sidebar"]').click({ timeout: CLICK_MS });
+        await waitFor(
+          preparer,
+          "the sidebar to be closed",
+          () => document.querySelector('[data-action="toggle-sidebar"]')?.getAttribute("aria-expanded") === "false",
+          undefined,
+          RENDER_MS,
+        );
+      }
+      await clickAction(preparer, "check-in");
+      await waitFor(
+        preparer,
+        "Checked in since on the strip",
+        () => (document.querySelector(".check-in-strip")?.textContent ?? "").startsWith("Checked in since"),
+        undefined,
+        ARRIVAL_MS,
+      );
+      await waitForQuiet(preparer);
+      assert.ok(
+        await preparer.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+        `the strip makes the page scroll sideways at ${MOBILE_WIDTH}px`,
+      );
+      await mkdir(SHOTS, { recursive: true });
+      await preparer.evaluate(() => window.scrollTo(0, 0));
+      await preparer.screenshot({ path: path.join(SHOTS, `check-in-strip-${MOBILE_WIDTH}.png`) });
+
+      // 8. Today's Schedule in the Site Coordinator's window: the Preparer's
+      // check-in is a bar. The walk's day is today only on a weekend, and then
+      // the Preparer has a shift today, so "Not scheduled" is tagged only on
+      // other days.
+      const scheduledToday = stepsToDay === 0;
+      await clickAction(admin, "open-schedule");
+      await admin.getByRole("heading", { name: "Schedule", exact: true }).waitFor({ timeout: ARRIVAL_MS });
+      const checkInBar = admin.locator(`button.check-in-bar[aria-label^="${ROLE_NAMES.preparer}, checked in "]`);
+      await checkInBar.waitFor({ timeout: ARRIVAL_MS });
+      await waitForQuiet(admin);
+      const barTags = async () => (await checkInBar.getAttribute("aria-label")) ?? "";
+      assert.equal(
+        (await barTags()).includes("Not scheduled"),
+        !scheduledToday,
+        `the check-in bar is ${scheduledToday ? "" : "not "}tagged Not scheduled: ${await barTags()}`,
+      );
+      assert.ok(!(await barTags()).includes("Corrected"), "a fresh check-in is tagged Corrected");
+      // Checked in one 5-minute step earlier, then Save.
+      await pressControl(admin, checkInBar, { selector: ".check-in-bar", what: "the Preparer's check-in bar" });
+      await admin.locator("#check-in-form").waitFor({ timeout: ARRIVAL_MS });
+      const earlier = await admin.locator("#check-in-in").evaluate((select) => select.options[select.selectedIndex - 1]?.value ?? null);
+      assert.ok(earlier, "no 5-minute step before the check-in time");
+      await admin.locator("#check-in-in").selectOption(earlier);
+      await pressControl(admin, admin.locator('#check-in-form [data-action="save-check-in"]'), { selector: "button", what: "Save" });
+      await waitFor(admin, "the check-in drawer to close", () => !document.querySelector("#check-in-form"), undefined, ARRIVAL_MS);
+      await waitFor(
+        admin,
+        "the bar to be tagged Corrected",
+        (name) =>
+          [...document.querySelectorAll("button.check-in-bar")].some((bar) => {
+            const label = bar.getAttribute("aria-label") ?? "";
+            return label.startsWith(`${name}, checked in `) && label.includes("Corrected");
+          }),
+        ROLE_NAMES.preparer,
+        ARRIVAL_MS,
+      );
+      await shootDay(admin, "check-in-bars");
+
+      // 9. The Preparer checks out, and the strip offers Check in again.
+      await clickAction(preparer, "check-out");
+      await waitFor(
+        preparer,
+        "Check in on the strip again",
+        () => document.querySelector('.check-in-strip [data-action="check-in"]')?.textContent.trim() === "Check in",
+        undefined,
+        ARRIVAL_MS,
+      );
+      await preparer.setViewportSize(DESKTOP);
+
+      // 10. The Workload's Hours this week for the Preparer: checked-in time,
+      // to one decimal or none.
+      await clickAction(admin, "open-volunteers");
+      await clickAction(admin, "volunteer-tab", { attributes: '[data-tab="workload"]' });
+      await waitFor(
+        admin,
+        "the Preparer's Hours this week",
+        (name) =>
+          [...document.querySelectorAll("tr.workload-row")].some(
+            (row) =>
+              row.querySelector(".workload-name")?.textContent.trim() === name &&
+              /^\d+(\.\d)?$/.test(row.querySelector('td[data-col="hours"]')?.textContent.trim() ?? ""),
+          ),
+        ROLE_NAMES.preparer,
+        ARRIVAL_MS,
+      );
       assertConsoleQuiet(adminWin, { name: "the Site Coordinator's Schedule window" });
       assertConsoleQuiet(preparerWin, { name: "the Preparer's Schedule window" });
       t.diagnostic(`schedule walk ${((Date.now() - started) / 1000).toFixed(1)} s`);

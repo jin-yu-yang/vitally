@@ -25,7 +25,7 @@ it. Run everything described here against the local stack from [`docs/setup.md`]
 
 ## Migrations
 
-The schema is fifty-eight plain SQL files (001 to 058) in [`supabase/migrations/`](../../supabase/migrations/), applied
+The schema is fifty-nine plain SQL files (001 to 059) in [`supabase/migrations/`](../../supabase/migrations/), applied
 in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 
 | File | Adds |
@@ -88,6 +88,7 @@ in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 | `056_onedrive_client_documents.sql` | Hand-written: client documents through the OneDrive link (change `add-client-documents-onedrive`, #157). The RPC `vitally_client_documents_link` returns only the workspace's client documents upload link to a signed-in member (never the certificate / photo ID link); a client may report a document as sent only when that link is set, and only staff can mark it received or verified; `check_payload`, `receive_document`, `act_respond_document`, `act_set_document_card` and `act_record_document_response` re-created from their latest definitions |
 | `057_my_profile.sql` | Hand-written: My profile (change `add-my-profile`; [below](#my-profile)). `roster_entries.form_13615_reviewed_at`, `form_13615_review_reason`, `photo_id_reviewed_at` and `photo_id_review_reason` (each pair both null or both set, a reason of 1 to 120 characters), and `volunteer_profiles.usual_days`; `vitally_my_clearance` re-created from 053 with `reviewedAt` and `reviewReason` on the two document items and `uploadUrl` null while the site check is owed; `vitally_mark_upload_sent` re-created (sending again clears the reviewed pair); `vitally_save_volunteer` re-created to accept `usualDays` and clear the reviewed pairs with the sent dates; `vitally_mark_upload_reviewed` now takes a required reason (the four-argument version is dropped); the new RPCs `vitally_my_profile` and `vitally_save_my_profile` |
 | `058_volunteer_schedule.sql` | Hand-written: the volunteer schedule (change `add-volunteer-schedule`; [below](#the-volunteer-schedule)). The tables `shifts` and `schedule_settings`, with their SELECT policies (for Realtime only, no write grant) and their place in the Realtime publication; the private helpers `vitally_private.valid_site_hours`, `schedule_viewer`, `schedule_settings_answer`, `schedule_target`, `shift_flags`, `shift_counts` and `ny_week`, and the policy helper `vitally_policy.is_schedule_viewer`; the RPCs `vitally_save_schedule_settings`, `vitally_save_shift`, `vitally_remove_shift`, `vitally_schedule_day` and `vitally_my_shifts`; and `vitally_season_settings` (from 052) and `vitally_my_clearance` (from 057) re-created, with a `schedule` answer and `scheduleViewer`. Usual days are 057's `volunteer_profiles.usual_days`; 058 only reads them. No seed and no `vitally_save_volunteer` change |
+| `059_volunteer_check_in.sql` | Hand-written: volunteer check-in (change `add-volunteer-check-in`; [below](#volunteer-check-in)). The table `check_ins`, with its SELECT policy (an admin reads every row, anyone else their own; for Realtime only, no write grant) and its place in the Realtime publication; the private helpers `vitally_private.check_in_day_end`, `check_in_span`, `check_in_person`, `can_check_in`, `open_check_in` and `check_in_item`, and the policy helper `vitally_policy.is_own_person`; the RPCs `vitally_my_check_in`, `vitally_check_in`, `vitally_check_out`, `vitally_save_check_in`, `vitally_remove_check_in` and `vitally_hours_this_week`; and `vitally_schedule_day` (from 058) re-created, with `checkIns` for an admin. Nothing else existing changes |
 **Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
 never edit an applied one.** The build writes a file only when the hash differs from the newest
 catalogue migration's. The hash covers the catalogue and `LOADER_VERSION` in
@@ -141,7 +142,8 @@ do not copy them from older files:
 | `vitally_private.acting_person`, `contact_person`, `require_cleared`, the role helpers, `role_certificates_check`, `vitally_policy.cleared_workspace_id`, and the RPCs `public.vitally_create_case`, `vitally_log_contact`, `vitally_edit_contact` | `045_volunteer_clearance.sql` |
 | `vitally_private.audience_member`, `vitally_policy.in_update_audience`, `vitally_policy.unpublished_read_window`, and the RPCs `public.vitally_save_update`, `vitally_update_action`, `vitally_mark_updates`, `vitally_my_updates`, `vitally_posted_updates` | `049_posted_updates.sql` |
 | `public.vitally_mark_upload_sent`, `vitally_mark_upload_reviewed` | `053_clearance_uploads.sql` |
-| `public.vitally_my_clearance`, `vitally_season_settings`, and the schedule functions `vitally_private.valid_site_hours`, `schedule_viewer`, `schedule_settings_answer`, `schedule_target`, `shift_flags`, `shift_counts`, `ny_week`, `vitally_policy.is_schedule_viewer`, and the RPCs `public.vitally_save_schedule_settings`, `vitally_save_shift`, `vitally_remove_shift`, `vitally_schedule_day`, `vitally_my_shifts` | `058_volunteer_schedule.sql` (`vitally_my_clearance` was last 057's, `vitally_season_settings` 052's) |
+| `public.vitally_my_clearance`, `vitally_season_settings`, and the schedule functions `vitally_private.valid_site_hours`, `schedule_viewer`, `schedule_settings_answer`, `schedule_target`, `shift_flags`, `shift_counts`, `ny_week`, `vitally_policy.is_schedule_viewer`, and the RPCs `public.vitally_save_schedule_settings`, `vitally_save_shift`, `vitally_remove_shift`, `vitally_my_shifts` | `058_volunteer_schedule.sql` (`vitally_my_clearance` was last 057's, `vitally_season_settings` 052's) |
+| `public.vitally_schedule_day`, and the check-in functions `vitally_private.check_in_day_end`, `check_in_span`, `check_in_person`, `can_check_in`, `open_check_in`, `check_in_item`, `vitally_policy.is_own_person`, and the RPCs `public.vitally_my_check_in`, `vitally_check_in`, `vitally_check_out`, `vitally_save_check_in`, `vitally_remove_check_in`, `vitally_hours_this_week` | `059_volunteer_check_in.sql` (`vitally_schedule_day` was 058's) |
 | `public.vitally_save_volunteer`, `vitally_mark_upload_sent`, `vitally_mark_upload_reviewed` (five arguments), and the RPCs `vitally_my_profile`, `vitally_save_my_profile` | `057_my_profile.sql` (053 introduced the first four; see [My profile](#my-profile)) |
 | `vitally_private.add_starter_labels`, `check_label`, and the RPCs `public.vitally_save_label`, `vitally_set_case_label` | `051_case_labels.sql` |
 | `vitally_private.add_staff_member`, `vitally_policy.is_workspace_admin` | `044_volunteer_roster_records.sql` |
@@ -176,7 +178,7 @@ grep -n -E "^create (or replace )?function" supabase/migrations/*.sql
 
 Two schemas:
 
-- **`public`**: the application tables and the thirty-nine browser-callable functions.
+- **`public`**: the application tables and the forty-five browser-callable functions.
 - **`vitally_private`**: helper functions, the migration ledger, and tables browsers must never
   reach. Every function here is `SECURITY DEFINER` with `search_path=''`, and `EXECUTE` is revoked
   from every role, including `service_role`.
@@ -230,6 +232,7 @@ erDiagram
 | `update_reads` | Who has read and confirmed each update (049) | Primary key `(update_id, person_id)`; `read_at` (the first read), `confirmed_at` (the first confirmation). Written only by `vitally_mark_updates`; Ask everyone to read it again deletes the update's rows. No policy, so browsers read none of it directly; not published |
 | `shifts` | One planned stretch of one person on one date (058) | `season`, `person_id`, `shift_date`, `start_hour` < `end_hour` (0 to 24), `role` (one of the five roster roles), `revision`, `created_by_person_id`, `updated_by_person_id`, `removed_at` (a soft delete, so Realtime announces a removal as an UPDATE). Index `shifts_day` on `(workspace_id, season, shift_date)`. Not written by clients; published to Realtime |
 | `schedule_settings` | The site hours and coverage targets, one row per workspace (058) | `site_hours` (jsonb keyed `"1"` to `"7"`, ISO weekday, each `{open, close}`; checked by `vitally_private.valid_site_hours`), `preparers_needed`, `reviewers_needed`, `on_site_needed` (0 to 9; defaults 2, 1, 1), `revision`, `updated_by_person_id`. A missing row means every day is closed. Published to Realtime |
+| `check_ins` | One check-in of one person on one New York date (059) | `season`, `person_id`, `check_in_date` (the New York date of `checked_in_at`), `checked_in_at`, `checked_out_at` (null until checked out; after the check-in and no later than the midnight that ends the date), `revision`, `created_by_person_id`, `updated_by_person_id`, `corrected_by_person_id` (set by an admin's save), `removed_at` (a soft delete, as on `shifts`). Index `check_ins_day` on `(workspace_id, season, check_in_date)`. Not written by clients; published to Realtime |
 | `case_labels` | A workspace's case labels (051) | Primary key `id`, unique `(workspace_id, id)`; `name` (stored trimmed of spaces, tabs and line breaks, 1 to 24 characters, no line break inside, unique per workspace ignoring case), `color` (`sky`, `amber`, `pink`, `green`, `violet` or `slate`), `revision` (a stale edit gets `CONFLICT`), `created_by_person_id`, `updated_by_person_id`. Three starters per workspace. Staff-only; written only by `vitally_save_label`; never deleted; published to Realtime |
 | `case_label_links` | Which labels a case carries (051) | Primary key `(case_id, label_id)`; `active`, `changed_by_person_id`, `changed_at`. Removing a label sets `active` to false and adding it again sets it to true, so the row keeps who and when. Staff-only; written only by `vitally_set_case_label`; published to Realtime |
 | `contact_log` | The current version of each logged contact | One row per entry on any case: `direction`, `contacted_at` (an instant), `with_whom` (+ `other_name`), `method`, `purpose`, `outcome`, `note`, `followup_id` (null unless logged from a task), `logged_by_*`, `logged_at`, its own `revision`, `edited_at`. The outcome must fit the method. Staff-only; written only by the two contact functions; published to Realtime |
@@ -292,6 +295,7 @@ claimable cases) is a later change; see the [roadmap](production-roadmap.md#1-st
 | `update_reads` | Nothing | Nothing (no policy); read through `vitally_my_updates` and `vitally_posted_updates` (049) |
 | `shifts` | Nothing | A schedule viewer (a workspace admin, or anyone on the current roster with an active staff account, cleared or not) reads the shifts of people with a sign-in; only a workspace admin also reads a no-sign-in volunteer's. `removed_at` is not tested, so Realtime can deliver a removal (058). No write grant |
 | `schedule_settings` | Nothing | Any schedule viewer (058). No write grant |
+| `check_ins` | Nothing | A workspace admin reads every row; anyone else only their own (`vitally_policy.is_own_person`). `removed_at` is not tested, so Realtime can deliver a removal (059). No write grant |
 | `memberships` | Own active membership | Own active membership |
 | `workspaces` | Own workspace | Own workspace |
 | `action_receipts` | Nothing (no policy, no grant) | Nothing |
@@ -312,7 +316,7 @@ policy and `vitally_private.lock_case` (which applies the same rule to writes) i
 
 ## The action API
 
-Browsers can call exactly thirty-nine functions. Each runs as its owner (`SECURITY DEFINER`), checks the
+Browsers can call exactly forty-five functions. Each runs as its owner (`SECURITY DEFINER`), checks the
 caller itself, and returns a JSON receipt. The table below lists the case, Roster, clearance, update and label
 functions. The account functions (047, [migrations](#migrations)) and Season settings' four
 (`vitally_season_settings`, `vitally_save_season_settings`, `vitally_set_site_coordinator`,
@@ -330,8 +334,14 @@ they belong.
 | `vitally_save_schedule_settings(p_action_id uuid, p_expected_revision bigint, p_settings jsonb)` | Save the site hours and the three coverage targets (058; a site coordinator; [below](#the-volunteer-schedule)) | the settings answer: `{siteHours, targets, revision}` |
 | `vitally_save_shift(p_action_id uuid, p_shift_id uuid, p_expected_revision bigint, p_shift jsonb)` | Add a shift (the id and the revision null) or edit one (058; workspace admins, cleared or not) | `{shiftId, revision}` |
 | `vitally_remove_shift(p_action_id uuid, p_shift_id uuid, p_expected_revision bigint)` | Remove a shift: sets `removed_at` (058; workspace admins) | `{shiftId, revision, removed: true}` |
-| `vitally_schedule_day(p_date date)` | One day of the schedule (058; any schedule viewer, cleared or not) | `{date, weekday, hours, anyOpen, targets, settingsRevision, canEdit, canEditSettings, shifts}`; for an admin each shift carries `flags` and `counts`, and the answer adds `candidates` |
+| `vitally_schedule_day(p_date date)` | One day of the schedule (058; any schedule viewer, cleared or not; 059 adds `checkIns` for an admin) | `{date, weekday, hours, anyOpen, targets, settingsRevision, canEdit, canEditSettings, shifts}`; for an admin each shift carries `flags` and `counts`, and the answer adds `candidates` and (059) `checkIns`, each as `vitally_save_check_in` answers |
 | `vitally_my_shifts()` | The caller's own live shifts from Monday to Sunday of this New York week, for My profile's "Your shifts this week" (058; any staff member with a person row, cleared or not, once the site check is passed: `FORBIDDEN` for a client or while the account is `invited`; it reads no profile row, so a volunteer with none gets an empty week; [below](#the-volunteer-schedule)) | `{weekStart, weekEnd, shifts: [{shiftId, date, startHour, endHour, role}]}` |
+| `vitally_my_check_in()` | The caller's own check-in for the strip (059; gated like `vitally_my_shifts`, not by clearance; [below](#volunteer-check-in)) | `{today, canCheckIn, open}`; `open` is `{checkInId, checkedInAt}` or null |
+| `vitally_check_in(p_action_id uuid)` | Check the caller in at the current time (059; a cleared staff member on the current roster, else `NOT_CLEARED`; `VALIDATION` `ALREADY_CHECKED_IN` when one is open today) | `{open: {checkInId, checkedInAt}}` |
+| `vitally_check_out(p_action_id uuid)` | Check the caller out of today's open check-in at the current time (059; as `vitally_check_in`; `VALIDATION` `NOT_CHECKED_IN` when none is open) | `{checkInId, checkedInAt, checkedOutAt}` |
+| `vitally_save_check_in(p_action_id uuid, p_check_in_id uuid, p_expected_revision bigint, p_check_in jsonb)` | Add a check-in (the id and the revision null) or correct one; `p_check_in` is `{volunteerId, date, checkedIn, checkedOut}` in New York `HH:MM` (059; workspace admins, cleared or not; [below](#volunteer-check-in)) | `{checkInId, revision, volunteerId, name, checkedInAt, checkedOutAt, endsAt, state, minutes, flags, correctedByName}` |
+| `vitally_remove_check_in(p_action_id uuid, p_check_in_id uuid, p_expected_revision bigint)` | Remove a check-in: sets `removed_at` (059; workspace admins) | `{checkInId, revision}` |
+| `vitally_hours_this_week()` | Each volunteer's counted check-in minutes from Monday to Sunday of this New York week, for the Workload's Hours this week (059; workspace admins) | `{weekStart, weekEnd, hours: [{volunteerId, minutes}]}` |
 | `vitally_save_volunteer(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint, p_volunteer jsonb)` | Add or edit a volunteer on the Roster (044; workspace admins, that is a site coordinator or the Admin role this season; only a site coordinator changes the Admin role; 045 adds role needs, the photo ID check and the open-work rule; 057 adds `usualDays`) | `{actionId, personId, revision}` |
 | `vitally_my_clearance()` | The caller's own clearance (045, [below](#roster-clearance); 053 adds the sent dates, the upload link and empty capabilities when not cleared; 057 adds `reviewedAt` and `reviewReason` and nulls the link while the site check is owed; 058 adds `scheduleViewer`) | `{cleared, missing, capabilities, isAdmin, isSiteCoordinator, siteCoordinatorName, siteCheck, uploadUrl, scheduleViewer}`; `missing` items for `form13615` and `photoId` carry `sentAt` (053), `reviewedAt` and `reviewReason` (057); `uploadUrl` is null while the site check is owed (057) |
 | `vitally_mark_upload_sent(p_action_id uuid, p_document text)` | The caller says they sent their own `form13615` or `photoId` (053; any staff member with a current-season entry, cleared or not; [below](#clearance-uploads)) | `{actionId, document, sentAt}` |
@@ -624,6 +634,45 @@ behaviour is in the change's `volunteer-schedule` spec, and in `openspec/specs/`
 - **Realtime.** `shifts` and `schedule_settings` are in the publication and in `STAFF_TABLES`. A
   schedule viewer's window reads the day again on a change, and an uncleared viewer's channel follows only
   these two tables, and only while the window is on the Schedule or My profile ([frontend](frontend.md)).
+
+### Volunteer check-in
+
+Migration 059 (change `add-volunteer-check-in`) records who actually came, and for how long. The
+behaviour is in the change's `volunteer-check-in` spec, and in `openspec/specs/` once archived.
+
+- **Storage.** `check_ins` holds one check-in of one person on one New York date: `checked_in_at`,
+  and `checked_out_at`, which is null while the check-in is open. A check-out is after the check-in
+  and no later than the midnight that ends its date (`"24:00"` in the drawer). Removing a check-in
+  sets `removed_at` and raises the revision: that is the UPDATE Realtime delivers, as for `shifts`.
+- **The counted span.** `vitally_private.check_in_span` gives a check-in's state, end and minutes at
+  an instant. `out`: the end is the check-out. `open` (not out, and still its date): the earlier of
+  now and the day's end. `missed` (not out, and its date has passed): the day's end. The day's end
+  (`check_in_day_end`) is the person's latest live shift end that day, else the site hours' close for
+  that weekday, else none, and then the check-in counts nothing until a real check-out. Every
+  conversion goes through `at time zone 'America/New_York'`, so a daylight saving Sunday counts right.
+- **Who reads.** The SELECT policy lets a workspace admin read every row and anyone else only their
+  own (`vitally_policy.is_own_person`). It is for Realtime only; there is no write grant.
+- **Self check-in.** `vitally_my_check_in` answers `{today, canCheckIn, open}` for the strip. It is
+  gated like `vitally_my_shifts` (`FORBIDDEN` for a client, a staff caller with no person row, or an
+  `invited` account), not by clearance: `canCheckIn` is true only for a cleared person on the current
+  roster. `vitally_check_in` and `vitally_check_out` take every time from `now()`. Their order is
+  `FORBIDDEN`, `NOT_CLEARED`, the workspace lock, the receipt (a replay returns the stored answer),
+  then `VALIDATION` with `ALREADY_CHECKED_IN` or `NOT_CHECKED_IN`.
+- **Admin corrections.** A workspace admin, cleared or not, adds, corrects and removes check-ins
+  (`vitally_save_check_in`, `vitally_remove_check_in`) in `vitally_save_shift`'s order: `FORBIDDEN`,
+  shape `VALIDATION`, the lock, the receipt, `NOT_FOUND`, `CONFLICT`, then the `VALIDATION` details
+  `NOT_ON_ROSTER`, `DEACTIVATED`, `OUT_BEFORE_IN`, `IN_FUTURE` and `OVERLAP` (against another
+  check-in's counted end). Every save sets `corrected_by_person_id`; the original times are not kept.
+- **The day read.** `vitally_schedule_day` (058's) is re-created with its body unchanged, except that
+  an admin's answer adds `checkIns`: the day's live check-ins, each with `state`, `endsAt`, `minutes`,
+  `flags` (`noCheckOut`, `notScheduled`, `corrected`, `outsideSiteHours`) and `correctedByName`. A
+  non-admin's answer has no `checkIns` key.
+- **Hours this week.** `vitally_hours_this_week` (workspace admins) sums each volunteer's counted
+  minutes over their live current-season check-ins of this New York week (`ny_week`). The Workload's
+  Hours this week is now this checked-in time, not the hours of planned shifts (058).
+- **Realtime.** `check_ins` is in the publication and in `STAFF_TABLES`. An admin's Schedule and
+  Workload re-read on a change; a volunteer's strip re-reads on a change to their own check-in
+  ([frontend](frontend.md#the-schedule-and-my-profile)).
 
 ### Calling it
 
@@ -1048,13 +1097,13 @@ exceptions from an application path; the browser would show them as `SERVER_ERRO
 
 ## Realtime
 
-Twenty-five tables are published to `supabase_realtime`, INSERT and UPDATE only. `007_realtime_publication.sql`
+Twenty-six tables are published to `supabase_realtime`, INSERT and UPDATE only. `007_realtime_publication.sql`
 adds twelve: `cases`, `document_requests`, `documents`, `client_events`, `workspaces`, `people`,
 `preparation_participants`, `admin_followups`, `contact_attempts`, `case_events`,
 `assistance_items`, `reviews`. `011` adds `case_contacts`, `013` adds `case_materials` and `017` adds `case_document_cards`.
-`031` adds `contact_log` and `contact_log_versions` and removes `contact_attempts`; `033` adds the two questionnaire tables and `039` adds `preparer_shaded_fields`; `051` adds `case_labels` and `case_label_links`; `054` adds `return_to_signing_exit_forms`; `058` adds `shifts` and `schedule_settings`, which every schedule viewer's window watches, cleared or not ([the volunteer schedule](#the-volunteer-schedule)).
+`031` adds `contact_log` and `contact_log_versions` and removes `contact_attempts`; `033` adds the two questionnaire tables and `039` adds `preparer_shaded_fields`; `051` adds `case_labels` and `case_label_links`; `054` adds `return_to_signing_exit_forms`; `058` adds `shifts` and `schedule_settings`, which every schedule viewer's window watches, cleared or not ([the volunteer schedule](#the-volunteer-schedule)); `059` adds `check_ins` ([volunteer check-in](#volunteer-check-in)).
 `044` adds nothing: `volunteer_profiles`, `roster_entries` and `certificates` are not published, because Realtime sends whole rows and the records are admin-only; the Roster loads on opening and after each save. `049` adds `posted_updates`, so an open window re-reads its feed when an update is posted, edited or unpublished (the audience hears of an unpublished update's changes for 10 minutes after Unpublish, the policy's window). `update_reads` is deliberately not published: reads are frequent and would wake every admin window, so the admin's table re-reads on opening, on focus and after each save instead. `action_receipts` is not published. An applicant's window watches seven of them (`CLIENT_TABLES`),
-a staff window's all twenty-five (`STAFF_TABLES`).
+a staff window's all twenty-six (`STAFF_TABLES`).
 
 Realtime applies each subscriber's RLS, so the same visibility rules hold for events. Deletes are
 not published because a deleted row cannot be authorized. The browser treats events as "something
