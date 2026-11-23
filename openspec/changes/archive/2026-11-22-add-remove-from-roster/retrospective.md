@@ -69,6 +69,8 @@ bfc91a4 Test inventory: the remove-from-roster receipt carries shiftsRemoved
   - The `rpc-signatures.mjs` entry omits `cleared: false`, which the Deactivate entry sets (harmless).
   - `database.md`'s picker sentence could point to `returningCandidates`.
 
+- 🔴 [blocking | evidence: PR #273 review, RED 45119153370, fix `df8275e`] 059's lock order covered admins' writes, which all take the workspace lock first, but not the person's own writes, which start from their membership and take no workspace lock. Remove could deadlock (40P01) with the volunteer saving My profile or marking a document sent. Neither the plan, the task reviews nor the final review checked lock order against the target's own calls; Zeye found it on a scratch database before deploy. Fixed as 055 did, with tests for both timings.
+
 ## 3. Plan deviations
 
 | Plan task | What changed | Why |
@@ -106,6 +108,10 @@ bfc91a4 Test inventory: the remove-from-roster receipt carries shiftsRemoved
 - Admins can already read `shifts` directly (058's `viewer_shifts`, used by Workload), so the dialog's shifts line cost one filtered read in the existing Roster load rather than a new RPC.
 
 ## 6. Promote candidates → long-term learning
+
+- [ ] 🔴 **An RPC that changes another person's membership or account must check lock order against that person's own calls, not only admins'** → **Promote to memory** (type: feedback)
+  > **Why**: 055 (Start next season) and 059 (Remove) both shipped a deadlock with calls that start from `require_membership`'s `FOR SHARE` and take no workspace lock; both were found in review.
+  > **How to apply**: when a migration deactivates or edits someone's membership, list the target's own RPCs that write the same rows, lock the membership right after the workspace lock, and add a two-timing race test.
 
 - [ ] 🟡 **When an RPC or its receipt changes, update `tests/support/rpc-signatures.mjs` and quick-run `tests/database-actions.mjs`** → **Promote to memory** (type: feedback)
   > **Why**: the inventory failed the full `database` job twice in this change (R6 and `bfc91a4`), each costing a full CI cycle.
