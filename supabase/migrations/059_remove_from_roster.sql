@@ -38,7 +38,8 @@ revoke all on public.roster_removals from public,anon,authenticated,service_role
 -- workspace admin, in one transaction under the workspace lock. Order of
 -- checks (design D4): FORBIDDEN (not a workspace admin: no receipt),
 -- VALIDATION (a missing argument), VALIDATION (SELF: the caller's own row, no
--- receipt), the workspace lock, ADMIN_ROLE (the person
+-- receipt), the workspace lock, the person's membership (if this will
+-- deactivate it), ADMIN_ROLE (the person
 -- holds the Admin role this season and the caller isn't a site coordinator: no
 -- receipt, as Save), the stored answer for a repeated action id (so a retry
 -- after a lost reply is not a CONFLICT), NOT_FOUND (no profile in the caller's
@@ -51,10 +52,41 @@ revoke all on public.roster_removals from public,anon,authenticated,service_role
 -- coordinator's; the profile revision is raised; the removal is recorded; the
 -- receipt is stored. No email is sent.
 --
--- The lock order is Save's: the workspace lock, the profile, the entry, then
--- the shifts and the account. Saving or removing a shift takes the workspace
--- lock first too. Save, Deactivate, Start next season and this all take the
--- workspace lock first, so none of them can deadlock with another.
+-- The lock order is the workspace lock, the person's membership, the profile,
+-- the entry, the shifts, then the account.
+--
+-- Admins' writes take the workspace lock first: Save, Deactivate, Start next
+-- season, Save shift, Remove shift and this, so none of them can deadlock
+-- with another. The person's own writes don't take it. Each starts in
+-- require_membership, which holds FOR SHARE on their own membership, and then
+-- locks their profile and entry:
+--   vitally_save_my_profile (057): membership, then the profile;
+--   vitally_mark_upload_sent (057): membership, then the profile, then the
+--     entry.
+-- No other RPC the person calls for themselves writes their profile or entry
+-- without the workspace lock. Step 13 deactivates that membership, so it is
+-- locked FOR UPDATE here, before the profile, in the order those writes take:
+-- a write already holding its membership finishes first while this waits
+-- holding no profile or entry lock; one that comes later waits on its
+-- membership and is then refused, since the membership is inactive. Locking
+-- the membership only at step 13, after the profile, deadlocked (40P01) with
+-- a write that held its membership and was waiting for the profile (PR #273
+-- review).
+--
+-- Only a membership step 13 will deactivate is locked: the person's account
+-- invited or active, not a site coordinator's (the set step 13 deactivates,
+-- as 055 does for Start next season). A site coordinator's is left alone, and
+-- they may be holding it while they wait for the workspace lock (Start next
+-- season, Season settings, any admin RPC). With no account there is nothing
+-- to lock. The set can't change before step 13: every account change takes
+-- the workspace lock, and step 6 can only cancel the account.
+--
+-- One shape this order can't cover: a call of the person's own that takes
+-- the workspace lock after their membership (an Admin-role volunteer's admin
+-- RPC, or an invited volunteer's vitally_complete_site_check) waits for the
+-- workspace lock while holding the membership this needs, and can still
+-- deadlock with it. Deactivate (052) and Start next season (055) have the
+-- same shape, so it is not new here; covering it means changing those calls.
 
 create function public.vitally_remove_from_roster(p_action_id uuid,p_volunteer_id uuid,p_expected_revision bigint)
 returns jsonb language plpgsql security definer set search_path='' as $$
@@ -88,8 +120,14 @@ begin
   raise sqlstate 'VT007' using message='VALIDATION',detail='SELF';
  end if;
  -- 3. The workspace lock, which Save, the account RPCs and Start next season
- -- take first too.
+ -- take first too. Then the person's membership, if step 13 will deactivate
+ -- it, before their profile, as their own writes take them (see the header).
  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_member.workspace_id::text,0));
+ perform 1 from public.memberships m
+  join public.accounts a on a.workspace_id=m.workspace_id and a.user_id=m.user_id
+  where m.workspace_id=v_member.workspace_id and a.person_id=p_volunteer_id
+   and a.status in ('invited','active') and not a.is_site_coordinator
+  for update of m;
  -- 4. Removal takes the Admin role away, which only a site coordinator may do
  -- (052 rule 3, design D3). Refused before the receipt is reserved, as Save
  -- does, from the stored roles of the current-season entry.
