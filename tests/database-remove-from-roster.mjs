@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createDatabaseFixture } from "./support/database-fixture.mjs";
+import { openDatabase } from "../tools/admin/database.mjs";
 
 // OpenSpec change add-remove-from-roster (design D1-D7), migration 059: an
 // admin removes a volunteer from the current season's roster. The entry goes,
@@ -668,6 +669,175 @@ test("earlier seasons and case history are kept", async () => {
     await removeNow(f, f.siteCoordinator, preparerId);
     assert.equal(await currentEntry(f, preparerId), null);
     assert.deepEqual(await pastRows(), before);
+  } finally {
+    await f.close();
+  }
+});
+
+// PR #273 review (Zeye): the volunteer's own writes take no workspace lock.
+// They hold FOR SHARE on their own membership (require_membership), then lock
+// their profile (and, for a send, the entry). Remove deactivates that
+// membership, so it locks it right after the workspace lock and before the
+// profile. These pin both timings for both of the volunteer's writes; without
+// that lock each ends in a deadlock (40P01).
+test("removal and the volunteer's own writes never deadlock", async (t) => {
+  const f = await createDatabaseFixture();
+  const DEADLOCK = "40P01";
+  const sc = f.siteCoordinator;
+  // Waits until a session running `fn` is blocked on a lock.
+  const waitingOn = async (fn) => {
+    for (let i = 0; i < 100; i += 1) {
+      const { w } = await one(
+        f,
+        `select exists(select 1 from pg_stat_activity where wait_event_type='Lock' and query ilike $1
+          and pid<>pg_backend_pid()) as w`,
+        [`%${fn}%`],
+      );
+      if (w) return true;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return false;
+  };
+  // The volunteer's own profile, as My profile sends it, with a new phone.
+  const profilePayload = async (personId, phone) => {
+    const profile = await profileOf(f, personId);
+    const person = await personOf(f, personId);
+    return {
+      name: person.name,
+      phone,
+      works: profile.works,
+      languages: profile.languages ?? [],
+      otherLanguage: profile.other_language ?? null,
+      usualDays: profile.usual_days ?? [],
+    };
+  };
+  const sentAt = async (personId) =>
+    (
+      await one(
+        f,
+        `select r.form_13615_sent_at from public.roster_entries r join public.workspaces w
+          on w.id=r.workspace_id and w.current_season=r.season where r.workspace_id=$1 and r.person_id=$2`,
+        [f.workspaceId, personId],
+      )
+    )?.form_13615_sent_at ?? null;
+  // Each write as SQL (inside the volunteer's own open transaction) and as an
+  // RPC (through their signed-in client), with what shows it landed.
+  const writes = [
+    {
+      name: "the volunteer's profile save",
+      fn: "vitally_save_my_profile",
+      sql: async (personId) => ({
+        text: "select public.vitally_save_my_profile($1,$2,$3::jsonb) as answer",
+        values: [randomUUID(), await profileRevision(f, personId), JSON.stringify(await profilePayload(personId, "555-0142"))],
+      }),
+      rpc: async (member) =>
+        member.client.rpc("vitally_save_my_profile", {
+          p_action_id: randomUUID(),
+          p_expected_revision: await profileRevision(f, member.personId),
+          p_profile: await profilePayload(member.personId, "555-0143"),
+        }),
+      landed: async (personId) => ["555-0142", "555-0143"].includes((await profileOf(f, personId)).phone),
+    },
+    {
+      name: "the volunteer's mark sent",
+      fn: "vitally_mark_upload_sent",
+      sql: async () => ({
+        text: "select public.vitally_mark_upload_sent($1,'form13615') as answer",
+        values: [randomUUID()],
+      }),
+      rpc: async (member) =>
+        member.client.rpc("vitally_mark_upload_sent", { p_action_id: randomUUID(), p_document: "form13615" }),
+      landed: async (personId) => (await sentAt(personId)) != null,
+    },
+  ];
+  let n = 0;
+  try {
+    for (const write of writes) {
+      // (a) The volunteer's write has its membership. Remove comes in and
+      // waits on it holding no profile lock, so the write takes the profile
+      // and commits. Remove then answers CONFLICT (the write raised the
+      // profile revision), never a deadlock.
+      await t.test(`${write.name} holds its membership, then Remove: Remove waits, then CONFLICT`, async () => {
+        n += 1;
+        const member = await f.staff({ key: `race_a${n}`, name: `Vic Ardent ${n}`, capabilities: ["prepare"] });
+        const volunteer = await openDatabase({ kind: "test" });
+        let open = false;
+        try {
+          const revision = await profileRevision(f, member.personId);
+          const { text, values } = await write.sql(member.personId);
+          await volunteer.query("begin");
+          open = true;
+          // As require_membership does at the start of the write.
+          await volunteer.query(
+            "select 1 from public.memberships where workspace_id=$1 and user_id=$2 and active for share",
+            [f.workspaceId, member.userId],
+          );
+          const removal = remove(sc, { volunteerId: member.personId, revision }).then((answer) => answer);
+          assert.equal(await waitingOn("vitally_remove_from_roster"), true, "Remove waits");
+          // The rest of the volunteer's write, in the same transaction.
+          await volunteer.query("select set_config('request.jwt.claims',$1,true)", [
+            JSON.stringify({ sub: member.userId, role: "authenticated" }),
+          ]);
+          await volunteer.query("set local role authenticated");
+          const answer = await volunteer.query(text, values).then(
+            (result) => ({ data: result.rows[0].answer, error: null }),
+            (error) => ({ data: null, error }),
+          );
+          await volunteer.query(answer.error ? "rollback" : "commit");
+          open = false;
+          const { data, error } = await removal;
+          assert.notEqual(answer.error?.code, DEADLOCK, `the write: ${answer.error?.message}`);
+          assert.notEqual(error?.code, DEADLOCK, `Remove: ${failure(error)}`);
+          assert.equal(answer.error, null, `the write lands: ${answer.error?.message}`);
+          assert.equal(await write.landed(member.personId), true, "the write landed");
+          assert.deepEqual(refusal(error), { code: CONFLICT, message: "CONFLICT" }, failure(error));
+          assert.equal(data, null);
+          assert.ok(await currentEntry(f, member.personId), "still on the roster");
+        } finally {
+          if (open) await volunteer.query("rollback");
+          await volunteer.end();
+        }
+      });
+
+      // (b) Remove has the membership and is held up at the profile (another
+      // connection holds it). The volunteer's write then waits on its own
+      // membership, holding nothing Remove needs. Remove lands, the
+      // membership is inactive, and the write is refused, never a deadlock.
+      await t.test(`Remove holds the membership, then ${write.name}: the write waits, then is refused`, async () => {
+        n += 1;
+        const member = await f.staff({ key: `race_b${n}`, name: `Vic Bellamy ${n}`, capabilities: ["prepare"] });
+        const blocker = await openDatabase({ kind: "test" });
+        let open = false;
+        try {
+          const revision = await profileRevision(f, member.personId);
+          await blocker.query("begin");
+          open = true;
+          await blocker.query(
+            "select 1 from public.volunteer_profiles where workspace_id=$1 and person_id=$2 for update",
+            [f.workspaceId, member.personId],
+          );
+          const removal = remove(sc, { volunteerId: member.personId, revision }).then((answer) => answer);
+          assert.equal(await waitingOn("vitally_remove_from_roster"), true, "Remove waits on the profile");
+          const pending = write.rpc(member).then((answer) => answer);
+          assert.equal(await waitingOn(write.fn), true, "the write waits");
+          await blocker.query("commit");
+          open = false;
+          const { data, error } = await removal;
+          const answer = await pending;
+          assert.notEqual(error?.code, DEADLOCK, `Remove: ${failure(error)}`);
+          assert.notEqual(answer.error?.code, DEADLOCK, `the write: ${failure(answer.error)}`);
+          assert.equal(error, null, `Remove lands: ${failure(error)}`);
+          assert.equal(data.accountDeactivated, true);
+          assert.deepEqual(refusal(answer.error), { code: FORBIDDEN, message: "FORBIDDEN" }, failure(answer.error));
+          assert.equal(await write.landed(member.personId), false, "the write did not land");
+          assert.equal(await currentEntry(f, member.personId), null);
+          assert.equal((await membershipOf(f, member.userId)).active, false);
+        } finally {
+          if (open) await blocker.query("rollback");
+          await blocker.end();
+        }
+      });
+    }
   } finally {
     await f.close();
   }
