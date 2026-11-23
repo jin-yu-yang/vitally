@@ -37,4 +37,4 @@
 - [x] 7.2 In 059, right after the entry is deleted, mark the person's live current-season shifts dated today or later (America/New_York) removed, as Remove shift does; `shiftsRemoved` in the receipt and `roster_removals.shifts_removed`; database tests: today's and later removed with the revision raised, earlier kept, another person's and already removed untouched, `OPEN_WORK` changes no shift, a replay removes nothing more
 - [x] 7.3 The Roster read marks `hasShiftsFromToday`, and the confirmation says "Their shifts from today on are removed from the Schedule." before its last line; unit tests for the store, `combineVolunteers` and the view
 - [x] 7.4 Update `docs/developer/database.md` and `docs/developer/frontend.md`
-- [ ] 7.5 Re-run the full CI on the new head; every job covering the change passes
+- [x] 7.5 Re-run the full CI on the new head; every job covering the change passes
