@@ -23,17 +23,17 @@
   - the lock, then the receipt;
   - `ALREADY_CHECKED_IN` and `NOT_CHECKED_IN`;
   - yesterday's open check-in is not `open`.
-- [ ] 2.2 `vitally_save_check_in` and `vitally_remove_check_in` (D4):
+- [x] 2.2 `vitally_save_check_in` and `vitally_remove_check_in` (D4):
   - workspace admins only, in the order FORBIDDEN, VALIDATION, lock, receipt, CONFLICT, domain refusals;
   - the reasons `NOT_ON_ROSTER`, `DEACTIVATED`, `OUT_BEFORE_IN`, `IN_FUTURE` and `OVERLAP` (spans may meet);
   - `HH:MM` New York times, with `24:00` for the check-out only;
   - an edit keeps the person and the date;
   - every save sets `corrected_by_person_id`;
   - removal is a soft delete.
-- [ ] 2.3 Replace `vitally_schedule_day`: copy 058's body as is and add only the admin-only `checkIns` block, marked `-- 059`. Each check-in carries its id, revision, volunteer, name, times, `endsAt`, `state`, `minutes`, its flags (`noCheckOut`, `notScheduled`, `corrected`, `outsideSiteHours`) and `correctedByName` (D7).
-- [ ] 2.4 `vitally_hours_this_week()`: workspace admins only, returning `weekStart`, `weekEnd` and `hours [{volunteerId, minutes}]` over `ny_week(now())` (D8).
-- [ ] 2.5 Grants: execute for `authenticated` only on the six RPCs, and none on the private helper. Update `tests/support/rpc-signatures.mjs` and `tests/database-catalog.mjs`.
-- [ ] 2.6 `tests/database-check-in.mjs`, part 2: every `volunteer-check-in` RPC scenario, the day read's `checkIns` (an admin gets them, a non-admin's answer is unchanged), and `vitally_hours_this_week`. Check that `tests/database-schedule.mjs` passes unchanged. Run `npm run db:migrate:test` on a stack that already has 058, then `npm run test:database`.
+- [x] 2.3 Replace `vitally_schedule_day`: copy 058's body as is and add only the admin-only `checkIns` block, marked `-- 059`. Each check-in carries its id, revision, volunteer, name, times, `endsAt`, `state`, `minutes`, its flags (`noCheckOut`, `notScheduled`, `corrected`, `outsideSiteHours`) and `correctedByName` (D7).
+- [x] 2.4 `vitally_hours_this_week()`: workspace admins only, returning `weekStart`, `weekEnd` and `hours [{volunteerId, minutes}]` over `ny_week(now())` (D8).
+- [x] 2.5 Grants: execute for `authenticated` only on the six RPCs, and none on the private helper. Update `tests/support/rpc-signatures.mjs` and `tests/database-catalog.mjs`.
+- [x] 2.6 `tests/database-check-in.mjs`, part 2: every `volunteer-check-in` RPC scenario, the day read's `checkIns` (an admin gets them, a non-admin's answer is unchanged), and `vitally_hours_this_week`. Check that `tests/database-schedule.mjs` passes unchanged. Run `npm run db:migrate:test` on a stack that already has 058, then `npm run test:database`.
 
 ## 3. Store and pure logic
 
