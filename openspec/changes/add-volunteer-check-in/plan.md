@@ -29,7 +29,7 @@ Read design.md and the specs before each task.
 
 **Data and the database:**
 - Fictional data only, in code, tests, fixtures and screenshots.
-- Never edit an applied migration. `058_volunteer_schedule.sql` is not edited. Everything new goes in `supabase/migrations/059_volunteer_check_in.sql`, or the next free number found in Task 1 Step 1.
+- Never edit an applied migration. `058_volunteer_schedule.sql` is not edited. Everything new goes in `supabase/migrations/060_volunteer_check_in.sql`, or the next free number found in Task 1 Step 1.
 - Times are America/New_York throughout. In SQL, convert only with `at time zone 'America/New_York'`.
 - RPC refusal order for admin writes: `FORBIDDEN` → `VALIDATION` (shape) → the workspace advisory lock → the receipt (a replay returns the stored answer) → `CONFLICT` → domain `VALIDATION` reasons. A refusal before the receipt writes nothing and stores no receipt.
 - Self RPCs: `FORBIDDEN` → `NOT_CLEARED` → lock → receipt → domain reasons. No revision is sent.
@@ -62,7 +62,7 @@ Read design.md and the specs before each task.
 ### Task 1: Migration, the table, the span, RLS and realtime
 
 **Files:**
-- Create: `supabase/migrations/059_volunteer_check_in.sql`
+- Create: `supabase/migrations/060_volunteer_check_in.sql`
 - Create: `tests/database-check-in.mjs`
 - Reference (do not edit): `supabase/migrations/058_volunteer_schedule.sql`:
   - the `shifts` table at :56;
@@ -124,14 +124,14 @@ Read design.md and the specs before each task.
 - [ ] **Step 5: Run the tests and see them pass.** Run the same command. Expected: PASS, all cases.
 - [ ] **Step 6: Commit.**
   ```bash
-  git add supabase/migrations/059_volunteer_check_in.sql tests/database-check-in.mjs
+  git add supabase/migrations/060_volunteer_check_in.sql tests/database-check-in.mjs
   git commit -m "Check-ins: table, counted span, RLS and realtime (#257)"
   ```
 
 ### Task 2: Migration, the self check-in RPCs
 
 **Files:**
-- Modify: `supabase/migrations/059_volunteer_check_in.sql` (add §5)
+- Modify: `supabase/migrations/060_volunteer_check_in.sql` (add §5)
 - Modify: `tests/database-check-in.mjs`
 - Modify: `tests/support/rpc-signatures.mjs`, `tests/database-catalog.mjs` (the new functions)
 
@@ -163,7 +163,7 @@ Read design.md and the specs before each task.
 ### Task 3: Migration, admin corrections, the day read and the hours
 
 **Files:**
-- Modify: `supabase/migrations/059_volunteer_check_in.sql` (add §6 to §8)
+- Modify: `supabase/migrations/060_volunteer_check_in.sql` (add §6 to §8)
 - Modify: `tests/database-check-in.mjs`, `tests/support/rpc-signatures.mjs`, `tests/database-catalog.mjs`
 
 **Interfaces:**
@@ -205,7 +205,7 @@ Read design.md and the specs before each task.
 - [ ] **Step 2: Run the tests and see them fail.** Run `npm run db:migrate:test && node --env-file=.env.test --test tests/database-check-in.mjs tests/database-schedule.mjs tests/database-catalog.mjs`. Expected: the new cases FAIL, and `database-schedule.mjs` passes.
 - [ ] **Step 3: Write the functions:**
   - **§6** holds `vitally_save_check_in` and `vitally_remove_check_in`. Convert `HH:MM` as `(date + time 'HH:MM')::timestamp at time zone 'America/New_York'`, and `'24:00'` as `(date+1)::timestamp at time zone …`. Check overlap under the lock against the person's other live rows that day, with spans `[checked_in_at, check_in_span(...).ends_at)`.
-  - **§7** replaces `vitally_schedule_day`: copy 058's body verbatim and add the admin-only `checkIns` block, each added line marked `-- 059`.
+  - **§7** replaces `vitally_schedule_day`: copy 058's body verbatim and add the admin-only `checkIns` block, each added line marked `-- 060`.
   - **§8** holds `vitally_hours_this_week`.
 - [ ] **Step 4: Run the tests and see them pass.** Run the same command. Expected: PASS, with `database-schedule.mjs` unchanged and passing.
 - [ ] **Step 5: Run the whole database suite.** Run `npm run test:database`. Expected: PASS.
@@ -411,7 +411,7 @@ Read design.md and the specs before each task.
 ### Task 10: Final-review fixes (added 2026-11-23)
 
 **Files:**
-- Modify: `supabase/migrations/059_volunteer_check_in.sql`. Change the OVERLAP check in `vitally_save_check_in` and the header comments. 059 is applied nowhere shared, so edit it in place, then reset it on the local stack: drop its objects and delete its `vitally_private.schema_migrations` row, then run `npm run db:migrate:test`. The stack's stored 059 digest is already stale (a CRLF copy), so this reset also clears that.
+- Modify: `supabase/migrations/060_volunteer_check_in.sql`. Change the OVERLAP check in `vitally_save_check_in` and the header comments. 060 is applied nowhere shared, so edit it in place, then reset it on the local stack: drop its objects and delete its `vitally_private.schema_migrations` row, then run `npm run db:migrate:test`. The stack's stored digest is already stale (a CRLF copy), so this reset also clears that.
 - Modify: `tests/database-check-in.mjs`.
 - Modify: `src/schedule-views.mjs`, the Checked out options; `src/controller.mjs`, the `state.weekHours` comment; `docs/developer/frontend.md`, the 24:00 line.
 - Test: `tests/schedule-views.test.mjs`.

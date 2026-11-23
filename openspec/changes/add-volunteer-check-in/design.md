@@ -46,8 +46,8 @@ a4ec880):
 
 **Constraints:**
 - Fictional data only.
-- Migrations are final once applied. This is a new migration, expected
-  `059`, and 058 is not edited, even though it has not reached `main`.
+- Migrations are final once applied. This is a new migration, `060`
+  (expected `059` until main's `059_remove_from_roster`, #273), and 058 is not edited, even though it has not reached `main`.
 - Staff screens are English. There is no client text.
 - America/New_York throughout.
 - The browser story's legs run near their time limit, so the check-in walk
@@ -404,7 +404,7 @@ a4ec880):
   collide.
 - [Risk] **Replacing `vitally_schedule_day` drops part of 058's answer.**
   → Mitigation: copy 058's body as is, and add only the `checkIns` block,
-  marked `-- 059`. The 058 schedule database tests run unchanged and must
+  marked `-- 060`. The 058 schedule database tests run unchanged and must
   still pass.
 - [Risk] **Migration number collision** with other open branches.
   → Mitigation: check `main` and open PRs before writing the file, and
@@ -427,7 +427,7 @@ a4ec880):
 
 ## Migration Plan
 
-1. The new migration (`059_volunteer_check_in.sql`, number to confirm) is
+1. The new migration (`060_volunteer_check_in.sql`) is
    additive. It adds the table, its policy and grants, the six RPCs and the
    span helper, replaces `vitally_schedule_day`, and adds `check_ins` to
    the publication. It changes no existing row.
@@ -445,7 +445,8 @@ a4ec880):
 ## Open Questions
 
 - **The migration number** (expected 059). Owner: the implementer, before
-  the migration task. It affects only the file name.
+  the migration task. It affects only the file name. Resolved: `060`, since
+  main's #273 took 059 (`059_remove_from_roster.sql`).
 - **Merge order with #271.** Owner: the user and team. #271 must be in
   `main` before this change is archived. Until then this branch carries
   it.

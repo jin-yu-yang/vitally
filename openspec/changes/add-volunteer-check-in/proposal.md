@@ -63,7 +63,7 @@ and #141 needs real hours before the season's analytics mean anything.
 
 ## Impact
 
-- **Database:** a new migration (expected `059_volunteer_check_in.sql`) adds:
+- **Database:** a new migration (`060_volunteer_check_in.sql`) adds:
   - the `public.check_ins` table, RPC-only for writes and in the realtime
     publication;
   - RPCs for check in, check out, the caller's own check-in state, the

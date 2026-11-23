@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createDatabaseFixture } from "./support/database-fixture.mjs";
 
-// OpenSpec change add-volunteer-check-in (design D1, D2, D5, D9), migration 059:
+// OpenSpec change add-volunteer-check-in (design D1, D2, D5, D9), migration 060:
 // the check_ins table and its checks, who reads it, the publication, and the
 // counted span (vitally_private.check_in_day_end and check_in_span).
 // Rows are inserted as the superuser for the table and span cases; the self

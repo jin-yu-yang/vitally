@@ -476,7 +476,7 @@ check failed. Check, in this order:
 
 ## 4. Migrations
 
-Fifty-nine migrations (001 to 059), applied in order. 020, the version-2 switch-over, was added after 021 and 022: a stack that already has them applies it last, and a new one applies it in number order. Both give the same result. Re-running the migrator on an already-migrated stack is safe,
+Sixty migrations (001 to 060), applied in order. 020, the version-2 switch-over, was added after 021 and 022: a stack that already has them applies it last, and a new one applies it in number order. Both give the same result. Re-running the migrator on an already-migrated stack is safe,
 but not because the files themselves are re-runnable — `001` and `002` create their tables with a
 plain `create table`, which fails the second time. What makes it safe is the ledger
 `tools/admin/migrate.mjs` keeps: `vitally_private.schema_migrations`, one row per file with a
@@ -531,7 +531,7 @@ already applied, so **the migrations are run only through the migrator, never by
 | `044_volunteer_roster_records.sql` | Hand-written: the admin-only Roster records (`volunteer_profiles`, `roster_entries`, `certificates`; not published to Realtime), the `vitally_policy` schema with its one admin check, `vitally_save_volunteer`, and `add_staff_member` linking a matching no-sign-in volunteer. A volunteer with no sign-in is readable only by admins. Existing staff are backfilled with no roles |
 | `045_volunteer_clearance.sql` | Hand-written: volunteer clearance. A current-season role needs its confirmed certificates (a deferred trigger refuses one that lacks them at commit), and a new volunteer needs a recorded photo ID check (`roster_entries.is_new`, `photo_id_checked_at`). Only a cleared staff member reads case data (the 21 staff policies) or acts (the six case RPCs refuse with `VT009 NOT_CLEARED`), and acts with the role capabilities that `people.capabilities` allows. Adds `vitally_my_clearance` and the Roster save's role and open-work checks. Unsupported roles of people with no sign-in are removed; it refuses with `VT008` if a person with a sign-in holds one ([below](#migration-failed-vt008)) |
 
-This table stops at 045. For 046 to 059, and what each migration adds, see the full table in
+This table stops at 045. For 046 to 060, and what each migration adds, see the full table in
 [`docs/developer/database.md`](developer/database.md#migrations).
 
 Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;

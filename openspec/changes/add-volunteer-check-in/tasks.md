@@ -1,6 +1,6 @@
 ## 1. Migration: storage, span and visibility
 
-- [x] 1.1 Confirm the migration number against `origin/main` and the open PRs, expected `059_volunteer_check_in.sql`. Record it in design.md if it differs (Open Questions).
+- [x] 1.1 Confirm the migration number against `origin/main` and the open PRs, expected `059_volunteer_check_in.sql`. Record it in design.md if it differs (Open Questions). It became `060_volunteer_check_in.sql` after main's `059_remove_from_roster` (#273).
 - [x] 1.2 Add `public.check_ins` (design D1):
   - columns: id, workspace, season, person, `check_in_date`, `checked_in_at`, `checked_out_at`, revision, created and updated by and at, `corrected_by_person_id`, `removed_at`;
   - checks: out after in, both on `check_in_date` in New York, and out at the latest the following midnight;
@@ -30,7 +30,7 @@
   - an edit keeps the person and the date;
   - every save sets `corrected_by_person_id`;
   - removal is a soft delete.
-- [x] 2.3 Replace `vitally_schedule_day`: copy 058's body as is and add only the admin-only `checkIns` block, marked `-- 059`. Each check-in carries its id, revision, volunteer, name, times, `endsAt`, `state`, `minutes`, its flags (`noCheckOut`, `notScheduled`, `corrected`, `outsideSiteHours`) and `correctedByName` (D7).
+- [x] 2.3 Replace `vitally_schedule_day`: copy 058's body as is and add only the admin-only `checkIns` block, marked `-- 060`. Each check-in carries its id, revision, volunteer, name, times, `endsAt`, `state`, `minutes`, its flags (`noCheckOut`, `notScheduled`, `corrected`, `outsideSiteHours`) and `correctedByName` (D7).
 - [x] 2.4 `vitally_hours_this_week()`: workspace admins only, returning `weekStart`, `weekEnd` and `hours [{volunteerId, minutes}]` over `ny_week(now())` (D8).
 - [x] 2.5 Grants: execute for `authenticated` only on the six RPCs, and none on the private helper. Update `tests/support/rpc-signatures.mjs` and `tests/database-catalog.mjs`.
 - [x] 2.6 `tests/database-check-in.mjs`, part 2: every `volunteer-check-in` RPC scenario, the day read's `checkIns` (an admin gets them, a non-admin's answer is unchanged), and `vitally_hours_this_week`. Check that `tests/database-schedule.mjs` passes unchanged. Run `npm run db:migrate:test` on a stack that already has 058, then `npm run test:database`.
@@ -113,8 +113,8 @@
 
 Decided by the user on 2026-11-23, after the final whole-branch review (finding I1). Run 6.3 after this group.
 
-- [x] 7.1 OVERLAP with an open check-in (design D4). For the overlap check in `vitally_save_check_in`, a live check-in dated today with no check-out runs on with no end, the saved one included. The counted minutes are unchanged. Edit 059 in place, since it is applied nowhere shared, and reset it on the local stack. Add database tests for the two new scenarios, "Adding beside an open check-in" and "Reopening before a later check-in".
+- [x] 7.1 OVERLAP with an open check-in (design D4). For the overlap check in `vitally_save_check_in`, a live check-in dated today with no check-out runs on with no end, the saved one included. The counted minutes are unchanged. Edit the migration in place, since it is applied nowhere shared, and reset it on the local stack. Add database tests for the two new scenarios, "Adding beside an open check-in" and "Reopening before a later check-in".
 - [x] 7.2 Review minors:
   - the Checked out list shows "12:00 am" only once: drop 00:00 and label 24:00 "12:00 am (midnight)", and correct `docs/developer/frontend.md`, which says the option reads "24:00";
   - the stale `state.weekHours` comment in `src/controller.mjs`;
-  - the 059 header comments name the right design decisions.
+  - the 060 header comments name the right design decisions.

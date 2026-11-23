@@ -424,7 +424,7 @@ export const RPC_SIGNATURES = Object.freeze([
       "hours",
       "settingsRevision",
       "shifts",
-      "checkIns", // 059
+      "checkIns", // 060
       "targets",
       "weekday",
     ]),

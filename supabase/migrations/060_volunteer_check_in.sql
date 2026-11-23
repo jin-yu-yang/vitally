@@ -1,4 +1,4 @@
--- 059: volunteer check-in (OpenSpec change add-volunteer-check-in, design
+-- 060: volunteer check-in (OpenSpec change add-volunteer-check-in, design
 -- D1 to D5 and D7 to D9).
 --
 -- Who actually came, and for how long. One row per check-in: a volunteer
@@ -572,7 +572,7 @@ grant execute on function public.vitally_remove_check_in(uuid,uuid,bigint) to au
 -- ---------------------------------------------------------------------------
 -- §7. The schedule day read (design D7).
 
--- 059: replaced from 058 §6, verbatim except the lines marked `-- 059`: for a
+-- 060: replaced from 058 §6, verbatim except the lines marked `-- 060`: for a
 -- workspace admin the answer also holds checkIns, the day's live check-ins as
 -- check_in_item builds them. Every 058 key stays, and a non-admin answer has no
 -- checkIns key. The comment below is 058's, with its last sentence added.
@@ -585,7 +585,7 @@ grant execute on function public.vitally_remove_check_in(uuid,uuid,bigint) to au
 -- roles and hours only, and not the shifts of people with no sign-in. A
 -- workspace admin also gets, on each shift, flags and counts, and the
 -- candidates for Add shift: current-season roster people with a role and an
--- account that is not deactivated. -- 059: A workspace admin also gets checkIns.
+-- account that is not deactivated. -- 060: A workspace admin also gets checkIns.
 create or replace function public.vitally_schedule_day(p_date date)
 returns jsonb language plpgsql security definer set search_path='' as $$
 declare v_member public.memberships;
@@ -637,13 +637,13 @@ begin
     and cardinality(r.roles)>0
     and not exists(select 1 from public.accounts a
      where a.workspace_id=p.workspace_id and a.person_id=p.id and a.status='deactivated')),'[]'::jsonb));
- -- 059: an admin also gets the day's live current-season check-ins (design D7),
+ -- 060: an admin also gets the day's live current-season check-ins (design D7),
  -- by check-in time. Nobody else gets the key, so a non-admin answer is 058's.
- v_result=v_result||jsonb_build_object('checkIns',coalesce((select jsonb_agg( -- 059
-    vitally_private.check_in_item(c) order by c.checked_in_at,c.id) -- 059
-   from public.check_ins c -- 059
-   where c.workspace_id=v_member.workspace_id and c.season=v_workspace.current_season -- 059
-    and c.check_in_date=p_date and c.removed_at is null),'[]'::jsonb)); -- 059
+ v_result=v_result||jsonb_build_object('checkIns',coalesce((select jsonb_agg( -- 060
+    vitally_private.check_in_item(c) order by c.checked_in_at,c.id) -- 060
+   from public.check_ins c -- 060
+   where c.workspace_id=v_member.workspace_id and c.season=v_workspace.current_season -- 060
+    and c.check_in_date=p_date and c.removed_at is null),'[]'::jsonb)); -- 060
  end if;
  return v_result;
 end;

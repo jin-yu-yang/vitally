@@ -1051,7 +1051,7 @@ export function createStore(client) {
       return await call("vitally_my_shifts");
     },
 
-    // Volunteer check-in (migration 059). The RPCs enforce who may call them.
+    // Volunteer check-in (migration 060). The RPCs enforce who may call them.
     async myCheckIn() {
       return await call("vitally_my_check_in");
     },
