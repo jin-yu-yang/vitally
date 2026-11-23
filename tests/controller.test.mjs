@@ -11816,6 +11816,20 @@ test("ADMIN_ROLE and a site coordinator's FORBIDDEN keep the removal dialog open
   controller.stop();
 });
 
+test("a SELF refusal keeps the removal dialog open with the own-row sentence", async () => {
+  const store = rosterStore();
+  const { controller } = await accountDrawer(store);
+  controller.openDialog("remove-from-roster", { volunteerId: "v-1" });
+  store.failRemove = accountRefusal("VALIDATION", "VT007", "SELF");
+  assert.equal(await controller.removeFromRoster(), false);
+  const state = controller.getState();
+  assert.equal(state.dialog, "remove-from-roster");
+  assert.equal(state.removeFromRosterError, "You can't remove yourself from the roster.");
+  assert.equal(state.error, null);
+  assert.equal(state.busy, false);
+  controller.stop();
+});
+
 test("CONFLICT on removal goes to the banner and re-reads the list", async () => {
   const store = rosterStore();
   const { controller } = await accountDrawer(store);

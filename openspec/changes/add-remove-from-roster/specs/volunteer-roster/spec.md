@@ -117,7 +117,7 @@ Each removal SHALL record one row: the workspace, the season, the person removed
 - **THEN** the read is refused, and an insert, update or delete is refused too
 
 ### Requirement: The Edit drawer offers removal, after a confirmation
-The Edit drawer of a saved volunteer SHALL offer "Remove from this season's roster…". For a caller who is not a site coordinator:
+The Edit drawer of a saved volunteer SHALL offer "Remove from this season's roster…". On the caller's own drawer it SHALL say "You can't remove yourself from the roster." instead, whatever the caller's role. For a caller who is not a site coordinator, on someone else's drawer:
 - on a site coordinator's drawer it SHALL say "Only site coordinators remove a site coordinator from the roster." instead;
 - on the drawer of someone with the Admin role this season it SHALL say the Admin role sentence the drawer already uses instead.
 
@@ -133,6 +133,10 @@ The button SHALL open a confirmation titled "Remove <name> from this season's ro
 Its buttons SHALL be "Remove from roster" and "Cancel". Nothing SHALL be sent until "Remove from roster" is pressed.
 
 A refusal SHALL keep the confirmation open with its sentence: `OPEN_WORK` as "<name> still has open work: <list>. Finish it or hand it over first.", `ADMIN_ROLE` with the Admin role sentence, and `FORBIDDEN` for a site coordinator with the sentence above. A `CONFLICT` or an unreadable refusal SHALL be the banner's message, and the list SHALL be read again. On success the confirmation and the drawer SHALL close, and the Roster SHALL no longer list the volunteer. An answer that never came SHALL be kept, so pressing again sends the same action id.
+
+#### Scenario: Your own drawer
+- **WHEN** an admin opens their own drawer
+- **THEN** it offers no removal and says "You can't remove yourself from the roster."
 
 #### Scenario: The confirmation for an active account
 - **WHEN** an admin opens Nadia Kerr's drawer, whose account is active, and presses "Remove from this season's roster…"

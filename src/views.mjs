@@ -823,6 +823,7 @@ export function dialog(state) {
             ? { query, candidates: picked ? [] : returningCandidates(earlier, query), picked }
             : null,
         canChangeAdmin: siteCoordinator(state.principal),
+        viewerId: state.principal?.personId ?? null,
         ui: {
           ...ui,
           formError: state.volunteerFormError ?? null,

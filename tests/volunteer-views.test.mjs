@@ -997,6 +997,20 @@ test("a non-site-coordinator sees the Admin role sentence instead of Remove", ()
   assert.match(plain, REMOVE_BUTTON);
 });
 
+test("your own drawer offers no Remove, and says why", () => {
+  const own = (extra = {}) => volunteerDrawerBody({ volunteer: withStatus("active", extra), isNew: false, ui: {}, canChangeAdmin: true, viewerId: "v-1" });
+  for (const html of [own(), own({ roles: ["admin"] }), own({ isSiteCoordinator: true })]) {
+    assert.doesNotMatch(html, /data-action="volunteer-remove"/);
+    assert.match(html, /<p class="field-note" id="volunteer-remove-note">You can&#39;t remove yourself from the roster\.<\/p>/);
+  }
+  const notSc = volunteerDrawerBody({ volunteer: withStatus("active", { roles: ["admin"] }), isNew: false, ui: {}, canChangeAdmin: false, viewerId: "v-1" });
+  assert.match(notSc, /You can&#39;t remove yourself from the roster\./);
+  assert.doesNotMatch(notSc, /Only site coordinators change the Admin role\.<\/p><\/div>/);
+  const other = volunteerDrawerBody({ volunteer: withStatus("active"), isNew: false, ui: {}, canChangeAdmin: true, viewerId: "v-9" });
+  assert.match(other, REMOVE_BUTTON);
+  assert.doesNotMatch(other, /remove yourself/);
+});
+
 test("the confirmation for an active account", () => {
   const html = removeFromRosterDialogBody({ volunteer: withStatus("active") });
   assert.match(html, /Mira Patel \(mira@example\.test\) comes off this season&#39;s roster, with their roles, certificates and the record of what they sent this season\./);

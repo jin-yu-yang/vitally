@@ -36,7 +36,7 @@ import { LABEL_COLORS, labelNameTaken } from "./case-labels.mjs";
 import { createShadedSave } from "./shaded-editor.mjs";
 import { createWindowState } from "./window-state.mjs";
 import { isLang, readLanguage, writeLanguage } from "./language.mjs";
-import { volunteerProblem, profileProblem, withoutLostRoles, roleNeedsMessage, openWorkMessage, accountMessage, ADMIN_ROLE_MESSAGE, REMOVE_SITE_COORDINATOR_MESSAGE } from "./volunteer-roster.mjs";
+import { volunteerProblem, profileProblem, withoutLostRoles, roleNeedsMessage, openWorkMessage, accountMessage, ADMIN_ROLE_MESSAGE, REMOVE_SELF_MESSAGE, REMOVE_SITE_COORDINATOR_MESSAGE } from "./volunteer-roster.mjs";
 import { emptyUpdateForm, toUpdateRequest, validateUpdate } from "./posted-updates.mjs";
 import { nowInput } from "./contact-log.mjs";
 import { seasonRefusalLines } from "./season-settings-views.mjs";
@@ -5044,16 +5044,19 @@ export function createController({
           ? openWorkMessage(current.name || "This volunteer", cause.details)
           : error?.code === "FORBIDDEN" && cause?.message === "ADMIN_ROLE"
             ? STAFF_ADMIN_ROLE_MESSAGE
-            : error?.code === "FORBIDDEN" && current.isSiteCoordinator === true
-              ? REMOVE_SITE_COORDINATOR_MESSAGE
-              : null;
+            : error?.code === "VALIDATION" && cause?.details === "SELF"
+              ? REMOVE_SELF_MESSAGE
+              : error?.code === "FORBIDDEN" && current.isSiteCoordinator === true
+                ? REMOVE_SITE_COORDINATOR_MESSAGE
+                : null;
       if (sentence && state.dialog === "remove-from-roster") {
         state.removeFromRosterError = sentence;
         await readVolunteers().catch(() => {});
         show();
         return false;
       }
-      // The drawer shows the banner; the confirmation does not.
+      // The banner belongs to the drawer, so the dialog goes back to it to show
+      // the re-read volunteer.
       if (state.dialog === "remove-from-roster") state.dialog = "volunteer";
       noteFailure(error, error?.code === "CONFLICT" ? { message: VOLUNTEER_CONFLICT_MESSAGE } : undefined);
       await readVolunteers().catch(() => {});

@@ -102,6 +102,7 @@ Stakeholders: Hailey (owner), Zeye (reviewer, approves before hosted deploy), Ji
 - **Choice:**
   - **The button.** "Remove from this season's roster…" in the Edit drawer, for a volunteer already saved.
   - **Who sees it.** A caller who isn't a site coordinator, opening a site coordinator's drawer, sees "Only site coordinators remove a site coordinator from the roster." instead. One opening someone with the Admin role sees the existing Admin role sentence.
+  - **Your own row.** A caller opening their own drawer sees "You can't remove yourself from the roster." instead, before any role sentence; the server refuses it anyway (`VALIDATION`, `SELF`), and the dialog shows the same sentence if it ever comes back.
   - **The dialog.**
 
     > **Remove <name> from this season's roster?**

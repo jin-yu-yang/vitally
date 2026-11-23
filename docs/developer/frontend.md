@@ -972,7 +972,10 @@ Change `add-remove-from-roster`. The database side is in
   coordinators remove a site coordinator from the roster." instead; opening someone with the Admin
   role, they see "Only site coordinators change the Admin role." Both sentences are exported from
   [`volunteer-roster.mjs`](../../src/volunteer-roster.mjs) (`REMOVE_SITE_COORDINATOR_MESSAGE`,
-  `ADMIN_ROLE_MESSAGE`), and the controller uses the same ones.
+  `ADMIN_ROLE_MESSAGE`), and the controller uses the same ones. On the viewer's own drawer (the
+  drawer is given `viewerId`, the principal's person id) the button is replaced by "You can't remove
+  yourself from the roster." (`REMOVE_SELF_MESSAGE`), ahead of both sentences; the controller shows
+  the same sentence if a `VALIDATION` refusal with details `SELF` ever comes back.
 - **The confirmation** (`removeFromRosterDialogBody`, dialog `remove-from-roster`, titled "Remove
   <name> from this season's roster?"): "<name> (<email>) comes off this season's roster, with their
   roles, certificates and the record of what they sent this season." Then one account line: "Their
