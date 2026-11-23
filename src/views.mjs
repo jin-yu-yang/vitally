@@ -34,6 +34,7 @@ import {
   renderRoster,
   volunteerDrawerBody,
   deactivateAccountDialogBody,
+  removeFromRosterDialogBody,
   sendInvitationTitle,
   sendInvitationDialogBody,
   cancelInvitationDialogBody,
@@ -699,6 +700,12 @@ export function dialog(state) {
     title = "Deactivate this account?";
     body = deactivateAccountDialogBody({ volunteer });
   }
+  if (state.dialog === "remove-from-roster") {
+    const volunteerId = state.dialogContext?.volunteerId ?? null;
+    const volunteer = (state.volunteers ?? []).find((entry) => entry?.id === volunteerId) ?? null;
+    title = `Remove ${volunteer?.name ?? "this volunteer"} from this season's roster?`;
+    body = removeFromRosterDialogBody({ volunteer, error: state.removeFromRosterError ?? null });
+  }
   if (state.dialog === "send-invitation") {
     // From the drawer (the saved profile email) or the office panel (the typed one).
     const volunteerId = state.dialogContext?.volunteerId ?? null;
@@ -857,6 +864,7 @@ export function dialog(state) {
             ? { query, candidates: picked ? [] : returningCandidates(earlier, query), picked }
             : null,
         canChangeAdmin: siteCoordinator(state.principal),
+        viewerId: state.principal?.personId ?? null,
         ui: {
           ...ui,
           formError: state.volunteerFormError ?? null,

@@ -37,7 +37,7 @@ import { LABEL_COLORS, labelNameTaken } from "./case-labels.mjs";
 import { createShadedSave } from "./shaded-editor.mjs";
 import { createWindowState } from "./window-state.mjs";
 import { isLang, readLanguage, writeLanguage } from "./language.mjs";
-import { volunteerProblem, profileProblem, withoutLostRoles, roleNeedsMessage, openWorkMessage, accountMessage } from "./volunteer-roster.mjs";
+import { volunteerProblem, profileProblem, withoutLostRoles, roleNeedsMessage, openWorkMessage, accountMessage, ADMIN_ROLE_MESSAGE, REMOVE_SELF_MESSAGE, REMOVE_SITE_COORDINATOR_MESSAGE } from "./volunteer-roster.mjs";
 import { emptyUpdateForm, toUpdateRequest, validateUpdate } from "./posted-updates.mjs";
 import { nowInput } from "./contact-log.mjs";
 import { seasonRefusalLines } from "./season-settings-views.mjs";
@@ -142,7 +142,7 @@ export const VOLUNTEER_CONFLICT_MESSAGE = STAFF_VOLUNTEER_CONFLICT_MESSAGE;
 // Site coordinators (change add-season-settings): a save that changes the
 // Admin role by someone who is not one, deactivating a site coordinator by
 // someone who is not one, and deactivating the last one.
-const STAFF_ADMIN_ROLE_MESSAGE = "Only site coordinators change the Admin role.";
+const STAFF_ADMIN_ROLE_MESSAGE = ADMIN_ROLE_MESSAGE;
 const STAFF_DEACTIVATE_SITE_COORDINATOR_MESSAGE = "Only site coordinators deactivate a site coordinator's account.";
 const STAFF_LAST_SITE_COORDINATOR_MESSAGE =
   "At least one site coordinator must remain. Make someone else a site coordinator first.";
@@ -404,8 +404,11 @@ export function createController({
     volunteerFormError: null,
     // The document whose Mark reviewed reason row is open in the drawer; window-local.
     reviewReasonFor: null,
-    // The last account action's result in the drawer: {kind: "ok" | "error", text}.
+    // The last account action's result in the drawer: {kind: "ok" | "error" | "info", text}.
     volunteerAccountNotice: null,
+    // The refusal the remove-from-roster confirmation says (change
+    // add-remove-from-roster); cleared whenever a dialog opens or closes.
+    removeFromRosterError: null,
     // The office screen's Invite a client panel (admin only): the client
     // accounts (null until read), the email as typed, and the last result.
     invitations: null,
@@ -554,6 +557,8 @@ export function createController({
   // sent at, so pressing the same button again sends the same action id.
   let pendingAccountAction = null;
   let pendingInviteAction = null;
+  // A removal from the roster whose answer never came, kept the same way.
+  let pendingRemoval = null;
   // Post an update's save and table action whose outcome is unknown, kept
   // the same way: `{ key, request }`, where the key says what was pressed.
   let pendingUpdateSave = null;
@@ -3192,6 +3197,7 @@ export function createController({
     state.volunteerFormError = null;
     state.reviewReasonFor = null;
     state.volunteerAccountNotice = null;
+    state.removeFromRosterError = null;
     state.invitations = null;
     state.invitationsFailed = false;
     state.inviteEmail = "";
@@ -3203,6 +3209,7 @@ export function createController({
     pendingUploadSend = null;
     pendingAccountAction = null;
     pendingInviteAction = null;
+    pendingRemoval = null;
     state.updates = [];
     state.updatesUnread = 0;
     state.uploadsToReview = 0;
@@ -3325,6 +3332,7 @@ export function createController({
     if (name === "start-season") state.seasonSettingsUi = { ...state.seasonSettingsUi, startRefusal: null };
     state.dialog = name;
     state.dialogContext = context ? { ...context } : null;
+    state.removeFromRosterError = null;
     if (name === "volunteer") state.returningSearch = "";
     // Start next season is about the season the page read when it opened.
     if (name === "start-season" && state.seasonSettings?.season != null)
@@ -3333,6 +3341,7 @@ export function createController({
   }
 
   function closeDialog() {
+    state.removeFromRosterError = null;
     // Keeping the shift goes back to its drawer; closing the drawer drops its draft.
     if (state.dialog === "remove-shift" && state.schedule.drawer) {
       state.dialog = "shift";
@@ -3342,10 +3351,11 @@ export function createController({
     }
     if (state.dialog === "shift" || state.dialog === "remove-shift")
       state.schedule = { ...state.schedule, drawer: null };
-    // Keeping the account (or not sending, or keeping the invitation) goes
-    // back to the drawer it was asked from.
+    // Keeping the account (or the roster entry, or not sending, or keeping the
+    // invitation) goes back to the drawer it was asked from.
     if (
       state.dialog === "deactivate-account" ||
+      state.dialog === "remove-from-roster" ||
       (DRAWER_QUESTIONS.includes(state.dialog) && state.dialogContext?.volunteerId)
     ) {
       state.dialog = "volunteer";
@@ -5110,6 +5120,7 @@ export function createController({
     try {
       await readVolunteers();
       state.error = null;
+      keepReAddOpen(returning, volunteerId);
     } catch (error) {
       noteFailure(error);
     }
@@ -5120,6 +5131,21 @@ export function createController({
     // closes on the save alone.
     if (volunteerId && volunteerId === state.principal?.personId) void recheckAfterOwnSave();
     return true;
+  }
+
+  // A picked earlier volunteer back on the roster with a deactivated account
+  // (#269, design D10): the drawer stays open on their Edit, and the Account
+  // section points to Reactivate. Nothing is reactivated. The page closes the
+  // drawer on a save only while it is still the pick (app.mjs submitVolunteer).
+  function keepReAddOpen(returning, volunteerId) {
+    if (!returning || state.dialog !== "volunteer" || state.dialogContext?.volunteerId !== volunteerId) return;
+    const back = state.volunteers.find((entry) => entry?.id === volunteerId);
+    if (back?.account?.status !== "deactivated") return;
+    state.dialogContext = { volunteerId };
+    state.volunteerAccountNotice = {
+      kind: "info",
+      text: `${back.name || "This volunteer"} is back on this season's roster. Their account is deactivated. Reactivate it so they can sign in.`,
+    };
   }
 
   // A check already out (a focus, say) was asked before the save landed, so
@@ -5496,6 +5522,78 @@ export function createController({
     throw unread;
   }
 
+  // Remove from this season's roster (change add-remove-from-roster, design
+  // D8): sent only from its confirmation, at the profile revision the drawer
+  // holds. A refusal with a sentence (open work, the Admin role, a site
+  // coordinator) keeps the confirmation open and says it there; CONFLICT or
+  // anything unreadable is the banner's, back in the drawer, thrown. Either
+  // way the list is read again. An answer that never came is kept, so the
+  // same press again sends the same action id. A removal that landed closes
+  // the confirmation and the drawer; the re-read also re-reads the uploads
+  // count (readVolunteers).
+  async function removeFromRoster() {
+    if (state.busy || state.dialog !== "remove-from-roster") return false;
+    const volunteerId = state.dialogContext?.volunteerId ?? null;
+    const current = volunteerId ? (state.volunteers.find((entry) => entry?.id === volunteerId) ?? null) : null;
+    if (!current) throw refuse("NOT_FOUND", STAFF_VOLUNTEER_GONE_MESSAGE);
+    const revision = Number(current.revision);
+    const key = `remove:${volunteerId}:${revision}`;
+    const request = {
+      actionId: pendingRemoval?.key === key ? pendingRemoval.actionId : newActionId(),
+      volunteerId,
+      expectedRevision: revision,
+    };
+    pendingRemoval = null;
+    state.removeFromRosterError = null;
+    state.busy = true;
+    state.error = null;
+    show();
+    try {
+      await store.removeFromRoster(request);
+    } catch (error) {
+      state.busy = false;
+      if (UNKNOWN_OUTCOME.includes(error?.code)) pendingRemoval = { key, actionId: request.actionId };
+      const cause = error?.cause;
+      const sentence =
+        cause?.message === "OPEN_WORK"
+          ? openWorkMessage(current.name || "This volunteer", cause.details)
+          : error?.code === "FORBIDDEN" && cause?.message === "ADMIN_ROLE"
+            ? STAFF_ADMIN_ROLE_MESSAGE
+            : error?.code === "VALIDATION" && cause?.details === "SELF"
+              ? REMOVE_SELF_MESSAGE
+              : error?.code === "FORBIDDEN" && current.isSiteCoordinator === true
+                ? REMOVE_SITE_COORDINATOR_MESSAGE
+                : null;
+      if (sentence && state.dialog === "remove-from-roster") {
+        state.removeFromRosterError = sentence;
+        await readVolunteers().catch(() => {});
+        show();
+        return false;
+      }
+      // The banner belongs to the drawer, so the dialog goes back to it to show
+      // the re-read volunteer.
+      if (state.dialog === "remove-from-roster") state.dialog = "volunteer";
+      noteFailure(error, error?.code === "CONFLICT" ? { message: VOLUNTEER_CONFLICT_MESSAGE } : undefined);
+      await readVolunteers().catch(() => {});
+      show();
+      throw error;
+    }
+    state.busy = false;
+    noteConnected();
+    if (state.dialog === "remove-from-roster") {
+      state.dialog = null;
+      state.dialogContext = null;
+    }
+    try {
+      await readVolunteers();
+      state.error = null;
+    } catch (error) {
+      noteFailure(error);
+    }
+    show();
+    return true;
+  }
+
   const createAccount = () => runAccountAction("create");
   const resendAccount = () => runAccountAction("resend");
   const deactivateAccount = () => runAccountAction("deactivate");
@@ -5687,6 +5785,7 @@ export function createController({
     resendAccount,
     deactivateAccount,
     reactivateAccount,
+    removeFromRoster,
     clearVolunteerFormError,
     setVolunteerTab,
     setWorkloadView,

@@ -531,6 +531,28 @@ export const RPC_SIGNATURES = Object.freeze([
       },
     }),
   }),
+  // Removing a staff member with no open work from this season's roster
+  // (change add-remove-from-roster, migration 059), at their profile revision.
+  Object.freeze({
+    name: "vitally_remove_from_roster",
+    signature: "vitally_remove_from_roster(uuid,uuid,bigint)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["accountDeactivated", "actionId", "revision", "shiftsRemoved", "volunteerId"]),
+    context: async (f) => {
+      const key = `sig_rm_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+      const { personId } = await f.staff({ key, name: "Jules Arden", capabilities: ["prepare"] });
+      const { rows } = await f.sql(
+        "select revision::int as revision from public.volunteer_profiles where workspace_id=$1 and person_id=$2",
+        [f.workspaceId, personId],
+      );
+      return { removeVolunteerId: personId, removeRevision: rows[0].revision };
+    },
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_volunteer_id: context.removeVolunteerId,
+      p_expected_revision: context.removeRevision,
+    }),
+  }),
   // The office panel's client list: an array, each element of this shape.
   Object.freeze({
     name: "vitally_client_invitations",
