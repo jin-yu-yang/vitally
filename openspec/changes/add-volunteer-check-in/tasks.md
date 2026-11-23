@@ -102,7 +102,7 @@
   - the frontend notes: the strip and the check-in drawer;
   - `docs/setup.md`'s migration table if it lists migrations;
   - the README counts, if they list RPCs or tables.
-- [ ] 6.3 Final checks:
+- [x] 6.3 Final checks:
   - merge `origin/main` first if it has moved;
   - `npm test`;
   - `npm run db:migrate:test` on a stack with main's migrations and 058, then `npm run test:database`;
