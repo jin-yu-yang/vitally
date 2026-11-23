@@ -80,6 +80,13 @@ All four deltas are `ADDED` only, so they add to the canonical specs and change 
 - **Screenshots**: reviewed from run 45111772982's `story-screenshots-chrome-client` artifact. The Roster's returning-volunteer picker and the admin's Schedule day render as before. The remove-from-roster browser test runs in its own `test(...)` block and takes no story screenshots.
 - **Not run**: `npm run build:hant -- --check` locally (no client text changed; CI's `checks` runs it). No local stack on this machine; CI starts from an empty database, and 059 changes no existing rows on deploy, so no run on a stack holding main's migrations is needed.
 
+### After PR #273 review (2026-11-23)
+
+- Zeye found a deadlock: the person's own `vitally_save_my_profile` / `vitally_mark_upload_sent` hold `FOR SHARE` on their membership, then lock the profile, while Remove locked the profile first and the membership only when deactivating it. 059 now locks that membership right after the workspace lock (`df8275e`; design D4).
+- New deterministic tests for both timings and both writes ("removal and the volunteer's own writes never deadlock"): all four failed with `40P01` on the old 059 ([quick run 45119153370](https://github.com/jin-yu-yang/vitally/actions/runs/45119153370), tests at `01d4762`) and pass with the fix ([quick run 45119382304](https://github.com/jin-yu-yang/vitally/actions/runs/45119382304), 143 / 143 with the my-profile, clearance-uploads and actions files).
+- Full CI [run 45119803317](https://github.com/jin-yu-yang/vitally/actions/runs/45119803317) on `ab5e69d` (main with #272 merged in): every job green. It supersedes run 45111772982 above as the run of record.
+- Known limit, not new: a call of the person's own that takes the workspace lock after their membership (an Admin-role volunteer's admin RPC, an invited volunteer's site check) can still deadlock with Remove, as with Deactivate (052) and Start next season (055). Found by reading, not reproduced.
+
 ### Known gaps (ruling R8, parked)
 
 - An invitation that has expired but hasn't been swept yet gets the "deactivated" account line in the confirmation instead of a line for an expired invitation.
