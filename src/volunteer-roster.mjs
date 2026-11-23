@@ -83,7 +83,10 @@ const OTHER_LANGUAGE_MAX = 40;
 const ACCOUNT_MISSING = Object.freeze({ none: "noAccount", invited: "notSignedIn", deactivated: "deactivated" });
 
 // Joins raw PostgREST rows into volunteers. Only people with a roster entry appear.
-export function combineVolunteers({ profiles = [], entries = [], certificates = [], people = [], accounts = [] }) {
+// `shifts` are the live current-season shifts from today on (person_id only),
+// so the remove confirmation can say they go too (change add-remove-from-roster, D12).
+export function combineVolunteers({ profiles = [], entries = [], certificates = [], people = [], accounts = [], shifts = [] }) {
+  const withShifts = new Set(shifts.map((s) => s.person_id));
   const accountById = new Map(accounts.map((a) => [a.person_id, a]));
   const profileById = new Map(profiles.map((p) => [p.person_id, p]));
   const entryById = new Map(entries.map((e) => [e.person_id, e]));
@@ -154,7 +157,8 @@ export function combineVolunteers({ profiles = [], entries = [], certificates = 
       account,
       isSiteCoordinator,
       cleared,
-      missing
+      missing,
+      hasShiftsFromToday: withShifts.has(person.id)
     });
   }
   return list.sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
@@ -356,6 +360,13 @@ const ACCOUNT_MESSAGES = Object.freeze({
   SELF: "You can't deactivate your own account."
 });
 export const accountMessage = (reason) => ACCOUNT_MESSAGES[String(reason ?? "")] ?? null;
+
+// What only a site coordinator may do (change add-season-settings, and
+// add-remove-from-roster): said by the drawer before a press, and by the
+// controller when the server refuses one. One source for both.
+export const ADMIN_ROLE_MESSAGE = "Only site coordinators change the Admin role.";
+export const REMOVE_SELF_MESSAGE = "You can't remove yourself from the roster.";
+export const REMOVE_SITE_COORDINATOR_MESSAGE = "Only site coordinators remove a site coordinator from the roster.";
 
 // The server's OPEN_WORK detail, a JSON array of labels, as the drawer's
 // sentence; null when it isn't a non-empty array of strings.

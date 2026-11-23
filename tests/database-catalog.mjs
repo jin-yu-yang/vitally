@@ -101,6 +101,7 @@ const RPCS = Object.freeze([
   "vitally_start_next_season(p_action_id uuid, p_expected_season smallint, p_typed_year smallint)",
   "vitally_my_profile()",
   "vitally_save_my_profile(p_action_id uuid, p_expected_revision bigint, p_profile jsonb)",
+  "vitally_remove_from_roster(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)",
 ]);
 // The public RPCs that only read: no action id, no digest.
 // The RPCs that take no action id and store no digest: the reads, and (047,

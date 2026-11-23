@@ -5,6 +5,7 @@ import {
   volunteerDrawerBody,
   deactivateAccountDialogBody,
   cancelInvitationDialogBody,
+  removeFromRosterDialogBody,
 } from "../src/volunteer-views.mjs";
 import { staffScreen, dialog } from "../src/views.mjs";
 import { cleared } from "./support/clearance.mjs";
@@ -968,4 +969,103 @@ test("a pick whose earlier person is gone says it could not be opened, with no s
   assert.match(html, /This volunteer could not be opened\. Close this and try again\./);
   assert.doesNotMatch(html, /id="returning-search"/);
   assert.doesNotMatch(html, /id="volunteer-form"/);
+});
+
+// Change add-remove-from-roster: the drawer's Remove button, its confirmation
+// and the Reactivate note (#269).
+const REMOVE_BUTTON = /data-action="volunteer-remove" data-volunteer-id="v-1"/;
+test("the Edit drawer offers Remove from this season's roster…", () => {
+  const html = drawerFor("active");
+  assert.match(html, REMOVE_BUTTON);
+  assert.ok(html.includes("Remove from this season&#39;s roster…") || html.includes("Remove from this season's roster…"));
+  assert.doesNotMatch(volunteerDrawerBody({ volunteer: null, isNew: true, ui: {} }), /data-action="volunteer-remove"/);
+});
+
+test("a non-site-coordinator sees the site coordinator sentence instead of Remove", () => {
+  const html = volunteerDrawerBody({ volunteer: withStatus("active", { isSiteCoordinator: true }), isNew: false, ui: {}, canChangeAdmin: false });
+  assert.doesNotMatch(html, /data-action="volunteer-remove"/);
+  assert.match(html, /Only site coordinators remove a site coordinator from the roster\./);
+  const sc = volunteerDrawerBody({ volunteer: withStatus("active", { isSiteCoordinator: true }), isNew: false, ui: {}, canChangeAdmin: true });
+  assert.match(sc, REMOVE_BUTTON);
+});
+
+test("a non-site-coordinator sees the Admin role sentence instead of Remove", () => {
+  const html = volunteerDrawerBody({ volunteer: withStatus("active", { roles: ["admin"] }), isNew: false, ui: {}, canChangeAdmin: false });
+  assert.doesNotMatch(html, /data-action="volunteer-remove"/);
+  assert.match(html, /<p class="field-note" id="volunteer-remove-note">Only site coordinators change the Admin role\.<\/p>/);
+  const plain = volunteerDrawerBody({ volunteer: withStatus("active"), isNew: false, ui: {}, canChangeAdmin: false });
+  assert.match(plain, REMOVE_BUTTON);
+});
+
+test("your own drawer offers no Remove, and says why", () => {
+  const own = (extra = {}) => volunteerDrawerBody({ volunteer: withStatus("active", extra), isNew: false, ui: {}, canChangeAdmin: true, viewerId: "v-1" });
+  for (const html of [own(), own({ roles: ["admin"] }), own({ isSiteCoordinator: true })]) {
+    assert.doesNotMatch(html, /data-action="volunteer-remove"/);
+    assert.match(html, /<p class="field-note" id="volunteer-remove-note">You can&#39;t remove yourself from the roster\.<\/p>/);
+  }
+  const notSc = volunteerDrawerBody({ volunteer: withStatus("active", { roles: ["admin"] }), isNew: false, ui: {}, canChangeAdmin: false, viewerId: "v-1" });
+  assert.match(notSc, /You can&#39;t remove yourself from the roster\./);
+  assert.doesNotMatch(notSc, /Only site coordinators change the Admin role\.<\/p><\/div>/);
+  const other = volunteerDrawerBody({ volunteer: withStatus("active"), isNew: false, ui: {}, canChangeAdmin: true, viewerId: "v-9" });
+  assert.match(other, REMOVE_BUTTON);
+  assert.doesNotMatch(other, /remove yourself/);
+});
+
+test("the confirmation for an active account", () => {
+  const html = removeFromRosterDialogBody({ volunteer: withStatus("active") });
+  assert.match(html, /Mira Patel \(mira@example\.test\) comes off this season&#39;s roster, with their roles, certificates and the record of what they sent this season\./);
+  assert.match(html, /Their account is deactivated, so they can no longer sign in\./);
+  assert.match(html, /Their cases and contact details are kept\. To add them back, search for mira@example\.test in Add a volunteer\./);
+  assert.match(html, /data-action="confirm-remove-from-roster"[^>]*>[^<]*Remove from roster/);
+  assert.match(html, /data-action="close-dialog"[^>]*>[^<]*Cancel/);
+  assert.doesNotMatch(html, /remove-from-roster-error/);
+});
+
+test("the confirmation's account line follows the account", () => {
+  const line = (v) => removeFromRosterDialogBody({ volunteer: v });
+  for (const status of ["invited", "active"])
+    assert.match(line(withStatus(status)), /Their account is deactivated, so they can no longer sign in\./, status);
+  const sc = line(withStatus("active", { isSiteCoordinator: true }));
+  assert.match(sc, /Their account stays active because they are a site coordinator, but they will have no roles this season\./);
+  assert.doesNotMatch(sc, /so they can no longer sign in/);
+  assert.match(line(withStatus("deactivated")), /Their account is already deactivated\./);
+  const none = line(withStatus("none"));
+  assert.doesNotMatch(none, /Their account/);
+});
+
+test("the confirmation says shifts from today on go, only when there are some", () => {
+  const SHIFTS = "Their shifts from today on are removed from the Schedule.";
+  const html = removeFromRosterDialogBody({ volunteer: withStatus("active", { hasShiftsFromToday: true }) });
+  // After the account line, before the last line.
+  assert.match(
+    html,
+    /so they can no longer sign in\. Their shifts from today on are removed from the Schedule\. Their cases and contact details are kept\./,
+  );
+  const none = removeFromRosterDialogBody({ volunteer: withStatus("none", { hasShiftsFromToday: true }) });
+  assert.match(none, /this season\. Their shifts from today on are removed from the Schedule\. Their cases/);
+  for (const v of [withStatus("active"), withStatus("active", { hasShiftsFromToday: false })])
+    assert.ok(!removeFromRosterDialogBody({ volunteer: v }).includes(SHIFTS));
+});
+
+test("the confirmation escapes the name and email, and shows a refusal", () => {
+  const html = removeFromRosterDialogBody({ volunteer: withStatus("active", { name: "<b>X</b>", email: "a<i>@e.test" }), error: "Try again <u>" });
+  assert.doesNotMatch(html, /<b>X|<i>|<u>/);
+  assert.match(html, /&lt;b&gt;X&lt;\/b&gt;/);
+  assert.match(html, /role="alert" id="remove-from-roster-error"|id="remove-from-roster-error"[^>]*role="alert"/);
+  const view = dialog(baseState({ dialog: "remove-from-roster", dialogContext: { volunteerId: "v-1" }, volunteers: [volunteer()], removeFromRosterError: "Nope." }));
+  assert.match(view, /Remove Mira Patel from this season&#39;s roster\?/);
+  assert.match(view, /remove-from-roster-error/);
+});
+
+test("a deactivated volunteer's drawer shows the Reactivate note", () => {
+  const html = drawerFor("deactivated");
+  assert.match(html, /<p class="field-note" id="volunteer-reactivate-note">Reactivate so they can sign in\.<\/p>/);
+  for (const status of ["none", "invited", "active"])
+    assert.doesNotMatch(drawerFor(status), /volunteer-reactivate-note/, status);
+});
+
+test("the notice and the note never show together", () => {
+  const html = drawerFor("deactivated", { accountNotice: { kind: "ok", text: "Mira is back on this season's roster." } });
+  assert.match(html, /volunteer-account-notice/);
+  assert.doesNotMatch(html, /volunteer-reactivate-note/);
 });

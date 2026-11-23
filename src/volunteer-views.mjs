@@ -3,7 +3,7 @@
 // row says whether the volunteer is cleared (change add-volunteer-clearance).
 import { esc, button, icon, SENT_DAY, loadingLine, unloadedLine, emptyLine, confirmBody } from "./ui.mjs";
 import { drawerError } from "./office-views.mjs";
-import { ROLES, CERTIFICATES, WORKS, LANGUAGES, SHOW_VIEWS, filterVolunteers, languagesText, accountLabel, ACCOUNT_LABELS, returningFill } from "./volunteer-roster.mjs";
+import { ROLES, CERTIFICATES, WORKS, LANGUAGES, SHOW_VIEWS, filterVolunteers, languagesText, accountLabel, ACCOUNT_LABELS, returningFill, ADMIN_ROLE_MESSAGE, REMOVE_SELF_MESSAGE, REMOVE_SITE_COORDINATOR_MESSAGE } from "./volunteer-roster.mjs";
 
 export { languagesText, accountLabel };
 
@@ -237,7 +237,10 @@ function accountSection(volunteer, notice, { viewerIsSiteCoordinator = true } = 
       button("Cancel invitation", "account-cancel-invitation", "secondary", id),
     )}${deactivate}`,
     active: deactivate,
-    deactivated: button("Reactivate", "account-reactivate", "secondary", id),
+    deactivated: `${button("Reactivate", "account-reactivate", "secondary", id)}${when(
+      !notice?.text,
+      `<p class="field-note" id="volunteer-reactivate-note">Reactivate so they can sign in.</p>`,
+    )}`,
   }[status];
   const said = notice?.text
     ? `<p class="notice ${notice.kind === "error" ? "error" : "info"}" role="${notice.kind === "error" ? "alert" : "status"}" id="volunteer-account-notice">${icon(
@@ -250,6 +253,58 @@ function accountSection(volunteer, notice, { viewerIsSiteCoordinator = true } = 
     volunteer?.signedInName,
     `<p class="volunteer-signed-in">Signed in as ${esc(volunteer?.signedInName ?? "")}</p>`,
   )}${said}<div class="drawer-actions">${actions}</div></fieldset>`;
+}
+
+// Remove from this season's roster (change add-remove-from-roster). The drawer
+// offers it to any admin, except that a site coordinator, or someone holding
+// the Admin role this season, is removed only by a site coordinator, and
+// nobody removes themselves.
+function removeSection(volunteer, { viewerIsSiteCoordinator = true, viewerId = null } = {}) {
+  const id = `data-volunteer-id="${esc(volunteer.id)}"`;
+  const note = (text) => `<p class="field-note" id="volunteer-remove-note">${esc(text)}</p>`;
+  let action = button("Remove from this season's roster…", "volunteer-remove", "secondary", id);
+  if (viewerId && volunteer.id === viewerId) action = note(REMOVE_SELF_MESSAGE);
+  else if (!viewerIsSiteCoordinator) {
+    if (volunteer.isSiteCoordinator === true) action = note(REMOVE_SITE_COORDINATOR_MESSAGE);
+    else if ((volunteer.roles ?? []).includes("admin")) action = note(ADMIN_ROLE_MESSAGE);
+  }
+  return `<div class="drawer-actions volunteer-remove">${action}</div>`;
+}
+
+/**
+ * The remove-from-roster confirmation: nothing changes until its confirm
+ * button is pressed. `error` is the refusal the last attempt got.
+ */
+export function removeFromRosterDialogBody({ volunteer = null, error = null } = {}) {
+  const name = volunteer?.name ?? "this volunteer";
+  const email = volunteer?.email ?? "";
+  const status = volunteer?.account?.status ?? "none";
+  const accountLine =
+    status === "deactivated"
+      ? "Their account is already deactivated."
+      : status === "none"
+        ? ""
+        : volunteer?.isSiteCoordinator === true
+          ? "Their account stays active because they are a site coordinator, but they will have no roles this season."
+          : "Their account is deactivated, so they can no longer sign in.";
+  const lead = [
+    `${name} (${email}) comes off this season's roster, with their roles, certificates and the record of what they sent this season.`,
+    accountLine,
+    volunteer?.hasShiftsFromToday === true ? "Their shifts from today on are removed from the Schedule." : "",
+    `Their cases and contact details are kept. To add them back, search for ${email} in Add a volunteer.`,
+  ]
+    .filter(Boolean)
+    .map((line) => esc(line))
+    .join(" ");
+  const refusal = error
+    ? `<p class="notice error" role="alert" id="remove-from-roster-error">${icon("help")}<span>${esc(error)}</span></p>`
+    : "";
+  return confirmBody({
+    before: refusal,
+    lead,
+    confirm: button("Remove from roster", "confirm-remove-from-roster", "primary full"),
+    keep: "Cancel",
+  });
 }
 
 /**
@@ -344,7 +399,7 @@ function returningPicker(returning, picked) {
  *   with `picked`, the form is filled from that person and New volunteer is
  *   left unticked.
  */
-export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {}, canChangeAdmin = true, returning = null } = {}) {
+export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {}, canChangeAdmin = true, returning = null, viewerId = null } = {}) {
   if (!isNew && !volunteer)
     return `${drawerError(ui, VOLUNTEER_CONFLICT_HEADING)}<p>This volunteer could not be opened. Close this and try again.</p>${button(
       "Close",
@@ -392,7 +447,7 @@ export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {}, 
     { locked: canChangeAdmin ? {} : { admin: "volunteer-admin-note" } },
   )}${when(
     !canChangeAdmin,
-    `<p class="field-note" id="volunteer-admin-note">Only site coordinators change the Admin role.</p>`,
+    `<p class="field-note" id="volunteer-admin-note">${ADMIN_ROLE_MESSAGE}</p>`,
   )}</fieldset>${when(!isNew, documentLine(v, "form13615", ui))}<fieldset class="check-group"><legend>Certificates</legend>${ticks(
     "certificate",
     CERTIFICATES,
@@ -402,7 +457,7 @@ export function volunteerDrawerBody({ volunteer = null, isNew = false, ui = {}, 
     "isNew",
     "New volunteer",
     isNew && !picked ? true : v.isNew === true,
-  )}${tickRow("photoIdChecked", "Photo ID checked", v.photoIdChecked === true)}${when(!isNew, documentLine(v, "photoId", ui))}</fieldset>${when(!isNew && volunteer, accountSection(v, ui?.accountNotice, { viewerIsSiteCoordinator: canChangeAdmin }))}`;
+  )}${tickRow("photoIdChecked", "Photo ID checked", v.photoIdChecked === true)}${when(!isNew, documentLine(v, "photoId", ui))}</fieldset>${when(!isNew && volunteer, accountSection(v, ui?.accountNotice, { viewerIsSiteCoordinator: canChangeAdmin }))}${when(!isNew && volunteer, removeSection(v, { viewerIsSiteCoordinator: canChangeAdmin, viewerId }))}`;
   const formError = ui?.formError
     ? `<p class="notice error" role="alert" id="volunteer-form-error">${icon("help")}<span>${esc(ui.formError)}</span></p>`
     : "";

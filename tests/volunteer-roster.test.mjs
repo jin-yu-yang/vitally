@@ -57,10 +57,15 @@ test("combine keeps only people with a roster entry", () => {
     isNew: false, photoIdChecked: false, form13615SentAt: null, photoIdSentAt: null,
     form13615ReviewedAt: null, form13615ReviewReason: null, photoIdReviewedAt: null, photoIdReviewReason: null,
     account: { status: "active", revision: 2, activatedAt: null, expiresAt: null }, isSiteCoordinator: false,
-    cleared: true, missing: []
+    cleared: true, missing: [], hasShiftsFromToday: false
   });
   assert.deepEqual(list[1].account, { status: "invited", revision: 1, activatedAt: null, expiresAt: null });
   assert.deepEqual(list[1].certificates, []);
+});
+
+test("combine marks who has a shift from today on", () => {
+  const list = combineVolunteers({ profiles, entries, certificates, people, accounts, shifts: [{ person_id: "p2" }, { person_id: "p2" }] });
+  assert.deepEqual(list.map((v) => [v.id, v.hasShiftsFromToday]), [["p1", false], ["p2", true]]);
 });
 
 const sample = combineVolunteers({ profiles, entries, certificates, people, accounts });

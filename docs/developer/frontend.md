@@ -27,6 +27,7 @@ The front end **predicts** what a person may do so it can show the right buttons
 - [The contact log](#the-contact-log)
 - [Case labels](#case-labels)
 - [Clearance uploads](#clearance-uploads)
+- [Removing a volunteer from the Roster](#removing-a-volunteer-from-the-roster)
 - [Posted updates](#posted-updates)
 - [The Schedule and My profile](#the-schedule-and-my-profile)
 - [Sign-in](#sign-in)
@@ -965,6 +966,49 @@ The database side is in [Database: clearance uploads](database.md#clearance-uplo
   (`roster_entries` is not live). It is re-read with the data load, every clearance check, a cleared
   window's wake refresh, the admin's Save and Mark reviewed, and every Roster read. A failed read
   keeps the last count; it is reset on sign-out and on losing admin.
+
+## Removing a volunteer from the Roster
+
+Change `add-remove-from-roster`. The database side is in
+[Database: removing a volunteer from the roster](database.md#removing-a-volunteer-from-the-roster).
+
+- **The drawer's button** ([`volunteer-views.mjs`](../../src/volunteer-views.mjs), `removeSection`):
+  "Remove from this season's roster…", below the Account section, for a volunteer already saved. A
+  viewer who isn't a site coordinator, opening a site coordinator's drawer, sees "Only site
+  coordinators remove a site coordinator from the roster." instead; opening someone with the Admin
+  role, they see "Only site coordinators change the Admin role." Both sentences are exported from
+  [`volunteer-roster.mjs`](../../src/volunteer-roster.mjs) (`REMOVE_SITE_COORDINATOR_MESSAGE`,
+  `ADMIN_ROLE_MESSAGE`), and the controller uses the same ones. On the viewer's own drawer (the
+  drawer is given `viewerId`, the principal's person id) the button is replaced by "You can't remove
+  yourself from the roster." (`REMOVE_SELF_MESSAGE`), ahead of both sentences; the controller shows
+  the same sentence if a `VALIDATION` refusal with details `SELF` ever comes back.
+- **The confirmation** (`removeFromRosterDialogBody`, dialog `remove-from-roster`, titled "Remove
+  <name> from this season's roster?"): "<name> (<email>) comes off this season's roster, with their
+  roles, certificates and the record of what they sent this season." Then one account line: "Their
+  account is deactivated, so they can no longer sign in." (invited or active), "Their account stays
+  active because they are a site coordinator, but they will have no roles this season.", "Their
+  account is already deactivated.", or none when there is no account. When the volunteer has a live
+  shift this season from today on (`hasShiftsFromToday`, from the Roster read's `shifts` query in
+  `listVolunteers`), "Their shifts from today on are removed from the Schedule." Then "Their cases and contact
+  details are kept. To add them back, search for <email> in Add a volunteer." The buttons are
+  **Remove from roster** and **Cancel**. Nothing is sent until the first.
+- **`controller.removeFromRoster()`** calls the store's `removeFromRoster` at the profile revision the
+  drawer holds. A refusal that has a sentence (`OPEN_WORK` with the existing open-work message, the
+  Admin role, or `FORBIDDEN` for a site coordinator) keeps the confirmation open, shows the sentence
+  from `state.removeFromRosterError`, and re-reads the list. `CONFLICT` and anything unreadable go back
+  to the drawer with the usual banner. An unknown outcome keeps its action id, so pressing again sends
+  the same one. On success the confirmation and the drawer close and the list is re-read, which also
+  re-reads the uploads count.
+- **Back on the roster (#269).** Right after Save of a picked earlier volunteer, `keepReAddOpen` checks
+  the re-read list. If their account is `deactivated`, the drawer stays open on their Edit view with the
+  info notice "<name> is back on this season's roster. Their account is deactivated. Reactivate it so
+  they can sign in." Later, the drawer for someone on the roster with a deactivated account and no
+  notice shows the note "Reactivate so they can sign in." under Reactivate. Only one shows at a time,
+  and nothing is reactivated automatically. Every other save closes the drawer as before.
+- **Other windows are not told.** The Roster is not live, so another admin's Roster learns of a removal
+  only when it is read again (opened again, or the page reloaded) or when that admin acts on the
+  person: a Save gets `CONFLICT`, a Remove `NOT_FOUND` or `CONFLICT`, and either refusal re-reads the
+  list.
 
 ## Posted updates
 

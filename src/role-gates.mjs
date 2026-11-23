@@ -30,6 +30,7 @@ export const CEILING_DIALOGS = Object.freeze([
   "send-invitation",
   "cancel-invitation",
   "deactivate-account",
+  "remove-from-roster",
   "update-people",
   "unpublish-update",
   "delete-update",
