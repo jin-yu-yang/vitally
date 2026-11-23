@@ -757,7 +757,7 @@ test("app.mjs wires the version-2 Add a case", () => {
   assert.match(handler("continue-add-case"), /controller\.openAddCase\(\{ caseId: target\.dataset\.caseId \}\)/);
   const confirm = handler("confirm-leave-add-case");
   assert.match(confirm, /EXITS\[state\.dialogContext\?\.to\]/);
-  assert.match(app, /openDialog\("leave-add-case", \{ to: action \}, describeFocus\(target\)\)/);
+  assert.match(app, /openDialog\("leave-add-case", \{ to: action, side: target\?\.dataset\?\.side \}, describeFocus\(target\)\)/);
   // Both version-2 forms share the wiring; each control selector names its form.
   assert.match(app, /const V2_FORMS = "#intake-v2-form, #add-case-v2-form";/);
   assert.match(app, /const V2_CONTROLS = "#intake-v2-form \[data-control\]\[data-q\], #add-case-v2-form \[data-control\]\[data-q\]";/);
