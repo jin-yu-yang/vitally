@@ -27,6 +27,6 @@
 
 ## 6. Docs and checks
 
-- [ ] 6.1 Update `docs/developer/database.md` (migration 058, the RPC, `roster_removals`) and `docs/developer/frontend.md` (the remove dialog, the #269 notice)
-- [ ] 6.2 Run `npm test` and `npx openspec validate --all`; confirm `npm run build:intake` leaves nothing to commit
-- [ ] 6.3 Push the branch and run the full CI (`gh workflow run ci.yml --ref <branch>`); every job covering the change passes, and the story's screenshots are reviewed
+- [x] 6.1 Update `docs/developer/database.md` (migration 058, the RPC, `roster_removals`) and `docs/developer/frontend.md` (the remove dialog, the #269 notice)
+- [x] 6.2 Run `npm test` and `npx openspec validate --all`; confirm `npm run build:intake` leaves nothing to commit
+- [x] 6.3 Push the branch and run the full CI (`gh workflow run ci.yml --ref <branch>`); every job covering the change passes, and the story's screenshots are reviewed
