@@ -61,6 +61,19 @@ export function taxpayerName(answers) {
   return name || "—";
 }
 
+// Hours this week (change add-volunteer-schedule, design D9): the sum of
+// (end - start) over the person's live shifts, every role, flagged or not.
+// Given `week` ({monday, sunday}, ISO dates) only shifts dated inside it count.
+export function weekHours(shifts, personId, week = null) {
+  let hours = 0;
+  for (const shift of shifts ?? []) {
+    if (shift?.person_id !== personId) continue;
+    if (week && !(shift.shift_date >= week.monday && shift.shift_date <= week.sunday)) continue;
+    hours += Number(shift.end_hour) - Number(shift.start_hour);
+  }
+  return hours;
+}
+
 const holdsWork = (capabilities) => capabilities.includes("prepare") || capabilities.includes("review");
 
 const SLOT_NEEDS = Object.freeze({ preparer: "prepare", reviewer: "review" });
@@ -70,7 +83,7 @@ const SLOT_NEEDS = Object.freeze({ preparer: "prepare", reviewer: "review" });
 // was removed (a certificate unticked, say), or a person no longer on this
 // season's roster. Such a row has `roleRemoved`: it holds at least one case in
 // a slot whose capability its person no longer has, so an admin can reassign it.
-export function workloadRows({ volunteers = [], people = [], cases = [], now = Date.now() } = {}) {
+export function workloadRows({ volunteers = [], people = [], cases = [], now = Date.now(), shifts = [], week = null } = {}) {
   const personById = new Map(people.map((p) => [p.id, p]));
   const listed = new Set(volunteers.map((volunteer) => volunteer.id));
   // Holders of an open case who are not on the roster, as the people list names them.
@@ -98,6 +111,7 @@ export function workloadRows({ volunteers = [], people = [], cases = [], now = D
       open: 0,
       waiting: 0,
       stalled: 0,
+      hours: weekHours(shifts, volunteer.id, week),
       cases: [],
     };
     for (const record of cases) {

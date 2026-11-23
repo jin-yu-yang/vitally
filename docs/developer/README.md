@@ -59,7 +59,7 @@ flowchart LR
 
 There is no application server. The browser talks to Supabase directly with the public
 (publishable) key. Every read goes through row-level security, and **every write goes through one
-of twenty-two database functions** that check who may do what, in a fixed order, inside one
+of thirty-nine database functions** that check who may do what, in a fixed order, inside one
 transaction. The database is the back end.
 
 ## Repository map
@@ -71,7 +71,7 @@ src/
   app.mjs                  Bootstrap and DOM event wiring. No state, no HTML, no queries.
   controller.mjs           All browser state and every user-level operation.
   window-state.mjs         Per-window, per-user navigation memory (sessionStorage).
-  supabase-store.mjs       The only data adapter: reads, the thirty-four RPCs, Realtime, row mapping.
+  supabase-store.mjs       The only data adapter: reads, the thirty-nine RPCs, Realtime, row mapping.
   auth.mjs                 Email one-time-code sign-in, resend cooldown, neutral messages.
   contact-log.mjs          The contact log's summary line, labels and New York time helpers.
   contracts.mjs            Shared vocabulary: stages, actions, error codes.
@@ -107,7 +107,7 @@ src/
   vendor/pdfjs.mjs, vendor/pdfjs-worker.mjs
                            Committed copy of pdfjs-dist's legacy build (the shaded-section editor).
 supabase/
-  migrations/001-058       The whole schema, RLS, business logic and intake catalogue, in order.
+  migrations/001-059       The whole schema, RLS, business logic and intake catalogue, in order.
   test-stack.config.example.toml   Reference config for the local test stack.
 tools/
   admin/                   Privileged tooling: target guards, migrate, roster, workspace setup.
@@ -137,7 +137,7 @@ These are load-bearing. Changing any of them is an architecture decision, not a 
    in PostgreSQL. The browser predicts what is allowed so it can hide buttons, but a prediction is
    never permission. See [Database: the action API](database.md#the-action-api).
 2. **Browser roles can read, never write, tables.** `authenticated` has `SELECT` only; all
-   changes go through the twenty-two `SECURITY DEFINER` functions. See
+   changes go through the thirty-nine `SECURITY DEFINER` functions. See
    [Database: visibility](database.md#who-can-see-what).
 3. **Every write is idempotent and revision-fenced.** A write carries a client-generated action
    id and the revision the person saw. Replaying the same envelope returns the same receipt;

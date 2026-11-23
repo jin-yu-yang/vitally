@@ -60,6 +60,7 @@ import * as client from "./client-views.mjs";
 import { POOL_FILTER_KEYS } from "./pool-views.mjs";
 import { createSidebarPeek, peekZone, toggleLabel } from "./sidebar-peek.mjs";
 import { createRedrawHold } from "./redraw-hold.mjs";
+import { createGesture, dragResult, gestureLive } from "./schedule-drag.mjs";
 import { STORAGE_KEY, createLanguageRequests, isLang, loadHantWithin, viewLang } from "./language.mjs";
 import { createHantLoader, hantReady } from "./hant.mjs";
 import { t, SENTENCES } from "./client-text.mjs";
@@ -68,7 +69,7 @@ import { contactEntryFromForm, contactSummary, contactSummaries } from "./contac
 import { decorateStaffCase, outcomeGroup, staffEligibility } from "./staff-views.mjs";
 import { volunteerFromForm, volunteerFormChanged, roleBoxesToUntick, untickedRolesMessage, rosterCsv, rosterCsvFilename, filterVolunteers } from "./volunteer-roster.mjs";
 import { actionToast, renderUpdatePreview, saveToast, updateFormFromValues } from "./update-views.mjs";
-import { startSeasonReady } from "./season-settings-views.mjs";
+import { startSeasonReady, scheduleSettingsFromForm } from "./season-settings-views.mjs";
 
 // Bootstrap and DOM wiring, and nothing else. No state lives here (the
 // controller owns it), no HTML is written here (the view modules own it), and
@@ -311,6 +312,7 @@ if (!config) {
     const v2Place = wasV2 || v2OnPage();
     restoreFormDrafts();
     syncContactForms();
+    syncSiteDays();
     syncCloseUnsigned();
     syncStartSeason();
     syncVolunteerOther();
@@ -473,6 +475,15 @@ if (!config) {
     const box = root.querySelector("#volunteer-language-other");
     const field = root.querySelector("#volunteer-other-language");
     if (box && field) field.hidden = !box.checked;
+  }
+
+  // A site hours tile shows its hours only while Open is ticked: at once on
+  // a tick, and after a redraw that put an unsent tick back.
+  function syncSiteDays() {
+    for (const box of root.querySelectorAll("input[data-site-day]")) {
+      const hours = root.querySelector(`#site-day-${box.dataset.siteDay}-hours`);
+      if (hours) hours.hidden = !box.checked;
+    }
   }
 
   // My profile shows its Other language box only while Other is ticked (change
@@ -1084,11 +1095,18 @@ if (!config) {
   // (another window resolved the task), so a drawer always has one: the queue.
   function closeDialog(fallbackFocusSelector) {
     const dialog = controller.getState().dialog;
-    // The volunteer and assign drawers open from the Volunteers page, which
-    // has no queue; the Notifications panel from the sidebar.
+    // Keeping a shift goes back to its drawer, at its Remove shift.
+    if (dialog === "remove-shift" && controller.getState().schedule?.drawer) {
+      controller.closeDialog();
+      root.querySelector('#shift-form [data-action="remove-shift"]')?.focus();
+      return;
+    }
+    // The volunteer and assign drawers open from the Volunteers page, and the
+    // shift drawer from the Schedule, which have no queue; the Notifications
+    // panel from the sidebar.
     const fallback =
       fallbackFocusSelector ??
-      (dialog === "assign" || dialog === "volunteer"
+      (dialog === "shift" || dialog === "remove-shift" || dialog === "assign" || dialog === "volunteer"
         ? "#main"
         : dialog === "notifications"
           ? '[data-action="open-notifications"]'
@@ -1109,6 +1127,29 @@ if (!config) {
     if (opener) opener.focus();
     else if (fallback) root.querySelector(fallback)?.focus();
     focusBeforeDialog = null;
+  }
+
+  // The shift drawer's choices as the form holds them (change
+  // add-volunteer-schedule): the volunteer (a new shift only), role, start, end.
+  function shiftFormValues(form) {
+    const values = new FormData(form ?? undefined);
+    const pick = (name) => (values.has(name) ? String(values.get(name)) : undefined);
+    return { volunteerId: pick("volunteerId"), role: pick("role"), startHour: pick("startHour"), endHour: pick("endHour") };
+  }
+
+  // A shift write's answer: done closes the drawer (back to what opened it),
+  // and a CONFLICT says the schedule was refreshed (the controller's staff
+  // sentence). A refusal stays in the drawer.
+  function shiftDone(result, by) {
+    if (!result?.done) return;
+    closeDialog("#main");
+    if (result.toast) notify("warning", result.toast, by);
+  }
+
+  async function saveShiftFromDrawer(by) {
+    const form = root.querySelector("#shift-form");
+    if (!form) return;
+    shiftDone(await controller.saveShift(shiftFormValues(form)), by);
   }
 
   function fictional(replaceEverything) {
@@ -1502,6 +1543,24 @@ if (!config) {
       render();
     }
     root.querySelector('#season-settings-form [aria-invalid="true"]')?.focus();
+  }
+
+  // The site hours card's Save: the whole form, every day and every target.
+  // A landed save draws what was stored; a conflict draws the settings as
+  // they are now; a refused field keeps what was typed and takes the keyboard.
+  async function submitSiteHours(form, by) {
+    const text = await controller.saveScheduleSettings(scheduleSettingsFromForm(new FormData(form)));
+    if (text) {
+      clearFormDrafts(form);
+      notify("success", text, by);
+      return;
+    }
+    const ui = controller.getState().seasonSettingsUi ?? {};
+    if (ui.notice?.place === "site-hours") {
+      clearFormDrafts(form);
+      render();
+    }
+    root.querySelector('#site-hours-form [aria-invalid="true"]')?.focus();
   }
 
   // Change the SIDN. A landed save closes the dialog; a refusal keeps it,
@@ -2084,6 +2143,11 @@ if (!config) {
       controller.navigate("office-settings");
       void controller.loadSeasonSettings();
     },
+    // And the Schedule, on today (change add-volunteer-schedule).
+    "open-schedule": () => {
+      formDrafts.clear();
+      void controller.openSchedule();
+    },
     // Pressed again while on the page: a fresh draft, which is what it asks for.
     "open-add-case": async () => {
       formDrafts.clear();
@@ -2155,6 +2219,30 @@ if (!config) {
       case "open-season-settings":
         if (leaveAddCaseFirst("open-season-settings", target)) break;
         EXITS["open-season-settings"]();
+        break;
+      // ---- the Schedule (change add-volunteer-schedule) ----
+      case "open-schedule":
+        if (leaveAddCaseFirst("open-schedule", target)) break;
+        EXITS["open-schedule"]();
+        break;
+      case "schedule-prev":
+      case "schedule-next":
+      case "schedule-today":
+        await controller.scheduleGo(action.slice("schedule-".length));
+        break;
+      case "open-add-shift":
+      case "open-shift":
+        openDialog("shift", { shiftId: target.dataset.shiftId || null }, describeFocus(target));
+        break;
+      case "save-shift":
+        await saveShiftFromDrawer(by);
+        break;
+      case "remove-shift":
+        // Asked over the drawer; the drawer's opener stays the one to go back to.
+        controller.openDialog("remove-shift", { shiftId: target.dataset.shiftId });
+        break;
+      case "confirm-remove-shift":
+        shiftDone(await controller.removeShift(target.dataset.shiftId), by);
         break;
       // ---- Season settings (change add-season-settings) ----
       case "open-change-sidn":
@@ -2859,6 +2947,138 @@ if (!config) {
     }
   }
 
+  // ---- drag on the Schedule (change add-volunteer-schedule, design D7) -----
+  //
+  // An admin's day only (the read's own `canEdit`). Drag across empty cells of
+  // a row to make a shift; drag a shift's edge handle to change its hours.
+  // The page is not redrawn mid-drag (the press hold above keeps realtime
+  // redraws back); the cells are highlighted with a class, and pointerup
+  // saves through the controller's shared write. One gesture, one action id.
+  let scheduleDrag = null; // { gesture, row, pointerId, toHour, moved }
+  let suppressShiftClick = false;
+
+  function dragHourAt(row, x) {
+    const cells = [...row.querySelectorAll(".schedule-cell")];
+    if (!cells.length) return null;
+    const hit = cells.find((cell) => {
+      const box = cell.getBoundingClientRect();
+      return x >= box.left && x < box.right;
+    });
+    const fallback = x < cells[0].getBoundingClientRect().left ? cells[0] : cells[cells.length - 1];
+    return Number((hit ?? fallback).dataset.hour);
+  }
+
+  const dragInput = (drag) => {
+    const day = controller.getState().schedule?.day;
+    return { kind: drag.gesture.kind, volunteerId: drag.gesture.volunteerId, shift: drag.gesture.shift, fromHour: drag.gesture.fromHour, toHour: drag.toHour, hours: day?.hours, shifts: day?.shifts ?? [] };
+  };
+
+  function paintDrag(drag) {
+    const draft = dragResult(dragInput(drag));
+    for (const cell of drag.row.querySelectorAll(".schedule-cell"))
+      cell.classList.toggle("drag-preview", Boolean(draft) && Number(cell.dataset.hour) >= draft.startHour && Number(cell.dataset.hour) < draft.endHour);
+  }
+
+  function endScheduleDrag(drag) {
+    scheduleDrag = null;
+    for (const cell of drag.row.querySelectorAll(".drag-preview")) cell.classList.remove("drag-preview");
+    drag.row.closest(".schedule-grid")?.classList.remove("dragging");
+  }
+
+  root.addEventListener("pointerdown", (event) => {
+    if (scheduleDrag || !event.isPrimary || event.button !== 0) return;
+    const state = controller.getState();
+    const day = state.schedule?.day;
+    if (state.screen !== "schedule" || day?.canEdit !== true || state.busy || state.dialog) return;
+    const row = event.target.closest?.(".schedule-grid .schedule-row[data-volunteer-id]");
+    if (!row) return;
+    const edge = event.target.closest("[data-edge]");
+    const shift = edge ? (day.shifts ?? []).find((entry) => entry.shiftId === edge.closest("[data-shift-id]")?.dataset.shiftId) : null;
+    if (edge && !shift) return;
+    if (!edge && !event.target.closest(".schedule-cell")) return;
+    const fromHour = dragHourAt(row, event.clientX);
+    if (!Number.isInteger(fromHour)) return;
+    event.preventDefault();
+    try {
+      event.target.setPointerCapture(event.pointerId);
+    } catch {
+      // A pointer that is already gone; the gesture ends on its own.
+    }
+    scheduleDrag = {
+      gesture: createGesture({
+        kind: edge ? edge.dataset.edge : "create",
+        volunteerId: row.dataset.volunteerId,
+        shift,
+        fromHour,
+        actionId: crypto.randomUUID(),
+        date: state.schedule.date,
+      }),
+      row,
+      pointerId: event.pointerId,
+      toHour: fromHour,
+      moved: false,
+    };
+    row.closest(".schedule-grid").classList.add("dragging");
+  });
+
+  root.addEventListener("pointermove", (event) => {
+    const drag = scheduleDrag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    if (!gestureLive(drag.row)) return endScheduleDrag(drag);
+    const hour = dragHourAt(drag.row, event.clientX);
+    if (!Number.isInteger(hour) || hour === drag.toHour) return;
+    drag.toHour = hour;
+    drag.moved = true;
+    paintDrag(drag);
+  });
+
+  root.addEventListener("pointercancel", (event) => {
+    if (scheduleDrag && event.pointerId === scheduleDrag.pointerId) endScheduleDrag(scheduleDrag);
+  });
+
+  root.addEventListener("pointerup", async (event) => {
+    const drag = scheduleDrag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    endScheduleDrag(drag);
+    // The row was replaced by a redraw mid-drag: cancel, save nothing.
+    if (!gestureLive(drag.row)) return;
+    // A drag on a shift's edge is not a press on the shift: the click that
+    // follows must not open the drawer.
+    if (drag.moved) {
+      suppressShiftClick = true;
+      setTimeout(() => (suppressShiftClick = false), 100);
+    }
+    const schedule = controller.getState().schedule;
+    const day = schedule?.day;
+    // A press that never left its cell makes nothing (a tap is not a shift).
+    // A day changed while the press was down (Next with the keyboard) cancels
+    // it: `finish` answers null when the date is not the gesture's own.
+    const draft =
+      drag.moved || drag.gesture.kind !== "create"
+        ? drag.gesture.finish({ toHour: drag.toHour, hours: day?.hours, shifts: day?.shifts ?? [], date: schedule?.date })
+        : null;
+    if (!draft) return;
+    const by = signedInUserId();
+    const shown = controller.getState().errorCount;
+    try {
+      const result = await controller.saveShiftDrag(draft);
+      if (result?.toast) notify("warning", result.toast, by);
+    } catch (error) {
+      safetyNet(error, by, shown);
+    }
+  });
+
+  root.addEventListener(
+    "click",
+    (event) => {
+      if (!suppressShiftClick) return;
+      suppressShiftClick = false;
+      event.stopImmediatePropagation();
+      event.preventDefault();
+    },
+    true,
+  );
+
   root.addEventListener("click", async (event) => {
     // Who pressed, before anything is awaited (see `notify`).
     const by = signedInUserId();
@@ -2913,6 +3133,12 @@ if (!config) {
       syncUpdateForm(field.form);
       return;
     }
+    // The shift drawer is drawn from its draft: a choice goes there, and the
+    // roles follow the volunteer picked.
+    if (field.closest?.("#shift-form")) {
+      controller.editShiftDraft(shiftFormValues(field.form));
+      return;
+    }
     if (field.matches?.(V2_CONTROLS)) {
       // The version-2 form (spec §2.4 rule 2): the draft, quietly, then the
       // note, the rail mark and a longtext's count in place, never a redraw.
@@ -2946,6 +3172,8 @@ if (!config) {
         for (const [id, draft] of checkDrafts(field)) keepDraft(id, draft);
       if (field.closest("#volunteer-form")) syncCreateAccount();
       if (field.closest("#start-season-form")) syncStartSeason();
+      // The site hours card's draft keeps the revision it began at (ruling R13).
+      if (field.closest("#site-hours-form")) controller.beginSiteHoursEdit();
     } else if (field.name === "volunteerSearch") {
       // The Roster filters as it is typed; the redraw replaces the box, so
       // the keyboard and the caret go back into it. Mid-composition the
@@ -2985,6 +3213,10 @@ if (!config) {
     }
     if (field.id === "sc-pick") {
       syncSiteCoordinatorAdd();
+      return;
+    }
+    if (field.matches?.("input[data-site-day]")) {
+      syncSiteDays();
       return;
     }
     if (field.matches?.("select[data-board-filter]")) {
@@ -3037,6 +3269,15 @@ if (!config) {
     // Add a case has no submit: its bar's controls are buttons. Enter in a
     // lone text box would otherwise reach `reportValidity`.
     if (form.id === "add-case-v2-form") return;
+    // The shift drawer saves from its Save button; Enter does the same.
+    if (form.id === "shift-form") {
+      try {
+        await saveShiftFromDrawer(by);
+      } catch (error) {
+        safetyNet(error, by, shown);
+      }
+      return;
+    }
     if (form.id === "intake-v2-form") {
       // Continue. Before `reportValidity`, which ignores `novalidate`: the
       // form warns but always moves on, and a half-typed `type="email"` would
@@ -3058,7 +3299,16 @@ if (!config) {
     // the drawer's own sentence (volunteerProblem).
     // The site check says its own "Enter your name." the same way, and Post
     // an update's sentences sit beside its fields.
-    if (form.id !== "volunteer-form" && form.id !== "site-check-form" && form.id !== "update-form" && !form.reportValidity()) return;
+    // The site hours card names a refused day or target beside it, as the
+    // database does.
+    if (
+      form.id !== "volunteer-form" &&
+      form.id !== "site-check-form" &&
+      form.id !== "update-form" &&
+      form.id !== "site-hours-form" &&
+      !form.reportValidity()
+    )
+      return;
     const values = new FormData(form);
     try {
       // A staff form carries its action on its own submit button and names its
@@ -3081,6 +3331,8 @@ if (!config) {
         await submitUpdate(form, event.submitter, by);
       } else if (form.id === "season-settings-form") {
         await submitSeasonSettings(form, by);
+      } else if (form.id === "site-hours-form") {
+        await submitSiteHours(form, by);
       } else if (form.id === "sidn-form") {
         await submitSidn(form, by);
       } else if (form.id === "start-season-form") {

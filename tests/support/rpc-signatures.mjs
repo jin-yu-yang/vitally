@@ -1,5 +1,50 @@
 import { TEST_SITE_NUMBER } from "./database-fixture.mjs";
 
+// Next Saturday in New York, open 10 to 16, and a preparer shift at 12 to 13
+// on it, for the schedule entry points below.
+async function scheduleContext(f) {
+  const { rows } = await f.sql(
+    `select to_char((now() at time zone 'America/New_York')::date
+        + ((6 - extract(isodow from (now() at time zone 'America/New_York')::date)::int + 7) % 7 + 7),'YYYY-MM-DD') as d,
+       w.current_season as season
+      from public.workspaces w where w.id=$1`,
+    [f.workspaceId],
+  );
+  const before = (
+    await f.sql("select site_hours,revision from public.schedule_settings where workspace_id=$1", [f.workspaceId])
+  ).rows[0];
+  await f.sql(
+    `insert into public.schedule_settings(workspace_id,site_hours) values($1,'{"6":{"open":10,"close":16}}')
+      on conflict (workspace_id) do update set site_hours=excluded.site_hours,revision=public.schedule_settings.revision+1`,
+    [f.workspaceId],
+  );
+  const shift = await f.sql(
+    `insert into public.shifts(workspace_id,season,person_id,shift_date,start_hour,end_hour,role)
+      values($1,$2,$3,$4,12,13,'preparer') returning id`,
+    [f.workspaceId, rows[0].season, f.preparerId, rows[0].d],
+  );
+  return {
+    scheduleVolunteerId: f.preparerId,
+    scheduleSaturday: rows[0].d,
+    scheduleShiftId: shift.rows[0].id,
+    scheduleSettingsBefore: before ?? null,
+  };
+}
+
+// Leaves the workspace's shifts and schedule settings as scheduleContext found
+// them (the suite calls an entry's `cleanup` after its member call).
+async function scheduleCleanup(f, context) {
+  await f.sql("delete from public.shifts where workspace_id=$1", [f.workspaceId]);
+  const before = context.scheduleSettingsBefore;
+  if (before)
+    await f.sql("update public.schedule_settings set site_hours=$2,revision=$3 where workspace_id=$1", [
+      f.workspaceId,
+      before.site_hours,
+      before.revision,
+    ]);
+  else await f.sql("delete from public.schedule_settings where workspace_id=$1", [f.workspaceId]);
+}
+
 // Every public application entry point installed so far, with a valid argument
 // shape, the exact receipt it answers with, and the member allowed to call it.
 // The database suite asserts this list matches exactly what the database
@@ -144,6 +189,7 @@ export const RPC_SIGNATURES = Object.freeze([
       "isAdmin",
       "isSiteCoordinator",
       "missing",
+      "scheduleViewer",
       "siteCheck",
       "siteCoordinatorName",
       "uploadUrl",
@@ -264,6 +310,7 @@ export const RPC_SIGNATURES = Object.freeze([
       "clientDocumentsUrl",
       "history",
       "revision",
+      "schedule",
       "season",
       "siteCoordinators",
       "siteNumber",
@@ -288,6 +335,95 @@ export const RPC_SIGNATURES = Object.freeze([
       p_expected_revision: context.seasonSettingsRevision,
       p_settings: { certificateUploadUrl: "https://example.org/certificates", clientDocumentsUrl: null },
     }),
+  }),
+  // Saving the site hours and coverage targets at the schedule settings
+  // revision (add-volunteer-schedule, design D4): 0 while the workspace has no
+  // row.
+  Object.freeze({
+    name: "vitally_save_schedule_settings",
+    signature: "vitally_save_schedule_settings(uuid,bigint,jsonb)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["revision", "siteHours", "targets"]),
+    context: async (f) => {
+      const { rows } = await f.sql("select revision::int as revision from public.schedule_settings where workspace_id=$1", [
+        f.workspaceId,
+      ]);
+      return { scheduleSettingsRevision: rows[0]?.revision ?? 0 };
+    },
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_expected_revision: context.scheduleSettingsRevision,
+      p_settings: {
+        siteHours: { 6: { open: 10, close: 16 } },
+        targets: { preparersNeeded: 2, reviewersNeeded: 1, onSiteNeeded: 1 },
+      },
+    }),
+  }),
+  // Saving and removing shifts (add-volunteer-schedule, design D2, D4). The
+  // context opens next Saturday 10 to 16 in the site hours and gives each call
+  // its own target: save adds a preparer shift for the fixture's preparer at
+  // 10 to 11, remove takes a shift at 12 to 13 that it inserts.
+  Object.freeze({
+    name: "vitally_save_shift",
+    signature: "vitally_save_shift(uuid,uuid,bigint,jsonb)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["revision", "shiftId"]),
+    context: async (f) => scheduleContext(f),
+    cleanup: scheduleCleanup,
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_shift_id: null,
+      p_expected_revision: null,
+      p_shift: {
+        volunteerId: context.scheduleVolunteerId,
+        date: context.scheduleSaturday,
+        startHour: 10,
+        endHour: 11,
+        role: "preparer",
+      },
+    }),
+  }),
+  Object.freeze({
+    name: "vitally_remove_shift",
+    signature: "vitally_remove_shift(uuid,uuid,bigint)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["removed", "revision", "shiftId"]),
+    context: async (f) => scheduleContext(f),
+    cleanup: scheduleCleanup,
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_shift_id: context.scheduleShiftId,
+      p_expected_revision: 1,
+    }),
+  }),
+  // One day of the schedule (design D3, D5, D6): a read that writes nothing,
+  // for an admin, so the answer carries the candidates.
+  Object.freeze({
+    name: "vitally_schedule_day",
+    signature: "vitally_schedule_day(date)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze([
+      "anyOpen",
+      "canEdit",
+      "canEditSettings",
+      "candidates",
+      "date",
+      "hours",
+      "settingsRevision",
+      "shifts",
+      "targets",
+      "weekday",
+    ]),
+    args: () => ({ p_date: "2027-02-06" }),
+  }),
+  // The caller's own shifts this week (add-volunteer-schedule, design D5): a
+  // read for the caller that writes nothing.
+  Object.freeze({
+    name: "vitally_my_shifts",
+    signature: "vitally_my_shifts()",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["shifts", "weekEnd", "weekStart"]),
+    args: () => ({}),
   }),
   // Setting the site's SIDN (design D5): the answer says only that it is set.
   // The fixture's own number (TEST_SITE_NUMBER), so the site check elsewhere
@@ -396,7 +532,7 @@ export const RPC_SIGNATURES = Object.freeze([
     }),
   }),
   // Removing a staff member with no open work from this season's roster
-  // (change add-remove-from-roster, migration 058), at their profile revision.
+  // (change add-remove-from-roster, migration 059), at their profile revision.
   Object.freeze({
     name: "vitally_remove_from_roster",
     signature: "vitally_remove_from_roster(uuid,uuid,bigint)",

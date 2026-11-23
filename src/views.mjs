@@ -42,7 +42,7 @@ import {
 import { volunteerTabs, renderWorkload, assignDrawerBody, assignDrawerTitle, DEFAULT_WORKLOAD_SORT } from "./workload-views.mjs";
 import { workloadRows, unassignedCases, candidates } from "./volunteer-workload.mjs";
 import { returningCandidates } from "./volunteer-roster.mjs";
-import { awaitingClearance, ceilingAdmin, siteCoordinator } from "./clearance.mjs";
+import { awaitingClearance, ceilingAdmin, scheduleViewer, siteCoordinator } from "./clearance.mjs";
 import { setupScreen, siteCheckScreen } from "./setup-views.mjs";
 import { myProfilePage } from "./profile-views.mjs";
 import {
@@ -54,6 +54,7 @@ import {
   updateGoneBody,
 } from "./update-views.mjs";
 import { renderSeasonSettings, changeSidnDialogBody, startSeasonDialogBody } from "./season-settings-views.mjs";
+import { scheduleScreen, shiftDrawer, shiftDrawerTitle, removeShiftDialogBody, removeShiftTitle } from "./schedule-views.mjs";
 
 // The shared shell: the frame every screen sits in, the dialogs, the two
 // screens that belong to nobody in particular (setup needed, no access), and
@@ -213,11 +214,13 @@ const isAdmin = (person) =>
   Array.isArray(person?.capabilities) && person.capabilities.includes("admin");
 
 // What the staff sidebar holds: the brand, the screens this account can go to,
-// and who is signed in. Screens that do not exist yet (Dashboard, Schedule,
-// Documents, Messages) are not shown. `office` is the effective admin (All
-// cases, Follow-ups); `volunteers` is the workspace admin (the Roster), and
+// and who is signed in. Screens that do not exist yet (Dashboard, Documents,
+// Messages) are not shown. `office` is the effective admin (All cases,
+// Follow-ups); `volunteers` is the workspace admin (the Roster); `schedule`
+// is a schedule viewer, with the Schedule (change add-volunteer-schedule,
+// design D11; My profile stays the account row's), and
 // `board` is false on the setup screen, which has no work board.
-export function staffSidebar(state, person, office, { volunteers = office, board = true } = {}) {
+export function staffSidebar(state, person, office, { volunteers = office, board = true, schedule = false } = {}) {
   // A staff account is its own person. A cleared window's row is the link to
   // My profile (change add-my-profile, D9); on the setup screen it stays the
   // plain "Signed in as".
@@ -236,6 +239,7 @@ export function staffSidebar(state, person, office, { volunteers = office, board
   const onRoster = state?.screen === "office-volunteers";
   const onUpdates = state?.screen === "office-updates";
   const onSettings = state?.screen === "office-settings";
+  const onSchedule = state?.screen === "schedule";
   const label = office ? "Follow-ups" : "Work board";
   // All cases, then the Roster (admin only, change add-volunteer-roster-records).
   const pool = office && board
@@ -265,6 +269,16 @@ export function staffSidebar(state, person, office, { volunteers = office, board
         ]
           .filter(Boolean)
           .join(" "),
+      )
+    : "";
+  // The Schedule follows the Roster for a workspace admin, and the Work board
+  // for anyone else: every schedule viewer's, cleared or not.
+  const scheduleLink = schedule
+    ? button(
+        `${icon("calendar")} Schedule`,
+        "open-schedule",
+        `nav-link${onSchedule ? " current" : ""}`,
+        onSchedule ? 'aria-current="page"' : "",
       )
     : "";
   // Post an update follows the Roster: the workspace admin's, cleared or not.
@@ -298,8 +312,9 @@ export function staffSidebar(state, person, office, { volunteers = office, board
     `aria-haspopup="dialog"${unread > 0 ? ` aria-label="Notifications, ${unread} unread"` : ""}`,
   );
   // On the setup screen there is no board: a workspace admin's way back from
-  // the Roster is the setup screen itself.
-  const home = board || volunteers
+  // the Roster, and a schedule viewer's from the Schedule, is the setup
+  // screen itself.
+  const home = board || volunteers || schedule
     ? button(
         board ? `${icon(office ? "people" : "board")} ${label}` : `${icon("shield")} Finish your setup`,
         "open-board",
@@ -307,7 +322,7 @@ export function staffSidebar(state, person, office, { volunteers = office, board
         onBoard ? 'aria-current="page"' : "",
       )
     : "";
-  const links = `${home}${pool}${roster}${postUpdate}${settings}${notifications}`;
+  const links = `${home}${pool}${roster}${scheduleLink}${postUpdate}${settings}${notifications}`;
   return `<div class="sidebar-brand"><img src="src/pcdc-logo.png" alt="PCDC" width="36" height="36"><span class="sidebar-wordmark">ViTally<span class="brand-dot">.</span></span></div>${when(links, `<nav class="sidebar-nav" aria-label="Main navigation">${links}</nav>`)}<div class="sidebar-account"><div class="account-row">${icon("user")}<span>${accountRow}</span></div>${button(
     `${icon("help")} Need help?`,
     "open-help",
@@ -343,7 +358,14 @@ const workloadPanel = (state) => {
   const view = state.workload ?? {};
   const cases = state.cases ?? [];
   return renderWorkload({
-    rows: workloadRows({ volunteers: state.volunteers ?? [], people: state.people ?? [], cases, now: Date.now() }),
+    rows: workloadRows({
+      volunteers: state.volunteers ?? [],
+      people: state.people ?? [],
+      cases,
+      now: Date.now(),
+      // Already the week's shifts: the controller read them for that week.
+      shifts: state.weekShifts ?? [],
+    }),
     unassigned: unassignedCases(cases),
     sort: view.sort ?? DEFAULT_WORKLOAD_SORT,
     search: view.search ?? "",
@@ -415,17 +437,21 @@ export function staffScreen(state) {
   // the ceiling (design D10), so an admin can record their own roles.
   const office = isAdmin(person);
   const volunteers = ceilingAdmin(state.principal);
+  // The Schedule is every schedule viewer's, cleared or not (design D11).
+  const viewer = scheduleViewer(state.principal);
   const open = state.sidebarOpen !== false;
   // Not cleared: the setup screen, and for a workspace admin the Roster and
-  // Post an update. No work.
+  // Post an update, and for a schedule viewer the Schedule. No work, and no
+  // My profile (a cleared window's).
   if (awaitingClearance(state)) {
     const onCeiling = volunteers && CEILING_SCREENS.includes(state.screen);
+    const onSchedule = viewer && state.screen === "schedule";
     return appShell({
       sidebar: staffSidebar(
-        { ...state, screen: onCeiling ? state.screen : "staff" },
+        { ...state, screen: onCeiling || onSchedule ? state.screen : "staff" },
         person,
         false,
-        { volunteers, board: false },
+        { volunteers, board: false, schedule: viewer },
       ),
       // An invited volunteer's first sign-in confirms the site first (the
       // site check, change add-account-invitations); nothing else shows.
@@ -434,7 +460,9 @@ export function staffScreen(state) {
           ? siteCheckScreen(state)
           : onCeiling
             ? ceilingPage(state)
-            : setupScreen(state),
+            : onSchedule
+              ? scheduleScreen(state)
+              : setupScreen(state),
       open,
     });
   }
@@ -449,7 +477,9 @@ export function staffScreen(state) {
         (name === "office-volunteers" && volunteers) ||
         (name === "office-add-case" && state.principal?.access === "staff");
   const screen =
-    OFFICE_SCREENS.includes(state.screen) && !allowed(state.screen) ? "staff" : state.screen;
+    (OFFICE_SCREENS.includes(state.screen) && !allowed(state.screen)) || (state.screen === "schedule" && !viewer)
+      ? "staff"
+      : state.screen;
   const main = (() => {
     const addCaseAction = button(`${icon("plus")} Add a case`, "open-add-case", "primary");
     if (screen === "staff-case" && state.savedCase) {
@@ -510,6 +540,7 @@ export function staffScreen(state) {
     if (screen === "office-volunteers") return rosterPage(state, { workload: office });
     if (screen === "office-updates") return postUpdatePage(state);
     if (screen === "office-settings") return seasonSettingsPage(state);
+    if (screen === "schedule") return scheduleScreen(state);
     const cases = (state.cases ?? []).map((record) =>
       decorateStaffCase(record, people),
     );
@@ -567,7 +598,7 @@ export function staffScreen(state) {
         );
   })();
   return appShell({
-    sidebar: staffSidebar({ ...state, screen }, person, office, { volunteers }),
+    sidebar: staffSidebar({ ...state, screen }, person, office, { volunteers, schedule: viewer }),
     body: main,
     open,
   });
@@ -769,6 +800,16 @@ export function dialog(state) {
       busy: state.busy === true,
     });
   }
+  // The Schedule's shift drawer and its Remove shift confirmation (change
+  // add-volunteer-schedule). The drawer's refusals are said above its body.
+  if (state.dialog === "shift") {
+    title = shiftDrawerTitle(state);
+    body = shiftDrawer(state);
+  }
+  if (state.dialog === "remove-shift") {
+    title = removeShiftTitle(state);
+    body = removeShiftDialogBody(state);
+  }
   if (state.dialog === "notifications") {
     title = "Notifications";
     // A drawer says its own failure (a confirm that did not go through).
@@ -851,7 +892,7 @@ export function dialog(state) {
     title = t("print.title", {}, lang);
     body = `<div class="print-card"><strong>${say("print.org")}</strong><span>${say("id.application_caps")}</span><b>${esc(state.savedCase?.reference)}</b>${state.savedCase?.clientNumber != null ? `<span>${say("id.client_number_caps")}</span><b>${esc(formatClientNumber(state.savedCase.clientNumber))}</b>` : ""}<p>${say("print.return")}</p></div><p class="field-note">${say("print.note")}</p>${button(`${icon("print")} ${say("print.button")}`, "print-now", "primary full")}`;
   }
-  const drawer = DRAWERS.includes(state.dialog);
+  const drawer = DRAWERS.includes(state.dialog) || state.dialog === "shift";
   const overline =
     state.dialog === "volunteer"
       ? "OFFICE · VOLUNTEERS"
@@ -861,8 +902,10 @@ export function dialog(state) {
           ? "FROM THE OFFICE"
           : ["update-people", "unpublish-update", "delete-update", "change-sidn", "start-season"].includes(state.dialog)
             ? "OFFICE · ADMIN"
-            : drawer
-              ? "OFFICE FOLLOW-UP"
-              : t("dialog.overline", {}, lang);
+            : state.dialog === "shift" || state.dialog === "remove-shift"
+              ? "VOLUNTEERS · SCHEDULE"
+              : drawer
+                ? "OFFICE FOLLOW-UP"
+                : t("dialog.overline", {}, lang);
   return `<div class="modal-backdrop"><section class="modal${drawer ? " office-drawer" : ""}" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1"><button class="close-btn" data-action="close-dialog" aria-label="${say("dialog.close")}">${icon("close")}</button><span class="overline">${esc(overline)}</span><h2 id="modal-title">${esc(title)}</h2>${dialogError(state, lang)}${body}</section></div>`;
 }

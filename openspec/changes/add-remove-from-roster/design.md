@@ -156,10 +156,10 @@ When shifts exist, removing someone from this season's roster must also remove o
 
 ## Migration Plan
 
-- **The migration.** `058_remove_from_roster.sql` adds the table and the function, and changes no existing function or row. It's hand-written and final once applied.
+- **The migration.** `059_remove_from_roster.sql` adds the table and the function, and changes no existing function or row. It's hand-written and final once applied.
 - **While iterating.** Database tests run through `gh workflow run database-quick.yml --ref <branch> -f files="tests/database-remove-from-roster.mjs"`. No local Docker or stack on this machine.
 - **The final check.** The PR's full CI: `checks`, `database`, `sign-in` and both `story` legs.
-- **Deploy.** Once the migration is final and Zeye has approved, apply 058 to the hosted database from the worktree, then merge. If the migration changes after approval, ask Zeye to look again first.
+- **Deploy.** Once the migration is final and Zeye has approved, apply 059 to the hosted database from the worktree, then merge. If the migration changes after approval, ask Zeye to look again first.
 - **Rollback.** A follow-up migration drops `vitally_remove_from_roster` and `roster_removals`. Removals already made stay made, since the entries are deleted. The people can be re-added through the picker and reactivated.
 
 ## Open Questions

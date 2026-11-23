@@ -199,7 +199,7 @@ re-reads the list. Recorded, nothing added.
 
 ## Acceptance (agreed)
 
-- Migration 058 and `vitally_remove_from_roster` with `FORBIDDEN`,
+- Migration 059 and `vitally_remove_from_roster` with `FORBIDDEN`,
   `ADMIN_ROLE`, `VALIDATION` (`SELF`), `NOT_FOUND`, `CONFLICT`, `OPEN_WORK`;
   receipt replay before `CONFLICT`; profile revision raised; removal recorded;
   capabilities `{}`; certificates and sent fields gone; past seasons unchanged.
@@ -223,7 +223,7 @@ re-reads the list. Recorded, nothing added.
 
 ## Deploy and PR
 
-- Once the migration is final and Zeye has approved, apply 058 to hosted from
+- Once the migration is final and Zeye has approved, apply 059 to hosted from
   the worktree, then merge. If the migration changes after approval, ask Zeye
   to look again first.
 - PR body: "Closes #232", "Closes #269", "Part of #138"; "Refs #N" for others.

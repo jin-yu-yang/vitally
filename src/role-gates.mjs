@@ -37,6 +37,9 @@ export const CEILING_DIALOGS = Object.freeze([
   "change-sidn",
   "start-season",
   "notifications",
+  // The Schedule's shift drawer and Remove shift (change add-volunteer-schedule).
+  "shift",
+  "remove-shift",
 ]);
 
 // Dialogs that need no capability: never swapped.

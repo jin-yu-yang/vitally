@@ -60,7 +60,7 @@ test("Season settings against real Supabase", async (t) => {
       return error;
     };
     const SETTINGS_KEYS = ["certificateUploadUrl", "clientDocumentsUrl", "revision", "season"];
-    const READ_KEYS = [...SETTINGS_KEYS, "canEdit", "candidates", "history", "siteCoordinators", "siteNumber"];
+    const READ_KEYS = [...SETTINGS_KEYS, "canEdit", "candidates", "history", "schedule", "siteCoordinators", "siteNumber"];
 
     // A workspace admin by the Admin role who is not a site coordinator.
     const nadia = await f.staff({
@@ -79,6 +79,11 @@ test("Season settings against real Supabase", async (t) => {
         assert.equal(answer.clientDocumentsUrl, null);
         assert.equal(answer.revision, 0);
         assert.equal(answer.canEdit, true);
+        assert.deepEqual(answer.schedule, {
+          siteHours: {},
+          targets: { preparersNeeded: 2, reviewersNeeded: 1, onSiteNeeded: 1 },
+          revision: 0,
+        });
         assert.deepEqual(Object.keys(answer.siteNumber).sort(), ["set", "updatedAt"]);
         assert.equal(answer.siteNumber.set, true, "the fixture sets a site number");
         assert.ok(!Number.isNaN(Date.parse(answer.siteNumber.updatedAt)), "the update time");

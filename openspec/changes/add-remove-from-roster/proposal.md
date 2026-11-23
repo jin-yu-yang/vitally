@@ -15,7 +15,7 @@ There is no way to take a volunteer off this season's Roster. Cancel invitation 
 - To: the drawer stays open on that person with the notice "<name> is back on this season's roster. Their account is deactivated. Reactivate it so they can sign in." When the drawer is opened later, a short note under Reactivate says "Reactivate so they can sign in." Only one of the two shows at a time.
 - Impact: non-breaking. Every other save still closes the drawer.
 
-Migration 058. No change for clients. Staff text is English only.
+Migration 059. No change for clients. Staff text is English only.
 
 ## Capabilities
 
@@ -30,7 +30,7 @@ Migration 058. No change for clients. Staff text is English only.
 
 ## Impact
 
-- **Database:** `supabase/migrations/058_remove_from_roster.sql`, with the `roster_removals` table and `vitally_remove_from_roster`. No change to existing functions.
+- **Database:** `supabase/migrations/059_remove_from_roster.sql`, with the `roster_removals` table and `vitally_remove_from_roster`. No change to existing functions.
 - **Browser:**
   - `src/supabase-store.mjs`: a `removeFromRoster` request.
   - `src/controller.mjs`: the action, its refusals, and the #269 notice.
@@ -42,5 +42,5 @@ Migration 058. No change for clients. Staff text is English only.
   - the RPC added to `tests/database-catalog.mjs`;
   - a browser test in its own `test(...)` block in `tests/browser.mjs`, outside the story.
 - **Docs:** `docs/developer/database.md` and `docs/developer/frontend.md`.
-- **Deploy:** once Zeye has approved, 058 is applied to the hosted database before merge.
+- **Deploy:** once Zeye has approved, 059 is applied to the hosted database before merge.
 - **Issues:** Closes #232 and #269. Part of #138.

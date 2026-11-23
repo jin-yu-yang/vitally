@@ -8,6 +8,7 @@ import {
   isStalled,
   taxpayerName,
   workloadRows,
+  weekHours,
   unassignedCases,
   sortRows,
   searchRows,
@@ -471,4 +472,55 @@ test("A holder who is not on this season's roster gets a tagged row under the pe
   assert.equal(otto.review, 1);
   assert.equal(rowOf(rows, "nobody").name, "Unknown person");
   assert.equal(rows.length, 3, "each holder once");
+});
+
+// ---- Hours this week (change add-volunteer-schedule, design D9) --------------
+
+const shiftOn = (personId, shift_date, start_hour, end_hour, extra = {}) => ({
+  person_id: personId,
+  shift_date,
+  start_hour,
+  end_hour,
+  role: "preparer",
+  ...extra,
+});
+// NOW is Friday 2026-11-13: the week is Monday the 9th to Sunday the 15th.
+const WEEK = { monday: "2026-11-09", sunday: "2026-11-15" };
+
+test("weekHours sums this week's shifts and leaves out the next week's", () => {
+  const shifts = [
+    shiftOn("v-1", "2026-11-10", 17, 20),
+    shiftOn("v-1", "2026-11-14", 10, 14),
+    shiftOn("v-1", "2026-11-16", 9, 12),
+    shiftOn("v-2", "2026-11-11", 9, 15),
+  ];
+  assert.equal(weekHours(shifts, "v-1", WEEK), 7);
+  assert.equal(weekHours(shifts, "v-2", WEEK), 6);
+  assert.equal(weekHours(shifts, "v-3", WEEK), 0);
+  assert.equal(weekHours(undefined, "v-1", WEEK), 0);
+  assert.equal(weekHours(shifts, "v-1"), 10, "with no week given, every shift passed counts");
+});
+
+test("weekHours counts every role, including a shift whose role the person no longer holds", () => {
+  const shifts = [
+    shiftOn("v-1", "2026-11-09", 9, 12, { role: "greeter" }),
+    shiftOn("v-1", "2026-11-10", 9, 12, { role: "reviewer" }),
+    shiftOn("v-1", "2026-11-11", 18, 22),
+  ];
+  assert.equal(weekHours(shifts, "v-1", WEEK), 10);
+});
+
+test("workloadRows carries each volunteer's hours and sorts by them", () => {
+  const people = [
+    { id: "a", name: "Ann", capabilities: ["prepare"] },
+    { id: "b", name: "Bo", capabilities: ["prepare"] },
+    { id: "c", name: "Cy", capabilities: ["prepare"] },
+  ];
+  const volunteers = [volunteer("a", "Ann", ["preparer"]), volunteer("b", "Bo", ["preparer"]), volunteer("c", "Cy", ["preparer"])];
+  const shifts = [shiftOn("a", "2026-11-09", 9, 18), shiftOn("b", "2026-11-10", 9, 15)];
+  const rows = workloadRows({ volunteers, people, cases: [], now: NOW, shifts, week: WEEK });
+  assert.deepEqual(rows.map((row) => row.hours), [9, 6, 0]);
+  assert.deepEqual(sortRows(rows, { key: "hours", dir: "desc" }).map((row) => row.id), ["a", "b", "c"]);
+  assert.deepEqual(sortRows(rows, { key: "hours", dir: "asc" }).map((row) => row.id), ["c", "b", "a"]);
+  assert.equal(workloadRows({ volunteers, people, cases: [], now: NOW })[0].hours, 0, "no shifts read yet: 0");
 });

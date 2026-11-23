@@ -1,7 +1,7 @@
-## 1. Database: migration 058
+## 1. Database: migration 059
 
 - [x] 1.1 Write `tests/database-remove-from-roster.mjs` (own workspaces) covering the removal and every refusal in the volunteer-roster, sign-in-accounts, site-coordinators and volunteer-clearance delta specs, including: stale Save after removal gets `CONFLICT` and creates no entry; Remove vs Deactivate never answers `INVALID_TRANSITION`; removing a site coordinator never calls `deactivate_account` (mark, history and account unchanged); capabilities become `{}`; certificates and sent/reviewed fields gone; earlier seasons and a Closed current-season case unchanged; a current-season Accepted case refused with `OPEN_WORK`; receipt replay before `CONFLICT`; `roster_removals` has no grant
-- [x] 1.2 Write `supabase/migrations/058_remove_from_roster.sql`: the `roster_removals` table (RLS on, no policy, revoke all) and `public.vitally_remove_from_roster(uuid,uuid,bigint)` with the check and lock order of design D4, deactivation skipped per D6, grant to `authenticated`
+- [x] 1.2 Write `supabase/migrations/059_remove_from_roster.sql`: the `roster_removals` table (RLS on, no policy, revoke all) and `public.vitally_remove_from_roster(uuid,uuid,bigint)` with the check and lock order of design D4, deactivation skipped per D6, grant to `authenticated`
 - [x] 1.3 Add the RPC to `tests/database-catalog.mjs` and to any RPC list in `tests/store.test.mjs` that enumerates write RPCs
 - [x] 1.4 Run the new database tests and the files they reach (`database-accounts.mjs`, `database-volunteer-roster.mjs`, `database-site-coordinators.mjs`, `database-capabilities-mirror.mjs`, `database-catalog.mjs`) through `gh workflow run database-quick.yml --ref <branch> -f files="…"` until green
 
@@ -27,6 +27,6 @@
 
 ## 6. Docs and checks
 
-- [x] 6.1 Update `docs/developer/database.md` (migration 058, the RPC, `roster_removals`) and `docs/developer/frontend.md` (the remove dialog, the #269 notice)
+- [x] 6.1 Update `docs/developer/database.md` (migration 059, the RPC, `roster_removals`) and `docs/developer/frontend.md` (the remove dialog, the #269 notice)
 - [x] 6.2 Run `npm test` and `npx openspec validate --all`; confirm `npm run build:intake` leaves nothing to commit
 - [x] 6.3 Push the branch and run the full CI (`gh workflow run ci.yml --ref <branch>`); every job covering the change passes, and the story's screenshots are reviewed

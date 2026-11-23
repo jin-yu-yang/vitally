@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createDatabaseFixture } from "./support/database-fixture.mjs";
 
-// OpenSpec change add-remove-from-roster (design D1-D7), migration 058: an
+// OpenSpec change add-remove-from-roster (design D1-D7), migration 059: an
 // admin removes a volunteer from the current season's roster. The entry goes,
 // with its certificates and sent and reviewed fields; the person, profile,
 // earlier seasons and cases stay; the account is deactivated as Deactivate

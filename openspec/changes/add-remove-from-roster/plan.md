@@ -4,7 +4,7 @@
 
 **Goal:** A workspace admin can remove a volunteer from the current season's Roster in one confirmed step. Their account is deactivated except a site coordinator's, and the removal is recorded. After re-adding someone whose account is deactivated, the drawer points to Reactivate (#232, #269).
 
-**Architecture:** One new `security definer` RPC, `vitally_remove_from_roster`, and one private table, `roster_removals`, in migration 058. The RPC reuses `vitally_private.deactivate_account` and `open_work` unchanged. The browser adds a store call, a drawer button, a confirmation dialog, a controller action, and the #269 notice/note in the existing Account section.
+**Architecture:** One new `security definer` RPC, `vitally_remove_from_roster`, and one private table, `roster_removals`, in migration 059. The RPC reuses `vitally_private.deactivate_account` and `open_work` unchanged. The browser adds a store call, a drawer button, a confirmation dialog, a controller action, and the #269 notice/note in the existing Account section.
 
 **Tech Stack:**
 - Postgres/Supabase SQL migrations;
@@ -22,7 +22,7 @@
 
 ## Global Constraints
 
-- **The migration:** `supabase/migrations/058_remove_from_roster.sql`, hand-written. Never edit 001–057.
+- **The migration:** `supabase/migrations/059_remove_from_roster.sql`, hand-written. Never edit 001–058.
 - **No local Docker or Supabase stack on this machine.** Database tests run only through CI: `gh workflow run database-quick.yml --ref <branch> -f files="tests/database-remove-from-roster.mjs ..."`, then `gh run watch` with a bounded timeout. Never `supabase start`.
 - **Every command gets a timeout.** Never run a server in the foreground. Bounded CI waits (`timeout 1500 gh run watch <id> --exit-status`). If an action needs the user's approval, stop and report BLOCKED.
 - **Test runners:** `node --test` runs with `--test-concurrency=1` where a suite is heavy. Kill orphaned test runners.
@@ -63,11 +63,11 @@
 
 ---
 
-### Task 1: Migration 058 and its database tests
+### Task 1: Migration 059 and its database tests
 
 **Files:**
 - Create: `tests/database-remove-from-roster.mjs`
-- Create: `supabase/migrations/058_remove_from_roster.sql`
+- Create: `supabase/migrations/059_remove_from_roster.sql`
 - Modify: `tests/database-catalog.mjs` (add `vitally_remove_from_roster(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)` to the list where `vitally_start_next_season(...)` is, line ~86)
 
 **Interfaces:**
@@ -117,7 +117,7 @@
   Run: `timeout 60 gh workflow run database-quick.yml --ref <branch> -f files="tests/database-remove-from-roster.mjs tests/database-catalog.mjs"`, then `timeout 1500 gh run watch <id> --exit-status`.
   Expected: FAIL. The function `vitally_remove_from_roster` does not exist, and the catalog is missing an entry.
 
-- [ ] **Step 3: Write `058_remove_from_roster.sql`.**
+- [ ] **Step 3: Write `059_remove_from_roster.sql`.**
   - **The header comment:** names the change and design D1–D11, as 055's does.
   - **§1, the table:** as in Interfaces.
   - **§2, the function:** follows design D4 exactly, step for step.
@@ -135,8 +135,8 @@
 
 - [ ] **Step 5: Commit.**
   ```bash
-  git add supabase/migrations/058_remove_from_roster.sql tests/database-remove-from-roster.mjs tests/database-catalog.mjs
-  git commit -m "Roster: remove a volunteer from this season's roster (058)"
+  git add supabase/migrations/059_remove_from_roster.sql tests/database-remove-from-roster.mjs tests/database-catalog.mjs
+  git commit -m "Roster: remove a volunteer from this season's roster (059)"
   ```
 
 ### Task 2: The store call
@@ -238,7 +238,7 @@
 - Modify: `tests/browser.mjs` (a new top-level `test(...)` after the existing ones, line ~10787 onward, with its own workspace set up the way the other non-story blocks do)
 
 **Interfaces:**
-- Consumes the UI from Tasks 3 and 4, and migration 058.
+- Consumes the UI from Tasks 3 and 4, and migration 059.
 
 - [ ] **Step 1: Write the test.** Name it `removing a volunteer from this season's roster`. Steps:
   1. Create a fictional volunteer Nadia Kerr the way the other separate blocks create their staff (for example the uploads block): `fixture.database.staff({ key: "remove_volunteer", name: "Nadia Kerr", capabilities: [] })` (a Greeter has no capabilities). If her current-season entry doesn't carry the Greeter role, set `roles` with `fixture.database.sql`, as the uploads block adjusts its entries. Her email is the one `staff` provisions. Sign her in in a second page with `loginTestUser({ page, actor: { key: "remove_volunteer", email: nadia.email, userId: nadia.userId }, fixture, heading })`; don't build a new sign-in path. The admin (`fixture.actor("siteCoordinator")`) signs in with `loginTestUser` as the other blocks do. Use `nadia.email` wherever the steps below name her email.
@@ -253,7 +253,7 @@
 ### Task 6: Docs and the final checks
 
 **Files:**
-- Modify: `docs/developer/database.md` (migration 058, `vitally_remove_from_roster` with its refusals and lock order, `roster_removals`)
+- Modify: `docs/developer/database.md` (migration 059, `vitally_remove_from_roster` with its refusals and lock order, `roster_removals`)
 - Modify: `docs/developer/frontend.md` (the remove confirmation, the #269 notice and note, and the fact that other Roster windows learn of a removal only when they read it again)
 
 - [ ] **Step 1: Update both docs,** in the style of the existing entries for 055 and 057.

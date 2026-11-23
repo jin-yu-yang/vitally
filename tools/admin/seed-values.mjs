@@ -119,6 +119,7 @@ export const ROLE_ACCOUNT_CLEARANCE = Object.freeze({
 export const SEED_VOLUNTEERS = Object.freeze([
   Object.freeze({
     name: "Maya Lindgren",
+    usualDays: ["tue", "thu"],
     email: "volunteer-01@example.org",
     phone: "(215) 555-0141",
     works: "on_site",
@@ -131,6 +132,7 @@ export const SEED_VOLUNTEERS = Object.freeze([
   }),
   Object.freeze({
     name: "Tomas Abara",
+    usualDays: ["sat"],
     email: "volunteer-02@example.org",
     phone: "(215) 555-0142",
     works: "remote",
@@ -143,6 +145,7 @@ export const SEED_VOLUNTEERS = Object.freeze([
   }),
   Object.freeze({
     name: "Wen Tao Liu",
+    usualDays: ["tue", "sat"],
     email: "volunteer-03@example.org",
     phone: "(215) 555-0143",
     works: "on_site",
@@ -155,6 +158,7 @@ export const SEED_VOLUNTEERS = Object.freeze([
   }),
   Object.freeze({
     name: "Priya Venkat",
+    usualDays: ["thu"],
     email: "volunteer-04@example.org",
     phone: null,
     works: "on_site_and_remote",
@@ -179,6 +183,7 @@ export const SEED_VOLUNTEERS = Object.freeze([
   }),
   Object.freeze({
     name: "Hana Moretti",
+    usualDays: ["sat"],
     email: "volunteer-06@example.org",
     phone: "(215) 555-0146",
     works: "remote",
@@ -213,6 +218,34 @@ export const SEED_VOLUNTEERS = Object.freeze([
     isNew: false,
     photoIdChecked: false,
   }),
+]);
+
+// The schedule `npm run seed:local` fills (change add-volunteer-schedule,
+// design D12). Site hours are ISO weekday keys ("2" is Tuesday), saved only
+// when the workspace never saved any; the targets are the defaults.
+export const SEED_SITE_HOURS = Object.freeze({
+  2: Object.freeze({ open: 17, close: 20 }),
+  4: Object.freeze({ open: 17, close: 20 }),
+  6: Object.freeze({ open: 10, close: 16 }),
+});
+export const SEED_SCHEDULE_TARGETS = Object.freeze({
+  preparersNeeded: 2,
+  reviewersNeeded: 1,
+  onSiteNeeded: 1,
+});
+
+// About six shifts in the current New York week. `who` is a role account's
+// person key or a SEED_VOLUNTEERS email (no sign-in); `weekday` is the
+// preferred ISO weekday, with another open day used when it is closed. A shift
+// covers the whole open day, except a Saturday's, which covers only the first
+// half so a later Saturday hour is left with a gap.
+export const SEED_SHIFTS = Object.freeze([
+  Object.freeze({ who: "preparer", role: "preparer", weekday: 2 }),
+  Object.freeze({ who: "reviewer", role: "reviewer", weekday: 2 }),
+  Object.freeze({ who: "volunteer-01@example.org", role: "preparer", weekday: 4 }),
+  Object.freeze({ who: "intaker", role: "intaker", weekday: 4 }),
+  Object.freeze({ who: "preparer", role: "preparer", weekday: 6 }),
+  Object.freeze({ who: "volunteer-03@example.org", role: "reviewer", weekday: 6 }),
 ]);
 
 // The previous season's roster (spec local-seed-data, "The local seed adds a

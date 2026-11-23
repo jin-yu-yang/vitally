@@ -48,6 +48,7 @@ const COLUMNS = Object.freeze([
   { key: "review", label: "Review" },
   { key: "waiting", label: "Waiting on client" },
   { key: "stalled", label: "Stalled" },
+  { key: "hours", label: "Hours this week" },
 ]);
 
 function header(column, sort) {
@@ -118,7 +119,7 @@ function unassignedRows(unassigned, expanded) {
   )}<span class="workload-sub">${esc(summary)}</span></th>${cell("open", preparer.length + reviewer.length)}${cell(
     "bar",
     bar(preparer.length, reviewer.length, summary),
-  )}${cell("preparing", preparer.length)}${cell("review", reviewer.length)}${cell("waiting", "—")}${cell("stalled", "—")}</tr>`;
+  )}${cell("preparing", preparer.length)}${cell("review", reviewer.length)}${cell("waiting", "—")}${cell("stalled", "—")}${cell("hours", "—")}</tr>`;
   if (!open) return row;
   const items = [
     ...preparer.map((record) => caseItem(record, { slotText: WAITING_LABEL.preparer, action: "Assign", slot: "preparer" })),
@@ -138,7 +139,7 @@ function volunteerRows(row, expanded) {
   )}</th>${cell("open", row.open)}${cell("bar", bar(row.preparing, row.review, `${row.preparing} preparing, ${row.review} in review`))}${cell(
     "preparing",
     row.preparing,
-  )}${cell("review", row.review)}${cell("waiting", row.waiting)}${cell("stalled", row.stalled)}</tr>`;
+  )}${cell("review", row.review)}${cell("waiting", row.waiting)}${cell("stalled", row.stalled)}${cell("hours", row.hours ?? 0)}</tr>`;
   if (!open) return line;
   const items = (row.cases ?? []).map(({ record, slot, stalled, roleRemoved }) =>
     caseItem(record, { slotText: SLOT_LABEL[slot] ?? slot, stalled, roleRemoved, action: "Reassign", slot }),

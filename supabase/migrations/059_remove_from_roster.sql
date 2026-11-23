@@ -1,4 +1,4 @@
--- 058: Remove from this season's roster (OpenSpec change add-remove-from-roster,
+-- 059: Remove from this season's roster (OpenSpec change add-remove-from-roster,
 -- design D1-D11; #232, #269).
 --
 -- In order:

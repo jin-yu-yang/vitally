@@ -252,6 +252,68 @@ test("setup uploads: keeps the order Form 13615, photo ID, roles, SC", () => {
   assert.ok(at[0] > -1);
 });
 
+// ---- the Schedule on the setup screen (change add-volunteer-schedule) ------
+
+const scheduleDay = (canEdit) => ({
+  date: "2027-02-06",
+  weekday: 6,
+  hours: { open: 10, close: 16 },
+  anyOpen: true,
+  targets: { preparersNeeded: 2, reviewersNeeded: 1, onSiteNeeded: 1 },
+  settingsRevision: 1,
+  canEdit,
+  canEditSettings: false,
+  shifts: [{ shiftId: "s-1", revision: 1, volunteerId: "p-kim", name: "Kim Novak", role: "preparer", startHour: 10, endHour: 13 }],
+  ...(canEdit ? { candidates: [] } : {}),
+});
+
+test("an uncleared schedule viewer's setup sidebar has Schedule and the way back to setup", () => {
+  const html = staffScreen(staffState({ scheduleViewer: true }));
+  assert.match(html, /Finish your setup for this season/);
+  assert.match(html, /data-action="open-schedule"/);
+  assert.match(html, /data-action="open-board"[^>]*aria-current="page"><svg[^]*?<\/svg> Finish your setup<\/button>/);
+  assert.doesNotMatch(html, /data-action="open-volunteers"/);
+  // Not a schedule viewer: no link.
+  assert.doesNotMatch(staffScreen(staffState()), /open-schedule/);
+});
+
+test("an uncleared schedule viewer opens the Schedule read-only from the setup screen", () => {
+  const html = staffScreen(
+    staffState(
+      { scheduleViewer: true },
+      { screen: "schedule", schedule: { date: "2027-02-06", day: scheduleDay(false), drawer: null }, lists: { schedule: "ready" } },
+    ),
+  );
+  assert.doesNotMatch(html, /Finish your setup for this season/);
+  assert.match(html, /<h1>Schedule<\/h1>/);
+  assert.match(html, /data-action="open-schedule"[^>]*aria-current="page"/);
+  assert.doesNotMatch(html, /open-shift|Add shift/);
+  // Someone who is not a schedule viewer, left on the Schedule, gets the setup screen.
+  const not = staffScreen(
+    staffState({}, { screen: "schedule", schedule: { date: "2027-02-06", day: scheduleDay(false), drawer: null } }),
+  );
+  assert.match(not, /Finish your setup for this season/);
+  assert.doesNotMatch(not, /<h1>Schedule<\/h1>/);
+});
+
+// My profile is a cleared window's (change add-my-profile): no link to it here,
+// neither in the nav nor as the account row.
+test("an uncleared workspace admin's setup sidebar orders Volunteers, Schedule, Post an update, Season settings, with no My profile", () => {
+  const html = staffScreen(staffState({ isAdmin: true, scheduleViewer: true }));
+  const order = [...html.matchAll(/data-action="(open-[a-z-]+)"/g)].map((m) => m[1]).filter((a) => a !== "open-help");
+  assert.deepEqual(order, ["open-board", "open-volunteers", "open-schedule", "open-post-update", "open-season-settings", "open-notifications"]);
+  assert.doesNotMatch(html, /open-my-profile|My profile/);
+  // The admin gets the editing controls.
+  const schedule = staffScreen(
+    staffState(
+      { isAdmin: true, scheduleViewer: true },
+      { screen: "schedule", schedule: { date: "2027-02-06", day: scheduleDay(true), drawer: null }, lists: { schedule: "ready" } },
+    ),
+  );
+  assert.match(schedule, /data-action="open-shift"/);
+  assert.match(schedule, /\+ Add shift/);
+});
+
 // Why a document came back (change add-my-profile, design D8).
 const returned = (document, reviewReason, sentAt = null) =>
   setupScreen(staffState({ missing: [{ kind: document, sentAt, reviewedAt: "2026-11-21T03:30:00Z", reviewReason }], uploadUrl: URL13615 }));
