@@ -132,6 +132,29 @@ export const SQLSTATE_ERROR_CODES = Object.freeze({
 // An account with no staff or applicant access gets `noAccessScreen` and nothing else.
 export const isStaffWindow = (principal) => principal?.access === "staff";
 
+// The two sides of the staff window (OpenSpec change add-workspace-switch).
+// A person with capabilities on both sides gets an Office / Cases switch.
+export const OFFICE_CAPABILITIES = Object.freeze(["admin", "followup", "assist", "receive_documents"]);
+export const CASES_CAPABILITIES = Object.freeze(["prepare", "review"]);
+
+const hasAny = (person, set) =>
+  Array.isArray(person?.capabilities) && person.capabilities.some((c) => set.includes(c));
+export const hasOfficeSide = (person) => hasAny(person, OFFICE_CAPABILITIES);
+export const hasCasesSide = (person) => hasAny(person, CASES_CAPABILITIES);
+
+export const hasWorkspaceSwitch = (principal, person) =>
+  isStaffWindow(principal) && hasOfficeSide(person) && hasCasesSide(person);
+
+// "office" or "cases". With the switch, the preferred side wins (default
+// office). With one side, that side. With neither, or no person yet, "cases":
+// today's work board.
+export const workspaceSide = (principal, person, preferred) => {
+  const office = hasOfficeSide(person);
+  const cases = hasCasesSide(person);
+  if (office && cases) return preferred === "cases" ? "cases" : "office";
+  return office ? "office" : "cases";
+};
+
 // Principal: { userId, workspaceId, access: 'applicant'|'staff',
 //              email, personId, personName }
 //   personId and personName are the staff member's own roster person, linked
