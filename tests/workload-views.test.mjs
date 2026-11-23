@@ -288,15 +288,14 @@ test("a locked Assign drawer drops the Choose buttons, keeps the search, and say
   assert.match(html, /Your roles changed, so you can&#39;t send this any more\./);
 });
 
-// ---- Hours this week (change add-volunteer-schedule, design D9) --------------
+// ---- Hours this week (change add-volunteer-check-in, design D8) --------------
 
 test("Hours this week follows Stalled, sorts highest first, and the Unassigned row has no hours", () => {
-  const WEEK = { monday: "2026-11-09", sunday: "2026-11-15" };
-  const shifts = [
-    { person_id: "v-jordan", shift_date: "2026-11-10", start_hour: 9, end_hour: 18 },
-    { person_id: "v-alex", shift_date: "2026-11-11", start_hour: 9, end_hour: 15 },
+  const hours = [
+    { volunteerId: "v-jordan", minutes: 540 },
+    { volunteerId: "v-alex", minutes: 390 },
   ];
-  const rows = workloadRows({ volunteers: VOLUNTEERS, people: PEOPLE, cases: CASES, now: NOW, shifts, week: WEEK });
+  const rows = workloadRows({ volunteers: VOLUNTEERS, people: PEOPLE, cases: CASES, now: NOW, hours });
   const html = renderWorkload(args({ rows, sort: { key: "hours", dir: "desc" } }));
   const heads = [...html.matchAll(/<th scope="col"[^>]*>(?:<button[^>]*>)?([^<]+)/g)].map((m) => m[1]);
   assert.equal(heads[heads.indexOf("Stalled") + 1], "Hours this week");
@@ -304,7 +303,7 @@ test("Hours this week follows Stalled, sorts highest first, and the Unassigned r
   assert.deepEqual(rowIds(html), ["unassigned", "v-jordan", "v-alex", "v-casey"]);
   const hoursOf = (id) =>
     new RegExp(`data-row-id="${id}">[\\s\\S]*?<td data-col="hours">([^<]*)</td>`).exec(html)[1];
-  assert.deepEqual(["v-jordan", "v-alex", "v-casey"].map(hoursOf), ["9", "6", "0"]);
+  assert.deepEqual(["v-jordan", "v-alex", "v-casey"].map(hoursOf), ["9", "6.5", "0"]);
   const unassigned = /<tr class="workload-row workload-unassigned"[^>]*>([\s\S]*?)<\/tr>/.exec(html)[1];
   assert.match(unassigned, /<td data-col="hours">—<\/td>/);
   const reversed = renderWorkload(args({ rows, sort: { key: "hours", dir: "asc" } }));

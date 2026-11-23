@@ -1068,21 +1068,6 @@ export function createStore(client) {
       });
     },
 
-    // The admin's direct read of live shifts in the current season for the
-    // week monday..sunday (the table is readable by admins under RLS).
-    async weekShifts({ monday, sunday }) {
-      await requireStaffAccess();
-      const season = await staffSeason();
-      let query = client
-        .from("shifts")
-        .select("*")
-        .is("removed_at", null)
-        .gte("shift_date", monday)
-        .lte("shift_date", sunday);
-      if (season != null) query = query.eq("season", season);
-      return await read(query);
-    },
-
     // The SIDN is write-only: the answer is `{set, updatedAt}`, never the number.
     async setSiteNumber(request) {
       return await call("vitally_set_site_number", {

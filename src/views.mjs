@@ -389,8 +389,8 @@ const workloadPanel = (state) => {
       people: state.people ?? [],
       cases,
       now: Date.now(),
-      // Already the week's shifts: the controller read them for that week.
-      shifts: state.weekShifts ?? [],
+      // The checked-in minutes of this week, as the server counted them.
+      hours: state.weekHours ?? [],
     }),
     unassigned: unassignedCases(cases),
     sort: view.sort ?? DEFAULT_WORKLOAD_SORT,

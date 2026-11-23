@@ -113,13 +113,13 @@ function fakeStore({
       store.calls.push("listPeople");
       return people;
     },
-    // The Workload's hours: the live shifts of the week asked for.
-    weekShiftRows: [],
-    weekRequests: [],
-    async weekShifts(week) {
-      store.calls.push("weekShifts");
-      store.weekRequests.push(week);
-      return store.weekShiftRows.map((row) => ({ ...row }));
+    // The Workload's hours: the checked-in minutes of the week, from the server.
+    hourRows: [],
+    hourReads: 0,
+    async hoursThisWeek() {
+      store.calls.push("hoursThisWeek");
+      store.hourReads += 1;
+      return { weekStart: "2026-11-09", weekEnd: "2026-11-15", hours: store.hourRows.map((row) => ({ ...row })) };
     },
     async listCases() {
       store.calls.push("listCases");
@@ -9156,76 +9156,71 @@ test("a cleared staff member without effective admin gets no Workload and no ass
   controller.stop();
 });
 
-test("Hours this week: read for the week holding today, sortable, and re-read when a shift changes", async () => {
+test("workload: hours from minutes, and re-reads on check_ins, shifts and schedule_settings changes", async () => {
   const store = workloadStore();
-  store.weekShiftRows = [{ person_id: "v-1", shift_date: "2026-11-10", start_hour: 9, end_hour: 13, role: "preparer" }];
+  store.hourRows = [{ volunteerId: "v-1", minutes: 390 }];
   const { controller } = build({ store, clock: () => Date.parse("2026-11-13T15:00:00-05:00") });
   await controller.start();
   controller.navigate("office-volunteers");
   await controller.setVolunteerTab("workload");
-  assert.deepEqual(store.weekRequests, [{ monday: "2026-11-09", sunday: "2026-11-15" }]);
+  assert.equal(store.hourReads, 1);
   const hours = (id) =>
     new RegExp(String.raw`data-row-id="${id}">[\s\S]*?<td data-col="hours">([^<]*)</td>`).exec(staffScreen(controller.getState()))?.[1];
-  assert.equal(hours("v-1"), "4");
+  assert.equal(hours("v-1"), "6.5");
   assert.equal(hours("v-2"), "0");
   controller.setWorkloadView({ sortBy: "hours" });
   assert.deepEqual(controller.getState().workload.sort, { key: "hours", dir: "desc" });
   controller.setWorkloadView({ sortBy: "hours" });
   assert.deepEqual(controller.getState().workload.sort, { key: "hours", dir: "asc" });
-  // A shift changed in another window: the week is read again, and only it.
-  store.weekShiftRows = [
-    ...store.weekShiftRows,
-    { person_id: "v-2", shift_date: "2026-11-12", start_hour: 10, end_hour: 15, role: "reviewer" },
-  ];
+  store.hourRows = [...store.hourRows, { volunteerId: "v-2", minutes: 300 }];
   const casesBefore = caseListReads(store);
   const volunteersBefore = volunteerReads(store);
-  await store.handlers.onChange({ table: "shifts", eventType: "INSERT", id: "s-1" });
-  assert.equal(store.weekRequests.length, 2);
+  let expected = 1;
+  for (const table of ["check_ins", "shifts", "schedule_settings"]) {
+    await store.handlers.onChange({ table, eventType: "INSERT", id: "x-1" });
+    expected += 1;
+    assert.equal(store.hourReads, expected, `${table} re-reads the hours`);
+  }
   assert.equal(hours("v-2"), "5");
   assert.equal(caseListReads(store), casesBefore, "no case list is re-read");
   assert.equal(volunteerReads(store), volunteersBefore, "nor the volunteers");
-  // On the Roster tab a shift change reads nothing for the Workload.
   await controller.setVolunteerTab("roster");
-  await store.handlers.onChange({ table: "shifts", eventType: "UPDATE", id: "s-1" });
-  assert.equal(store.weekRequests.length, 2);
+  await store.handlers.onChange({ table: "check_ins", eventType: "UPDATE", id: "x-1" });
+  assert.equal(store.hourReads, expected, "on the Roster tab nothing is read for the Workload");
   controller.stop();
 });
 
-test("a refresh on the Workload tab reads the week again, and a clock past Sunday midnight in New York reads the new week", async () => {
+test("a refresh on the Workload tab reads the hours again, and not off the Workload tab", async () => {
   const store = workloadStore();
-  let now = Date.parse("2026-11-15T22:00:00-05:00");
-  const { controller } = build({ store, clock: () => now });
+  const { controller } = build({ store, clock: () => Date.parse("2026-11-15T22:00:00-05:00") });
   await controller.start();
   controller.navigate("office-volunteers");
   await controller.setVolunteerTab("workload");
-  assert.deepEqual(store.weekRequests, [{ monday: "2026-11-09", sunday: "2026-11-15" }]);
-  now = Date.parse("2026-11-16T00:30:00-05:00");
+  assert.equal(store.hourReads, 1);
   await controller.refresh();
-  assert.equal(store.weekRequests.length, 2);
-  assert.deepEqual(store.weekRequests[1], { monday: "2026-11-16", sunday: "2026-11-22" });
-  // Off the Workload tab, a refresh reads no week.
+  assert.equal(store.hourReads, 2);
   await controller.setVolunteerTab("roster");
   await controller.refresh();
-  assert.equal(store.weekRequests.length, 2);
+  assert.equal(store.hourReads, 2);
   controller.stop();
 });
 
-test("arriving on the Volunteers page with the Workload tab already chosen reads the week", async () => {
+test("a navigation to the Workload reads the hours with the rows", async () => {
   const store = workloadStore();
   const { controller } = build({ store, clock: () => Date.parse("2026-11-13T15:00:00-05:00") });
   await controller.start();
   controller.navigate("office-volunteers");
   await controller.setVolunteerTab("workload");
-  assert.equal(store.weekRequests.length, 1);
+  assert.equal(store.hourReads, 1);
   controller.navigate("staff");
   controller.navigate("office-volunteers");
   assert.equal(controller.getState().volunteerTab, "workload");
   await controller.loadVolunteers();
-  assert.equal(store.weekRequests.length, 2, "the arrival reads the week with the rows");
+  assert.equal(store.hourReads, 2, "the arrival reads the hours with the rows");
   controller.stop();
 });
 
-test("a failed week read in a shift change does not stop the open case from being re-read", async () => {
+test("a failed hours read in a change does not stop the open case from being re-read", async () => {
   const store = workloadStore();
   const { controller } = build({ store, clock: () => Date.parse("2026-11-13T15:00:00-05:00") });
   await controller.start();
@@ -9233,7 +9228,7 @@ test("a failed week read in a shift change does not stop the open case from bein
   await controller.setVolunteerTab("workload");
   await controller.selectCase("case-w2");
   controller.navigate("office-volunteers");
-  store.weekShifts = async () => {
+  store.hoursThisWeek = async () => {
     throw Object.assign(new Error("offline"), { code: "OFFLINE" });
   };
   const before = store.calls.filter((entry) => entry === "getCase:case-w2").length;

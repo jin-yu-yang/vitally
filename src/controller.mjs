@@ -1,5 +1,5 @@
 import { awaitingClearance, ceilingAdmin, scheduleViewer, withOwnCapabilities } from "./clearance.mjs";
-import { nyToday, addDays, weekBounds, SHIFT_REFUSALS, WEEKDAYS } from "./volunteer-schedule.mjs";
+import { nyToday, addDays, SHIFT_REFUSALS, WEEKDAYS } from "./volunteer-schedule.mjs";
 import {
   CASE_ACTIONS,
   ASSISTANCE_ACTIONS,
@@ -438,7 +438,7 @@ export function createController({
     workload: freshWorkloadView(),
     // The live shifts of the week holding today, for the Workload's Hours
     // this week (design D9); read only while the Workload is open.
-    weekShifts: [],
+    weekHours: [],
     // Posted updates (change add-posted-updates). The feed is every staff
     // window's, cleared or not: `updates` is the RPC's items as read,
     // `updatesUnread` its own badge count (never recounted here), and
@@ -1306,11 +1306,15 @@ export function createController({
     const touchesProfile = state.screen === "my-profile" && (touchesWorkspace || change.table === "shifts");
     // The site hours card on Season settings.
     const touchesSettings = state.screen === "office-settings" && change.table === "schedule_settings";
-    // A shift moves the Workload's Hours this week (a new season too).
+    // A check-in, a shift or the site hours move the Workload's Hours this week
+    // (a new season too).
     const touchesHours =
       state.screen === "office-volunteers" &&
       state.volunteerTab === "workload" &&
-      (touchesWorkspace || change.table === "shifts");
+      (touchesWorkspace ||
+        change.table === "check_ins" ||
+        change.table === "shifts" ||
+        change.table === "schedule_settings");
     // The caller's own check-in moved (another device, or an admin's
     // correction): the strip re-reads. Another person's never does (D9).
     const touchesCheckIn =
@@ -1530,11 +1534,11 @@ export function createController({
     await loadVolunteers();
   }
 
-  // The Workload's Hours this week: the live shifts dated Monday to Sunday of
-  // the week holding today in New York. A failed read keeps the last hours.
+  // The Workload's Hours this week: the minutes checked in this New York week,
+  // counted by the server (design D8). A failed read keeps the last hours.
   async function readWorkloadHours() {
     if (!canSeeWorkload() || state.screen !== "office-volunteers" || state.volunteerTab !== "workload") return;
-    state.weekShifts = (await store.weekShifts(weekBounds(nyToday(clock())))) ?? [];
+    state.weekHours = (await store.hoursThisWeek())?.hours ?? [];
   }
 
 
@@ -5882,7 +5886,7 @@ export function createController({
       volunteers: state.volunteers.map((entry) => ({ ...entry })),
       earlierVolunteers: state.earlierVolunteers.map((entry) => ({ ...entry })),
       volunteerFilters: { ...state.volunteerFilters },
-      weekShifts: state.weekShifts.map((entry) => ({ ...entry })),
+      weekHours: state.weekHours.map((entry) => ({ ...entry })),
       workload: {
         ...state.workload,
         sort: { ...state.workload.sort },
