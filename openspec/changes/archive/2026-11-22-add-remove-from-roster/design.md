@@ -62,7 +62,7 @@ Stakeholders: Hailey (owner), Zeye (reviewer, approves before hosted deploy), Ji
 - **Choice:** `vitally_remove_from_roster(p_action_id uuid, p_volunteer_id uuid, p_expected_revision bigint)`, `security definer`, granted to `authenticated`. In this order:
   1. `require_membership`, `acting_person`, then `FORBIDDEN` unless the caller is staff with a person and is a workspace admin.
   2. `VALIDATION` for a null argument, then `VALIDATION` (`SELF`) for the caller's own row.
-  3. The workspace advisory lock (`hashtextextended(workspace_id::text, 0)`).
+  3. The workspace advisory lock (`hashtextextended(workspace_id::text, 0)`), then the person's membership `FOR UPDATE`, found through their account's `user_id`, when step 13 will deactivate it (the account `invited` or `active`, not a site coordinator's). With no account there is nothing to lock.
   4. `ADMIN_ROLE` (from D3).
   5. `reserve_receipt` with operation `REMOVE_FROM_ROSTER` and a digest of the arguments and the caller. A replay returns the stored receipt.
   6. `expire_invitations`.
@@ -77,7 +77,10 @@ Stakeholders: Hailey (owner), Zeye (reviewer, approves before hosted deploy), Ji
   15. Insert into `roster_removals`.
   16. Store the receipt: `{actionId, volunteerId, revision, accountDeactivated, shiftsRemoved}`.
 - **Why:**
-  - The order of locks is the same as Save's: the workspace lock, then the profile, then the entry, then the shifts and the account. Save, Deactivate, Remove, and Save shift and Remove shift (058) all take the workspace lock first, so none of them can deadlock with another.
+  - The order of locks is the workspace lock, the person's membership, the profile, the entry, the shifts, then the account. Save, Deactivate, Start next season, Remove, and Save shift and Remove shift (058) all take the workspace lock first, so none of them can deadlock with another.
+  - The person's own writes take no workspace lock: `vitally_save_my_profile` (057) holds `FOR SHARE` on their membership in `require_membership`, then locks the profile; `vitally_mark_upload_sent` (057) does the same, then locks the entry. No other call of the person's own writes their profile or entry without the workspace lock. Removal deactivates that membership, so it locks it before the profile, in the same order those writes take: a write already holding its membership finishes first while Remove waits holding no profile lock, and a later one waits on its membership and is then refused. Locking it only when deactivating, after the profile, could deadlock (`40P01`) with a write that held its membership and was waiting for the profile (PR #273 review, as 055 did for Start next season).
+  - Only a membership that will be deactivated is locked. A site coordinator's is left alone, since they may hold it while waiting for the workspace lock (Start next season, Season settings, any admin RPC).
+  - Known limit, not new: a call of the person's own that takes the workspace lock after their membership (an Admin-role volunteer's admin RPC, or an invited volunteer's site check) can still deadlock with Remove, as it can with Deactivate (052) and Start next season (055). Covering it means changing those calls.
   - The receipt is reserved before the `CONFLICT` check, so a retry after a lost reply is answered, not refused.
   - `OPEN_WORK` is checked before anything is written. `deactivate_account` checks it again, which costs nothing.
 - **Alternative considered:** the account revision as the expected revision, as Deactivate uses. Rejected, because the Edit drawer that Save uses holds the profile revision (D5).

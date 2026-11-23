@@ -580,7 +580,8 @@ confirmed step.
   2. A null argument is `VALIDATION`. The caller's own row is `VALIDATION` with detail `SELF`. It comes
      before `ADMIN_ROLE`: every admin who isn't a site coordinator holds the Admin role, so after it
      they would never see `SELF`.
-  3. The workspace advisory lock.
+  3. The workspace advisory lock, then the person's membership `for update` when step 13 will deactivate it
+     (their account invited or active, not a site coordinator's).
   4. A person who holds the Admin role this season, removed by a caller who isn't a site coordinator, is
      `FORBIDDEN` with message `ADMIN_ROLE` (052 rule 3), before the receipt, as Save does.
   5. The receipt is reserved, so a repeated action id returns the stored answer although its revision is
@@ -592,9 +593,17 @@ confirmed step.
   9. A site coordinator, removed by a caller who isn't one, is `FORBIDDEN`.
   10. Open work: `VT004` `OPEN_WORK` with the labels as JSON in the detail, from the whole `open_work`
       list. Unlike Save, a site coordinator who is the default follow-up person is not excused.
-- **Locks, in order:** the workspace advisory lock, the profile, the entry, the shifts, the account.
-  That is Save's order, and Save, Deactivate, Start next season, Save shift, Remove shift and Remove all
-  take the workspace lock first, so none of them can deadlock with another.
+- **Locks, in order:** the workspace advisory lock, the person's membership, the profile, the entry,
+  the shifts, the account. Save, Deactivate, Start next season, Save shift, Remove shift and Remove all
+  take the workspace lock first, so none of them can deadlock with another. The person's own writes
+  take no workspace lock: `vitally_save_my_profile` and `vitally_mark_upload_sent` (057) hold `for
+  share` on their membership (`require_membership`), then lock the profile (and the entry). Remove
+  deactivates that membership, so it locks it before the profile, in the same order: a write already
+  holding its membership finishes first, and a later one waits and is then refused. A site
+  coordinator's membership isn't deactivated, so it isn't locked. Known limit, shared with Deactivate
+  and Start next season: a call of the person's own that takes the workspace lock after their
+  membership (an Admin-role volunteer's admin RPC, an invited volunteer's site check) can still
+  deadlock with it.
 - **The account.** When it is `invited` or `active` and not a site coordinator's, the same transaction
   calls `deactivate_account` (never `cancel_invitation`, so adding the person back means Reactivate).
   With no account, or one already `deactivated`, only the entry is deleted, so a Remove racing a
