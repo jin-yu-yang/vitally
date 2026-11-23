@@ -537,7 +537,7 @@ export const RPC_SIGNATURES = Object.freeze([
     name: "vitally_remove_from_roster",
     signature: "vitally_remove_from_roster(uuid,uuid,bigint)",
     authorized: (f) => f.siteCoordinator,
-    receiptKeys: Object.freeze(["accountDeactivated", "actionId", "revision", "volunteerId"]),
+    receiptKeys: Object.freeze(["accountDeactivated", "actionId", "revision", "shiftsRemoved", "volunteerId"]),
     context: async (f) => {
       const key = `sig_rm_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
       const { personId } = await f.staff({ key, name: "Jules Arden", capabilities: ["prepare"] });
