@@ -94,8 +94,10 @@ test("checkInTags keep a fixed order", () => {
   assert.deepEqual(checkInTags({}), []);
 });
 
-test("CHECK_IN_REFUSALS has the reasons the check-in RPCs raise", () => {
+// ALREADY_CHECKED_IN and NOT_CHECKED_IN are not here: the strip re-reads on
+// them quietly and never says them (design D6).
+test("CHECK_IN_REFUSALS has the reasons the check-in RPCs raise that are said", () => {
   assert.deepEqual(Object.keys(CHECK_IN_REFUSALS).sort(), [
-    "ALREADY_CHECKED_IN", "DEACTIVATED", "IN_FUTURE", "NOT_CHECKED_IN", "NOT_ON_ROSTER", "OUT_BEFORE_IN", "OVERLAP",
+    "DEACTIVATED", "IN_FUTURE", "NOT_ON_ROSTER", "OUT_BEFORE_IN", "OVERLAP",
   ]);
 });

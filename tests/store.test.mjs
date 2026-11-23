@@ -1514,6 +1514,27 @@ test("a subscription watches only the tables its principal may read", async () =
     assert.ok(!SUBSCRIBED_TABLES.applicant.includes(staffTable), staffTable);
 });
 
+test("a check_ins change also names whose check-in it is, and nothing else", async () => {
+  const seen = [];
+  const client = fakeClient({ access: "staff" });
+  const stop = createStore(client).subscribe({ onChange: (change) => seen.push(change) });
+  await settle();
+  const [channel] = client.channels;
+  channel.bindings
+    .filter((binding) => binding.filter.table === "check_ins" && binding.filter.event === "INSERT")
+    .forEach((binding) =>
+      binding.handler({
+        eventType: "INSERT",
+        new: { id: "ci-1", person_id: "person-riley", checked_in_at: "2027-02-06T14:52:00Z" },
+        old: {},
+      }),
+    );
+  assert.deepEqual(seen, [
+    { table: "check_ins", eventType: "INSERT", id: "ci-1", caseId: null, personId: "person-riley" },
+  ]);
+  stop();
+});
+
 test("a change announces identifiers only", async () => {
   const seen = [];
   const client = fakeClient({ access: "applicant" });

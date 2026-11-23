@@ -1245,6 +1245,9 @@ export function createStore(client) {
           eventType: payload?.eventType ?? null,
           id,
           caseId: table === "cases" ? id : (row.case_id ?? null),
+          // Whose check-in moved, so a window re-reads its strip only for
+          // its own (design D9).
+          ...(table === "check_ins" ? { personId: row.person_id ?? null } : {}),
         });
       };
       const open = async () => {

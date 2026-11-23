@@ -53,6 +53,7 @@ import {
   updateGoneBody,
 } from "./update-views.mjs";
 import { renderSeasonSettings, changeSidnDialogBody, startSeasonDialogBody } from "./season-settings-views.mjs";
+import { timeLabel } from "./volunteer-check-in.mjs";
 import { scheduleScreen, shiftDrawer, shiftDrawerTitle, removeShiftDialogBody, removeShiftTitle } from "./schedule-views.mjs";
 
 // The shared shell: the frame every screen sits in, the dialogs, the two
@@ -143,10 +144,26 @@ export function footer(lang = "en") {
 // the toggle pinned to the top-left corner so it is always reachable. Nothing
 // passes a sidebar yet (Phase 0), and without one the body comes back exactly
 // as it went in, so no screen changes until it opts in.
-export function appShell({ sidebar = "", body = "", open = true } = {}) {
+// `strip` is the check-in strip (design D6): the first thing in the main area,
+// so collapsing the sidebar never hides it.
+export function appShell({ sidebar = "", body = "", open = true, strip = "" } = {}) {
   if (!sidebar) return body;
   const label = open ? "Hide the sidebar" : "Show the sidebar";
-  return `<div class="app-shell${open ? "" : " sidebar-closed"}"><button type="button" class="sidebar-toggle" data-action="toggle-sidebar" aria-controls="app-sidebar" aria-expanded="${open}" aria-label="${label}" title="${label}">${icon("sidebar")}</button><aside id="app-sidebar" class="app-sidebar" aria-label="Workspace"${open ? "" : " hidden"}>${sidebar}</aside><div class="app-main">${body}</div></div>`;
+  return `<div class="app-shell${open ? "" : " sidebar-closed"}"><button type="button" class="sidebar-toggle" data-action="toggle-sidebar" aria-controls="app-sidebar" aria-expanded="${open}" aria-label="${label}" title="${label}">${icon("sidebar")}</button><aside id="app-sidebar" class="app-sidebar" aria-label="Workspace"${open ? "" : " hidden"}>${sidebar}</aside><div class="app-main">${strip}${body}</div></div>`;
+}
+
+// The check-in strip (change add-volunteer-check-in, design D6): a cleared
+// staff window's, when the last `vitally_my_check_in` read said canCheckIn.
+// Never on the setup screen (an uncleared window) or for a client.
+export function checkInStrip(state) {
+  if (!isStaffWindow(state?.principal) || awaitingClearance(state)) return "";
+  const checkIn = state.checkIn;
+  if (checkIn?.canCheckIn !== true) return "";
+  const busy = checkIn.busy === true ? 'disabled aria-busy="true"' : "";
+  const open = checkIn.open;
+  return open
+    ? `<div class="check-in-strip"><span class="check-in-since">Checked in since ${esc(timeLabel(open.checkedInAt))}</span>${button("Check out", "check-out", "secondary", busy)}</div>`
+    : `<div class="check-in-strip">${button("Check in", "check-in", "primary", busy)}</div>`;
 }
 
 export function page(state, body) {
@@ -600,6 +617,7 @@ export function staffScreen(state) {
     sidebar: staffSidebar({ ...state, screen }, person, office, { volunteers, schedule: viewer }),
     body: main,
     open,
+    strip: checkInStrip(state),
   });
 }
 

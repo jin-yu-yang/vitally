@@ -2652,6 +2652,32 @@ textarea::placeholder {
   }
 }
 
+/* The check-in strip (change add-volunteer-check-in, design D6): a slim bar
+   at the top of the main area, above the page title. It wraps rather than
+   scrolling sideways at 390 px, and its button is a 44 px touch target. */
+.check-in-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 12px;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--vt-line);
+  border-radius: 10px;
+  background: var(--vt-primary-soft);
+}
+.check-in-since {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+.check-in-strip .btn {
+  min-height: 44px;
+}
+
 /* Sidebar peek (spec 2026-10-04 §8): a collapsed sidebar shown over the page
    while the mouse rests on its toggle or in it. It never pushes the page;
    app.mjs adds .sidebar-peek in place. */

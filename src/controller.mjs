@@ -41,6 +41,7 @@ import { volunteerProblem, profileProblem, withoutLostRoles, roleNeedsMessage, o
 import { emptyUpdateForm, toUpdateRequest, validateUpdate } from "./posted-updates.mjs";
 import { nowInput } from "./contact-log.mjs";
 import { seasonRefusalLines } from "./season-settings-views.mjs";
+import { CHECK_IN_REFUSALS } from "./volunteer-check-in.mjs";
 
 // The one place browser state lives. It owns what is loaded, what is being
 // edited, and which action envelope is in flight; it renders nothing and knows
@@ -106,6 +107,13 @@ const CLEARED_ONLY_SCREENS = Object.freeze(["my-profile"]);
 // are the only failures worth retrying with the same envelope; a refusal is
 // final and its expected revision is already stale.
 const UNKNOWN_OUTCOME = Object.freeze(["OFFLINE", "SERVER_ERROR"]);
+
+// The check-in strip's state (change add-volunteer-check-in, design D6):
+// `vitally_my_check_in`'s canCheckIn and open as last read, and whether a
+// Check in or Check out is out. Window-local, never persisted.
+const freshCheckIn = () => ({ loaded: false, canCheckIn: false, open: null, busy: false });
+// Another device already did it: the strip re-reads and says nothing.
+const QUIET_CHECK_IN_REASONS = Object.freeze(["ALREADY_CHECKED_IN", "NOT_CHECKED_IN"]);
 
 // Assistance is its own workflow: its own RPC, its own revision and its own
 // list, beside the tax case rather than inside it (Ruling R22). Its two actions
@@ -462,6 +470,8 @@ export function createController({
     // design D8): the `vitally_my_shifts` answer `{weekStart, weekEnd,
     // shifts}` as last read, or null until then. Not persisted.
     myShifts: null,
+    // The check-in strip (change add-volunteer-check-in, design D6).
+    checkIn: freshCheckIn(),
     // The caller's own workspace row, read only for a staff window: the
     // office's defaults.
     workspace: null,
@@ -1106,6 +1116,8 @@ export function createController({
         }
       // Its shifts this week too (design D8); that read never throws.
       if (state.screen === "my-profile") await readMyShifts();
+      // The check-in strip, on every screen (never throws).
+      await readMyCheckIn();
       // A wake, focus or reconnect re-reads the week too (it may have turned).
       try {
         await readWorkloadHours();
@@ -1286,7 +1298,13 @@ export function createController({
       state.screen === "office-volunteers" &&
       state.volunteerTab === "workload" &&
       (touchesWorkspace || change.table === "shifts");
+    // The caller's own check-in moved (another device, or an admin's
+    // correction): the strip re-reads. Another person's never does (D9).
+    const touchesCheckIn =
+      touchesWorkspace ||
+      (change.table === "check_ins" && Boolean(change.personId) && change.personId === state.principal?.personId);
     if (
+      !touchesCheckIn &&
       !touchesList &&
       !touchesOpen &&
       !touchesAssistance &&
@@ -1311,6 +1329,7 @@ export function createController({
       if (touchesUpdates && state.screen === "office-updates") await readPostedUpdates();
       if (touchesSchedule && state.screen === "schedule") await readScheduleDay();
       if (touchesProfile && state.screen === "my-profile") await readMyShifts();
+      if (touchesCheckIn) await readMyCheckIn();
       if (touchesSettings && state.screen === "office-settings") await readSeasonSettings();
       if (touchesHours)
         try {
@@ -1369,6 +1388,9 @@ export function createController({
         await readMyProfile();
         await readMyShifts();
       }
+      // The check-in strip: sign-in, restore, and a window that just became
+      // cleared all come through here (never throws).
+      await readMyCheckIn();
     } else {
       state.lists.assistance = "ready";
     }
@@ -2090,6 +2112,83 @@ export function createController({
     } catch {
       if (state.lists.myShifts !== "ready") state.lists = { ...state.lists, myShifts: "failed" };
     }
+  }
+
+  // ---- The check-in strip (change add-volunteer-check-in, design D6) ------
+  //
+  // `vitally_my_check_in`, read on sign-in and restore (loadData), on focus
+  // (refresh), on the caller's own `check_ins` change (handleChange), and when
+  // the window becomes cleared (loadWork). A cleared window's only. A failed
+  // read keeps what the strip showed; it never throws and raises no banner.
+  // A store without the call (an older double) reads nothing.
+  async function readMyCheckIn() {
+    if (!staffWindow() || awaitingClearance(state) || typeof store.myCheckIn !== "function") return;
+    const asked = state.principal.userId;
+    let answer;
+    try {
+      answer = await store.myCheckIn();
+    } catch {
+      return;
+    }
+    // Signed out, another user, or no longer cleared while it was out.
+    if (!staffWindow() || state.principal.userId !== asked || awaitingClearance(state)) return;
+    state.checkIn = {
+      ...state.checkIn,
+      loaded: true,
+      canCheckIn: answer?.canCheckIn === true,
+      open: answer?.open ?? null,
+    };
+    noteConnected();
+  }
+
+  // A Check in or Check out whose answer never arrived: the next press of the
+  // same button sends the same action id, so the server answers from its
+  // receipt instead of acting twice. `{kind, request}` or null.
+  let pendingCheckInWrite = null;
+
+  // Check in (`kind` "in") or Check out ("out"): sent at once, with no
+  // question asked. One action id per press; the button is busy until the
+  // answer, and a press while busy sends nothing. ALREADY_CHECKED_IN and
+  // NOT_CHECKED_IN mean another device did it: the strip re-reads, with no
+  // error. Any other refusal is said, and the strip re-reads too.
+  // Resolves to the answer, or null.
+  async function checkInWrite(kind) {
+    if (state.checkIn.busy || !staffWindow() || awaitingClearance(state) || state.checkIn.canCheckIn !== true) return null;
+    let request = pendingCheckInWrite?.kind === kind ? pendingCheckInWrite.request : null;
+    pendingCheckInWrite = null;
+    if (!request) request = { actionId: newActionId() };
+    const asked = state.principal.userId;
+    const same = () => staffWindow() && state.principal.userId === asked;
+    state.checkIn = { ...state.checkIn, busy: true };
+    state.error = null;
+    dropLocalRetry();
+    show();
+    let answer;
+    try {
+      answer = kind === "in" ? await store.checkIn(request) : await store.checkOut(request);
+    } catch (error) {
+      if (!same()) return null;
+      state.checkIn = { ...state.checkIn, busy: false };
+      const reason = error?.code === "VALIDATION" ? String(error?.cause?.details ?? error?.reason ?? "") : "";
+      if (!QUIET_CHECK_IN_REASONS.includes(reason)) {
+        if (UNKNOWN_OUTCOME.includes(error?.code)) pendingCheckInWrite = { kind, request };
+        const message = Object.hasOwn(CHECK_IN_REFUSALS, reason) ? CHECK_IN_REFUSALS[reason] : undefined;
+        noteFailure(error, message ? { message } : {});
+      }
+      await readMyCheckIn();
+      show();
+      return null;
+    }
+    if (!same()) return null;
+    noteConnected();
+    state.checkIn = {
+      ...state.checkIn,
+      busy: false,
+      loaded: true,
+      open: kind === "in" ? (answer?.open ?? null) : null,
+    };
+    show();
+    return answer ?? {};
   }
 
   // The six fields the save sends, and nothing else: strings trimmed, an
@@ -2863,6 +2962,9 @@ export function createController({
     state.dialogContext = null;
     // The Workload is case data: back to the Roster.
     state.volunteerTab = "roster";
+    // No strip in an uncleared window: the next clearance reads it afresh.
+    state.checkIn = freshCheckIn();
+    pendingCheckInWrite = null;
     endNotifications();
     if (!(ceilingAdmin(state.principal) && ADMIN_SETUP_SCREENS.includes(state.screen)) && !keepsSchedule())
       state.screen = "staff";
@@ -3184,6 +3286,8 @@ export function createController({
       myShifts: "loading",
     };
     dataLoaded = false;
+    state.checkIn = freshCheckIn();
+    pendingCheckInWrite = null;
     state.people = [];
     state.volunteers = [];
     state.earlierVolunteers = [];
@@ -5709,6 +5813,13 @@ export function createController({
     openShiftDrawer,
     editShiftDraft,
     saveShift,
+    // The check-in strip (change add-volunteer-check-in).
+    readMyCheckIn: async () => {
+      await readMyCheckIn();
+      show();
+    },
+    checkIn: () => checkInWrite("in"),
+    checkOut: () => checkInWrite("out"),
     saveShiftDrag,
     removeShift,
     loadMyProfile,

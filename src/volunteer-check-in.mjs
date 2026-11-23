@@ -2,9 +2,9 @@
 // and hours arithmetic. Pure functions; the views render what they return.
 // Times are New York wall times, whatever the viewer's time zone.
 
+// ALREADY_CHECKED_IN and NOT_CHECKED_IN are not said: another device already
+// did it, so the strip re-reads quietly (design D6).
 export const CHECK_IN_REFUSALS = Object.freeze({
-  ALREADY_CHECKED_IN: "You are already checked in.",
-  NOT_CHECKED_IN: "You are not checked in.",
   OUT_BEFORE_IN: "The check-out must be after the check-in.",
   IN_FUTURE: "A check-in can't be in the future.",
   OVERLAP: "That volunteer already has a check-in at that time.",

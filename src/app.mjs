@@ -2226,6 +2226,14 @@ if (!config) {
       case "save-shift":
         await saveShiftFromDrawer(by);
         break;
+      // The check-in strip (change add-volunteer-check-in): sent at once,
+      // nothing asked. Focus, restore and realtime re-read it in the controller.
+      case "check-in":
+        await controller.checkIn();
+        break;
+      case "check-out":
+        await controller.checkOut();
+        break;
       case "remove-shift":
         // Asked over the drawer; the drawer's opener stays the one to go back to.
         controller.openDialog("remove-shift", { shiftId: target.dataset.shiftId });

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { appShell, staffSidebar, staffScreen, noAccessScreen, showsNoAccess, page, clientHeader, languageSwitch, dialog, DRAWERS } from "../src/views.mjs";
+import { appShell, checkInStrip, staffSidebar, staffScreen, noAccessScreen, showsNoAccess, page, clientHeader, languageSwitch, dialog, DRAWERS } from "../src/views.mjs";
 import { icon, ICON_NAMES, describeFocus, focusSelectors } from "../src/ui.mjs";
 import { TEXT, SENTENCES } from "../src/client-text.mjs";
 import { toggleLabel } from "../src/sidebar-peek.mjs";
@@ -1578,4 +1578,87 @@ test("app.mjs: Enter in the Mark reviewed note is Send back, never the drawer's 
     app,
     /event\.key !== "Enter" \|\| !event\.target\.matches\?\.\('\[name="review-note"\]'\)\) return;\s*if \(event\.isComposing \|\| event\.keyCode === 229\) return;\s*event\.preventDefault\(\);[^]*?send && !send\.disabled\) send\.click\(\)/,
   );
+});
+
+// ---- The check-in strip (change add-volunteer-check-in, design D6) ----
+
+// 9:52 am in New York on Saturday, February 6, 2027.
+const NINE_FIFTY_TWO = "2027-02-06T14:52:00Z";
+const stripState = (overrides = {}) => ({
+  principal: {
+    access: "staff",
+    personId: "person-riley",
+    clearance: cleared({ capabilities: ["prepare"] }),
+  },
+  people: [{ id: "person-riley", name: "Riley Park", capabilities: ["prepare"] }],
+  screen: "staff",
+  cases: [],
+  lists: { cases: "ready", assistance: "ready" },
+  checkIn: { loaded: true, canCheckIn: true, open: null, busy: false },
+  ...overrides,
+});
+
+test("strip: cleared preparer sees Check in", () => {
+  const html = checkInStrip(stripState());
+  assert.match(html, /^<div class="check-in-strip">/);
+  assert.match(html, /data-action="check-in"[^>]*>Check in<\/button>/);
+  assert.doesNotMatch(html, /Checked in since|data-action="check-out"/);
+});
+
+test("strip: open shows since and Check out", () => {
+  const html = checkInStrip(
+    stripState({ checkIn: { loaded: true, canCheckIn: true, open: { checkInId: "ci-1", checkedInAt: NINE_FIFTY_TWO }, busy: false } }),
+  );
+  assert.match(html, /Checked in since 9:52 am/);
+  assert.match(html, /data-action="check-out"[^>]*>Check out<\/button>/);
+  assert.doesNotMatch(html, /data-action="check-in"/);
+});
+
+test("strip: a busy button is disabled and says it is busy", () => {
+  const html = checkInStrip(stripState({ checkIn: { loaded: true, canCheckIn: true, open: null, busy: true } }));
+  assert.match(html, /data-action="check-in"[^>]*disabled/);
+  assert.match(html, /data-action="check-in"[^>]*aria-busy="true"/);
+});
+
+test("strip: absent when not cleared, on setup, for clients, and when canCheckIn is false", () => {
+  const uncleared = stripState({
+    principal: { access: "staff", personId: "person-riley", clearance: { cleared: false, missing: [{ kind: "form13615" }], capabilities: [] } },
+  });
+  assert.equal(checkInStrip(uncleared), "");
+  // The setup screen draws no strip, even with an answer that says canCheckIn.
+  assert.doesNotMatch(staffScreen(uncleared), /check-in-strip/);
+  assert.equal(checkInStrip(stripState({ principal: { access: "applicant", personId: "person-riley" } })), "");
+  assert.equal(checkInStrip(stripState({ checkIn: { loaded: true, canCheckIn: false, open: null, busy: false } })), "");
+  // Never read yet: nothing.
+  assert.equal(checkInStrip(stripState({ checkIn: undefined })), "");
+  assert.equal(checkInStrip(null), "");
+});
+
+test("strip: is inside .app-main and outside the sidebar, and stays when the sidebar is collapsed", () => {
+  for (const sidebarOpen of [true, false]) {
+    const html = staffScreen(stripState({ sidebarOpen }));
+    const main = html.indexOf('<div class="app-main">');
+    const strip = html.indexOf('<div class="check-in-strip">');
+    assert.ok(main >= 0 && strip > main, `strip inside app-main (sidebarOpen ${sidebarOpen})`);
+    // First child of the main area.
+    assert.equal(strip, main + '<div class="app-main">'.length);
+    const aside = html.match(/<aside[\s\S]*?<\/aside>/)[0];
+    assert.doesNotMatch(aside, /check-in-strip/);
+  }
+});
+
+test("strip: appShell renders the strip first in .app-main and nothing without one", () => {
+  const html = appShell({ sidebar: "<nav></nav>", body: "<main></main>", strip: "<div class=\"check-in-strip\"></div>" });
+  assert.match(html, /<div class="app-main"><div class="check-in-strip"><\/div><main><\/main><\/div>/);
+  assert.match(appShell({ sidebar: "<nav></nav>", body: "<main></main>" }), /<div class="app-main"><main><\/main><\/div>/);
+});
+
+test("strip: the stylesheet wraps it and gives its button 44 px", () => {
+  const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
+  const rule = css.match(/\.check-in-strip\s*\{[^}]*\}/)?.[0] ?? "";
+  assert.match(rule, /display:\s*flex/);
+  assert.match(rule, /flex-wrap:\s*wrap/);
+  assert.match(rule, /gap:/);
+  assert.match(rule, /max-width:\s*100%/);
+  assert.match(css, /\.check-in-strip \.btn\s*\{[^}]*min-height:\s*44px/);
 });

@@ -12640,3 +12640,215 @@ test("an Edit of a current volunteer to an earlier volunteer's email does not ge
   assert.equal(store.writes.at(-1).volunteerId, "v-1");
   controller.stop();
 });
+
+// ---- The check-in strip (change add-volunteer-check-in, Task 5, design D6) ----
+
+// 9:52 am in New York on Saturday, February 6, 2027.
+const CHECKED_IN_AT = "2027-02-06T14:52:00Z";
+// A cleared Preparer's store with the three self calls. `store.checkInState`
+// is what `myCheckIn` answers; `failNextCheckIn` / `failNextCheckOut` make the
+// next write reject; `holdNextWrite` keeps the next write waiting until its
+// `release()` is called.
+const checkInStore = (overrides = {}) => {
+  const people = [{ id: "person-riley", name: "Riley Park", capabilities: ["prepare"] }];
+  const store = staffStore({ people, clearance: { ...PREPARER_CLEARED }, ...overrides });
+  store.checkInState = { today: "2027-02-06", canCheckIn: true, open: null };
+  store.failNextCheckIn = null;
+  store.failNextCheckOut = null;
+  store.holdNextWrite = false;
+  store.release = null;
+  const hold = async () => {
+    if (!store.holdNextWrite) return;
+    store.holdNextWrite = false;
+    await new Promise((resolve) => {
+      store.release = resolve;
+    });
+  };
+  store.myCheckIn = async () => {
+    store.calls.push("myCheckIn");
+    return structuredClone(store.checkInState);
+  };
+  store.checkIn = async (request) => {
+    store.calls.push("checkIn");
+    store.writes.push({ type: "checkIn", ...request });
+    await hold();
+    const error = store.failNextCheckIn;
+    store.failNextCheckIn = null;
+    if (error) throw error;
+    store.checkInState = { ...store.checkInState, open: { checkInId: "ci-1", checkedInAt: CHECKED_IN_AT } };
+    return { open: structuredClone(store.checkInState.open) };
+  };
+  store.checkOut = async (request) => {
+    store.calls.push("checkOut");
+    store.writes.push({ type: "checkOut", ...request });
+    await hold();
+    const error = store.failNextCheckOut;
+    store.failNextCheckOut = null;
+    if (error) throw error;
+    store.checkInState = { ...store.checkInState, open: null };
+    return { open: null };
+  };
+  return store;
+};
+const checkInReads = (store) => callCount(store, "myCheckIn");
+async function onStrip(overrides = {}, options = {}) {
+  const store = checkInStore(overrides);
+  let n = 0;
+  const built = build({ store, clock: SCHEDULE_NOW, newActionId: () => `action-${++n}`, ...options });
+  await built.controller.start();
+  return { store, ...built };
+}
+
+test("strip: sign-in reads it, and a cleared preparer sees Check in", async () => {
+  const { store, controller } = await onStrip();
+  assert.equal(checkInReads(store), 1);
+  const state = controller.getState();
+  assert.deepEqual(state.checkIn, { loaded: true, canCheckIn: true, open: null, busy: false });
+  assert.match(staffScreen(state), /data-action="check-in"[^>]*>Check in<\/button>/);
+  controller.stop();
+});
+
+test("strip: check in sends one action id and is busy until the answer", async () => {
+  const { store, controller } = await onStrip();
+  store.holdNextWrite = true;
+  const first = controller.checkIn();
+  await Promise.resolve();
+  assert.equal(controller.getState().checkIn.busy, true);
+  // A second press while busy sends nothing.
+  assert.equal(await controller.checkIn(), null);
+  assert.equal(await controller.checkOut(), null);
+  assert.equal(callCount(store, "checkIn"), 1);
+  assert.equal(callCount(store, "checkOut"), 0);
+  store.release();
+  await first;
+  const state = controller.getState();
+  assert.equal(state.checkIn.busy, false);
+  assert.deepEqual(state.checkIn.open, { checkInId: "ci-1", checkedInAt: CHECKED_IN_AT });
+  assert.deepEqual(store.writes.filter((w) => w.type === "checkIn"), [{ type: "checkIn", actionId: "action-1" }]);
+  assert.match(staffScreen(state), /Checked in since 9:52 am/);
+  assert.match(staffScreen(state), /data-action="check-out"/);
+  controller.stop();
+});
+
+test("strip: check out asks nothing and shows Check in again", async () => {
+  const { store, controller } = await onStrip();
+  store.checkInState = { ...store.checkInState, open: { checkInId: "ci-1", checkedInAt: CHECKED_IN_AT } };
+  await controller.readMyCheckIn();
+  await controller.checkOut();
+  const state = controller.getState();
+  assert.equal(state.dialog ?? null, null);
+  assert.equal(state.checkIn.open, null);
+  assert.equal(state.checkIn.busy, false);
+  assert.equal(store.writes.filter((w) => w.type === "checkOut").length, 1);
+  assert.match(staffScreen(state), /data-action="check-in"/);
+  controller.stop();
+});
+
+test("strip: ALREADY_CHECKED_IN re-reads quietly", async () => {
+  const { store, controller } = await onStrip();
+  const reads = checkInReads(store);
+  // Another device checked in first.
+  store.checkInState = { ...store.checkInState, open: { checkInId: "ci-9", checkedInAt: CHECKED_IN_AT } };
+  store.failNextCheckIn = domainError("VALIDATION", "ALREADY_CHECKED_IN");
+  await controller.checkIn();
+  const state = controller.getState();
+  assert.equal(checkInReads(store), reads + 1);
+  assert.equal(state.error, null);
+  assert.equal(state.checkIn.busy, false);
+  assert.deepEqual(state.checkIn.open, { checkInId: "ci-9", checkedInAt: CHECKED_IN_AT });
+  controller.stop();
+});
+
+test("strip: NOT_CHECKED_IN on check out re-reads quietly", async () => {
+  const { store, controller } = await onStrip();
+  store.checkInState = { ...store.checkInState, open: { checkInId: "ci-1", checkedInAt: CHECKED_IN_AT } };
+  await controller.readMyCheckIn();
+  const reads = checkInReads(store);
+  // Another device checked out first.
+  store.checkInState = { ...store.checkInState, open: null };
+  store.failNextCheckOut = domainError("VALIDATION", "NOT_CHECKED_IN");
+  await controller.checkOut();
+  const state = controller.getState();
+  assert.equal(checkInReads(store), reads + 1);
+  assert.equal(state.error, null);
+  assert.equal(state.checkIn.open, null);
+  controller.stop();
+});
+
+test("strip: another refusal is said, the strip re-reads, and a retry keeps the action id", async () => {
+  const { store, controller } = await onStrip();
+  const reads = checkInReads(store);
+  store.failNextCheckIn = domainError("OFFLINE");
+  await controller.checkIn();
+  const state = controller.getState();
+  assert.equal(state.error?.code, "OFFLINE");
+  assert.equal(state.checkIn.busy, false);
+  assert.equal(checkInReads(store), reads + 1);
+  // The retry of an unknown outcome sends the same action id again.
+  await controller.checkIn();
+  const ids = store.writes.filter((w) => w.type === "checkIn").map((w) => w.actionId);
+  assert.deepEqual(ids, ["action-1", "action-1"]);
+  controller.stop();
+});
+
+test("strip: own check_ins change re-reads, another person's does not", async () => {
+  const { store, controller } = await onStrip();
+  const reads = checkInReads(store);
+  store.checkInState = { ...store.checkInState, open: { checkInId: "ci-2", checkedInAt: CHECKED_IN_AT } };
+  await store.handlers.onChange({ table: "check_ins", eventType: "INSERT", id: "ci-2", personId: "person-riley" });
+  assert.equal(checkInReads(store), reads + 1);
+  assert.match(staffScreen(controller.getState()), /Checked in since 9:52 am/);
+  await store.handlers.onChange({ table: "check_ins", eventType: "INSERT", id: "ci-3", personId: "person-sam" });
+  assert.equal(checkInReads(store), reads + 1);
+  controller.stop();
+});
+
+test("strip: focus re-reads", async () => {
+  const { store, controller, events } = await onStrip();
+  const reads = checkInReads(store);
+  await events.emit("focus");
+  assert.equal(checkInReads(store), reads + 1);
+  controller.stop();
+});
+
+test("strip: a clearance change re-reads", async () => {
+  const { store, controller } = await onStrip({ clearance: { ...UNCLEARED_VOLUNTEER } });
+  // Uncleared: no strip read and no strip.
+  assert.equal(checkInReads(store), 0);
+  assert.doesNotMatch(staffScreen(controller.getState()), /check-in-strip/);
+  store.nextClearance = { ...PREPARER_CLEARED };
+  await controller.checkClearance();
+  assert.equal(checkInReads(store), 1);
+  assert.match(staffScreen(controller.getState()), /data-action="check-in"/);
+  // Losing it again drops the strip.
+  store.nextClearance = { ...UNCLEARED_VOLUNTEER };
+  await controller.checkClearance();
+  assert.equal(controller.getState().checkIn.canCheckIn, false);
+  assert.doesNotMatch(staffScreen(controller.getState()), /check-in-strip/);
+  controller.stop();
+});
+
+test("strip: restore reads it", async () => {
+  const sessionStorage = fakeSession();
+  const first = await onStrip({}, { sessionStorage });
+  first.controller.stop();
+  const second = await onStrip({}, { sessionStorage });
+  assert.equal(checkInReads(second.store), 1);
+  assert.equal(second.controller.getState().checkIn.canCheckIn, true);
+  second.controller.stop();
+});
+
+test("strip: canCheckIn false draws no strip, and a failed read keeps what it showed", async () => {
+  const { store, controller } = await onStrip();
+  store.myCheckIn = async () => {
+    store.calls.push("myCheckIn");
+    throw domainError("OFFLINE");
+  };
+  await controller.readMyCheckIn();
+  assert.equal(controller.getState().checkIn.canCheckIn, true);
+  assert.equal(controller.getState().error, null);
+  store.myCheckIn = async () => ({ today: "2027-02-06", canCheckIn: false, open: null });
+  await controller.readMyCheckIn();
+  assert.doesNotMatch(staffScreen(controller.getState()), /check-in-strip/);
+  controller.stop();
+});
