@@ -1,15 +1,15 @@
 ## 1. Migration: storage, span and visibility
 
-- [ ] 1.1 Confirm the migration number against `origin/main` and the open PRs, expected `059_volunteer_check_in.sql`. Record it in design.md if it differs (Open Questions).
-- [ ] 1.2 Add `public.check_ins` (design D1):
+- [x] 1.1 Confirm the migration number against `origin/main` and the open PRs, expected `059_volunteer_check_in.sql`. Record it in design.md if it differs (Open Questions).
+- [x] 1.2 Add `public.check_ins` (design D1):
   - columns: id, workspace, season, person, `check_in_date`, `checked_in_at`, `checked_out_at`, revision, created and updated by and at, `corrected_by_person_id`, `removed_at`;
   - checks: out after in, both on `check_in_date` in New York, and out at the latest the following midnight;
   - a foreign key to `people(workspace_id,id)`;
   - an index on `(workspace_id, season, check_in_date)`.
-- [ ] 1.3 Add `vitally_private.check_in_span(p_check_in, p_now)`, returning `state`, `ends_at` and `minutes` (D2). The day's end is the latest live shift end that day, else the site close, else none.
-- [ ] 1.4 Add a SELECT policy and grant on `check_ins`: workspace admins see every row, a person sees their own, and there is no write grant (D5).
-- [ ] 1.5 Add `check_ins` to `supabase_realtime` with 049's DO block (D9).
-- [ ] 1.6 Add `tests/database-check-in.mjs`, part 1:
+- [x] 1.3 Add `vitally_private.check_in_span(p_check_in, p_now)`, returning `state`, `ends_at` and `minutes` (D2). The day's end is the latest live shift end that day, else the site close, else none.
+- [x] 1.4 Add a SELECT policy and grant on `check_ins`: workspace admins see every row, a person sees their own, and there is no write grant (D5).
+- [x] 1.5 Add `check_ins` to `supabase_realtime` with 049's DO block (D9).
+- [x] 1.6 Add `tests/database-check-in.mjs`, part 1:
   - the table checks;
   - the RLS for an admin, the person, another preparer and a client;
   - no direct writes;
