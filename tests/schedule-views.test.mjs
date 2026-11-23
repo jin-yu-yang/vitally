@@ -98,6 +98,8 @@ test("schedule: an admin day has the gap header, one column per open hour, tags,
   assert.deepEqual(shifts, ["s-ari", "s-hana", "s-kai", "s-lia", "s-rowan", "s-wen"]);
   assert.match(html, /aria-label="Rowan Diaz, Preparer, 10 am to 4 pm"/);
   assert.match(html, /aria-label="Kai Moss, Intaker, 12 pm to 2 pm, Not cleared, No sign-in"/);
+  // The full label is also the title, so a tag clipped in a narrow shift still shows on hover.
+  assert.match(html, /aria-label="Kai Moss, Intaker, 12 pm to 2 pm, Not cleared, No sign-in" title="Kai Moss, Intaker, 12 pm to 2 pm, Not cleared, No sign-in"/);
   // Rows carry the volunteer, cells the hour, and a shift spans its hours.
   assert.match(html, /class="schedule-row" data-volunteer-id="p-hana"/);
   assert.match(html, /data-shift-id="s-hana"[^>]*style="grid-column: 2 \/ span 4"/);
