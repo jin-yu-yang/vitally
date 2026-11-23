@@ -99,7 +99,7 @@ A save SHALL be refused with `VALIDATION` and one of these reasons:
 - `DEACTIVATED`: the person's account is deactivated;
 - `OUT_BEFORE_IN`: the check-out is not after the check-in;
 - `IN_FUTURE`: the check-in, or a given check-out, is later than now;
-- `OVERLAP`: its span overlaps another live check-in of the person that day. Each span runs from its check-in to its end, as counted above.
+- `OVERLAP`: its span overlaps another live check-in of the person that day. Each span runs from its check-in to its end, as counted above, except that for this check a check-in dated today with no check-out runs on with no end, the one being saved included. Spans MAY meet.
 
 A check-in outside site hours, on a closed day, with no shift, or for a person who is not cleared or has no sign-in SHALL be allowed.
 
@@ -126,6 +126,14 @@ A check-in outside site hours, on a closed day, with no shift, or for a person w
 #### Scenario: Overlap
 - **WHEN** a volunteer has a check-in from 10:00 to 12:00 on a date, and an admin adds one from 11:30 to 13:00 and then one from 12:00 to 13:00 for them on that date
 - **THEN** the first is refused with `VALIDATION` `OVERLAP`, and the second is saved
+
+#### Scenario: Adding beside an open check-in
+- **WHEN** at 3:00 pm a volunteer has been checked in since 10:00 am today with a shift that ended at 1 pm, and an admin adds a check-in for them today from 2:00 pm to 2:30 pm
+- **THEN** it is refused with `VALIDATION` `OVERLAP`, and the volunteer still has one open check-in
+
+#### Scenario: Reopening before a later check-in
+- **WHEN** a volunteer has check-ins today from 10:00 to 12:00 and from 1:00 pm to 2:00 pm, and an admin clears the check-out of the 10:00 one
+- **THEN** it is refused with `VALIDATION` `OVERLAP`, and nothing changes
 
 #### Scenario: A preparer
 - **WHEN** a cleared staff member whose only role is Preparer calls `vitally_save_check_in`

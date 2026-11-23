@@ -189,8 +189,13 @@ a4ec880):
     - `IN_FUTURE`: the check-in, or the check-out when given, is after
       `now()`;
     - `OVERLAP`: the span overlaps another live check-in of the person that
-      day. Each check-in's span is from `checked_in_at` to its D2 `ends_at`.
-      Spans may meet.
+      day. Each check-in's span is from `checked_in_at` to its D2 `ends_at`,
+      except that for this check a check-in dated today with no check-out
+      runs on with no end, the one being saved included. Spans may meet.
+      Why: an open row's capped end is only an estimate. A later row added
+      after it would take the volunteer's next check-out, and the two would
+      then overlap and double-count (final-review finding I1, decided by the
+      user on 2026-11-23). The counted minutes (D2) are unchanged.
   - Times outside site hours, on a closed day, or with no shift are
     allowed.
   - **Who an admin can add for:** the Add shift candidates, including

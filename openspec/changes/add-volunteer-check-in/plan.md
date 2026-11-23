@@ -408,6 +408,26 @@ Read design.md and the specs before each task.
   Expected: all PASS.
 - [ ] **Step 5: Commit** `git commit -m "Check-ins: browser walk and docs (#257)"`, and tick `tasks.md` 6.1–6.3.
 
+### Task 10: Final-review fixes (added 2026-11-23)
+
+**Files:**
+- Modify: `supabase/migrations/059_volunteer_check_in.sql`. Change the OVERLAP check in `vitally_save_check_in` and the header comments. 059 is applied nowhere shared, so edit it in place, then reset it on the local stack: drop its objects and delete its `vitally_private.schema_migrations` row, then run `npm run db:migrate:test`. The stack's stored 059 digest is already stale (a CRLF copy), so this reset also clears that.
+- Modify: `tests/database-check-in.mjs`.
+- Modify: `src/schedule-views.mjs`, the Checked out options; `src/controller.mjs`, the `state.weekHours` comment; `docs/developer/frontend.md`, the 24:00 line.
+- Test: `tests/schedule-views.test.mjs`.
+
+**Interfaces:** none change. The OVERLAP reason and shape are as before.
+
+- [ ] **Step 1: Write the failing database tests.**
+  - `save: adding beside an open check-in`: today, open since 10:00 with a shift ending 13:00, and `now()` after 14:30. Add 14:00–14:30. Expect `OVERLAP`, and one open row remains. Derive the times from `now()` so the test holds at any hour; if it is too early in the day for the layout, shift the times earlier.
+  - `save: reopening before a later check-in`: today has 10:00–12:00 and 13:00–14:00 (both past). Clear the first one's out. Expect `OVERLAP`, and the row is unchanged.
+  - Keep `save: overlap uses the derived end` (a missed row from an earlier date) passing unchanged.
+- [ ] **Step 2: Run them and see them fail:** `node --env-file=.env.test --test tests/database-check-in.mjs`.
+- [ ] **Step 3: Implement it.** In the OVERLAP query, the other rows' end, and the saved row's own end, is `'infinity'` when `check_in_date` is the New York today and `checked_out_at` is null. Otherwise it stays `check_in_span(...).ends_at`. Fix the header comments' design refs.
+- [ ] **Step 4: Write a failing view test:** the Checked out select has exactly one option labelled "12:00 am (midnight)", with value `24:00`, and no `00:00` option. Then implement it, and correct the `frontend.md` line and the controller comment.
+- [ ] **Step 5: Run** `npm test` and `npm run test:database`, ignoring only the known `database-accounts-function.mjs` edge-runtime baseline. Expected: PASS.
+- [ ] **Step 6: Commit** `git commit -m "Check-ins: an open check-in today blocks overlapping corrections; review minors (#257)"`, and tick `tasks.md` 7.1–7.2.
+
 ---
 
 **Task to tasks.md map:**
@@ -423,5 +443,6 @@ Read design.md and the specs before each task.
 | 7 | 4.5 and the Workload half of 4.6 |
 | 8 | 5.1 |
 | 9 | 6.1–6.3 |
+| 10 | 7.1–7.2 (then re-run 6.3) |
 
 Tick each tasks.md box when its plan task is committed.

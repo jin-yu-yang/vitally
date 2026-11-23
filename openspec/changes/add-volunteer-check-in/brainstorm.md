@@ -187,3 +187,6 @@ Capabilities:
   - `test:auth-browser`, because sign-in is unchanged;
   - `build:hant --check`, because staff screens are English only. CI runs
     it anyway.
+
+## Update 2026-11-23: overlap with an open check-in
+The final review found that an admin could add a check-in after a volunteer's still-open one today, because the open row was measured only to its day's end. The volunteer's next check-out then closed the wrong row, and the two overlapped. **Decided by the user:** for the OVERLAP check, an open check-in dated today runs on until it is checked out. The counted minutes are unchanged.
