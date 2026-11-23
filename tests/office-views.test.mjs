@@ -1514,3 +1514,11 @@ test("the admin queue is unchanged", () => {
   assert.match(html, /Close unsigned cases/);
   assert.match(html, /Nothing is waiting on the office right now|data-kind="intake"/);
 });
+
+test("an Intaker's documents row opens the case, and the admin keeps Put on hold", () => {
+  const cases = [waiting("w1", null)];
+  const intaker = rowOf(page(cases, [], INTAKER), "w1");
+  assert.match(intaker, /data-action="open-case" data-case-id="w1">[^]*? Open<\/button>/);
+  assert.doesNotMatch(intaker, /Needs office administrator access\./);
+  assert.match(rowOf(page(cases, [], sam), "w1"), /Put on hold…/);
+});

@@ -316,10 +316,14 @@ function rowAction(row, person, ui) {
     // List rows: each button opens the case in place, then its confirmation.
     const rights = adminEligibility({ caseRecord: record }, person);
     const attrs = `data-case-id="${id}" ${busy}`;
-    if (kind === "documents")
-      return rights.putOnHold.allowed
-        ? button(`${icon("clock")} Put on hold…`, "open-put-on-hold", "primary", attrs)
-        : explain(rights.putOnHold);
+    if (kind === "documents") {
+      if (rights.putOnHold.allowed)
+        return button(`${icon("clock")} Put on hold…`, "open-put-on-hold", "primary", attrs);
+      // Someone who receives documents records the receipt on the office case page.
+      if (Array.isArray(person?.capabilities) && person.capabilities.includes("receive_documents"))
+        return button(`${icon("arrow")} Open`, "open-case", "primary", `data-case-id="${id}"`);
+      return explain(rights.putOnHold);
+    }
     return `${
       rights.resumeFromHold.allowed
         ? button(`${icon("phone")} Got in touch…`, "open-resume-from-hold", "primary", attrs)
