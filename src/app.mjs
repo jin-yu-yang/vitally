@@ -3174,6 +3174,8 @@ if (!config) {
       if (field.closest("#start-season-form")) syncStartSeason();
       // The site hours card's draft keeps the revision it began at (ruling R13).
       if (field.closest("#site-hours-form")) controller.beginSiteHoursEdit();
+      // So does the links card's (#263).
+      if (field.closest("#season-settings-form")) controller.beginSettingsLinksEdit();
     } else if (field.name === "volunteerSearch") {
       // The Roster filters as it is typed; the redraw replaces the box, so
       // the keyboard and the caret go back into it. Mid-composition the
