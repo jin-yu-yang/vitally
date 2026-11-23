@@ -51,6 +51,7 @@ const STAFF_TABLES = Object.freeze([
   "posted_updates",
   "shifts",
   "schedule_settings",
+  "check_ins",
 ]);
 export const SUBSCRIBED_TABLES = Object.freeze({
   applicant: CLIENT_TABLES,
@@ -1023,6 +1024,40 @@ export function createStore(client) {
     // The caller's own live shifts this week, for My profile (migration 058).
     async myShifts() {
       return await call("vitally_my_shifts");
+    },
+
+    // Volunteer check-in (migration 059). The RPCs enforce who may call them.
+    async myCheckIn() {
+      return await call("vitally_my_check_in");
+    },
+
+    async checkIn(request) {
+      return await call("vitally_check_in", { p_action_id: actionId(request) });
+    },
+
+    async checkOut(request) {
+      return await call("vitally_check_out", { p_action_id: actionId(request) });
+    },
+
+    async saveCheckIn(request) {
+      return await call("vitally_save_check_in", {
+        p_action_id: actionId(request),
+        p_check_in_id: request.checkInId ?? null,
+        p_expected_revision: request.revision ?? null,
+        p_check_in: request.checkIn,
+      });
+    },
+
+    async removeCheckIn(request) {
+      return await call("vitally_remove_check_in", {
+        p_action_id: actionId(request),
+        p_check_in_id: request.checkInId,
+        p_expected_revision: request.revision,
+      });
+    },
+
+    async hoursThisWeek() {
+      return await call("vitally_hours_this_week");
     },
 
     async saveScheduleSettings(request) {

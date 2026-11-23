@@ -1507,6 +1507,7 @@ test("a subscription watches only the tables its principal may read", async () =
     "posted_updates",
     "shifts",
     "schedule_settings",
+    "check_ins",
   ]);
   // The applicant's channel never names a staff-only table.
   for (const staffTable of STAFF_ONLY_TABLES)
@@ -2301,6 +2302,39 @@ test("myShifts calls vitally_my_shifts with no arguments, and the duplicate prof
   assert.equal("saveMyUsualDays" in store, false);
   const refused = fakeClient({ rpc: async () => ({ data: null, error: { code: "VT001" } }) });
   await assert.rejects(() => createStore(refused).myShifts(), { code: "FORBIDDEN" });
+});
+
+test("the staff tables include check_ins", () => {
+  assert.ok(SUBSCRIBED_TABLES.staff.includes("check_ins"));
+});
+
+test("the check-in wrappers call their RPCs with the right arguments", async () => {
+  const client = fakeClient({ access: "staff", rpc: () => ({ data: { ok: 1 }, error: null }) });
+  const store = createStore(client);
+  await store.myCheckIn();
+  assert.deepEqual(client.rpcCalls.at(-1), { name: "vitally_my_check_in", args: undefined });
+  await store.checkIn({ actionId: "a1" });
+  assert.deepEqual(client.rpcCalls.at(-1), { name: "vitally_check_in", args: { p_action_id: "a1" } });
+  await store.checkOut({ actionId: "a2" });
+  assert.deepEqual(client.rpcCalls.at(-1), { name: "vitally_check_out", args: { p_action_id: "a2" } });
+  const checkIn = { volunteerId: "v1", date: "2027-02-06", checkedIn: "09:52", checkedOut: null };
+  await store.saveCheckIn({ actionId: "a3", checkInId: "c1", revision: 2, checkIn });
+  assert.deepEqual(client.rpcCalls.at(-1), {
+    name: "vitally_save_check_in",
+    args: { p_action_id: "a3", p_check_in_id: "c1", p_expected_revision: 2, p_check_in: checkIn },
+  });
+  await store.saveCheckIn({ actionId: "a4", checkIn });
+  assert.equal(client.rpcCalls.at(-1).args.p_check_in_id, null);
+  assert.equal(client.rpcCalls.at(-1).args.p_expected_revision, null);
+  await store.removeCheckIn({ actionId: "a5", checkInId: "c1", revision: 3 });
+  assert.deepEqual(client.rpcCalls.at(-1), {
+    name: "vitally_remove_check_in",
+    args: { p_action_id: "a5", p_check_in_id: "c1", p_expected_revision: 3 },
+  });
+  await store.hoursThisWeek();
+  assert.deepEqual(client.rpcCalls.at(-1), { name: "vitally_hours_this_week", args: undefined });
+  const refused = fakeClient({ rpc: async () => ({ data: null, error: { code: "VT001" } }) });
+  await assert.rejects(() => createStore(refused).checkIn({ actionId: "x" }), { code: "FORBIDDEN" });
 });
 
 test("listCases attaches sorted labels from active links only", async () => {
