@@ -5,7 +5,7 @@ import {
   ROLES_CHANGED_TEXT,
   rolesChangedLine,
   DIALOG_CAPABILITY,
-  CEILING_DIALOGS,
+  WORKSPACE_ADMIN_DIALOGS,
   NO_CAPABILITY_DIALOGS,
   ownCapabilities,
   dialogLocked,
@@ -55,15 +55,15 @@ test("every staff dialog is classified", () => {
   assert.ok(keys.size > 20);
   const capability = Object.keys(DIALOG_CAPABILITY);
   for (const key of keys) {
-    const hits = [capability.includes(key), CEILING_DIALOGS.includes(key), NO_CAPABILITY_DIALOGS.includes(key)].filter(Boolean);
+    const hits = [capability.includes(key), WORKSPACE_ADMIN_DIALOGS.includes(key), NO_CAPABILITY_DIALOGS.includes(key)].filter(Boolean);
     assert.equal(hits.length, 1, `${key} is in ${hits.length} categories`);
   }
-  const all = [...capability, ...CEILING_DIALOGS, ...NO_CAPABILITY_DIALOGS];
+  const all = [...capability, ...WORKSPACE_ADMIN_DIALOGS, ...NO_CAPABILITY_DIALOGS];
   assert.equal(new Set(all).size, all.length, "the categories overlap");
 });
 
-test("Change the SIDN is a ceiling dialog: never replaced when capabilities change", () => {
-  assert.ok(CEILING_DIALOGS.includes("change-sidn"));
+test("Change the SIDN is a workspace admin dialog: never replaced when capabilities change", () => {
+  assert.ok(WORKSPACE_ADMIN_DIALOGS.includes("change-sidn"));
   assert.equal(Object.hasOwn(DIALOG_CAPABILITY, "change-sidn"), false);
   assert.equal(dialogLocked(stateWith([], { dialog: "change-sidn" })), false);
   assert.equal(dialogLocked(stateWith(["prepare"], { dialog: "change-sidn" })), false);
