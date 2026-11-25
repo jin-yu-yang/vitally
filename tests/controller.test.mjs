@@ -10560,6 +10560,46 @@ test("season settings: CONFLICT re-reads and asks to check and save again", asyn
   controller.stop();
 });
 
+test("season settings: a links edit begun at revision N saves at N after a focus re-read moved the page to N+1, and the CONFLICT re-reads", async () => {
+  const { store, controller, events } = await onSettingsScreen();
+  controller.beginSettingsLinksEdit();
+  // Another coordinator saved in another window; this one regains focus and re-reads.
+  store.settings = { ...store.settings, clientDocumentsUrl: "https://example.org/other", revision: 4 };
+  await events.emit("focus");
+  assert.equal(controller.getState().seasonSettings.revision, 4);
+  store.failNextSettings = settingsRefusal("CONFLICT");
+  const reads = settingsReads(store);
+  assert.equal(await controller.saveSeasonSettings({ certificateUploadUrl: "", clientDocumentsUrl: "" }), null);
+  assert.equal(store.writes.at(-1).expectedRevision, 3);
+  assert.equal(settingsReads(store), reads + 1);
+  assert.equal(controller.getState().seasonSettingsUi.notice?.place, "links");
+  // The CONFLICT cleared the base: the next edit starts at the revision on screen.
+  controller.beginSettingsLinksEdit();
+  assert.equal(await controller.saveSeasonSettings({ certificateUploadUrl: "", clientDocumentsUrl: "" }), "Season settings saved");
+  assert.equal(store.writes.at(-1).expectedRevision, 4);
+  controller.stop();
+});
+
+test("season settings: the links base clears after a save and on leaving the page", async () => {
+  const { store, controller } = await onSettingsScreen();
+  controller.beginSettingsLinksEdit();
+  await controller.saveSeasonSettings({ certificateUploadUrl: "", clientDocumentsUrl: "" });
+  assert.equal(store.writes.at(-1).expectedRevision, 3);
+  // Saved: the next edit starts at the revision now read.
+  controller.beginSettingsLinksEdit();
+  await controller.saveSeasonSettings({ certificateUploadUrl: "", clientDocumentsUrl: "" });
+  assert.equal(store.writes.at(-1).expectedRevision, 4);
+  // An edit left behind on another screen is forgotten.
+  controller.beginSettingsLinksEdit();
+  store.settings = { ...store.settings, revision: 9 };
+  controller.navigate("staff");
+  controller.navigate("office-settings");
+  await controller.loadSeasonSettings();
+  await controller.saveSeasonSettings({ certificateUploadUrl: "", clientDocumentsUrl: "" });
+  assert.equal(store.writes.at(-1).expectedRevision, 9);
+  controller.stop();
+});
+
 test("season settings: Change the SIDN sends the number, re-reads and says SIDN updated", async () => {
   const { store, controller } = await onSettingsScreen();
   controller.openDialog("change-sidn");
