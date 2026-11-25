@@ -1,7 +1,7 @@
 # staff-workspaces Specification
 
 ## Purpose
-TBD - created by archiving change add-workspace-switch. Update Purpose after archive.
+Which side a cleared staff member works on: the office side (Follow-ups, All cases, Add a case) or the Cases side (the Work board and its pool), and the Office / Cases switch for someone with both. It covers how effective capabilities decide the sides, the switch and the side remembered in this browser, where a press of the switch lands, which screens each side holds and which show on both, links into a case, and the Intaker's Follow-ups. The side is a view choice: the database checks every action, and the side grants nothing.
 
 ## Requirements
 
