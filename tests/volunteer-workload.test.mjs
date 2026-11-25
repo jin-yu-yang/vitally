@@ -69,7 +69,7 @@ test("ROLE_CAPABILITIES matches the clearance spec and is frozen", () => {
   assert.equal(STALLED_DAYS, 5);
 });
 
-test("effective capabilities are the roles' union within the ceiling", () => {
+test("effective capabilities are the roles' union intersected with recorded capabilities", () => {
   const caps = effectiveCapabilities(
     volunteer("v1", "Tess Rowan", ["reviewer", "admin"]),
     person("v1", "Tess Rowan", ["review", "admin"]),
@@ -101,7 +101,7 @@ test("An admin who also reviews", () => {
   assert.equal(rows.length, 1);
 });
 
-test("A ceiling wider than the roles", () => {
+test("Recorded capabilities wider than the roles", () => {
   const volunteers = [volunteer("g", "Gil Hart", ["greeter"])];
   const rows = workloadRows({
     volunteers,

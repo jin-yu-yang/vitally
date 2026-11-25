@@ -94,7 +94,7 @@ test("an uncleared staff member left on a case or an office screen still sees th
   }
 });
 
-test("an uncleared ceiling admin gets the Volunteers link and the way back to setup, and the Roster opens", () => {
+test("an uncleared workspace admin gets the Volunteers link and the way back to setup, and the Roster opens", () => {
   const setup = staffScreen(staffState({ isAdmin: true }));
   assert.match(setup, /Finish your setup for this season/);
   assert.match(setup, /data-action="open-volunteers"/);
@@ -151,7 +151,7 @@ test("a staff window with siteCheck shows the site check instead of the setup sc
   assert.match(html, /<h1>Confirm your site<\/h1>/);
   assert.doesNotMatch(html, /Finish your setup for this season/);
   assert.match(html, /data-action="sign-out"/);
-  // A ceiling admin left on the Roster sees the site check too.
+  // A workspace admin left on the Roster sees the site check too.
   const admin = staffScreen(staffState({ siteCheck: true, isAdmin: true }, { screen: "office-volunteers" }));
   assert.match(admin, /Confirm your site/);
   assert.doesNotMatch(admin, /<h1>Volunteers<\/h1>/);
