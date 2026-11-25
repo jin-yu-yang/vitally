@@ -1,4 +1,4 @@
-import { awaitingClearance, ceilingAdmin, scheduleViewer, withOwnCapabilities } from "./clearance.mjs";
+import { awaitingClearance, workspaceAdmin, scheduleViewer, withOwnCapabilities } from "./clearance.mjs";
 import { nyToday, addDays, weekBounds, SHIFT_REFUSALS, WEEKDAYS } from "./volunteer-schedule.mjs";
 import {
   CASE_ACTIONS,
@@ -98,7 +98,7 @@ const SCHEDULE_SCREENS = Object.freeze(["schedule"]);
 // add-volunteer-clearance, add-posted-updates and add-season-settings).
 const ADMIN_SETUP_SCREENS = Object.freeze(["office-volunteers", "office-updates", "office-settings"]);
 // The screens only a workspace admin may be on.
-const CEILING_ONLY_SCREENS = Object.freeze(["office-updates", "office-settings"]);
+const WORKSPACE_ADMIN_ONLY_SCREENS = Object.freeze(["office-updates", "office-settings"]);
 // The screens only a cleared window may be on.
 const CLEARED_ONLY_SCREENS = Object.freeze(["my-profile"]);
 
@@ -673,7 +673,7 @@ export function createController({
   // while cleared.
   const screenAllowed = (screen) =>
     screens().includes(screen) &&
-    (!CEILING_ONLY_SCREENS.includes(screen) || ceilingAdmin(state.principal)) &&
+    (!WORKSPACE_ADMIN_ONLY_SCREENS.includes(screen) || workspaceAdmin(state.principal)) &&
     (!SCHEDULE_SCREENS.includes(screen) || scheduleViewer(state.principal)) &&
     (!CLEARED_ONLY_SCREENS.includes(screen) || !awaitingClearance(state));
 
@@ -1390,7 +1390,7 @@ export function createController({
   // first read that fails marks the list failed, so it never looks empty; one
   // that loaded once keeps what it shows. It throws, for loadData.
   async function readVolunteers() {
-    if (!staffWindow() || !ceilingAdmin(state.principal)) return;
+    if (!staffWindow() || !workspaceAdmin(state.principal)) return;
     try {
       const [volunteers, earlier] = await Promise.all([store.listVolunteers(), store.listEarlierVolunteers()]);
       state.volunteers = volunteers;
@@ -1403,7 +1403,7 @@ export function createController({
     } finally {
       // After the list, and whatever the list did: the count is its own read,
       // started here and not waited for, so the list's callers never wait on it.
-      if (staffWindow() && ceilingAdmin(state.principal)) {
+      if (staffWindow() && workspaceAdmin(state.principal)) {
         const asked = state.principal.userId;
         void redrawIfUploadsChanged(() => staffWindow() && state.principal?.userId === asked);
       }
@@ -1416,7 +1416,7 @@ export function createController({
   // changes what its caller does.
   async function readUploadsCount() {
     try {
-      if (!staffWindow() || !ceilingAdmin(state.principal)) return false;
+      if (!staffWindow() || !workspaceAdmin(state.principal)) return false;
       const asked = state.principal.userId;
       const count = Number(await store.countUploadsToReview());
       if (!Number.isFinite(count) || count < 0) return false;
@@ -1433,7 +1433,7 @@ export function createController({
   // read never fails the load around it: the panel says so and keeps what it
   // had. It never throws.
   async function readInvitations() {
-    if (!staffWindow() || !ceilingAdmin(state.principal)) return;
+    if (!staffWindow() || !workspaceAdmin(state.principal)) return;
     try {
       state.invitations = await store.listClientInvitations();
     } catch {
@@ -1741,7 +1741,7 @@ export function createController({
   // Roster's list, a first read that fails marks it failed, and one that
   // loaded once keeps what it shows. It throws, for loadData and refresh.
   async function readPostedUpdates() {
-    if (!staffWindow() || !ceilingAdmin(state.principal)) return;
+    if (!staffWindow() || !workspaceAdmin(state.principal)) return;
     try {
       const rows = await store.listPostedUpdates();
       state.postedUpdates = Array.isArray(rows) ? rows : [];
@@ -2200,7 +2200,7 @@ export function createController({
   // list, a first read that fails marks it failed, and one that loaded once
   // keeps what it shows. It throws, for loadData and refresh.
   async function readSeasonSettings() {
-    if (!staffWindow() || !ceilingAdmin(state.principal)) return;
+    if (!staffWindow() || !workspaceAdmin(state.principal)) return;
     try {
       state.seasonSettings = await store.getSeasonSettings();
       state.lists = { ...state.lists, seasonSettings: "ready" };
@@ -2884,7 +2884,7 @@ export function createController({
     // The Workload is case data: back to the Roster.
     state.volunteerTab = "roster";
     endNotifications();
-    if (!(ceilingAdmin(state.principal) && ADMIN_SETUP_SCREENS.includes(state.screen)) && !keepsSchedule())
+    if (!(workspaceAdmin(state.principal) && ADMIN_SETUP_SCREENS.includes(state.screen)) && !keepsSchedule())
       state.screen = "staff";
     // A viewer kept on the Schedule keeps a channel for it alone.
     syncScheduleChannel();
@@ -2934,7 +2934,7 @@ export function createController({
     return clearanceCheck;
   }
 
-  // The same effective capabilities (as a set) and the same ceiling flag.
+  // The same effective capabilities (as a set) and the same workspace admin flag.
   const sameStanding = (before, after) => {
     const had = new Set(before?.capabilities ?? []);
     const has = new Set(after?.capabilities ?? []);
@@ -2996,7 +2996,7 @@ export function createController({
     const oldClearance = state.principal.clearance;
     state.principal = { ...state.principal, clearance: answer };
     // No longer a workspace admin: a later regain must not flash an old number.
-    if (!ceilingAdmin(state.principal)) state.uploadsToReview = 0;
+    if (!workspaceAdmin(state.principal)) state.uploadsToReview = 0;
     // No longer a schedule viewer: the Schedule and its data go.
     const leftSchedule = SCHEDULE_SCREENS.includes(state.screen) && !scheduleViewer(state.principal);
     if (leftSchedule) leaveSchedule();
@@ -3290,7 +3290,7 @@ export function createController({
     if (state.screen === "no-access" && !state.principal) return;
     // Post an update and Season settings are a workspace admin's: anyone else
     // lands on their home.
-    if (CEILING_ONLY_SCREENS.includes(screen) && !screenAllowed(screen)) screen = homeScreen();
+    if (WORKSPACE_ADMIN_ONLY_SCREENS.includes(screen) && !screenAllowed(screen)) screen = homeScreen();
     // The Schedule is a schedule viewer's (design D11).
     if (SCHEDULE_SCREENS.includes(screen) && !screenAllowed(screen)) screen = homeScreen();
     // Leaving the Schedule leaves its drawer.
