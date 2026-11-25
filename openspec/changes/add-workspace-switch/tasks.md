@@ -26,4 +26,4 @@
 ## 5. Docs and checks
 
 - [x] 5.1 Update the R55 wording in `docs/developer/frontend.md` and `docs/developer/architecture.md` (and the staff guide, if it describes the workspace choice) to describe the two sides and the switch
-- [ ] 5.2 Run `npm test` and `npx openspec validate --all` locally. Run `npm run test:browser` and `npm run test:auth-browser` via the PR's full CI run, with no local Docker or stack; there is no database suite, as nothing in the database changes. Record the run link in `verify.md`
+- [x] 5.2 Run `npm test` and `npx openspec validate --all` locally. Run `npm run test:browser` and `npm run test:auth-browser` via the PR's full CI run, with no local Docker or stack; there is no database suite, as nothing in the database changes. Record the run link in `verify.md`
