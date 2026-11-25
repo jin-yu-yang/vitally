@@ -123,6 +123,10 @@ A check-in outside site hours, on a closed day, with no shift, or for a person w
 - **WHEN** an admin clears the check-out of a check-in dated today
 - **THEN** it is open again, and the volunteer's strip shows Check out
 
+#### Scenario: An unchanged time keeps its seconds
+- **WHEN** a volunteer checked out at 12:54:20 and back in at 12:54:45 on a past date, and an admin edits the second check-in, sending `checkedIn` `12:54` and adding a check-out
+- **THEN** it is saved, its check-in stays at 12:54:45, and it is not refused with `OVERLAP`
+
 #### Scenario: Adding a forgotten check-in
 - **WHEN** an admin adds a check-in for a volunteer for yesterday from 10:00 to 13:00
 - **THEN** it is saved, counts 180 minutes, and is marked corrected

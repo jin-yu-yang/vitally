@@ -710,6 +710,26 @@ test("Volunteer check-in against real Supabase", async (t) => {
           assert.equal(answer.minutes, 208);
           assert.equal(await localTime((await row(c.id)).checked_in_at), "09:52");
         });
+        await it("save: an unchanged minute keeps the stored seconds", async () => {
+          const seconds = async (instant) =>
+            (await one(f, `select to_char($1::timestamptz at time zone '${NY}','HH24:MI:SS') as s`, [instant])).s;
+          // Checked out by mistake at 12:54:20, back in at 12:54:45.
+          await insertCheckIn(f.preparerId, `${d.day_before} 12:00`, `${d.day_before} 12:54:20`);
+          const second = await insertCheckIn(f.preparerId, `${d.day_before} 12:54:45`);
+          await ok(sc, "vitally_save_check_in", save(second.id, 1, { checkedIn: "12:54", checkedOut: null }));
+          assert.equal(await seconds((await row(second.id)).checked_in_at), "12:54:45", "both fields left alone");
+          await ok(sc, "vitally_save_check_in", save(second.id, 2, { checkedIn: "12:54", checkedOut: "14:00" }));
+          assert.equal(await seconds((await row(second.id)).checked_in_at), "12:54:45", "only a check-out added");
+          // Moving the field does rebuild the instant.
+          await ok(sc, "vitally_save_check_in", save(second.id, 3, { checkedIn: "12:55", checkedOut: "14:00" }));
+          assert.equal(await seconds((await row(second.id)).checked_in_at), "12:55:00", "a changed minute");
+          // A check-in and check-out inside one minute.
+          const short = await insertCheckIn(f.preparerId, `${d.day_before} 15:55:10`, `${d.day_before} 15:55:40`);
+          await ok(sc, "vitally_save_check_in", save(short.id, 1, { checkedIn: "15:55", checkedOut: "15:55" }));
+          const stored = await row(short.id);
+          assert.equal(await seconds(stored.checked_in_at), "15:55:10");
+          assert.equal(await seconds(stored.checked_out_at), "15:55:40");
+        });
 
         await it("remove: soft delete and later change refused", async () => {
           const c = await insertCheckIn(f.preparerId, `${d.yesterday} 10:00`, `${d.yesterday} 12:00`);

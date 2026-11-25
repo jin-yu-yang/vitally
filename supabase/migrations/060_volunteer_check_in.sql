@@ -472,6 +472,21 @@ begin
    then (v_date+1)::timestamp at time zone 'America/New_York'
    else (v_date+(p_check_in->>'checkedOut')::time)::timestamp at time zone 'America/New_York' end;
  end if;
+ -- An edit that sends the minute already stored keeps the stored instant, its
+ -- seconds included (design D4: a saved time stays as it is unless the admin
+ -- changes that field). Otherwise an unchanged Save could move a volunteer's
+ -- own 12:54:45 back to 12:54:00 and be refused OVERLAP or OUT_BEFORE_IN.
+ if p_check_in_id is not null then
+  if date_trunc('minute',v_row.checked_in_at at time zone 'America/New_York')
+   =v_in at time zone 'America/New_York' then
+   v_in=v_row.checked_in_at;
+  end if;
+  if v_out is not null and v_row.checked_out_at is not null
+   and date_trunc('minute',v_row.checked_out_at at time zone 'America/New_York')
+    =v_out at time zone 'America/New_York' then
+   v_out=v_row.checked_out_at;
+  end if;
+ end if;
  if v_out is not null and v_out<=v_in then
   raise sqlstate 'VT007' using message='VALIDATION',detail='OUT_BEFORE_IN';
  end if;
