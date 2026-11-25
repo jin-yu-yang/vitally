@@ -581,6 +581,10 @@ export function createController({
   // page never lets an unsent draft overwrite a change it never saw. null
   // while there is no draft.
   let siteHoursBaseRevision = null;
+  // The same for the links card (#263): the revision its draft started from,
+  // so a focus or live re-read between the first change and Save cannot move
+  // what Save sends and let a stale save overwrite.
+  let linksBaseRevision = null;
   // A My profile save whose answer never came: `{ key, request }`, the key
   // being the values as typed.
   let pendingProfileSave = null;
@@ -2269,7 +2273,7 @@ export function createController({
     const settings = Object.fromEntries(
       SETTINGS_LINK_FIELDS.map((field) => [field, String(values?.[field] ?? "").trim()]),
     );
-    const expectedRevision = Number(state.seasonSettings?.revision ?? 0);
+    const expectedRevision = linksBaseRevision ?? Number(state.seasonSettings?.revision ?? 0);
     const answer = await settingsWrite(
       JSON.stringify({ type: "links", settings, expectedRevision }),
       () => ({ actionId: newActionId(), expectedRevision, settings }),
@@ -2285,11 +2289,14 @@ export function createController({
             ...state.seasonSettingsUi,
             notice: { place: "links", text: STAFF_SETTINGS_CONFLICT_MESSAGE },
           };
+          // The re-read is what the next draft starts from.
+          linksBaseRevision = null;
           return true;
         }
         return false;
       },
     );
+    if (answer) linksBaseRevision = null;
     return answer ? STAFF_SETTINGS_SAVED : null;
   }
 
@@ -2336,6 +2343,14 @@ export function createController({
   function beginSiteHoursEdit() {
     if (siteHoursBaseRevision !== null || state.screen !== "office-settings" || !state.seasonSettings) return;
     siteHoursBaseRevision = Number(state.seasonSettings.schedule?.revision ?? 0);
+  }
+
+  // The person's first change to the links card since the last save,
+  // CONFLICT re-read or page open: the draft starts from the revision on
+  // screen, like the site hours card.
+  function beginSettingsLinksEdit() {
+    if (linksBaseRevision !== null || state.screen !== "office-settings" || !state.seasonSettings) return;
+    linksBaseRevision = Number(state.seasonSettings.revision ?? 0);
   }
 
   // Change the SIDN. Spaces, hyphens and case are ignored here as they are
@@ -3245,6 +3260,7 @@ export function createController({
     state.seasonSettingsUi = freshSettingsUi();
     pendingSettingsWrite = null;
     siteHoursBaseRevision = null;
+    linksBaseRevision = null;
     state.schedule = freshSchedule();
     pendingShiftWrite = null;
     state.myProfile = null;
@@ -3305,6 +3321,7 @@ export function createController({
     if (screen === "office-settings") state.seasonSettingsUi = freshSettingsUi();
     // Leaving or opening a page ends its draft, and the revision it began at.
     siteHoursBaseRevision = null;
+    linksBaseRevision = null;
     // A new office draft belongs to the Add a case page: leaving drops it.
     if (screen !== "office-add-case") {
       state.officeDraft = false;
@@ -5854,6 +5871,7 @@ export function createController({
     loadScheduleDay,
     saveScheduleSettings,
     beginSiteHoursEdit,
+    beginSettingsLinksEdit,
     openShiftDrawer,
     editShiftDraft,
     saveShift,
