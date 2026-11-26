@@ -1,6 +1,6 @@
 import { esc, icon, button, officeContact, formatClientNumber, loadingLine, confirmBody } from "./ui.mjs";
 import { viewLang } from "./language.mjs";
-import { isStaffWindow } from "./contracts.mjs";
+import { isStaffWindow, hasWorkspaceSwitch, workspaceSide } from "./contracts.mjs";
 import { withdrawDialogBody } from "./client-views.mjs";
 import { t, sentence } from "./client-text.mjs";
 import { TOAST_ICONS } from "./toast.mjs";
@@ -42,7 +42,7 @@ import {
 import { volunteerTabs, renderWorkload, assignDrawerBody, assignDrawerTitle, DEFAULT_WORKLOAD_SORT } from "./workload-views.mjs";
 import { workloadRows, unassignedCases, candidates } from "./volunteer-workload.mjs";
 import { returningCandidates } from "./volunteer-roster.mjs";
-import { awaitingClearance, ceilingAdmin, scheduleViewer, siteCoordinator } from "./clearance.mjs";
+import { awaitingClearance, workspaceAdmin, scheduleViewer, siteCoordinator } from "./clearance.mjs";
 import { setupScreen, siteCheckScreen } from "./setup-views.mjs";
 import { myProfilePage } from "./profile-views.mjs";
 import {
@@ -54,7 +54,18 @@ import {
   updateGoneBody,
 } from "./update-views.mjs";
 import { renderSeasonSettings, changeSidnDialogBody, startSeasonDialogBody } from "./season-settings-views.mjs";
-import { scheduleScreen, shiftDrawer, shiftDrawerTitle, removeShiftDialogBody, removeShiftTitle } from "./schedule-views.mjs";
+import { timeLabel } from "./volunteer-check-in.mjs";
+import {
+  scheduleScreen,
+  shiftDrawer,
+  shiftDrawerTitle,
+  removeShiftDialogBody,
+  removeShiftTitle,
+  checkInDrawer,
+  checkInDrawerTitle,
+  removeCheckInDialogBody,
+  removeCheckInTitle,
+} from "./schedule-views.mjs";
 
 // The shared shell: the frame every screen sits in, the dialogs, the two
 // screens that belong to nobody in particular (setup needed, no access), and
@@ -144,10 +155,26 @@ export function footer(lang = "en") {
 // the toggle pinned to the top-left corner so it is always reachable. Nothing
 // passes a sidebar yet (Phase 0), and without one the body comes back exactly
 // as it went in, so no screen changes until it opts in.
-export function appShell({ sidebar = "", body = "", open = true } = {}) {
+// `strip` is the check-in strip (design D6): the first thing in the main area,
+// so collapsing the sidebar never hides it.
+export function appShell({ sidebar = "", body = "", open = true, strip = "" } = {}) {
   if (!sidebar) return body;
   const label = open ? "Hide the sidebar" : "Show the sidebar";
-  return `<div class="app-shell${open ? "" : " sidebar-closed"}"><button type="button" class="sidebar-toggle" data-action="toggle-sidebar" aria-controls="app-sidebar" aria-expanded="${open}" aria-label="${label}" title="${label}">${icon("sidebar")}</button><aside id="app-sidebar" class="app-sidebar" aria-label="Workspace"${open ? "" : " hidden"}>${sidebar}</aside><div class="app-main">${body}</div></div>`;
+  return `<div class="app-shell${open ? "" : " sidebar-closed"}"><button type="button" class="sidebar-toggle" data-action="toggle-sidebar" aria-controls="app-sidebar" aria-expanded="${open}" aria-label="${label}" title="${label}">${icon("sidebar")}</button><aside id="app-sidebar" class="app-sidebar" aria-label="Workspace"${open ? "" : " hidden"}>${sidebar}</aside><div class="app-main">${strip}${body}</div></div>`;
+}
+
+// The check-in strip (change add-volunteer-check-in, design D6): a cleared
+// staff window's, when the last `vitally_my_check_in` read said canCheckIn.
+// Never on the setup screen (an uncleared window) or for a client.
+export function checkInStrip(state) {
+  if (!isStaffWindow(state?.principal) || awaitingClearance(state)) return "";
+  const checkIn = state.checkIn;
+  if (checkIn?.canCheckIn !== true) return "";
+  const busy = checkIn.busy === true ? 'disabled aria-busy="true"' : "";
+  const open = checkIn.open;
+  return open
+    ? `<div class="check-in-strip"><span class="check-in-since">Checked in since ${esc(timeLabel(open.checkedInAt))}</span>${button("Check out", "check-out", "secondary", busy)}</div>`
+    : `<div class="check-in-strip">${button("Check in", "check-in", "primary", busy)}</div>`;
 }
 
 export function page(state, body) {
@@ -220,7 +247,14 @@ const isAdmin = (person) =>
 // is a schedule viewer, with the Schedule (change add-volunteer-schedule,
 // design D11; My profile stays the account row's), and
 // `board` is false on the setup screen, which has no work board.
-export function staffSidebar(state, person, office, { volunteers = office, board = true, schedule = false } = {}) {
+// `side` and `canSwitch` (change add-workspace-switch, D4): with the switch,
+// an Office / Cases group sits between the brand and the navigation.
+export function staffSidebar(
+  state,
+  person,
+  office,
+  { volunteers = office, board = true, schedule = false, side = office ? "office" : "cases", canSwitch = false } = {},
+) {
   // A staff account is its own person. A cleared window's row is the link to
   // My profile (change add-my-profile, D9); on the setup screen it stays the
   // plain "Signed in as".
@@ -242,7 +276,7 @@ export function staffSidebar(state, person, office, { volunteers = office, board
   const onSchedule = state?.screen === "schedule";
   const label = office ? "Follow-ups" : "Work board";
   // All cases, then the Roster (admin only, change add-volunteer-roster-records).
-  const pool = office && board
+  const pool = office && board && isAdmin(person)
     ? button(
         `${icon("folder")} All cases`,
         "open-cases",
@@ -322,8 +356,19 @@ export function staffSidebar(state, person, office, { volunteers = office, board
         onBoard ? 'aria-current="page"' : "",
       )
     : "";
+  const sideButton = (name, text) =>
+    button(
+      text,
+      "set-workspace-side",
+      `nav-link${side === name ? " current" : ""}`,
+      `data-side="${name}" aria-pressed="${side === name}"`,
+    );
+  const switcher =
+    canSwitch && board
+      ? `<div class="workspace-switch" role="group" aria-label="Workspace">${sideButton("office", "Office")}${sideButton("cases", "Cases")}</div>`
+      : "";
   const links = `${home}${pool}${roster}${scheduleLink}${postUpdate}${settings}${notifications}`;
-  return `<div class="sidebar-brand"><img src="src/pcdc-logo.png" alt="PCDC" width="36" height="36"><span class="sidebar-wordmark">ViTally<span class="brand-dot">.</span></span></div>${when(links, `<nav class="sidebar-nav" aria-label="Main navigation">${links}</nav>`)}<div class="sidebar-account"><div class="account-row">${icon("user")}<span>${accountRow}</span></div>${button(
+  return `<div class="sidebar-brand"><img src="src/pcdc-logo.png" alt="PCDC" width="36" height="36"><span class="sidebar-wordmark">ViTally<span class="brand-dot">.</span></span></div>${switcher}${when(links, `<nav class="sidebar-nav" aria-label="Main navigation">${links}</nav>`)}<div class="sidebar-account"><div class="account-row">${icon("user")}<span>${accountRow}</span></div>${button(
     `${icon("help")} Need help?`,
     "open-help",
     "text",
@@ -335,7 +380,7 @@ export function staffSidebar(state, person, office, { volunteers = office, board
 const OFFICE_SCREENS = ["office-cases", "office-add-case", "office-volunteers", "office-updates", "office-settings"];
 // The workspace admin's screens, cleared or not: the Roster, Post an update and
 // Season settings.
-const CEILING_SCREENS = ["office-volunteers", "office-updates", "office-settings"];
+const WORKSPACE_ADMIN_SCREENS = ["office-volunteers", "office-updates", "office-settings"];
 
 // The Follow-ups queue reads the cases and the help requests; it is ready only
 // when both are (a list that was never given counts as loaded).
@@ -363,8 +408,8 @@ const workloadPanel = (state) => {
       people: state.people ?? [],
       cases,
       now: Date.now(),
-      // Already the week's shifts: the controller read them for that week.
-      shifts: state.weekShifts ?? [],
+      // The checked-in minutes of this week, as the server counted them.
+      hours: state.weekHours ?? [],
     }),
     unassigned: unassignedCases(cases),
     sort: view.sort ?? DEFAULT_WORKLOAD_SORT,
@@ -422,7 +467,7 @@ const seasonSettingsPage = (state) =>
       ui: { ...(state.seasonSettingsUi ?? {}), busy: state.busy === true },
     }),
   );
-const ceilingPage = (state) =>
+const workspaceAdminPage = (state) =>
   state.screen === "office-updates"
     ? postUpdatePage(state)
     : state.screen === "office-settings"
@@ -434,9 +479,14 @@ export function staffScreen(state) {
   const person =
     people.find((entry) => entry.id === state.principal?.personId) ?? null;
   // The office screens follow the effective capabilities; the Roster follows
-  // the ceiling (design D10), so an admin can record their own roles.
-  const office = isAdmin(person);
-  const volunteers = ceilingAdmin(state.principal);
+  // the workspace admin flag (design D10), so an admin can record their own roles.
+  // The side decides the frame (change add-workspace-switch, D5); capabilities
+  // still decide All cases, the Workload and Add a case.
+  const admin = isAdmin(person);
+  const canSwitch = hasWorkspaceSwitch(state.principal, person);
+  const side = workspaceSide(state.principal, person, state.workspaceSide);
+  const office = side === "office";
+  const volunteers = workspaceAdmin(state.principal);
   // The Schedule is every schedule viewer's, cleared or not (design D11).
   const viewer = scheduleViewer(state.principal);
   const open = state.sidebarOpen !== false;
@@ -444,22 +494,22 @@ export function staffScreen(state) {
   // Post an update, and for a schedule viewer the Schedule. No work, and no
   // My profile (a cleared window's).
   if (awaitingClearance(state)) {
-    const onCeiling = volunteers && CEILING_SCREENS.includes(state.screen);
+    const onWorkspaceAdminPage = volunteers && WORKSPACE_ADMIN_SCREENS.includes(state.screen);
     const onSchedule = viewer && state.screen === "schedule";
     return appShell({
       sidebar: staffSidebar(
-        { ...state, screen: onCeiling || onSchedule ? state.screen : "staff" },
+        { ...state, screen: onWorkspaceAdminPage || onSchedule ? state.screen : "staff" },
         person,
         false,
-        { volunteers, board: false, schedule: viewer },
+        { volunteers, board: false, schedule: viewer, side },
       ),
       // An invited volunteer's first sign-in confirms the site first (the
       // site check, change add-account-invitations); nothing else shows.
       body:
         state.principal?.clearance?.siteCheck === true
           ? siteCheckScreen(state)
-          : onCeiling
-            ? ceilingPage(state)
+          : onWorkspaceAdminPage
+            ? workspaceAdminPage(state)
             : onSchedule
               ? scheduleScreen(state)
               : setupScreen(state),
@@ -467,25 +517,30 @@ export function staffScreen(state) {
     });
   }
   // A volunteer whose window was left on an office screen gets the work board.
-  // Post an update and Season settings follow the ceiling only, as the
+  // Post an update and Season settings follow the workspace admin flag only, as the
   // controller does.
   const allowed = (name) =>
     name === "office-updates" || name === "office-settings"
       ? volunteers
-      : // Add a case stays for a staff person who lost admin: its submits drop instead.
-        office ||
-        (name === "office-volunteers" && volunteers) ||
-        (name === "office-add-case" && state.principal?.access === "staff");
+      : name === "office-cases"
+        ? office && admin
+        : name === "office-volunteers"
+          ? admin || volunteers
+          : // Add a case stays for a staff person who lost admin: its submits drop instead.
+            // On the Cases side of a switch it goes back to the work board.
+            name === "office-add-case" && state.principal?.access === "staff" && !(canSwitch && !office);
   const screen =
     (OFFICE_SCREENS.includes(state.screen) && !allowed(state.screen)) || (state.screen === "schedule" && !viewer)
       ? "staff"
       : state.screen;
   const main = (() => {
-    const addCaseAction = button(`${icon("plus")} Add a case`, "open-add-case", "primary");
+    const addCaseAction = admin ? button(`${icon("plus")} Add a case`, "open-add-case", "primary") : "";
     if (screen === "staff-case" && state.savedCase) {
       const record = decorateStaffCase(state.savedCase, people);
       const ui = {
         person,
+        // The office case page hints toward Cases for a person with both sides.
+        canSwitch: hasWorkspaceSwitch(state.principal, person),
         // The case header says "Signed in as" for a staff account.
         principal: state.principal,
         // The case header's labels and its open menu.
@@ -537,7 +592,7 @@ export function staffScreen(state) {
       );
     // Past the setup screen above, so cleared: the Workload follows the effective admin.
     if (screen === "my-profile") return myProfilePage(state);
-    if (screen === "office-volunteers") return rosterPage(state, { workload: office });
+    if (screen === "office-volunteers") return rosterPage(state, { workload: admin });
     if (screen === "office-updates") return postUpdatePage(state);
     if (screen === "office-settings") return seasonSettingsPage(state);
     if (screen === "schedule") return scheduleScreen(state);
@@ -598,9 +653,10 @@ export function staffScreen(state) {
         );
   })();
   return appShell({
-    sidebar: staffSidebar({ ...state, screen }, person, office, { volunteers, schedule: viewer }),
+    sidebar: staffSidebar({ ...state, screen }, person, office, { volunteers, schedule: viewer, side, canSwitch }),
     body: main,
     open,
+    strip: checkInStrip(state),
   });
 }
 
@@ -810,6 +866,16 @@ export function dialog(state) {
     title = removeShiftTitle(state);
     body = removeShiftDialogBody(state);
   }
+  // The check-in drawer and its Remove check-in confirmation (change
+  // add-volunteer-check-in, design D7), the same way.
+  if (state.dialog === "check-in") {
+    title = checkInDrawerTitle(state);
+    body = checkInDrawer(state);
+  }
+  if (state.dialog === "remove-check-in") {
+    title = removeCheckInTitle(state);
+    body = removeCheckInDialogBody(state);
+  }
   if (state.dialog === "notifications") {
     title = "Notifications";
     // A drawer says its own failure (a confirm that did not go through).
@@ -892,7 +958,7 @@ export function dialog(state) {
     title = t("print.title", {}, lang);
     body = `<div class="print-card"><strong>${say("print.org")}</strong><span>${say("id.application_caps")}</span><b>${esc(state.savedCase?.reference)}</b>${state.savedCase?.clientNumber != null ? `<span>${say("id.client_number_caps")}</span><b>${esc(formatClientNumber(state.savedCase.clientNumber))}</b>` : ""}<p>${say("print.return")}</p></div><p class="field-note">${say("print.note")}</p>${button(`${icon("print")} ${say("print.button")}`, "print-now", "primary full")}`;
   }
-  const drawer = DRAWERS.includes(state.dialog) || state.dialog === "shift";
+  const drawer = DRAWERS.includes(state.dialog) || state.dialog === "shift" || state.dialog === "check-in";
   const overline =
     state.dialog === "volunteer"
       ? "OFFICE · VOLUNTEERS"
@@ -902,7 +968,7 @@ export function dialog(state) {
           ? "FROM THE OFFICE"
           : ["update-people", "unpublish-update", "delete-update", "change-sidn", "start-season"].includes(state.dialog)
             ? "OFFICE · ADMIN"
-            : state.dialog === "shift" || state.dialog === "remove-shift"
+            : ["shift", "remove-shift", "check-in", "remove-check-in"].includes(state.dialog)
               ? "VOLUNTEERS · SCHEDULE"
               : drawer
                 ? "OFFICE FOLLOW-UP"

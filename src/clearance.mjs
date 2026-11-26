@@ -14,7 +14,7 @@ export const withOwnCapabilities = (people, principal) => {
 
 // The workspace admin flag (a site coordinator, or the Admin role this season),
 // not the effective capabilities.
-export const ceilingAdmin = (principal) => principal?.clearance?.isAdmin === true;
+export const workspaceAdmin = (principal) => principal?.clearance?.isAdmin === true;
 
 // Whether the signed-in person is a site coordinator (change add-season-settings):
 // only they change Season settings, who is a site coordinator, and the Admin role.

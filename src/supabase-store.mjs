@@ -52,6 +52,7 @@ const STAFF_TABLES = Object.freeze([
   "posted_updates",
   "shifts",
   "schedule_settings",
+  "check_ins",
 ]);
 export const SUBSCRIBED_TABLES = Object.freeze({
   applicant: CLIENT_TABLES,
@@ -1050,27 +1051,46 @@ export function createStore(client) {
       return await call("vitally_my_shifts");
     },
 
+    // Volunteer check-in (migration 060). The RPCs enforce who may call them.
+    async myCheckIn() {
+      return await call("vitally_my_check_in");
+    },
+
+    async checkIn(request) {
+      return await call("vitally_check_in", { p_action_id: actionId(request) });
+    },
+
+    async checkOut(request) {
+      return await call("vitally_check_out", { p_action_id: actionId(request) });
+    },
+
+    async saveCheckIn(request) {
+      return await call("vitally_save_check_in", {
+        p_action_id: actionId(request),
+        p_check_in_id: request.checkInId ?? null,
+        p_expected_revision: request.revision ?? null,
+        p_check_in: request.checkIn,
+      });
+    },
+
+    async removeCheckIn(request) {
+      return await call("vitally_remove_check_in", {
+        p_action_id: actionId(request),
+        p_check_in_id: request.checkInId,
+        p_expected_revision: request.revision,
+      });
+    },
+
+    async hoursThisWeek() {
+      return await call("vitally_hours_this_week");
+    },
+
     async saveScheduleSettings(request) {
       return await call("vitally_save_schedule_settings", {
         p_action_id: actionId(request),
         p_expected_revision: request.revision,
         p_settings: request.settings,
       });
-    },
-
-    // The admin's direct read of live shifts in the current season for the
-    // week monday..sunday (the table is readable by admins under RLS).
-    async weekShifts({ monday, sunday }) {
-      await requireStaffAccess();
-      const season = await staffSeason();
-      let query = client
-        .from("shifts")
-        .select("*")
-        .is("removed_at", null)
-        .gte("shift_date", monday)
-        .lte("shift_date", sunday);
-      if (season != null) query = query.eq("season", season);
-      return await read(query);
     },
 
     // The SIDN is write-only: the answer is `{set, updatedAt}`, never the number.
@@ -1235,6 +1255,9 @@ export function createStore(client) {
           eventType: payload?.eventType ?? null,
           id,
           caseId: table === "cases" ? id : (row.case_id ?? null),
+          // Whose check-in moved, so a window re-reads its strip only for
+          // its own (design D9).
+          ...(table === "check_ins" ? { personId: row.person_id ?? null } : {}),
         });
       };
       const open = async () => {

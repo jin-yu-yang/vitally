@@ -1827,3 +1827,52 @@ test("one planned, one not: only the planned return is preselected", () => {
   assert.match(checked[0], /name="method-state"[^>]*value="paper"/);
   assert.ok(!checked.some((t) => /name="method-federal"/.test(t)));
 });
+
+// ---------------------------------------------------------------------------
+// The hint toward Cases (change add-workspace-switch, design D7)
+// ---------------------------------------------------------------------------
+const BOTH = { id: "alex", name: "Alex", capabilities: ["admin", "prepare", "review"] };
+const hintOf = (record, ui = {}) => renderAdminCase(record, { person: BOTH, canSwitch: true, ...ui });
+const overviewOf = (html) => html.slice(html.indexOf('id="case-panel-overview"'), html.indexOf('id="case-panel-intake"'));
+
+test("the hint names the first allowed work", () => {
+  const lines = [
+    [
+      officeCase({ stage: "review_ready", preparerId: "morgan", participants: ["morgan"], reviewerId: null }),
+      "You can review this case — switch to Cases",
+    ],
+    [
+      officeCase({ stage: "preparation_ready", preparerId: null, participants: [] }),
+      "You can claim this case — switch to Cases",
+    ],
+    [officeCase({ stage: "preparing", preparerId: "alex", participants: ["alex"] }), "You&#39;re preparing this case — switch to Cases"],
+    [
+      officeCase({ stage: "reviewing", preparerId: "morgan", participants: ["morgan"], reviewerId: "alex" }),
+      "You&#39;re reviewing this case — switch to Cases",
+    ],
+  ];
+  for (const [record, line] of lines) {
+    const overview = overviewOf(hintOf(record));
+    assert.match(overview, new RegExp(`<p class="field-note" role="note">${line}</p>`), line);
+    assert.match(overview, /data-action="set-workspace-side" data-side="cases"[^>]*>[^<]*Switch to Cases/, line);
+    // First in the Overview, ahead of the origin panel.
+    assert.ok(overview.indexOf(line) < overview.indexOf('id="origin-title"'), line);
+  }
+});
+
+test("no hint without canSwitch", () => {
+  const record = officeCase({ stage: "preparing", preparerId: "alex", participants: ["alex"] });
+  assert.doesNotMatch(renderAdminCase(record, { person: BOTH }), /switch to Cases|Switch to Cases/);
+  assert.doesNotMatch(renderAdminCase(record, { person: BOTH, canSwitch: false }), /switch to Cases/);
+});
+
+test("no hint when nothing is allowed", () => {
+  const html = hintOf(officeCase({ stage: "screening", intakeVerified: false, preparerId: null, participants: [] }));
+  assert.doesNotMatch(html, /switch to Cases|Switch to Cases/);
+});
+
+test("at most one line", () => {
+  const html = hintOf(officeCase({ stage: "preparation_ready", preparerId: null, participants: [] }));
+  assert.equal((html.match(/role="note"[^>]*>You/g) ?? []).length, 1);
+  assert.equal((html.match(/Switch to Cases/g) ?? []).length, 1);
+});

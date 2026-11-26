@@ -24,8 +24,8 @@ export const DIALOG_CAPABILITY = Object.freeze({
   "request-corrections": "review",
 });
 
-// The roster-ceiling dialogs: never swapped.
-export const CEILING_DIALOGS = Object.freeze([
+// The workspace admin dialogs: never swapped.
+export const WORKSPACE_ADMIN_DIALOGS = Object.freeze([
   "volunteer",
   "send-invitation",
   "cancel-invitation",
@@ -40,6 +40,9 @@ export const CEILING_DIALOGS = Object.freeze([
   // The Schedule's shift drawer and Remove shift (change add-volunteer-schedule).
   "shift",
   "remove-shift",
+  // The check-in drawer and Remove check-in (change add-volunteer-check-in).
+  "check-in",
+  "remove-check-in",
 ]);
 
 // Dialogs that need no capability: never swapped.

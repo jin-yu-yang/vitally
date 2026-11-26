@@ -174,6 +174,7 @@ export async function readRun(workspaceId, runDir) {
     caseIds: list(run?.caseIds),
     assistanceIds: list(run?.assistanceIds),
     shifts: list(run?.shifts),
+    checkInIds: list(run?.checkInIds),
   };
 }
 
@@ -233,6 +234,8 @@ export async function seedCases(
     caseIds: [],
     assistanceIds: [],
     ...(previous.shifts.length ? { shifts: previous.shifts } : {}),
+    // Likewise the check-ins are `seedSchedule`'s.
+    ...(previous.checkInIds.length ? { checkInIds: previous.checkInIds } : {}),
   };
   await recordRun(run, runDir);
 
@@ -570,6 +573,37 @@ export async function seedVolunteers(client, { workspaceId, actorUserId }) {
   return SEED_VALUES.SEED_VOLUNTEERS.length;
 }
 
+// Removes the check-ins an earlier run recorded, through the check-in removal
+// RPC (a soft delete), acting as the Site Coordinator. One already gone is
+// skipped and no other check-in is touched (an admin's stays). The current
+// revision is read first, as for shifts. `seedWorkspace` and `seedSchedule`
+// call this before the shifts and volunteers are removed; it is safe to call
+// again. Answers how many it removed. Local only.
+export async function removeSeededCheckIns(
+  client,
+  { workspaceId, actorUserId },
+  { runDir = ".vitally-runs" } = {},
+) {
+  const run = await readRun(workspaceId, runDir);
+  let removed = 0;
+  for (const id of run.checkInIds) {
+    const { rows } = await client.query(
+      "select revision from public.check_ins where workspace_id=$1 and id=$2 and removed_at is null",
+      [workspaceId, id],
+    );
+    if (!rows.length) continue;
+    await callRpc(client, actorUserId, "vitally_remove_check_in", {
+      p_action_id: randomUUID(),
+      p_check_in_id: id,
+      p_expected_revision: rows[0].revision,
+    });
+    removed += 1;
+  }
+  run.checkInIds = [];
+  await recordRun(run, runDir);
+  return removed;
+}
+
 // Removes the shifts an earlier run recorded, through the shift removal RPC
 // (a soft delete), acting as the Site Coordinator. A shift already gone is
 // skipped and no other shift is touched. `seedWorkspace` calls this before
@@ -609,8 +643,14 @@ export async function removeSeededShifts(
 export async function seedSchedule(
   client,
   { workspaceId, actorUserId },
-  { runDir = ".vitally-runs", values = SEED_VALUES } = {},
+  { runDir = ".vitally-runs", values = SEED_VALUES, today: todayOverride } = {},
 ) {
+  // Check-ins first: they belong to the same people as the shifts.
+  const checkInsRemoved = await removeSeededCheckIns(
+    client,
+    { workspaceId, actorUserId },
+    { runDir },
+  );
   const shiftsRemoved = await removeSeededShifts(
     client,
     { workspaceId, actorUserId },
@@ -634,11 +674,14 @@ export async function seedSchedule(
     savedHours = true;
   }
 
-  const today = (
-    await client.query(
-      "select (now() at time zone 'America/New_York')::date::text as day",
-    )
-  ).rows[0].day;
+  // `today` is the New York date; tests pass a past one to cover each weekday.
+  const today =
+    todayOverride ??
+    (
+      await client.query(
+        "select (now() at time zone 'America/New_York')::date::text as day",
+      )
+    ).rows[0].day;
   const { monday } = weekBounds(today);
   const open = [];
   for (let n = 0; n < 7; n += 1) {
@@ -705,7 +748,139 @@ export async function seedSchedule(
     run.shifts.push({ id: saved.shiftId, revision: saved.revision });
     await recordRun(run, runDir);
   }
-  return { shiftsRemoved, shiftsAdded: placed.length, savedHours };
+
+  // Check-ins (change add-volunteer-check-in, design D10): four, on the most
+  // recent open weekdays strictly before today in New York (they can be in
+  // last week). A day before today is wholly past, so no time is in the
+  // future and IN_FUTURE cannot fire. With no such day (saved hours with no
+  // open weekday in the last two weeks) none are seeded.
+  // Three follow a volunteer's own live seeded shift dated before today (in
+  // 5-10 minutes before the start; out at the end or a little after; the
+  // third has no check-out). A person with no such shift gets one on a past
+  // open day, recorded in the run file so a re-run removes it too. The fourth
+  // is the reviewer account on a past open day with no live shift for it.
+  const pastOpen = [];
+  for (let n = 1; n <= 14 && pastOpen.length < 3; n += 1) {
+    const date = addDays(today, -n);
+    const hours = settings.siteHours[String(isoWeekday(date))];
+    if (hours) pastOpen.push({ date, weekday: isoWeekday(date), ...hours });
+  }
+  const hhmm = (minutes) => {
+    const m = Math.max(0, Math.min(24 * 60, minutes));
+    return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+  };
+  const shiftEnd = (day) =>
+    day.weekday === 6 && day.close - day.open > 1
+      ? day.open + Math.max(1, Math.floor((day.close - day.open) / 2))
+      : day.close;
+  const pastShiftFor = async (person) =>
+    (
+      await client.query(
+        `select shift_date::text as date, start_hour, end_hour
+           from public.shifts
+          where workspace_id=$1 and person_id=$2 and removed_at is null
+            and id = any($3::uuid[]) and shift_date < $4::date
+          order by shift_date desc, start_hour limit 1`,
+        [workspaceId, person.id, run.shifts.map((x) => x.id), today],
+      )
+    ).rows[0];
+  const checkIns = [];
+  const [preparerSpec, , volunteerSpec, intakerSpec, , otherVolunteerSpec] =
+    values.SEED_SHIFTS;
+  const matching = [
+    { specs: [preparerSpec], early: 10, after: 0, out: true },
+    // A volunteer who has since been given an account is not found by email,
+    // so another seed volunteer stands in.
+    { specs: [volunteerSpec, otherVolunteerSpec], early: 5, after: 15, out: true },
+    { specs: [intakerSpec], early: 5, after: 0, out: false },
+  ];
+  for (const [i, m] of matching.entries()) {
+    if (!pastOpen.length) break;
+    const spec = m.specs.find((x) => {
+      const who = find(x.who);
+      return who && who.roles.includes(x.role);
+    });
+    if (!spec) continue;
+    m.spec = spec;
+    const person = find(spec.who);
+    let shift = await pastShiftFor(person);
+    for (let k = 0; !shift && k < pastOpen.length; k += 1) {
+      const day = pastOpen[(i + k) % pastOpen.length];
+      const saved = await callRpc(client, actorUserId, "vitally_save_shift", {
+        p_action_id: randomUUID(),
+        p_shift_id: null,
+        p_expected_revision: null,
+        p_shift: {
+          volunteerId: person.id,
+          date: day.date,
+          startHour: day.open,
+          endHour: shiftEnd(day),
+          role: m.spec.role,
+        },
+      }).catch((error) => {
+        if (error.cause?.detail === "OVERLAP") return null;
+        throw error;
+      });
+      if (!saved) continue;
+      run.shifts.push({ id: saved.shiftId, revision: saved.revision });
+      await recordRun(run, runDir);
+      shift = { date: day.date, start_hour: day.open, end_hour: shiftEnd(day) };
+    }
+    if (!shift) continue;
+    checkIns.push({
+      person,
+      date: shift.date,
+      checkedIn: hhmm(shift.start_hour * 60 - m.early),
+      checkedOut: m.out ? hhmm(shift.end_hour * 60 + m.after) : null,
+    });
+  }
+  const reviewer = find("reviewer");
+  for (const day of pastOpen) {
+    if (!reviewer) break;
+    const { rows } = await client.query(
+      `select 1 from public.shifts
+        where workspace_id=$1 and person_id=$2 and shift_date=$3 and removed_at is null`,
+      [workspaceId, reviewer.id, day.date],
+    );
+    if (rows.length) continue;
+    const to = Math.min(day.close, day.open + 2);
+    checkIns.push({
+      person: reviewer,
+      date: day.date,
+      checkedIn: hhmm((to - 1 > day.open ? day.open + 1 : day.open) * 60),
+      checkedOut: hhmm(to * 60),
+    });
+    break;
+  }
+  let checkInsAdded = 0;
+  for (const spec of checkIns) {
+    // A check-in an admin added that overlaps this one is theirs: skip.
+    const saved = await callRpc(client, actorUserId, "vitally_save_check_in", {
+      p_action_id: randomUUID(),
+      p_check_in_id: null,
+      p_expected_revision: null,
+      p_check_in: {
+        volunteerId: spec.person.id,
+        date: spec.date,
+        checkedIn: spec.checkedIn,
+        checkedOut: spec.checkedOut,
+      },
+    }).catch((error) => {
+      if (error.cause?.detail === "OVERLAP") return null;
+      throw error;
+    });
+    if (!saved) continue;
+    checkInsAdded += 1;
+    run.checkInIds.push(saved.checkInId);
+    await recordRun(run, runDir);
+  }
+  return {
+    shiftsRemoved,
+    shiftsAdded: placed.length,
+    savedHours,
+    checkInsRemoved,
+    checkInsAdded,
+  };
 }
 
 // Adds the previous season's roster after the volunteers (spec
@@ -826,6 +1001,7 @@ export async function seedWorkspace({
   clientAEmail,
   runDir = ".vitally-runs",
   env = process.env,
+  today,
 } = {}) {
   await assertLocalSeedTarget({ env });
   const client = await openDatabase({ kind: "test", env });
@@ -847,6 +1023,11 @@ export async function seedWorkspace({
       runDir,
     });
     // Before volunteers are re-created: their shifts cascade on delete.
+    await removeSeededCheckIns(
+      client,
+      { workspaceId, actorUserId: targets.siteCoordinator.userId },
+      { runDir },
+    );
     await removeSeededShifts(
       client,
       { workspaceId, actorUserId: targets.siteCoordinator.userId },
@@ -863,7 +1044,7 @@ export async function seedWorkspace({
     await seedSchedule(
       client,
       { workspaceId, actorUserId: targets.siteCoordinator.userId },
-      { runDir },
+      { runDir, today },
     );
     return { casesRemoved, casesCreated, volunteersCreated };
   } finally {

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { scheduleScreen, shiftDrawer, removeShiftDialogBody, shiftLabel } from "../src/schedule-views.mjs";
+import { scheduleScreen, shiftDrawer, removeShiftDialogBody, shiftLabel, checkInDrawer, removeCheckInDialogBody } from "../src/schedule-views.mjs";
+import { nyToday, addDays } from "../src/volunteer-schedule.mjs";
 import { staffScreen, dialog } from "../src/views.mjs";
 import { cleared } from "./support/clearance.mjs";
 
@@ -151,6 +152,75 @@ test("schedule: a closed day says so with no grid", () => {
   assert.match(html, /The site is closed on Mondays\./);
   assert.doesNotMatch(html, /schedule-grid/);
   assert.doesNotMatch(html, /Add shift/);
+  assert.doesNotMatch(html, /schedule-closed-shifts/);
+});
+
+// #275: a weekday closed after shifts were saved on it.
+const closedMonday = (over = {}) =>
+  adminDay({
+    date: "2027-02-08",
+    weekday: 1,
+    hours: null,
+    shifts: [
+      shift({ shiftId: "s-wen", volunteerId: "p-wen", name: "Wen Zhou", role: "greeter", startHour: 17, endHour: 20, flags: ["outsideSiteHours"], counts: null }),
+      shift({ shiftId: "s-ari-late", volunteerId: "p-ari", name: "Ari Shah", role: "reviewer", startHour: 18, endHour: 21, flags: ["outsideSiteHours"], counts: null }),
+      shift({ shiftId: "s-ari", volunteerId: "p-ari", name: "Ari Shah", role: "reviewer", startHour: 10, endHour: 12, flags: ["notCleared", "outsideSiteHours"], counts: null }),
+    ],
+    ...over,
+  });
+
+test("schedule: a closed day lists its shifts for an admin, as buttons with their tags, by name then start", () => {
+  const html = scheduleScreen(state(closedMonday()));
+  assert.match(html, /The site is closed on Mondays\.<\/p><ul class="schedule-closed-shifts"/);
+  assert.doesNotMatch(html, /schedule-grid/);
+  assert.doesNotMatch(html, /Add shift/);
+  const list = html.match(/<ul class="schedule-closed-shifts"[\s\S]*?<\/ul>/)?.[0] ?? "";
+  assert.deepEqual([...list.matchAll(/data-shift-id="([^"]+)"/g)].map((m) => m[1]), ["s-ari", "s-ari-late", "s-wen"]);
+  const ari = list.match(/<button[^>]*data-shift-id="s-ari"[\s\S]*?<\/button>/)?.[0] ?? "";
+  assert.match(ari, /data-action="open-shift"/);
+  assert.match(ari, /aria-label="Ari Shah, Reviewer, 10 am to 12 pm, Not cleared, Outside site hours"/);
+  assert.match(ari, /<span class="schedule-shift-name">Ari Shah<\/span>/);
+  assert.match(ari, /class="badge[^"]*">Not cleared</);
+  assert.match(ari, /class="badge[^"]*">Outside site hours</);
+  assert.doesNotMatch(list, /style=|data-edge/);
+});
+
+test("schedule: a closed day shows its shifts to a viewer as text, with no tags", () => {
+  const html = scheduleScreen(state(closedMonday({ canEdit: false })));
+  assert.match(html, /The site is closed on Mondays\./);
+  const list = html.match(/<ul class="schedule-closed-shifts"[\s\S]*?<\/ul>/)?.[0] ?? "";
+  assert.match(list, /<span class="schedule-shift role-greeter off-hours"><span class="schedule-shift-name">Wen Zhou<\/span>/);
+  assert.match(list, /5 pm – 8 pm/);
+  assert.doesNotMatch(list, /<button|badge/);
+});
+
+test("schedule: a closed day's shifts come before its check-ins, and stay below the no-site-hours notice", () => {
+  const html = scheduleScreen(state(closedMonday({ checkIns: [checkIn({ checkInId: "ci-ari", volunteerId: "p-ari", name: "Ari Moss" })] })));
+  assert.match(html, /class="schedule-closed-shifts"[\s\S]*class="check-in-list"/);
+  const none = scheduleScreen(state(closedMonday({ anyOpen: false })));
+  assert.match(none, /Set site hours in Season settings first\.[\s\S]*class="schedule-closed-shifts"/);
+});
+
+test("shift drawer: a closed day's shift opens with its own hours and Remove shift", () => {
+  const html = shiftDrawer(
+    state(closedMonday(), {
+      schedule: {
+        day: closedMonday(),
+        drawer: { mode: "edit", shiftId: "s-wen", revision: 1, volunteerId: "p-wen", name: "Wen Zhou", role: "greeter", startHour: 17, endHour: 20 },
+      },
+    }),
+  );
+  assert.match(html, /<select id="shift-start"[^>]*><option value="17" selected>5 pm<\/option><\/select>/);
+  assert.match(html, /<select id="shift-end"[^>]*><option value="20" selected>8 pm<\/option><\/select>/);
+  assert.match(html, /data-action="remove-shift"/);
+  // It says why the hours can't change, and how to move it.
+  assert.match(html, /<p class="shift-note muted">The site is closed this day, so this shift can't move to other hours here\. To move it, remove it and add it on an open day\.<\/p>/);
+  // Not on an open day, nor for a new shift.
+  const open = adminDay();
+  const edit = { mode: "edit", shiftId: "s-lia", revision: 1, volunteerId: "p-lia", name: "Lia Ruiz", role: "reviewer", startHour: 14, endHour: 17 };
+  assert.doesNotMatch(shiftDrawer(state(open, { schedule: { day: open, drawer: edit } })), /shift-note/);
+  const add = { mode: "add", shiftId: null, revision: null, volunteerId: null, name: null, role: null, startHour: 10, endHour: 13 };
+  assert.doesNotMatch(shiftDrawer(state(open, { schedule: { day: open, drawer: add } })), /shift-note/);
 });
 
 test("schedule: no site hours asks for them, with a Season settings link only for a site coordinator", () => {
@@ -264,4 +334,258 @@ test("staffScreen: a cleared schedule viewer on the schedule sees it; one who is
   assert.doesNotMatch(not, /<h1>Schedule<\/h1>/);
   assert.doesNotMatch(not, /open-schedule/);
   assert.match(not, /Work board/);
+});
+
+// ---- Check-ins on the admin Schedule (change add-volunteer-check-in, Task 6) ----
+
+// New York is UTC-5 on 2027-02-06. Fictional people only.
+const ny = (hm, date = "2027-02-06") => new Date(`${date}T${hm}:00-05:00`).toISOString();
+const checkIn = (over = {}) => ({
+  checkInId: "ci-rowan",
+  revision: 1,
+  volunteerId: "p-rowan",
+  name: "Rowan Diaz",
+  checkedInAt: ny("09:52"),
+  checkedOutAt: ny("13:10"),
+  endsAt: ny("13:10"),
+  state: "out",
+  minutes: 198,
+  flags: { noCheckOut: false, notScheduled: false, corrected: false, outsideSiteHours: false },
+  correctedByName: null,
+  ...over,
+});
+const barsIn = (html) => [...html.matchAll(/<button[^>]*class="check-in-bar[^"]*"[\s\S]*?<\/button>/g)].map((m) => m[0]);
+// One volunteer's row of the grid, up to the next row.
+const rowOf = (html, volunteerId) => {
+  const at = html.indexOf(`data-volunteer-id="${volunteerId}"`);
+  const from = html.lastIndexOf('<div class="schedule-row', at);
+  const next = html.indexOf('<div class="schedule-row', at);
+  return html.slice(from, next === -1 ? undefined : next);
+};
+const checkInDay = (checkIns, over = {}) =>
+  adminDay({ shifts: [shift({ shiftId: "s-rowan", flags: [], counts: "preparer" })], checkIns, ...over });
+
+test("schedule: admin bar under its shift", () => {
+  const html = scheduleScreen(state(checkInDay([checkIn()])));
+  const row = rowOf(html, "p-rowan");
+  const bars = barsIn(row);
+  assert.equal(bars.length, 1);
+  assert.match(bars[0], />9:52 am – 1:10 pm</);
+  assert.doesNotMatch(bars[0], /class="badge/);
+  // Cut off at the 10 am opening.
+  assert.match(bars[0], /style="left: 0%; width: [\d.]+%"/);
+  // Under the shift, in the same row.
+  assert.ok(row.indexOf("schedule-shift") < row.indexOf("check-in-bar"));
+});
+
+test("schedule: unscheduled row", () => {
+  const html = scheduleScreen(
+    state(
+      checkInDay([
+        checkIn({
+          checkInId: "ci-ari",
+          volunteerId: "p-ari",
+          name: "Ari Moss",
+          checkedInAt: ny("11:00"),
+          checkedOutAt: null,
+          endsAt: ny("12:30"),
+          state: "open",
+          flags: { noCheckOut: false, notScheduled: true, corrected: false, outsideSiteHours: false },
+        }),
+      ]),
+    ),
+  );
+  const row = rowOf(html, "p-ari");
+  assert.match(row, /Ari Moss/);
+  const [bar] = barsIn(row);
+  assert.match(bar, />11:00 am – now</);
+  assert.match(bar, /class="badge[^"]*">Not scheduled</);
+  // Rows stay ordered by name: Ari Moss before Rowan Diaz.
+  assert.ok(html.indexOf('data-volunteer-id="p-ari"') < html.indexOf('data-volunteer-id="p-rowan"'));
+});
+
+test("schedule: missed", () => {
+  const html = scheduleScreen(
+    state(
+      checkInDay([
+        checkIn({
+          checkedInAt: ny("10:05"),
+          checkedOutAt: null,
+          endsAt: ny("13:00"),
+          state: "missed",
+          flags: { noCheckOut: true, notScheduled: false, corrected: false, outsideSiteHours: false },
+        }),
+      ]),
+    ),
+  );
+  const [bar] = barsIn(html);
+  assert.match(bar, />10:05 am – no check-out</);
+  assert.match(bar, /class="badge[^"]*">No check-out</);
+});
+
+test("schedule: closed day lists check-ins for admins", () => {
+  const monday = checkIn({
+    checkInId: "ci-ari",
+    volunteerId: "p-ari",
+    name: "Ari Moss",
+    checkedInAt: ny("11:00", "2027-02-08"),
+    checkedOutAt: ny("12:00", "2027-02-08"),
+    endsAt: ny("12:00", "2027-02-08"),
+    flags: { noCheckOut: false, notScheduled: true, corrected: false, outsideSiteHours: true },
+  });
+  const html = scheduleScreen(state(adminDay({ date: "2027-02-08", weekday: 1, hours: null, shifts: [], checkIns: [monday] })));
+  assert.match(html, /The site is closed on Mondays\./);
+  assert.doesNotMatch(html, /schedule-grid/);
+  const list = html.match(/<ul class="check-in-list">[\s\S]*?<\/ul>/)?.[0] ?? "";
+  assert.match(list, /<li>/);
+  assert.match(list, /Ari Moss/);
+  assert.match(list, /11:00 am – 12:00 pm/);
+  assert.match(list, /class="badge[^"]*">Not scheduled</);
+  assert.match(list, /class="badge[^"]*">Outside site hours</);
+  assert.match(list, /data-action="open-check-in"/);
+  // No site hours at all: the list stays below that message too.
+  const none = scheduleScreen(state(adminDay({ hours: null, anyOpen: false, shifts: [], checkIns: [monday] })));
+  assert.match(none, /Set site hours in Season settings first\.[\s\S]*class="check-in-list"/);
+});
+
+test('schedule: each bar is a button with data-action="open-check-in"', () => {
+  const html = scheduleScreen(state(checkInDay([checkIn()])));
+  const [bar] = barsIn(html);
+  assert.match(bar, /^<button type="button" class="check-in-bar"/);
+  assert.match(bar, /data-action="open-check-in"/);
+  assert.match(bar, /data-check-in-id="ci-rowan"/);
+  assert.match(bar, /aria-label="Rowan Diaz, checked in 9:52 am – 1:10 pm"/);
+});
+
+test("schedule: a check-in wholly outside the open hours stays reachable by the name", () => {
+  const early = checkIn({ checkedInAt: ny("08:00"), checkedOutAt: ny("09:30"), endsAt: ny("09:30") });
+  const row = rowOf(scheduleScreen(state(checkInDay([early]))), "p-rowan");
+  const [bar] = barsIn(row);
+  assert.match(bar, />8:00 am – 9:30 am</);
+  assert.doesNotMatch(bar, /style=/);
+});
+
+test("schedule: Add check-in on today and past, not future", () => {
+  const today = nyToday(Date.now());
+  const on = (date, over = {}) => scheduleScreen(state(checkInDay([], { date, ...over })));
+  assert.match(on(today), /data-action="add-check-in"[^>]*>\+ Add check-in</);
+  assert.match(on(addDays(today, -1)), /\+ Add check-in/);
+  assert.doesNotMatch(on(addDays(today, 1)), /Add check-in/);
+  assert.match(on(addDays(today, 1)), /\+ Add shift/);
+  // Beside Add shift.
+  assert.match(on(today), /\+ Add shift[\s\S]*\+ Add check-in/);
+  // A closed day still takes a check-in.
+  assert.match(on(today, { hours: null }), /\+ Add check-in/);
+});
+
+test("schedule: read-only has no check-ins", () => {
+  const today = nyToday(Date.now());
+  const stray = checkIn({
+    checkInId: "ci-ari",
+    volunteerId: "p-ari",
+    name: "Ari Moss",
+    flags: { noCheckOut: false, notScheduled: true, corrected: false, outsideSiteHours: false },
+  });
+  const html = scheduleScreen(state(viewerDay({ date: today, checkIns: [checkIn(), stray] })));
+  assert.equal(html, scheduleScreen(state(viewerDay({ date: today }))));
+  assert.doesNotMatch(html, /check-in-bar/);
+  assert.doesNotMatch(html, /Add check-in/);
+  assert.doesNotMatch(html, /Ari Moss/);
+  const closed = scheduleScreen(state(viewerDay({ date: today, hours: null, checkIns: [stray] })));
+  assert.doesNotMatch(closed, /check-in-list|Ari Moss|Add check-in/);
+});
+
+const checkInDrawerState = (drawer, day = checkInDay([checkIn()])) =>
+  state(day, {
+    dialog: "check-in",
+    dialogContext: { checkInId: drawer.checkInId },
+    schedule: { date: day.date, day, drawer: null, checkInDrawer: drawer },
+  });
+
+test("drawer: corrected and missed notes", () => {
+  const missed = checkIn({
+    checkedInAt: ny("10:05"),
+    checkedOutAt: null,
+    endsAt: ny("13:00"),
+    state: "missed",
+    flags: { noCheckOut: true, notScheduled: false, corrected: true, outsideSiteHours: false },
+    correctedByName: "Sam Lee",
+  });
+  const html = checkInDrawer(
+    checkInDrawerState(
+      { mode: "edit", checkInId: "ci-rowan", revision: 1, volunteerId: "p-rowan", name: "Rowan Diaz", checkedIn: "10:05", checkedOut: null },
+      checkInDay([missed]),
+    ),
+  );
+  assert.match(html, /Corrected by Sam Lee/);
+  assert.match(html, /No check-out\. Counted to 1 pm\./);
+  assert.match(html, /data-action="remove-check-in"[^>]*>Remove check-in</);
+  assert.match(html, /data-action="save-check-in"/);
+  // Checked out is empty.
+  assert.match(html, /<select id="check-in-out"[\s\S]*?<option value="" selected>/);
+  // Neither note on a plain one.
+  const plain = checkInDrawer(
+    checkInDrawerState({ mode: "edit", checkInId: "ci-rowan", revision: 1, volunteerId: "p-rowan", name: "Rowan Diaz", checkedIn: "09:52", checkedOut: "13:10" }),
+  );
+  assert.doesNotMatch(plain, /Corrected by|No check-out\./);
+});
+
+test("drawer: an off-step saved time stays selected, in 5-minute steps", () => {
+  const html = checkInDrawer(
+    checkInDrawerState({ mode: "edit", checkInId: "ci-rowan", revision: 1, volunteerId: "p-rowan", name: "Rowan Diaz", checkedIn: "09:52", checkedOut: "13:10" }),
+  );
+  const select = (id) => html.match(new RegExp(`<select id="${id}"[\\s\\S]*?</select>`))[0];
+  assert.match(select("check-in-in"), /<option value="09:52" selected>9:52 am</);
+  assert.match(select("check-in-in"), /<option value="09:50">9:50 am</);
+  assert.match(select("check-in-in"), /<option value="09:55">9:55 am</);
+  assert.match(select("check-in-out"), /<option value="13:10" selected>1:10 pm</);
+  // An edit keeps its volunteer.
+  assert.doesNotMatch(html, /name="volunteerId"/);
+});
+
+test("drawer: Checked out offers midnight once, as the day's end", () => {
+  for (const checkedOut of [null, "13:10"]) {
+    const html = checkInDrawer(
+      checkInDrawerState({ mode: "edit", checkInId: "ci-rowan", revision: 1, volunteerId: "p-rowan", name: "Rowan Diaz", checkedIn: "09:52", checkedOut }),
+    );
+    const select = (id) => html.match(new RegExp(`<select id="${id}"[\\s\\S]*?</select>`))[0];
+    const out = select("check-in-out");
+    const midnight = [...out.matchAll(/<option value="([^"]*)"[^>]*>12:00 am[^<]*</g)];
+    assert.equal(midnight.length, 1, `${checkedOut}: one midnight option`);
+    assert.match(out, /<option value="24:00">12:00 am \(midnight\)</);
+    assert.doesNotMatch(out, /value="00:00"/);
+    assert.match(out, /<option value=""[^>]*>Not checked out</);
+    // Checked in still starts at midnight, unlabelled.
+    assert.match(select("check-in-in"), /<option value="00:00">12:00 am</);
+  }
+});
+
+test("drawer: Add check-in picks a volunteer, usual days first", () => {
+  const html = checkInDrawer(
+    checkInDrawerState({ mode: "add", checkInId: null, revision: null, volunteerId: null, name: null, checkedIn: "10:00", checkedOut: null }, adminDay()),
+  );
+  const names = [...html.matchAll(/name="volunteerId" value="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(names, ["p-hana", "p-wen", "p-ari"]);
+  assert.doesNotMatch(html, /Remove check-in/);
+  assert.match(html, /<span>Checked in<\/span>/);
+  assert.match(html, /<span>Checked out<\/span>/);
+});
+
+test("the check-in drawer and its Remove confirmation render in the shared dialog", () => {
+  const drawer = { mode: "add", checkInId: null, revision: null, volunteerId: null, name: null, checkedIn: "10:00", checkedOut: null };
+  const html = dialog(checkInDrawerState(drawer, adminDay()));
+  assert.match(html, /<h2 id="modal-title">Add check-in<\/h2>/);
+  assert.match(html, /id="check-in-form"/);
+  assert.match(html, /VOLUNTEERS · SCHEDULE/);
+  const ari = checkIn({ checkInId: "ci-ari", volunteerId: "p-ari", name: "Ari Moss" });
+  const remove = dialog(
+    state(checkInDay([ari]), {
+      dialog: "remove-check-in",
+      dialogContext: { checkInId: "ci-ari" },
+      principal: { access: "staff", clearance: cleared({ isAdmin: true }) },
+    }),
+  );
+  assert.match(remove, /Remove Ari Moss&#39;s check-in\?/);
+  assert.match(remove, /data-action="confirm-remove-check-in" data-check-in-id="ci-ari"/);
+  assert.match(removeCheckInDialogBody(state(checkInDay([ari]), { dialogContext: { checkInId: "ci-ari" } })), /confirm-remove-check-in/);
 });
