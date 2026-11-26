@@ -2629,6 +2629,14 @@ textarea::placeholder {
 .sidebar-closed .app-main {
   padding-left: 76px;
 }
+/* Between a phone and 1440 px, with the sidebar open, the page keeps 24 px
+   at its sides, so the staff lists fit a 1280 px window (issue 147). */
+@media (min-width: 801px) and (max-width: 1439px) {
+  .app-shell:not(.sidebar-closed) .app-main {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+}
 .app-main .narrow {
   width: 100%;
   max-width: 1240px;
@@ -3361,10 +3369,10 @@ textarea::placeholder {
 .office-queue .queue-table td,
 .office-queue .queue-table tbody th {
   vertical-align: top;
-  padding: 12px 10px;
+  padding: 12px 8px;
 }
 .office-queue .queue-table thead th {
-  padding: 10px;
+  padding: 10px 8px;
   white-space: normal;
 }
 .office-queue .queue-table td {
