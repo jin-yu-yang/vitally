@@ -3465,3 +3465,9 @@ test("the staff history says who added or removed a label", () => {
   assert.equal(historySentence(entry("ADD_CASE_LABEL")), "Alex added label City Tax.");
   assert.equal(historySentence(entry("REMOVE_CASE_LABEL")), "Alex removed label City Tax.");
 });
+
+test("#147: the board's service cell is marked so the stylesheet keeps it on one line", () => {
+  const html = board({ person: ALEX, filters: { status: "preparation" } });
+  assert.match(html, /<td class="board-service">[^<]+<\/td>/);
+  assert.doesNotMatch(html, /<td>(Drop-off|Online|Same-day)<\/td>/);
+});

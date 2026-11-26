@@ -2878,6 +2878,64 @@ textarea::placeholder {
   max-width: 260px;
   white-space: normal;
 }
+/* The work board and All cases fit a 1280 px window with the sidebar open
+   (issue 147): the stage, labels, names and date wrap rather than pushing the
+   last column out of the box, and a reason sits above its Open button when
+   the row is tight. The reference, the phone, the service, the language
+   letters and the buttons stay on one line. */
+.staff-board .board-table td,
+.staff-board .board-table tbody th,
+.case-pool .pool-table td,
+.case-pool .pool-table tbody th {
+  white-space: normal;
+}
+.staff-board .board-table thead th,
+.staff-board .board-table td,
+.staff-board .board-table tbody th,
+.case-pool .pool-table thead th,
+.case-pool .pool-table td,
+.case-pool .pool-table tbody th {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.staff-board .board-table .badge,
+.case-pool .pool-table .badge {
+  white-space: normal;
+}
+.staff-board .board-table .board-reference,
+.staff-board .board-table .client-number,
+.staff-board .board-table .board-service,
+.staff-board .board-table .phone-mask,
+.case-pool .pool-table .board-reference,
+.case-pool .pool-table .client-number,
+.case-pool .pool-table .board-service,
+.case-pool .pool-table .phone-mask {
+  white-space: nowrap;
+}
+.staff-board .board-row-actions {
+  flex-wrap: wrap;
+  align-items: center;
+}
+/* Below 1440 px with the sidebar open, the two lists' text is a size
+   smaller, so the reviewer's Waiting for review tab keeps Claim review
+   inside the box at 1280 px. */
+@media (max-width: 1439px) {
+  .app-shell:not(.sidebar-closed) .staff-board .board-table,
+  .app-shell:not(.sidebar-closed) .case-pool .pool-table {
+    font-size: 13px;
+  }
+}
+/* Row buttons the size of Follow-ups' (still a 44 px target). */
+.staff-board .board-row-actions .btn {
+  padding: 6px 12px;
+  gap: 6px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.staff-board .board-row-actions .btn .icon {
+  width: 16px;
+  height: 16px;
+}
 .you {
   color: var(--vt-you);
 }
@@ -3318,7 +3376,7 @@ textarea::placeholder {
   margin-bottom: 6px;
 }
 .office-queue .queue-needed {
-  min-width: 200px;
+  min-width: 160px;
   max-width: 340px;
 }
 .office-queue .queue-needed small {
@@ -3337,12 +3395,15 @@ textarea::placeholder {
 .office-queue .queue-waiting.late {
   color: var(--vt-stage-stopped);
 }
+/* Two actions stack rather than sit side by side, so the column fits a
+   1280 px window with the sidebar open (issue 147). Each label stays on one line. */
 .office-queue .queue-action {
   text-align: right;
-  white-space: nowrap;
+  white-space: normal;
 }
 .office-queue .queue-action .btn {
   min-height: var(--vt-tap);
+  margin: 2px 0;
   padding: 6px 12px;
   gap: 6px;
   font-size: 13px;
@@ -3370,6 +3431,12 @@ textarea::placeholder {
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+}
+/* In the queue the longer kinds ("Waiting for documents") and stages take
+   two lines. */
+.office-queue .kind-pill,
+.office-queue .queue-table .badge {
+  white-space: normal;
 }
 .kind-pill .icon {
   width: 14px;
