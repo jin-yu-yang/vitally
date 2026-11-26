@@ -45,14 +45,19 @@ const column = (hour, hours) => hour - hours.open + 2;
 
 // One shift: a button for an admin, text for anyone else. It spans the part
 // of its hours the day is open; `style` is left out for one drawn beside the
-// name (none of its hours is open).
-function shiftElement(shift, hours, admin, { placed = true } = {}) {
+// name (none of its hours is open) or in a closed day's list (`hours` null),
+// which also shows the name (`withName`).
+function shiftElement(shift, hours, admin, { placed = true, withName = false } = {}) {
   const tags = admin ? flagTags(shift) : [];
-  const from = Math.max(shift.startHour, hours.open);
-  const to = Math.min(shift.endHour, hours.close);
-  const style = placed ? ` style="grid-column: ${column(from, hours)} / span ${to - from}"` : "";
+  let style = "";
+  if (placed) {
+    const from = Math.max(shift.startHour, hours.open);
+    const to = Math.min(shift.endHour, hours.close);
+    style = ` style="grid-column: ${column(from, hours)} / span ${to - from}"`;
+  }
   const cls = `schedule-shift role-${esc(shift.role)}${tags.length ? " flagged" : ""}${placed ? "" : " off-hours"}`;
-  const inner = `<span class="schedule-role">${esc(roleLabel(shift.role))}</span><span class="schedule-time">${esc(
+  const name = withName ? `<span class="schedule-shift-name">${esc(shift.name)}</span>` : "";
+  const inner = `${name}<span class="schedule-role">${esc(roleLabel(shift.role))}</span><span class="schedule-time">${esc(
     hoursText(shift.startHour, shift.endHour),
   )}</span>${tagList(tags)}`;
   // The edge zones a pointer drags to change the hours (design D7); keyboard
@@ -95,6 +100,18 @@ function checkInList(day) {
   const checkIns = scheduleRows([], day.checkIns ?? []).flatMap((row) => row.checkIns);
   return checkIns.length
     ? `<ul class="check-in-list">${checkIns.map((checkIn) => `<li>${checkInBar(checkIn, null, { withName: true })}</li>`).join("")}</ul>`
+    : "";
+}
+
+// A closed day, or no open weekday: the shifts saved on it before it closed
+// (#275), by name then start, so they stay reachable. An admin's are buttons
+// with their tags that open the shift drawer; anyone else reads them.
+function closedShiftList(day, admin) {
+  const shifts = scheduleRows(day.shifts ?? []).flatMap((row) => row.shifts);
+  return shifts.length
+    ? `<ul class="schedule-closed-shifts" aria-label="Shifts">${shifts
+        .map((shift) => `<li>${shiftElement(shift, null, admin, { placed: false, withName: true })}</li>`)
+        .join("")}</ul>`
     : "";
 }
 
@@ -157,9 +174,11 @@ function dayBody(day, admin) {
   if (!day.hours) {
     if (admin && day.anyOpen === false) {
       const link = day.canEditSettings === true ? ` ${button("Season settings", "open-season-settings", "text")}` : "";
-      return `<p class="notice schedule-notice" role="note">Set site hours in Season settings first.${link}</p>${checkInList(day)}`;
+      return `<p class="notice schedule-notice" role="note">Set site hours in Season settings first.${link}</p>${closedShiftList(day, admin)}${checkInList(day)}`;
     }
-    return `<p class="schedule-closed">${esc(`The site is closed on ${weekdayPlural(day.weekday)}.`)}</p>${admin ? checkInList(day) : ""}`;
+    return `<p class="schedule-closed">${esc(`The site is closed on ${weekdayPlural(day.weekday)}.`)}</p>${closedShiftList(day, admin)}${
+      admin ? checkInList(day) : ""
+    }`;
   }
   const rows = admin ? coverageRows({ hours: day.hours, targets: day.targets, shifts: day.shifts ?? [] }) : [];
   const header = admin ? `<p class="schedule-gaps">${esc(gapHeader(rows))}</p>` : "";
@@ -250,6 +269,12 @@ export function shiftDrawer(state) {
               .join("")}</ul>`
           : `<p class="muted">No one on this season's roster has a role yet.</p>`
       }</fieldset>`;
+  // A saved shift on a closed day (#275) can be removed but not moved: there
+  // are no open hours to offer, and the database refuses its hours.
+  const closedNote =
+    edit && !day.hours
+      ? `<p class="shift-note muted">The site is closed this day, so this shift can't move to other hours here. To move it, remove it and add it on an open day.</p>`
+      : "";
   // The volunteer's current roles, and in an edit the shift's own.
   const roles = [...new Set([...(chosen?.roles ?? []), ...(edit && drawer.role ? [drawer.role] : [])])];
   const roleSelect = roles.length
@@ -260,7 +285,7 @@ export function shiftDrawer(state) {
   const remove = edit
     ? button("Remove shift", "remove-shift", "text danger-text", `data-shift-id="${esc(drawer.shiftId)}"${disabled(busy)}`)
     : "";
-  return `<form id="shift-form" class="staff-form shift-form" novalidate>${intro}<label class="field" for="shift-role"><span>Role</span>${roleSelect}</label><div class="shift-hours"><label class="field" for="shift-start"><span>Start</span><select id="shift-start" name="startHour"${disabled(
+  return `<form id="shift-form" class="staff-form shift-form" novalidate>${intro}${closedNote}<label class="field" for="shift-role"><span>Role</span>${roleSelect}</label><div class="shift-hours"><label class="field" for="shift-start"><span>Start</span><select id="shift-start" name="startHour"${disabled(
     busy,
   )}>${hourOptions(day.hours, drawer.startHour)}</select></label><label class="field" for="shift-end"><span>End</span><select id="shift-end" name="endHour"${disabled(
     busy,

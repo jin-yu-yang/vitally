@@ -152,6 +152,75 @@ test("schedule: a closed day says so with no grid", () => {
   assert.match(html, /The site is closed on Mondays\./);
   assert.doesNotMatch(html, /schedule-grid/);
   assert.doesNotMatch(html, /Add shift/);
+  assert.doesNotMatch(html, /schedule-closed-shifts/);
+});
+
+// #275: a weekday closed after shifts were saved on it.
+const closedMonday = (over = {}) =>
+  adminDay({
+    date: "2027-02-08",
+    weekday: 1,
+    hours: null,
+    shifts: [
+      shift({ shiftId: "s-wen", volunteerId: "p-wen", name: "Wen Zhou", role: "greeter", startHour: 17, endHour: 20, flags: ["outsideSiteHours"], counts: null }),
+      shift({ shiftId: "s-ari-late", volunteerId: "p-ari", name: "Ari Shah", role: "reviewer", startHour: 18, endHour: 21, flags: ["outsideSiteHours"], counts: null }),
+      shift({ shiftId: "s-ari", volunteerId: "p-ari", name: "Ari Shah", role: "reviewer", startHour: 10, endHour: 12, flags: ["notCleared", "outsideSiteHours"], counts: null }),
+    ],
+    ...over,
+  });
+
+test("schedule: a closed day lists its shifts for an admin, as buttons with their tags, by name then start", () => {
+  const html = scheduleScreen(state(closedMonday()));
+  assert.match(html, /The site is closed on Mondays\.<\/p><ul class="schedule-closed-shifts"/);
+  assert.doesNotMatch(html, /schedule-grid/);
+  assert.doesNotMatch(html, /Add shift/);
+  const list = html.match(/<ul class="schedule-closed-shifts"[\s\S]*?<\/ul>/)?.[0] ?? "";
+  assert.deepEqual([...list.matchAll(/data-shift-id="([^"]+)"/g)].map((m) => m[1]), ["s-ari", "s-ari-late", "s-wen"]);
+  const ari = list.match(/<button[^>]*data-shift-id="s-ari"[\s\S]*?<\/button>/)?.[0] ?? "";
+  assert.match(ari, /data-action="open-shift"/);
+  assert.match(ari, /aria-label="Ari Shah, Reviewer, 10 am to 12 pm, Not cleared, Outside site hours"/);
+  assert.match(ari, /<span class="schedule-shift-name">Ari Shah<\/span>/);
+  assert.match(ari, /class="badge[^"]*">Not cleared</);
+  assert.match(ari, /class="badge[^"]*">Outside site hours</);
+  assert.doesNotMatch(list, /style=|data-edge/);
+});
+
+test("schedule: a closed day shows its shifts to a viewer as text, with no tags", () => {
+  const html = scheduleScreen(state(closedMonday({ canEdit: false })));
+  assert.match(html, /The site is closed on Mondays\./);
+  const list = html.match(/<ul class="schedule-closed-shifts"[\s\S]*?<\/ul>/)?.[0] ?? "";
+  assert.match(list, /<span class="schedule-shift role-greeter off-hours"><span class="schedule-shift-name">Wen Zhou<\/span>/);
+  assert.match(list, /5 pm – 8 pm/);
+  assert.doesNotMatch(list, /<button|badge/);
+});
+
+test("schedule: a closed day's shifts come before its check-ins, and stay below the no-site-hours notice", () => {
+  const html = scheduleScreen(state(closedMonday({ checkIns: [checkIn({ checkInId: "ci-ari", volunteerId: "p-ari", name: "Ari Moss" })] })));
+  assert.match(html, /class="schedule-closed-shifts"[\s\S]*class="check-in-list"/);
+  const none = scheduleScreen(state(closedMonday({ anyOpen: false })));
+  assert.match(none, /Set site hours in Season settings first\.[\s\S]*class="schedule-closed-shifts"/);
+});
+
+test("shift drawer: a closed day's shift opens with its own hours and Remove shift", () => {
+  const html = shiftDrawer(
+    state(closedMonday(), {
+      schedule: {
+        day: closedMonday(),
+        drawer: { mode: "edit", shiftId: "s-wen", revision: 1, volunteerId: "p-wen", name: "Wen Zhou", role: "greeter", startHour: 17, endHour: 20 },
+      },
+    }),
+  );
+  assert.match(html, /<select id="shift-start"[^>]*><option value="17" selected>5 pm<\/option><\/select>/);
+  assert.match(html, /<select id="shift-end"[^>]*><option value="20" selected>8 pm<\/option><\/select>/);
+  assert.match(html, /data-action="remove-shift"/);
+  // It says why the hours can't change, and how to move it.
+  assert.match(html, /<p class="shift-note muted">The site is closed this day, so this shift can't move to other hours here\. To move it, remove it and add it on an open day\.<\/p>/);
+  // Not on an open day, nor for a new shift.
+  const open = adminDay();
+  const edit = { mode: "edit", shiftId: "s-lia", revision: 1, volunteerId: "p-lia", name: "Lia Ruiz", role: "reviewer", startHour: 14, endHour: 17 };
+  assert.doesNotMatch(shiftDrawer(state(open, { schedule: { day: open, drawer: edit } })), /shift-note/);
+  const add = { mode: "add", shiftId: null, revision: null, volunteerId: null, name: null, role: null, startHour: 10, endHour: 13 };
+  assert.doesNotMatch(shiftDrawer(state(open, { schedule: { day: open, drawer: add } })), /shift-note/);
 });
 
 test("schedule: no site hours asks for them, with a Season settings link only for a site coordinator", () => {

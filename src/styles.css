@@ -7274,6 +7274,20 @@ button.schedule-shift {
 .check-in-time {
   white-space: nowrap;
 }
+/* A closed day's shifts (#275): one line each, name first, like the check-in
+   list below them. */
+.schedule-closed-shifts .schedule-shift {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  width: fit-content;
+  max-width: 100%;
+}
+.schedule-shift-name {
+  font-weight: 600;
+}
+.schedule-closed-shifts,
 .check-in-list {
   display: flex;
   flex-direction: column;
@@ -7282,7 +7296,8 @@ button.schedule-shift {
   padding: 0;
   list-style: none;
 }
-.check-in-note {
+.check-in-note,
+.shift-note {
   margin: 0 0 8px;
 }
 /* The shift drawer: the volunteer picker, then role, start and end. */
