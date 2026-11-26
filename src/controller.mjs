@@ -3,6 +3,8 @@ import { nyToday, addDays, SHIFT_REFUSALS, WEEKDAYS } from "./volunteer-schedule
 import {
   CASE_ACTIONS,
   ASSISTANCE_ACTIONS,
+  hasWorkspaceSwitch,
+  workspaceSide,
   SHADED_EDITOR,
   SHADED_UPLOAD,
 } from "./contracts.mjs";
@@ -37,6 +39,7 @@ import { LABEL_COLORS, labelNameTaken } from "./case-labels.mjs";
 import { createShadedSave } from "./shaded-editor.mjs";
 import { createWindowState } from "./window-state.mjs";
 import { isLang, readLanguage, writeLanguage } from "./language.mjs";
+import { readWorkspaceSide, writeWorkspaceSide } from "./workspace-side.mjs";
 import { volunteerProblem, profileProblem, withoutLostRoles, roleNeedsMessage, openWorkMessage, accountMessage, ADMIN_ROLE_MESSAGE, REMOVE_SELF_MESSAGE, REMOVE_SITE_COORDINATOR_MESSAGE } from "./volunteer-roster.mjs";
 import { emptyUpdateForm, toUpdateRequest, validateUpdate } from "./posted-updates.mjs";
 import { nowInput } from "./contact-log.mjs";
@@ -547,6 +550,10 @@ export function createController({
     // Whether this window shows the staff sidebar. Open unless the person
     // closed it.
     sidebarOpen: true,
+    // The side of the staff window on screen (add-workspace-switch D3):
+    // "office" or "cases". Set at sign-in from this browser's remembered
+    // choice; only a person with both sides can change it.
+    workspaceSide: "office",
     // Which tab of the case page this window shows. Overview unless chosen.
     caseTab: "overview",
     // `{caseId, text: "Saved"}` once an uploaded shaded section was saved,
@@ -1531,7 +1538,7 @@ export function createController({
   // Who may see the Workload and open its drawer: a cleared staff member with
   // effective admin (design D1). The views hide the tab for anyone else; this
   // is the second gate, so nothing here opens it for them either.
-  const canSeeWorkload = () => staffWindow() && !awaitingClearance(state) && actingAdmin();
+  const canSeeWorkload = () => staffWindow() && !awaitingClearance(state) && effectiveAdmin();
 
   // The Volunteers page's tab. Either tab reads the volunteers, as opening the
   // Roster does: the Workload's rows and its drawer are built from them, and
@@ -3085,6 +3092,7 @@ export function createController({
     state.principal = principal;
     state.authError = null;
     windowState.clearAccess();
+    state.workspaceSide = readWorkspaceSide(principal.userId, { storage: localStorage }) ?? "office";
     restoreSession();
     // A staff window lands on the work board and a client on their applications,
     // unless this window was already somewhere this principal may be.
@@ -3259,6 +3267,7 @@ export function createController({
     noteConnected();
     const was = !awaitingClearance(state);
     const oldClearance = state.principal.clearance;
+    const oldPerson = currentPerson();
     state.principal = { ...state.principal, clearance: answer };
     // No longer a workspace admin: a later regain must not flash an old number.
     if (!ceilingAdmin(state.principal)) state.uploadsToReview = 0;
@@ -3280,6 +3289,14 @@ export function createController({
       return;
     }
     if (now && was) {
+      // The side on screen follows what the person may do now (design D10): a
+      // side gained moves nothing, a side lost lands on the one that remains.
+      // Never written to storage: the remembered choice is the person's own.
+      state.workspaceSide = workspaceSide(
+        state.principal,
+        currentPerson(),
+        workspaceSide(state.principal, oldPerson, state.workspaceSide),
+      );
       // Cleared before and after: nothing to reload, and nothing to draw unless
       // what the person may do changed. Their entry is already narrowed above.
       // The uploads count is the one thing that can still have moved.
@@ -3287,7 +3304,10 @@ export function createController({
       // All cases is Admin's; the other screens stay, and Admin coming back
       // moves nobody.
       let focus = leftSchedule;
-      if (!answer.capabilities?.includes("admin") && state.screen === "office-cases") {
+      if (
+        (!answer.capabilities?.includes("admin") || state.workspaceSide !== "office") &&
+        state.screen === "office-cases"
+      ) {
         state.screen = homeScreen();
         focus = true;
       }
@@ -3715,6 +3735,25 @@ export function createController({
     state.boardSearchDraft = String(value ?? "");
   }
 
+  // Pressing Office or Cases (add-workspace-switch D2, D6). Nothing happens
+  // when the side on screen would not change. The open case stays, on its
+  // Overview tab; the pages only the Office side has go to the board.
+  async function setWorkspaceSide(side) {
+    if (side !== "office" && side !== "cases") return;
+    if (!staffWindow()) return;
+    const person = currentPerson();
+    if (!hasWorkspaceSwitch(state.principal, person)) return;
+    if (workspaceSide(state.principal, person, state.workspaceSide) === side) return;
+    writeWorkspaceSide(state.principal.userId, side, { storage: localStorage });
+    state.workspaceSide = side;
+    if (state.screen === "staff-case") state.caseTab = "overview";
+    persistSession();
+    // An office-only screen lands on the Work board through navigate's cleanup.
+    if (state.screen === "office-cases" || state.screen === "office-add-case") navigate("staff");
+    else show(true);
+    await startScreeningIfDue();
+  }
+
   function toggleSidebar() {
     state.sidebarOpen = !state.sidebarOpen;
     persistSession();
@@ -3789,11 +3828,21 @@ export function createController({
   // turns VT003 into CONFLICT and VT004 into INVALID_TRANSITION (contracts.mjs).
   const SCREENING_RACES = Object.freeze(["INVALID_TRANSITION", "CONFLICT"]);
 
-  function actingAdmin() {
+  function currentPerson() {
+    const own = state.principal?.personId ?? null;
+    return (state.people ?? []).find((entry) => entry?.id === own) ?? null;
+  }
+
+  // Effective admin: the capability alone, whichever side is on screen.
+  function effectiveAdmin() {
     if (!staffWindow()) return false;
-    const own = state.principal.personId ?? null;
-    const person = (state.people ?? []).find((entry) => entry?.id === own);
+    const person = currentPerson();
     return Array.isArray(person?.capabilities) && person.capabilities.includes("admin");
+  }
+
+  // Screening starts only for an admin on the Office side (design D9).
+  function actingAdmin() {
+    return effectiveAdmin() && workspaceSide(state.principal, currentPerson(), state.workspaceSide) === "office";
   }
 
   async function startScreeningIfDue({ afterRace = false } = {}) {
@@ -6133,6 +6182,7 @@ export function createController({
     clearBoardFilters,
     setBoardSearchDraft,
     toggleSidebar,
+    setWorkspaceSide,
     setLanguage,
     adoptLanguage,
     setCaseTab,

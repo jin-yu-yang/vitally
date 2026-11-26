@@ -2170,6 +2170,11 @@ if (!config) {
       formDrafts.clear();
       void controller.openSchedule();
     },
+    // The Office / Cases switch (change add-workspace-switch).
+    "set-workspace-side": async (side) => {
+      formDrafts.clear();
+      await controller.setWorkspaceSide(side);
+    },
     // Pressed again while on the page: a fresh draft, which is what it asks for.
     "open-add-case": async () => {
       formDrafts.clear();
@@ -2189,7 +2194,7 @@ if (!config) {
       ? Object.values(state.draftAnswers ?? {}).some(isAnswered)
       : Boolean(state.savedCase) && Boolean(state.dirty);
     if (!loses) return false;
-    openDialog("leave-add-case", { to: action }, describeFocus(target));
+    openDialog("leave-add-case", { to: action, side: target?.dataset?.side }, describeFocus(target));
     return true;
   }
 
@@ -2556,14 +2561,21 @@ if (!config) {
         if (!root.querySelector('[data-action="clear-pool-filters"]'))
           root.querySelector("#field-poolStage")?.focus();
         break;
+      case "set-workspace-side":
+        // The pressed side is already where the person is: nothing happens.
+        if (target.getAttribute("aria-pressed") === "true") break;
+        if (leaveAddCaseFirst("set-workspace-side", target)) break;
+        await EXITS["set-workspace-side"](target.dataset.side);
+        break;
       case "open-add-case":
         if (leaveAddCaseFirst("open-add-case", target)) break;
         await EXITS["open-add-case"]();
         break;
       case "confirm-leave-add-case": {
         const exit = EXITS[state.dialogContext?.to] ?? EXITS["open-board"];
+        const side = state.dialogContext?.side;
         closeDialog();
-        await exit();
+        await exit(side);
         break;
       }
       case "continue-add-case":

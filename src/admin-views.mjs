@@ -1163,6 +1163,20 @@ export function resumeFromHoldDialogBody(state = {}) {
   });
 }
 
+// The first Cases-side work this person may do on the case, as one line and a
+// button to the Cases side. Nothing when none is allowed.
+const CASES_HINTS = [
+  ["claimPreparation", "You can claim this case — switch to Cases"],
+  ["claimReview", "You can review this case — switch to Cases"],
+  ["preparationWork", "You're preparing this case — switch to Cases"],
+  ["reviewDecision", "You're reviewing this case — switch to Cases"],
+];
+function casesHint(staffRights) {
+  const found = CASES_HINTS.find(([key]) => staffRights?.[key]?.allowed);
+  if (!found) return "";
+  return `<p class="field-note" role="note">${esc(found[1])}</p><p>${button("Switch to Cases", "set-workspace-side", "secondary", `data-side="cases"`)}</p>`;
+}
+
 /**
  * One case, as the office sees it: what the client answered, the screening
  * checks, documents taken in at the desk, the contact tasks, and the two
@@ -1181,6 +1195,7 @@ export function renderAdminCase(caseRecord, ui = {}) {
   // persona is refused there, in the preparer screen's own words.
   const staffRights = staffEligibility(record, person);
   const draftForOffice = record.stage === "draft" && assisted(record);
+  const hint = view.canSwitch === true ? casesHint(staffRights) : "";
   const origin = `<section class="panel" aria-labelledby="origin-title"><div class="section-head"><h2 id="origin-title">How this case reached the office</h2></div>${originRows(
     record,
   )}<p class="field-note">${esc(OFFICE_NOTE)}</p></section>`;
@@ -1190,6 +1205,7 @@ export function renderAdminCase(caseRecord, ui = {}) {
       "overview",
       "Overview",
       [
+        hint,
         origin,
         intakeChecksPanel(record, rights, view),
         draftForOffice ? continueInAddCase(record, rights) : "",

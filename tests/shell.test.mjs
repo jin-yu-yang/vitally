@@ -755,9 +755,15 @@ test("app.mjs wires the version-2 Add a case", () => {
   assert.match(app, /"open-cases": \(\) => \{\s+formDrafts\.clear\(\);\s+controller\.navigate\("office-cases"\);/);
   assert.match(app, /"open-add-case": async \(\) => \{\s+formDrafts\.clear\(\);\s+await controller\.openAddCase\(\);/);
   assert.match(handler("continue-add-case"), /controller\.openAddCase\(\{ caseId: target\.dataset\.caseId \}\)/);
+  // Pressing the pressed side does nothing: no leave dialog, no draft clear.
+  const sw = handler("set-workspace-side");
+  assert.match(sw, /if \(target\.getAttribute\("aria-pressed"\) === "true"\) break;\s+if \(leaveAddCaseFirst\("set-workspace-side", target\)\) break;/);
+  assert.match(sw, /EXITS\["set-workspace-side"\]\(target\.dataset\.side\)/);
+  // The confirm hands the pressed side on to the exit.
+  assert.match(handler("confirm-leave-add-case"), /const side = state\.dialogContext\?\.side;[\s\S]*await exit\(side\);/);
   const confirm = handler("confirm-leave-add-case");
   assert.match(confirm, /EXITS\[state\.dialogContext\?\.to\]/);
-  assert.match(app, /openDialog\("leave-add-case", \{ to: action \}, describeFocus\(target\)\)/);
+  assert.match(app, /openDialog\("leave-add-case", \{ to: action, side: target\?\.dataset\?\.side \}, describeFocus\(target\)\)/);
   // Both version-2 forms share the wiring; each control selector names its form.
   assert.match(app, /const V2_FORMS = "#intake-v2-form, #add-case-v2-form";/);
   assert.match(app, /const V2_CONTROLS = "#intake-v2-form \[data-control\]\[data-q\], #add-case-v2-form \[data-control\]\[data-q\]";/);
@@ -1661,6 +1667,22 @@ test("strip: is inside .app-main and outside the sidebar, and stays when the sid
     assert.equal(strip, main + '<div class="app-main">'.length);
     const aside = html.match(/<aside[\s\S]*?<\/aside>/)[0];
     assert.doesNotMatch(aside, /check-in-strip/);
+  }
+});
+
+test("strip: shows on both sides for a person with Office and Cases", () => {
+  const both = ["admin", "review"];
+  for (const workspaceSide of ["office", "cases"]) {
+    const html = staffScreen(
+      stripState({
+        principal: { access: "staff", personId: "person-riley", clearance: cleared({ capabilities: both }) },
+        people: [{ id: "person-riley", name: "Riley Park", capabilities: both }],
+        workspaceSide,
+      }),
+    );
+    assert.match(html, /role="group" aria-label="Workspace"/, `switch shows (${workspaceSide})`);
+    assert.match(html, new RegExp(workspaceSide === "office" ? "Follow-ups</h1>" : "Work board</h1>"));
+    assert.match(html, /<div class="app-main"><div class="check-in-strip">/, `strip shows (${workspaceSide})`);
   }
 });
 

@@ -8388,7 +8388,9 @@ test("a screening start refused NOT_CLEARED switches the window to the setup scr
   controller.stop();
 });
 
-test("a ceiling admin whose only role is Intaker gets Volunteers, and none of the office admin's screens", async () => {
+// Change add-workspace-switch: an Intaker is office-capable, so the Office side
+// draws Follow-ups and the office case page; All cases stays the admin's.
+test("a ceiling admin whose only role is Intaker gets Volunteers and Follow-ups, and none of the office admin's screens", async () => {
   const store = rosterStore({
     people: [{ id: "person-sam", name: "Sam", capabilities: ["admin", "followup", "assist", "receive_documents"] }],
     clearance: { cleared: true, missing: [], capabilities: ["assist", "receive_documents"], isAdmin: true, siteCoordinatorName: null },
@@ -8399,14 +8401,15 @@ test("a ceiling admin whose only role is Intaker gets Volunteers, and none of th
   const board = staffScreen(controller.getState());
   assert.match(board, /data-action="open-volunteers"/);
   assert.doesNotMatch(board, /data-action="open-cases"/);
-  assert.doesNotMatch(board, /Follow-ups/);
-  assert.match(board, /Work board/);
+  assert.match(board, /Follow-ups/);
+  assert.doesNotMatch(board, /Work board/);
+  assert.doesNotMatch(board, /data-action="open-add-case"/);
   controller.navigate("office-cases");
   assert.doesNotMatch(staffScreen(controller.getState()), /Case pool/);
   await controller.selectCase("case-a");
   const onCase = staffScreen(controller.getState());
-  assert.doesNotMatch(onCase, /OFFICE WORKSPACE/);
-  assert.match(onCase, /VOLUNTEER WORKSPACE/);
+  assert.match(onCase, /OFFICE WORKSPACE/);
+  assert.doesNotMatch(onCase, /VOLUNTEER WORKSPACE/);
   controller.navigate("office-volunteers");
   await controller.loadVolunteers();
   assert.equal(volunteerReads(store), 1);
@@ -10260,6 +10263,13 @@ test("an added Preparer role and an assignment show the preparation form after f
   store.records.set("case-a", { ...other, preparerId: "person-riley", participants: ["person-riley"], revision: 2 });
   store.nextClearance = { ...RILEY_CLEARED, capabilities: ["receive_documents", "assist", "prepare"], isAdmin: false };
   await events.emit("focus");
+  // Now on both sides: Office by default, so the preparation form is on the Cases side.
+  assert.doesNotMatch(staffScreen(controller.getState()), /Record that preparation is complete in TaxSlayer/);
+  assert.equal(controller.getState().screen, "staff-case", "the office case page stays");
+  const office = staffScreen(controller.getState());
+  assert.match(office, /role="group" aria-label="Workspace"/);
+  assert.match(office, /You&#39;re preparing this case — switch to Cases/);
+  await controller.setWorkspaceSide("cases");
   assert.match(staffScreen(controller.getState()), /Record that preparation is complete in TaxSlayer/);
   controller.stop();
 });
@@ -13306,5 +13316,248 @@ test("any other save still closes the drawer: a picked earlier volunteer with no
   assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
   assert.deepEqual(controller.getState().dialogContext, { volunteerId: "v-1" });
   assert.equal(controller.getState().volunteerAccountNotice, null);
+  controller.stop();
+});
+
+// ---------------------------------------------------------------------------
+// The workspace switch: the controller's side (change add-workspace-switch)
+// ---------------------------------------------------------------------------
+
+const SIDE_KEY = "vitally.workspace-side:p1";
+const bothSidesPeople = [{ id: "person-sam", name: "Sam", capabilities: ["admin", "prepare"] }];
+const bothSidesStore = (overrides = {}) => adminStaffStore({ people: bothSidesPeople, ...overrides });
+
+test("sign-in uses the remembered side", async () => {
+  const { controller } = build({ store: bothSidesStore(), localStorage: fakeSession({ [SIDE_KEY]: "cases" }) });
+  await controller.start();
+  assert.equal(controller.getState().workspaceSide, "cases");
+  controller.stop();
+});
+
+test("nothing remembered opens Office, also when storage throws", async () => {
+  const first = build({ store: bothSidesStore(), localStorage: fakeSession() });
+  await first.controller.start();
+  assert.equal(first.controller.getState().workspaceSide, "office");
+  first.controller.stop();
+  const blocked = {
+    getItem() { throw new Error("blocked"); },
+    setItem() { throw new Error("blocked"); },
+    removeItem() {},
+  };
+  const second = build({ store: bothSidesStore(), localStorage: blocked });
+  await second.controller.start();
+  assert.equal(second.controller.getState().workspaceSide, "office");
+  second.controller.stop();
+});
+
+test("sign-out keeps the remembered side, and a second user does not inherit it", async () => {
+  const localStorage = fakeSession({ [SIDE_KEY]: "cases" });
+  const { controller } = build({ store: bothSidesStore(), localStorage });
+  await controller.start();
+  await controller.signOut();
+  assert.equal(localStorage.raw(SIDE_KEY), "cases");
+  controller.stop();
+  const other = build({
+    store: fakeStore({
+      principal: { userId: "p2", workspaceId: "w1", access: "staff", personId: "person-sam" },
+      people: bothSidesPeople,
+    }),
+    localStorage,
+  });
+  await other.controller.start();
+  assert.equal(other.controller.getState().workspaceSide, "office");
+  other.controller.stop();
+});
+
+test("pressing Cases on a case page keeps the case and resets the tab", async () => {
+  const localStorage = fakeSession();
+  const store = bothSidesStore({ cases: [sampleCase()] });
+  const { controller } = build({ store, localStorage });
+  await controller.start();
+  await controller.selectCase("fixture-a");
+  controller.setCaseTab("contacts");
+  assert.equal(controller.getState().caseTab, "contacts");
+  await controller.setWorkspaceSide("cases");
+  const state = controller.getState();
+  assert.equal(state.screen, "staff-case");
+  assert.equal(state.selectedCaseId, "fixture-a");
+  assert.equal(state.caseTab, "overview");
+  assert.equal(state.workspaceSide, "cases");
+  assert.equal(localStorage.raw(SIDE_KEY), "cases");
+  controller.stop();
+});
+
+test("pressing Cases on All cases lands on the board; on Volunteers it stays", async () => {
+  const { controller } = build({ store: bothSidesStore(), localStorage: fakeSession() });
+  await controller.start();
+  controller.navigate("office-cases");
+  await controller.setWorkspaceSide("cases");
+  assert.equal(controller.getState().screen, "staff");
+  await controller.setWorkspaceSide("office");
+  controller.navigate("office-volunteers");
+  await controller.setWorkspaceSide("cases");
+  assert.equal(controller.getState().screen, "office-volunteers");
+  controller.stop();
+});
+
+test("pressing Cases on Add a case lands on the board and clears the office draft", async () => {
+  const { controller } = build({ store: bothSidesStore(), localStorage: fakeSession() });
+  await controller.start();
+  await controller.openAddCase();
+  assert.equal(controller.getState().screen, "office-add-case");
+  assert.equal(controller.getState().officeDraft, true);
+  await controller.setWorkspaceSide("cases");
+  const state = controller.getState();
+  assert.equal(state.screen, "staff");
+  assert.equal(state.workspaceSide, "cases");
+  assert.equal(state.officeDraft, false);
+  assert.equal(state.officeDraftCaseId, null);
+  assert.equal(state.addCaseShowMissing, false);
+  assert.equal(state.error, null);
+  controller.stop();
+});
+
+test("pressing the pressed side does nothing", async () => {
+  const localStorage = fakeSession();
+  const { controller, renders } = build({ store: bothSidesStore(), localStorage });
+  await controller.start();
+  const before = renders.count;
+  await controller.setWorkspaceSide("office");
+  assert.equal(renders.count, before, "no render");
+  assert.equal(localStorage.raw(SIDE_KEY), null, "no write");
+  controller.stop();
+});
+
+test("a person with one side has no switch: pressing does nothing", async () => {
+  const localStorage = fakeSession();
+  const { controller } = build({ store: adminStaffStore(), localStorage });
+  await controller.start();
+  await controller.setWorkspaceSide("cases");
+  assert.equal(localStorage.raw(SIDE_KEY), null);
+  controller.stop();
+});
+
+test("an admin in Cases opening a Received case starts nothing; switching to Office starts screening", async () => {
+  const store = bothSidesStore({ cases: [RECEIVED] });
+  const { controller } = build({ store, localStorage: fakeSession({ [SIDE_KEY]: "cases" }) });
+  await controller.start();
+  await controller.selectCase("case-r");
+  await tick();
+  assert.equal(startWrites(store).length, 0);
+  await controller.setWorkspaceSide("office");
+  await tick();
+  assert.equal(startWrites(store).length, 1);
+  controller.stop();
+});
+
+test("an Intaker never starts screening", async () => {
+  const store = adminStaffStore({
+    cases: [RECEIVED],
+    people: [{ id: "person-sam", name: "Sam", capabilities: ["receive_documents"] }],
+  });
+  const { controller } = build({ store, localStorage: fakeSession() });
+  await controller.start();
+  await controller.selectCase("case-r");
+  await tick();
+  assert.equal(startWrites(store).length, 0);
+  controller.stop();
+});
+
+test("the Workload is readable on Cases for an admin", async () => {
+  const store = workloadStore({
+    people: [
+      { id: "person-sam", name: "Sam Lee", capabilities: ["admin", "prepare"] },
+      { id: "v-1", name: "Mira Patel", capabilities: ["prepare"] },
+    ],
+  });
+  const { controller } = build({ store, localStorage: fakeSession({ [SIDE_KEY]: "cases" }) });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.setVolunteerTab("workload");
+  assert.equal(controller.getState().volunteerTab, "workload");
+  assert.equal(volunteerReads(store), 1);
+  controller.stop();
+});
+
+// ---------------------------------------------------------------------------
+// Capability changes mid-session (change add-workspace-switch, design D10)
+// ---------------------------------------------------------------------------
+const SIDE_KEY_RILEY = "vitally.workspace-side:user-riley";
+const writesTo = (storage) => {
+  const writes = [];
+  const set = storage.setItem;
+  storage.setItem = (key, value) => {
+    writes.push(key);
+    set(key, value);
+  };
+  return writes;
+};
+const caps = (capabilities, isAdmin = capabilities.includes("admin")) => ({ ...RILEY_CLEARED, capabilities, isAdmin });
+const sideStart = async (capabilities, remembered) => {
+  const localStorage = fakeSession(remembered ? { [SIDE_KEY_RILEY]: remembered } : {});
+  const store = staffStore({ cases: [{ ...SETUP_CASE }], clearance: caps(capabilities) });
+  const built = build({ store, localStorage });
+  await built.controller.start();
+  return { ...built, store, localStorage, writes: writesTo(localStorage) };
+};
+
+test("gaining Admin keeps the board and the storage", async () => {
+  const { controller, store, localStorage, writes } = await sideStart(["prepare"], "cases");
+  assert.equal(controller.getState().screen, "staff");
+  store.nextClearance = caps(["prepare", "admin", "followup"]);
+  await controller.checkClearance();
+  const state = controller.getState();
+  assert.equal(state.screen, "staff");
+  assert.equal(state.workspaceSide, "cases");
+  assert.match(staffScreen(state), /Work board/);
+  assert.deepEqual(writes, []);
+  assert.equal(localStorage.raw(SIDE_KEY_RILEY), "cases");
+  controller.stop();
+});
+
+test("losing the current side lands on the other", async () => {
+  const { controller, store, localStorage, writes } = await sideStart(["admin", "followup", "review"], "cases");
+  assert.equal(controller.getState().workspaceSide, "cases");
+  store.nextClearance = caps(["admin", "followup"]);
+  await controller.checkClearance();
+  assert.equal(controller.getState().workspaceSide, "office");
+  assert.deepEqual(writes, []);
+  assert.equal(localStorage.raw(SIDE_KEY_RILEY), "cases", "the remembered side is not rewritten");
+  controller.stop();
+});
+
+test("losing the other side keeps the screen", async () => {
+  const { controller, store, writes } = await sideStart(["admin", "followup", "review"], "cases");
+  await controller.selectCase("case-a");
+  store.nextClearance = caps(["followup", "review"], false);
+  await controller.checkClearance();
+  const state = controller.getState();
+  assert.equal(state.workspaceSide, "cases");
+  assert.equal(state.screen, "staff-case");
+  assert.deepEqual(writes, []);
+  controller.stop();
+});
+
+test("a reload after gaining Admin with nothing stored opens Office", async () => {
+  const first = await sideStart(["prepare"]);
+  first.store.nextClearance = caps(["prepare", "admin", "followup"]);
+  await first.controller.checkClearance();
+  assert.equal(first.localStorage.raw(SIDE_KEY_RILEY), null);
+  first.controller.stop();
+  const store = staffStore({ cases: [{ ...SETUP_CASE }], clearance: caps(["prepare", "admin", "followup"]) });
+  const second = build({ store, localStorage: first.localStorage });
+  await second.controller.start();
+  assert.equal(second.controller.getState().workspaceSide, "office");
+  second.controller.stop();
+});
+
+test("losing the Office side on All cases goes home", async () => {
+  const { controller, store } = await sideStart(["admin", "followup", "prepare"], "office");
+  controller.navigate("office-cases");
+  store.nextClearance = caps(["prepare"], false);
+  await controller.checkClearance();
+  const state = controller.getState();
+  assert.equal(state.screen, "staff");
+  assert.equal(state.workspaceSide, "cases");
   controller.stop();
 });
