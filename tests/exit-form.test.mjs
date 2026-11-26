@@ -12,6 +12,7 @@ import {
   exitFormNeedsFont,
   exitFormTaxYear,
 } from "../src/exit-form.mjs";
+import { exitFormSource } from "../src/exit-form-source.mjs";
 import { DRAFT_FONT_FIXTURES, draftFontFiles, draftFontsFor } from "../src/draft-pdf.mjs";
 
 // Fictional case and answers only.
@@ -200,19 +201,33 @@ test("Chinese in a name or the remarks is drawn with the downloaded fonts", asyn
   assert.equal((await PDFLib.PDFDocument.load(bytes)).getPageCount(), 1);
 });
 
-// What a built page draws on the line at a place: its text and font sizes.
-async function lineAt(marks, place, keep = () => true) {
+async function filledPdf(marks, formBytes) {
   const fontFiles = await draftFontFiles(draftFontsFor("zh-t"), exitFormFontFields(marks), {
     fontkit: PDFLib.fontkit,
     fetchFont: (file) => readFile(DRAFT_FONT_FIXTURES[file.url].path),
   });
-  const bytes = await buildExitFormPdf({ PDFLib, fontkit: PDFLib.fontkit, formBytes: await readFile(EXIT_FORM_FILE), fontFiles, marks });
+  return buildExitFormPdf({ PDFLib, fontkit: PDFLib.fontkit, formBytes, fontFiles, marks });
+}
+
+async function readPage(bytes, inspect) {
   const task = getDocument({ data: new Uint8Array(bytes), verbosity: 0 });
-  const { items } = await (await (await task.promise).getPage(1)).getTextContent();
-  await task.destroy();
-  const line = items.filter(
-    (item) => item.str.trim() && keep(item.str) && Math.abs(item.transform[5] - (792 - place.y)) < 1 && item.transform[4] >= place.x - 1,
-  );
+  try {
+    const doc = await task.promise;
+    return await inspect(await doc.getPage(1), doc);
+  } finally {
+    await task.destroy();
+  }
+}
+
+const textAt = (items, place) => items.filter(
+  (item) => item.str.trim() && Math.abs(item.transform[5] - (792 - place.y)) < 1 && item.transform[4] >= place.x - 1,
+);
+
+// What a built page draws on the line at a place: its text and font sizes.
+async function lineAt(marks, place) {
+  const bytes = await filledPdf(marks, await readFile(EXIT_FORM_FILE));
+  const { items } = await readPage(bytes, (page) => page.getTextContent());
+  const line = textAt(items, place);
   return { text: line.map((item) => item.str).join(""), sizes: line.map((item) => item.transform[0]), fonts: [...new Set(line.map((item) => item.fontName))] };
 }
 
@@ -256,18 +271,93 @@ test("a name Helvetica can't draw is not bold, and is drawn whole in the downloa
   assert.ok(accented.fonts.every((font) => !plain.fonts.includes(font)), JSON.stringify([plain.fonts, accented.fonts]));
 });
 
-test("Federal and State direct debit dates print in full at 9 pt (#122)", async () => {
-  const debit = { method: "efile", result: "owe", amount: "86", oweBy: "direct_debit", debitOn: "2027-04-15" };
-  const q = { exitForm: { federal: debit, state: debit, local: [] } };
-  const marks = exitFormMarks(q, CASE, "2026-11-01");
-  for (const group of ["federal", "state"]) {
-    const place = L.groups[group].debitOn;
-    const { text, sizes } = await lineAt(marks, place, (str) => /\d\d\/\d\d\/\d{4}/.test(str));
-    assert.match(text, /^\s*04\/15\/2027$/);
-    assert.ok(sizes.length && sizes.every((size) => Math.abs(size - 9) < 0.01), JSON.stringify(sizes));
-    assert.ok(place.x + place.width < L.groups[group].boxes.mail_check[0] - 5);
+const debit = (debitOn) => ({ method: "efile", result: "owe", amount: "86", oweBy: "direct_debit", debitOn });
+const DEBIT_DATES = { federal: debit("2027-04-15"), state: debit("2027-04-30"), local: [] };
+const BLANK_DATES = { federal: debit(null), state: debit(null), local: [] };
+const REVIEW = { id: "review-1", status: "approved", decidedAt: "2026-10-17T15:00:00.000Z" };
+const RETURN_TO_SIGNING = { action: "RETURN_TO_SIGNING", createdAt: "2026-11-02T15:00:00.000Z" };
+
+const dateAreas = [
+  { group: "federal", top: 280.44, underline: 302.04, bottom: 304.08, expected: "04/15/2027" },
+  { group: "state", top: 384.36, underline: 405.96, bottom: 408, expected: "04/30/2027" },
+];
+const innerDateEdge = 434.64;
+const outerDateEdge = 435.6;
+
+async function dateAreaPixels(bytes) {
+  return readPage(bytes, async (page, doc) => {
+    const scale = 4;
+    const viewport = page.getViewport({ scale });
+    const canvas = doc.canvasFactory.create(viewport.width, viewport.height);
+    try {
+      await page.render({ canvas: canvas.canvas, canvasContext: canvas.context, viewport }).promise;
+      return dateAreas.map(({ top, bottom }) => {
+        const x = 386;
+        const y = Math.floor(top) - 1;
+        const width = 51 * scale;
+        const height = (Math.ceil(bottom) + 1 - y) * scale;
+        const { data } = canvas.context.getImageData(x * scale, y * scale, width, height);
+        return { data, pixel: (px, py) => data[(Math.floor((py - y) * scale) * width + Math.floor((px - x) * scale)) * 4] };
+      });
+    } finally {
+      doc.canvasFactory.destroy(canvas);
+    }
+  });
+}
+
+test("the blank template has continuous date borders and full-length writing rules (#122)", async () => {
+  const pixels = await dateAreaPixels(await readFile(EXIT_FORM_FILE));
+  for (const [i, { group, top, underline, bottom }] of dateAreas.entries()) {
+    const { pixel } = pixels[i];
+    for (const y of [top + 0.48, bottom - 0.48]) {
+      assert.ok(pixel(430, y) < 64, `${group} horizontal border extends to the date's right end`);
+    }
+    assert.ok(pixel((innerDateEdge + outerDateEdge) / 2, top + 12) < 64, `${group} right border`);
+    assert.ok(pixel(430, underline) < 64, `${group} writing rule extends below the date`);
+    assert.ok(pixel(427, top + 12) > 240, `${group} has no old right border in its writing area`);
+    assert.ok(pixel(436.5, top + 12) > 240, `${group} has space beyond its border`);
   }
 });
+
+for (const [name, questionnaireDates, history, storedDates, populated] of [
+  ["approved review with debit dates", DEBIT_DATES, [], null, true],
+  ["approved review with undated debit", BLANK_DATES, [], null, false],
+  ["Return to signing with corrected debit dates", BLANK_DATES, [{ ...RETURN_TO_SIGNING, detail: { exitFormId: "corrected-1" } }], DEBIT_DATES, true],
+  ["Return to signing without corrected values", DEBIT_DATES, [RETURN_TO_SIGNING], null, false],
+  ["latest Return to signing without corrected values", DEBIT_DATES, [
+    { ...RETURN_TO_SIGNING, detail: { exitFormId: "corrected-1" } },
+    { ...RETURN_TO_SIGNING, createdAt: "2026-11-20T15:00:00.000Z" },
+  ], DEBIT_DATES, false],
+]) {
+  test(`${name} preserves the Federal and State date areas (#122)`, async () => {
+    const source = exitFormSource({
+      reviewerQuestionnaires: [{ reviewId: REVIEW.id, exitForm: questionnaireDates }],
+      internalHistory: history,
+      returnToSigningExitForms: storedDates ? [{ id: "corrected-1", exitForm: storedDates }] : [],
+      federalMethod: "efile", stateMethod: "efile", federalResult: "accepted", stateResult: "accepted",
+    }, REVIEW);
+    const marks = exitFormMarks(source.questionnaire, CASE, "2026-11-01");
+    const formBytes = await readFile(EXIT_FORM_FILE);
+    const bytes = await filledPdf(marks, formBytes);
+    const { items } = await readPage(bytes, (page) => page.getTextContent());
+    for (const { group, expected } of dateAreas) {
+      const place = L.groups[group].debitOn;
+      const dates = textAt(items, place).filter(({ str }) => /\d\d\/\d\d\/\d{4}/.test(str));
+      assert.deepEqual(dates.map(({ str }) => str.trim()), populated ? [expected] : [], group);
+      for (const { transform, width } of dates) {
+        assert.equal(transform[0], 9, `${group} date is 9 pt`);
+        assert.ok(transform[4] + width < innerDateEdge, `${group} date ends inside its frame`);
+      }
+    }
+    if (!populated) {
+      const template = await dateAreaPixels(formBytes);
+      const filled = await dateAreaPixels(bytes);
+      for (const [i, { group }] of dateAreas.entries()) {
+        assert.ok(filled[i].data.every((channel, j) => channel === template[i].data[j]), `${group} blank date area matches the template`);
+      }
+    }
+  });
+}
 
 test("a Local note at the front of the Remarks leaves less room for them (#122)", async () => {
   const remark = "Fictional remark ".repeat(9).trim(); // fits with no note

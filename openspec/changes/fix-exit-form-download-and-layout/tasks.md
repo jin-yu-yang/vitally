@@ -8,13 +8,13 @@
 
 ## 2. PDF template layout
 
-- [ ] 2.1 Inspect the original PDF template geometry, border widths, underlines and adjacent checkbox positions.
-- [ ] 2.2 Add or strengthen tests for full Federal and State debit dates at 9 pt.
-- [ ] 2.3 Adjust only the necessary vector geometry in src/forms/exit-form-pcdc.pdf.
-- [ ] 2.4 Update the date placement and width in src/exit-form.mjs.
-- [ ] 2.5 Remove the runtime debit-date border replacement workaround.
-- [ ] 2.6 Verify populated and blank PDF rendering, including border consistency, labels, underlines and handwriting space.
-- [ ] 2.7 Run Exit Form PDF and Return to signing regression tests.
+- [x] 2.1 Inspect the original PDF template geometry, border widths, underlines and adjacent checkbox positions.
+- [x] 2.2 Add or strengthen tests for full Federal and State debit dates at 9 pt.
+- [x] 2.3 Adjust only the necessary vector geometry in src/forms/exit-form-pcdc.pdf.
+- [x] 2.4 Update the date placement and width in src/exit-form.mjs.
+- [x] 2.5 Remove the runtime debit-date border replacement workaround.
+- [x] 2.6 Verify populated and blank PDF rendering, including border consistency, labels, underlines and handwriting space.
+- [x] 2.7 Run Exit Form PDF and Return to signing regression tests.
 
 ## 3. Blocked-popup download lifecycle
 
