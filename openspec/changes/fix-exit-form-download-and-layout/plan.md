@@ -41,14 +41,14 @@ Covers tasks.md 1.1–1.5.
 - openspec/specs/review-and-corrections/spec.md
 - Current change planning artifacts
 
-- [ ] **Step 1:** Review all six planning artifacts with the
+- [x] **Step 1:** Review all six planning artifacts with the
   user and obtain approval before implementation.
 
-- [ ] **Step 2:** Confirm the permitted implementation
+- [x] **Step 2:** Confirm the permitted implementation
   workflow. Record any approved manual fallback and
   unavailable Superpowers skills.
 
-- [ ] **Step 3:** Check branch and repository state.
+- [x] **Step 3:** Check branch and repository state.
 
   Run:
   git branch --show-current
@@ -59,7 +59,7 @@ Covers tasks.md 1.1–1.5.
   Expected: issue-122-exit-form-fixes is the active branch,
   and unrelated Issue #157 work remains safely stashed.
 
-- [ ] **Step 4:** Fetch origin/main and inspect divergence.
+- [x] **Step 4:** Fetch origin/main and inspect divergence.
 
   Run:
   git fetch origin
@@ -68,17 +68,17 @@ Covers tasks.md 1.1–1.5.
   If main has advanced, inspect and integrate it according
   to CLAUDE.md. Stop on canonical specification conflicts.
 
-- [ ] **Step 5:** Read the archived designs for:
+- [x] **Step 5:** Read the archived designs for:
   - 2026-11-03-add-exit-form-pdf
   - 2026-11-15-fix-exit-form-after-return-to-signing
   - 2026-11-20-add-exit-form-at-return-to-signing
 
-- [ ] **Step 6:** Inspect the canonical specification diff.
+- [x] **Step 6:** Inspect the canonical specification diff.
 
   Run:
   git diff origin/main HEAD -- openspec/specs/review-and-corrections/spec.md
 
-- [ ] **Step 7:** Restore only the two affected requirements
+- [x] **Step 7:** Restore only the two affected requirements
   to their current main baseline. Preserve every unrelated
   requirement.
 
@@ -86,13 +86,13 @@ Covers tasks.md 1.1–1.5.
   restoring that file from origin/main is acceptable.
   Otherwise restore the requirements individually.
 
-- [ ] **Step 8:** Validate the planning artifacts.
+- [x] **Step 8:** Validate the planning artifacts.
 
   Run:
   npx openspec validate fix-exit-form-download-and-layout --strict
   git diff --check
 
-- [ ] **Step 9:** Review and commit the approved planning
+- [x] **Step 9:** Review and commit the approved planning
   artifacts and canonical baseline correction.
 
   Suggested commit:
@@ -107,25 +107,25 @@ Covers tasks.md 2.1.
 - src/exit-form.mjs
 - tests/exit-form.test.mjs
 
-- [ ] **Step 1:** Inspect existing date placement constants,
+- [x] **Step 1:** Inspect existing date placement constants,
   font sizing and PDF generation tests.
 
-- [ ] **Step 2:** Record the original page dimensions,
+- [x] **Step 2:** Record the original page dimensions,
   document metadata, date labels, underline coordinates,
   border widths and Mail Check positions.
 
-- [ ] **Step 3:** Inspect the PDF content stream and identify
+- [x] **Step 3:** Inspect the PDF content stream and identify
   the exact drawing operations responsible for the Federal
   and State date areas.
 
-- [ ] **Step 4:** Measure the width of a complete debit date
+- [x] **Step 4:** Measure the width of a complete debit date
   using the same Helvetica Bold font at 9 pt.
 
-- [ ] **Step 5:** Determine the minimum geometry adjustment
+- [x] **Step 5:** Determine the minimum geometry adjustment
   that accommodates the date and preserves adjacent
   content.
 
-- [ ] **Step 6:** Save a baseline rendering of the original
+- [x] **Step 6:** Save a baseline rendering of the original
   template outside the repository for visual comparison.
 
 If a temporary editing tool is required, obtain approval
@@ -146,11 +146,11 @@ Covers tasks.md 2.2–2.7.
 - tests/exit-form.test.mjs
 - tests/exit-form-source.test.mjs
 
-- [ ] **Step 1 — RED:** Strengthen the existing regression
+- [x] **Step 1 — RED:** Strengthen the existing regression
   tests to require both Federal and State dates to fit
   fully at 9 pt.
 
-- [ ] **Step 2 — RED:** Add regression coverage for blank
+- [x] **Step 2 — RED:** Add regression coverage for blank
   date areas and the absence of runtime date-border
   replacement.
 
@@ -158,7 +158,7 @@ Covers tasks.md 2.2–2.7.
   stable template properties rather than brittle
   implementation details.
 
-- [ ] **Step 3:** Run the focused PDF tests.
+- [x] **Step 3:** Run the focused PDF tests.
 
   Run:
   node --test tests/exit-form.test.mjs
@@ -167,33 +167,33 @@ Covers tasks.md 2.2–2.7.
   missing behavior. Do not claim previously passing
   date-size assertions are new failing tests.
 
-- [ ] **Step 4 — GREEN:** Adjust only the identified vector
+- [x] **Step 4 — GREEN:** Adjust only the identified vector
   geometry in src/forms/exit-form-pcdc.pdf.
 
   Preserve the original border style, date underlines,
   bilingual labels and logo.
 
-- [ ] **Step 5 — GREEN:** Update Federal and State debitOn
+- [x] **Step 5 — GREEN:** Update Federal and State debitOn
   coordinates and widths in EXIT_FORM_LAYOUT using the
   measured geometry.
 
-- [ ] **Step 6 — GREEN:** Remove the runtime debit date
+- [x] **Step 6 — GREEN:** Remove the runtime debit date
   rectangle and border-redrawing loop from buildExitFormPdf.
 
   Preserve unrelated drawing operations.
 
-- [ ] **Step 7:** Run the focused regression tests.
+- [x] **Step 7:** Run the focused regression tests.
 
   Run:
   node --test tests/exit-form.test.mjs tests/exit-form-source.test.mjs
 
-- [ ] **Step 8:** Generate fictional populated and blank
+- [x] **Step 8:** Generate fictional populated and blank
   Exit Forms.
 
   Use Federal and State dates such as 04/15/2027 and
   04/30/2027 for the populated form.
 
-- [ ] **Step 9:** Visually inspect both generated forms.
+- [x] **Step 9:** Visually inspect both generated forms.
 
   Confirm:
   - Full dates at 9 pt.
@@ -204,10 +204,10 @@ Covers tasks.md 2.2–2.7.
   - Usable handwriting space.
   - Unchanged branding and unrelated content.
 
-- [ ] **Step 10 — REFACTOR:** Remove temporary debugging
+- [x] **Step 10 — REFACTOR:** Remove temporary debugging
   code and inspect the final PDF-related diff.
 
-- [ ] **Step 11:** Review and commit the PDF changes.
+- [x] **Step 11:** Review and commit the PDF changes.
 
   Suggested commit:
   fix(exit-form): correct debit date template geometry
@@ -223,27 +223,27 @@ Covers tasks.md 3.1–3.7.
 - tests/shell.test.mjs
 - Existing draft offer and staff-view tests
 
-- [ ] **Step 1:** Read createDraftOffer, draftLink,
+- [x] **Step 1:** Read createDraftOffer, draftLink,
   showDraftLink, viewDraft and viewExitForm.
 
-- [ ] **Step 2:** Inspect the existing expiration callback,
+- [x] **Step 2:** Inspect the existing expiration callback,
   user-switch behavior and application redraw lifecycle.
 
-- [ ] **Step 3 — RED:** Add regression tests that detect
+- [x] **Step 3 — RED:** Add regression tests that detect
   synchronous anchor removal and incorrect stale-offer
   cleanup.
 
-- [ ] **Step 4 — RED:** Cover user, case and review
+- [x] **Step 4 — RED:** Cover user, case and review
   mismatches, expiration, regeneration and unauthorized
   client access.
 
-- [ ] **Step 5:** Run the relevant existing test files and
+- [x] **Step 5:** Run the relevant existing test files and
   confirm that the new assertions detect the defect.
 
   Locate relevant tests with:
   git grep -nE 'createDraftOffer|draftLink|showDraftLink|exit-form-ready' -- tests
 
-- [ ] **Step 6 — GREEN:** Preserve native anchor download
+- [x] **Step 6 — GREEN:** Preserve native anchor download
   behavior and remove synchronous anchor replacement
   from the Exit Form click path.
 
@@ -256,7 +256,7 @@ Covers tasks.md 3.1–3.7.
   This is not the final implementation until cleanup
   and authorization tests pass.
 
-- [ ] **Step 7:** Implement safe cleanup of used and
+- [x] **Step 7:** Implement safe cleanup of used and
   expired links without interrupting the native download.
 
   Account for the fact that drop() clears the offer
@@ -266,16 +266,16 @@ Covers tasks.md 3.1–3.7.
   Do not allow an old cleanup callback to remove a
   newly generated offer.
 
-- [ ] **Step 8:** Preserve ordinary Draft 13614-C behavior.
+- [x] **Step 8:** Preserve ordinary Draft 13614-C behavior.
 
   Keep any Exit Form-specific cleanup scoped to Exit Form
   links unless a shared change is justified and tested.
 
-- [ ] **Step 9:** Verify that authorized volunteers without
+- [x] **Step 9:** Verify that authorized volunteers without
   contact access receive the download offer beside the
   matching Exit Form button.
 
-- [ ] **Step 10:** Run the focused shell, draft offer and
+- [x] **Step 10:** Run the focused shell, draft offer and
   staff-view tests.
 
   Run:
@@ -283,10 +283,10 @@ Covers tasks.md 3.1–3.7.
 
   Also run the draft offer test file identified in Step 5.
 
-- [ ] **Step 11 — REFACTOR:** Review security boundaries,
+- [x] **Step 11 — REFACTOR:** Review security boundaries,
   stale-link behavior and unintended shared changes.
 
-- [ ] **Step 12:** Review and commit the lifecycle fix.
+- [x] **Step 12:** Review and commit the lifecycle fix.
 
   Suggested commit:
   fix(exit-form): preserve native fallback downloads
@@ -298,16 +298,16 @@ Covers tasks.md 4.1–4.7.
 **Files:**
 - tests/browser.mjs
 
-- [ ] **Step 1:** Locate the existing Exit Form browser phase.
+- [x] **Step 1:** Locate the existing Exit Form browser phase.
 
   Run:
   git grep -nE 'exit-form-ready-link|Exit Form|exitForm' -- tests/browser.mjs
 
-- [ ] **Step 2:** Identify Chrome-only preview conditions
+- [x] **Step 2:** Identify Chrome-only preview conditions
   and the browser engine assigned to staff in each
   browser story permutation.
 
-- [ ] **Step 3 — RED:** Add actual download verification
+- [x] **Step 3 — RED:** Add actual download verification
   to the blocked-popup path.
 
   Adapt the project's existing Playwright pattern:
@@ -330,26 +330,26 @@ Covers tasks.md 4.1–4.7.
   Use the existing test's actual variables and fixtures.
   Do not introduce undefined identifiers.
 
-- [ ] **Step 4:** Move blocked-popup coverage outside
+- [x] **Step 4:** Move blocked-popup coverage outside
   Chrome-only preview guards while preserving preview,
   failure and retry behavior.
 
-- [ ] **Step 5:** Exercise both Chrome staff and Firefox
+- [x] **Step 5:** Exercise both Chrome staff and Firefox
   staff download paths using fictional client data.
 
-- [ ] **Step 6:** Verify the matching download area,
+- [x] **Step 6:** Verify the matching download area,
   expected filename and unchanged case stage and revision.
 
-- [ ] **Step 7:** Exercise the authorized volunteer path
+- [x] **Step 7:** Exercise the authorized volunteer path
   without contact-detail access.
 
-- [ ] **Step 8:** Verify expiration, regeneration and
+- [x] **Step 8:** Verify expiration, regeneration and
   relevant user, case and review isolation behavior.
 
-- [ ] **Step 9:** Ensure font routes and window.open
+- [x] **Step 9:** Ensure font routes and window.open
   overrides are restored even when a test fails.
 
-- [ ] **Step 10:** Run browser tests using the documented
+- [x] **Step 10:** Run browser tests using the documented
   project setup.
 
   Run:
@@ -359,14 +359,14 @@ Covers tasks.md 4.1–4.7.
   exact blocker and use CI evidence only as permitted
   by CLAUDE.md.
 
-- [ ] **Step 11:** Verify that both staff browser engines
+- [x] **Step 11:** Verify that both staff browser engines
   actually executed the new assertions.
 
   A skipped Firefox phase is not passing Firefox coverage.
 
-- [ ] **Step 12:** Review browser screenshots and evidence.
+- [x] **Step 12:** Review browser screenshots and evidence.
 
-- [ ] **Step 13:** Commit the browser test changes.
+- [x] **Step 13:** Commit the browser test changes.
 
   Suggested commit:
   test(exit-form): verify fallback downloads in both browsers
@@ -375,43 +375,43 @@ Covers tasks.md 4.1–4.7.
 
 Covers tasks.md 5.1–5.7.
 
-- [ ] **Step 1:** Review the complete diff against design.md
+- [x] **Step 1:** Review the complete diff against design.md
   and the delta specifications.
 
-- [ ] **Step 2:** Run the full unit test suite.
+- [x] **Step 2:** Run the full unit test suite.
 
   Run:
   npm test
 
-- [ ] **Step 3:** Run applicable browser regression tests
+- [x] **Step 3:** Run applicable browser regression tests
   or collect the permitted equivalent CI evidence.
 
-- [ ] **Step 4:** Confirm the corrected Exit Form tab title
+- [x] **Step 4:** Confirm the corrected Exit Form tab title
   and Return to signing behavior remain intact.
 
-- [ ] **Step 5:** Inspect PDF visual evidence for populated
+- [x] **Step 5:** Inspect PDF visual evidence for populated
   and blank date fields.
 
-- [ ] **Step 6:** Validate OpenSpec artifacts.
+- [x] **Step 6:** Validate OpenSpec artifacts.
 
   Run:
   npx openspec validate fix-exit-form-download-and-layout --strict
   npx openspec validate --all --json
 
-- [ ] **Step 7:** Inspect the implementation diff.
+- [x] **Step 7:** Inspect the implementation diff.
 
   Run:
   git diff --check
   git diff origin/main HEAD --stat
   git status --short
 
-- [ ] **Step 8:** Confirm there are no unrelated database,
+- [x] **Step 8:** Confirm there are no unrelated database,
   RPC, dependency, workflow or branding changes.
 
-- [ ] **Step 9:** Update tasks.md and plan.md checkboxes
+- [x] **Step 9:** Update tasks.md and plan.md checkboxes
   only when the corresponding work is verified.
 
-- [ ] **Step 10:** Commit remaining reviewed implementation
+- [x] **Step 10:** Commit remaining reviewed implementation
   changes and record the relevant commit range.
 
 ## Post-implementation lifecycle
