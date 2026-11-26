@@ -1,7 +1,7 @@
 # Verification Report
 
-**Change**: `fix-exit-form-download-and-layout`  
-**Verified at**: 2026-11-26, America/New_York  
+**Change**: `fix-exit-form-download-and-layout`
+**Verified at**: 2026-11-26, America/New_York
 **Verifier**: Codex with independent Superpowers task and branch reviews
 
 ## 1. Structural validation

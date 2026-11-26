@@ -1,6 +1,6 @@
 # Retrospective
 
-**Change**: `fix-exit-form-download-and-layout`  
+**Change**: `fix-exit-form-download-and-layout`
 **Written**: 2026-11-26 after Verify passed with warnings
 
 ## 0. Evidence
