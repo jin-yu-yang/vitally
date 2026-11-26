@@ -3357,8 +3357,8 @@ async function runPermutation(t, roles) {
             assert.equal((await draftBytes(again)).subarray(0, 5).toString("latin1"), "%PDF-", "Try again did not make the Exit Form");
             await again.close();
           } else {
-            // Attached, not visible: the link lives in the Intake answers tab (#122).
-            await staff.locator("#draft-ready-link").waitFor({ state: "attached", timeout: ARRIVAL_MS });
+            // The Exit Form fallback is visible beside its download button (#122).
+            await staff.locator("#exit-form-ready-link").waitFor({ state: "visible", timeout: ARRIVAL_MS });
           }
           await waitFor(
             staff,
@@ -3368,9 +3368,8 @@ async function runPermutation(t, roles) {
             ARRIVAL_MS,
           );
 
-          // A blocked tab. Known problem, #122: this records what happens, not
-          // what we want. The link is drawn in the Intake answers tab, so the
-          // office, pressing the button on Overview, sees nothing and no error.
+          // A blocked tab must offer a visible Exit Form download link
+          // beside the button on Overview (#122).
           await staff.evaluate(() => {
             window.__vitallyOpen = window.open;
             window.open = () => null;
@@ -3378,16 +3377,19 @@ async function runPermutation(t, roles) {
           await openCaseTab(staff, "overview");
           await waitForQuiet(staff);
           await staff.locator('[data-action="view-exit-form"]').first().click({ timeout: CLICK_MS });
-          await waitFor(staff, "the Exit Form link", () => Boolean(document.querySelector("#case-panel-intake #draft-ready a")), undefined, ARRIVAL_MS);
-          const link = staff.locator("#case-panel-intake #draft-ready a");
+          const link = staff.locator("#exit-form-ready-link");
+          await link.waitFor({ state: "visible", timeout: ARRIVAL_MS });
           assert.equal(
             await staff.locator('.notice.error:has-text("The Exit Form could not be made")').count(),
             0,
             "a blocked tab showed the Exit Form error",
           );
-          assert.equal(await link.isVisible(), false, "the blocked-tab link is visible from Overview");
-          await openCaseTab(staff, "intake");
-          assert.equal(await link.isVisible(), true, "the blocked-tab link is not on the Intake answers tab");
+          assert.equal(await link.isVisible(), true, "the blocked-tab link is not visible from Overview");
+          assert.equal(
+            await link.evaluate((a) => Boolean(a.closest("[data-exit-form-ready]"))),
+            true,
+            "the fallback link is not in the Exit Form download area",
+          );
           const blocked = await link.evaluate((a) => ({ download: a.download, blob: a.href.startsWith("blob:") }));
           await staff.evaluate(() => {
             window.open = window.__vitallyOpen;
@@ -3402,7 +3404,7 @@ async function runPermutation(t, roles) {
           exitForm = {
             opened: "one page with the season, client number, name, amount and a date",
             failure: "tab and error notice said so; Try again " + (again ? "opened a new tab" : "offered the link"),
-            blocked: `${blocked.download}, a link only on the Intake answers tab (#122)`,
+            blocked: `${blocked.download}, a visible link beside the Exit Form button (#122)`,
           };
         } finally {
           await staff.evaluate(() => { if (window.__vitallyOpen) window.open = window.__vitallyOpen; }).catch(() => {});
