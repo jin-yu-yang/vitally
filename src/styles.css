@@ -7296,7 +7296,8 @@ button.schedule-shift {
   padding: 0;
   list-style: none;
 }
-.check-in-note {
+.check-in-note,
+.shift-note {
   margin: 0 0 8px;
 }
 /* The shift drawer: the volunteer picker, then role, start and end. */

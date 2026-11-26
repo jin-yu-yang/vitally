@@ -269,6 +269,12 @@ export function shiftDrawer(state) {
               .join("")}</ul>`
           : `<p class="muted">No one on this season's roster has a role yet.</p>`
       }</fieldset>`;
+  // A saved shift on a closed day (#275) can be removed but not moved: there
+  // are no open hours to offer, and the database refuses its hours.
+  const closedNote =
+    edit && !day.hours
+      ? `<p class="shift-note muted">The site is closed this day, so this shift can't move to other hours here. To move it, remove it and add it on an open day.</p>`
+      : "";
   // The volunteer's current roles, and in an edit the shift's own.
   const roles = [...new Set([...(chosen?.roles ?? []), ...(edit && drawer.role ? [drawer.role] : [])])];
   const roleSelect = roles.length
@@ -279,7 +285,7 @@ export function shiftDrawer(state) {
   const remove = edit
     ? button("Remove shift", "remove-shift", "text danger-text", `data-shift-id="${esc(drawer.shiftId)}"${disabled(busy)}`)
     : "";
-  return `<form id="shift-form" class="staff-form shift-form" novalidate>${intro}<label class="field" for="shift-role"><span>Role</span>${roleSelect}</label><div class="shift-hours"><label class="field" for="shift-start"><span>Start</span><select id="shift-start" name="startHour"${disabled(
+  return `<form id="shift-form" class="staff-form shift-form" novalidate>${intro}${closedNote}<label class="field" for="shift-role"><span>Role</span>${roleSelect}</label><div class="shift-hours"><label class="field" for="shift-start"><span>Start</span><select id="shift-start" name="startHour"${disabled(
     busy,
   )}>${hourOptions(day.hours, drawer.startHour)}</select></label><label class="field" for="shift-end"><span>End</span><select id="shift-end" name="endHour"${disabled(
     busy,

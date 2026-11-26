@@ -213,6 +213,14 @@ test("shift drawer: a closed day's shift opens with its own hours and Remove shi
   assert.match(html, /<select id="shift-start"[^>]*><option value="17" selected>5 pm<\/option><\/select>/);
   assert.match(html, /<select id="shift-end"[^>]*><option value="20" selected>8 pm<\/option><\/select>/);
   assert.match(html, /data-action="remove-shift"/);
+  // It says why the hours can't change, and how to move it.
+  assert.match(html, /<p class="shift-note muted">The site is closed this day, so this shift can't move to other hours here\. To move it, remove it and add it on an open day\.<\/p>/);
+  // Not on an open day, nor for a new shift.
+  const open = adminDay();
+  const edit = { mode: "edit", shiftId: "s-lia", revision: 1, volunteerId: "p-lia", name: "Lia Ruiz", role: "reviewer", startHour: 14, endHour: 17 };
+  assert.doesNotMatch(shiftDrawer(state(open, { schedule: { day: open, drawer: edit } })), /shift-note/);
+  const add = { mode: "add", shiftId: null, revision: null, volunteerId: null, name: null, role: null, startHour: 10, endHour: 13 };
+  assert.doesNotMatch(shiftDrawer(state(open, { schedule: { day: open, drawer: add } })), /shift-note/);
 });
 
 test("schedule: no site hours asks for them, with a Season settings link only for a site coordinator", () => {
