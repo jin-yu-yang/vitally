@@ -182,8 +182,10 @@ and download usability, not tax workflow semantics.
 
 ### D7: Update requirements through OpenSpec archive
 
-**Choice:** Create complete MODIFIED requirements for
-the affected review-and-corrections requirements.
+**Choice:** Replace the two affected review-and-corrections requirements
+with two descriptively named successors. The team approved a
+one-time ADDED and REMOVED exception because OpenSpec 1.17.0
+rejects replacement scenario headings in MODIFIED blocks.
 
 Restore the previous canonical requirement baseline
 before archive applies the new deltas.

@@ -1,10 +1,10 @@
 ## 1. Preparation and baseline
 
-- [ ] 1.1 Confirm the approved planning artifacts and permitted manual implementation workflow.
-- [ ] 1.2 Confirm the branch, latest main baseline and preservation of unrelated work.
-- [ ] 1.3 Read the relevant archived Exit Form and Return to signing designs.
-- [ ] 1.4 Restore the two affected canonical requirements to their current main baseline before archive.
-- [ ] 1.5 Confirm that no unrelated requirements or source files are changed.
+- [x] 1.1 Confirm the approved planning artifacts and permitted manual implementation workflow.
+- [x] 1.2 Confirm the branch, latest main baseline and preservation of unrelated work.
+- [x] 1.3 Read the relevant archived Exit Form and Return to signing designs.
+- [x] 1.4 Restore the two affected canonical requirements to their current main baseline before archive.
+- [x] 1.5 Confirm that no unrelated requirements or source files are changed.
 
 ## 2. PDF template layout
 

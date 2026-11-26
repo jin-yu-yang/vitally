@@ -288,19 +288,21 @@ ViTally SHALL offer "Download Exit Form" for an approved review that has a revie
 ### Requirement: Staff make the Exit Form in the browser and nothing is kept
 Only a staff window SHALL be able to make the Exit Form. The form SHALL be built in the browser from the approved review's questionnaire and the case, or, after a Return to signing, from the case alone (see "The Exit Form after a Return to signing prints only what ViTally holds"). It SHALL NOT be uploaded or stored. Pressing "Download Exit Form" SHALL open the PDF in a new tab. If the form can't be made, the tab SHALL say "The Exit Form could not be made. Close this tab and try again.", the case page's error notice SHALL say "The Exit Form could not be made. Try again.", and the notice's Try again SHALL build it again. Making the form SHALL NOT change the case.
 
-If the browser blocks the tab, ViTally SHALL offer the finished PDF as a download link beside the matching Download Exit Form button, named `exit-form-<client number>.pdf`, without requiring access to contact details. The link SHALL be scoped to its maker, case and review, and SHALL expire after about 60 seconds. The page SHALL explain how to regenerate it. The tab SHALL NOT switch.
+If the browser blocks the tab, ViTally SHALL show no error, and SHALL draw the finished PDF as a link in the case page's Intake answers tab, named `exit-form-<client number>.pdf`. The link SHALL stop working after about 60 seconds. The tab SHALL NOT switch.
+
+Known problem, see #122: the button is on the Overview tab, so a person who presses it can't see the link where they are. A volunteer who may not see the case's contact details has no place for the link, so they get no link and no error. This records current behaviour, not the intended one.
 
 #### Scenario: The form opens in a new tab
 - **WHEN** a reviewer presses "Download Exit Form" on an approved review
 - **THEN** a new tab shows a one-page PDF, and the case's stage and revision are unchanged
 
-#### Scenario: A blocked tab offers the link beside the button
+#### Scenario: A blocked tab draws the link in the Intake answers tab (known problem, #122)
 - **WHEN** the office presses "Download Exit Form" on the Overview tab and the browser blocks the new tab
-- **THEN** a download link appears beside the button without switching tabs
+- **THEN** no error shows and no link can be seen on the Overview tab, and the Intake answers tab, once selected, shows a link named `exit-form-<client number>.pdf`
 
-#### Scenario: Contact access is not needed for the Exit Form link
-- **WHEN** a volunteer who may not see the case's contact details uses an available Exit Form button and the browser blocks the tab
-- **THEN** the same download link is offered beside that button
+#### Scenario: A volunteer not on the case gets no link (known problem, #122)
+- **WHEN** a volunteer who may not see the case's contact details opens the case
+- **THEN** the page has no place for the link
 
 #### Scenario: The link stops working
 - **WHEN** about 60 seconds have passed since the form was made
@@ -366,9 +368,9 @@ Known problem, see #122: if the font can't be fetched or fails its check, no Exi
 - **THEN** no form is made, and the tab and the error notice say so
 
 ### Requirement: The Exit Form's values fit their places
-Filled values SHALL be drawn in bold, except a value with a character Helvetica can't draw (Chinese, or a letter like "ễ" or "Ł"), which SHALL be drawn entirely in the downloaded font. The tax year, the date, the client number, the name and the amounts SHALL start larger than the form's 12 pt English labels. The Remarks SHALL start at 12 pt, and a debit date at 9 pt. A value wider than its place SHALL be drawn smaller, down to 6 pt, and if it still doesn't fit, SHALL be cut and end in "…". This applies to filled values, and most affects the Remarks, which are drawn on one line. Federal and State debit dates SHALL fit in full at 9 pt.
+Filled values SHALL be drawn in bold, except a value with a character Helvetica can't draw (Chinese, or a letter like "ễ" or "Ł"), which SHALL be drawn entirely in the downloaded font. The tax year, the date, the client number, the name and the amounts SHALL start larger than the form's 12 pt English labels. The Remarks SHALL start at 12 pt, and a debit date at 9 pt. A value wider than its place SHALL be drawn smaller, down to 6 pt, and if it still doesn't fit, SHALL be cut and end in "…". This applies to every value, and most affects the Remarks, which are drawn on one line, and the debit date, whose place holds a full date only at 6.5 pt.
 
-Known problem, see #122: the reviewer may enter up to 2000 characters of Remarks, which can be more than the line holds, and the reviewer is not told when the rest is cut. This records current behaviour, not the intended one.
+Known problem, see #122: the reviewer may enter up to 2000 characters of Remarks, which can be more than the line holds, and the reviewer is not told when the rest is cut. A debit date at 6.5 pt is hard to read on a form for clients. This records current behaviour, not the intended one.
 
 #### Scenario: Header values and amounts are bold and larger than the labels
 - **WHEN** the form shows a tax year, a date, a client number, the name Mei Chen and a Federal amount
@@ -378,9 +380,9 @@ Known problem, see #122: the reviewer may enter up to 2000 characters of Remarks
 - **WHEN** the taxpayer's first name has a character Helvetica can't draw
 - **THEN** the whole name is drawn in the downloaded font, not in bold
 
-#### Scenario: A debit date is readable
-- **WHEN** the form shows the Federal or State debit date 04/15/2027
-- **THEN** the full date is drawn at 9 pt
+#### Scenario: A debit date is drawn small (known problem, #122)
+- **WHEN** the form shows the debit date 04/15/2027
+- **THEN** it is drawn at 6.5 pt
 
 #### Scenario: A short remark is drawn whole
 - **WHEN** the Remarks are "Bring the corrected W-2."

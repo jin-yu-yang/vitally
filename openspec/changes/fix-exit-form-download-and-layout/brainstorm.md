@@ -183,7 +183,8 @@ The two affected requirements are:
 - The Exit Form's values fit their places.
 
 Restore the canonical baseline for these requirements
-before archive applies the complete MODIFIED deltas.
+before archive applies the team-approved requirement replacements.
+Each REMOVED entry records its successor under Migration.
 
 Preserve unrelated scenarios and known-problem notes.
 
