@@ -42,7 +42,7 @@ import {
 import { volunteerTabs, renderWorkload, assignDrawerBody, assignDrawerTitle, DEFAULT_WORKLOAD_SORT } from "./workload-views.mjs";
 import { workloadRows, unassignedCases, candidates } from "./volunteer-workload.mjs";
 import { returningCandidates } from "./volunteer-roster.mjs";
-import { awaitingClearance, ceilingAdmin, scheduleViewer, siteCoordinator } from "./clearance.mjs";
+import { awaitingClearance, workspaceAdmin, scheduleViewer, siteCoordinator } from "./clearance.mjs";
 import { setupScreen, siteCheckScreen } from "./setup-views.mjs";
 import { myProfilePage } from "./profile-views.mjs";
 import {
@@ -380,7 +380,7 @@ export function staffSidebar(
 const OFFICE_SCREENS = ["office-cases", "office-add-case", "office-volunteers", "office-updates", "office-settings"];
 // The workspace admin's screens, cleared or not: the Roster, Post an update and
 // Season settings.
-const CEILING_SCREENS = ["office-volunteers", "office-updates", "office-settings"];
+const WORKSPACE_ADMIN_SCREENS = ["office-volunteers", "office-updates", "office-settings"];
 
 // The Follow-ups queue reads the cases and the help requests; it is ready only
 // when both are (a list that was never given counts as loaded).
@@ -467,7 +467,7 @@ const seasonSettingsPage = (state) =>
       ui: { ...(state.seasonSettingsUi ?? {}), busy: state.busy === true },
     }),
   );
-const ceilingPage = (state) =>
+const workspaceAdminPage = (state) =>
   state.screen === "office-updates"
     ? postUpdatePage(state)
     : state.screen === "office-settings"
@@ -479,14 +479,14 @@ export function staffScreen(state) {
   const person =
     people.find((entry) => entry.id === state.principal?.personId) ?? null;
   // The office screens follow the effective capabilities; the Roster follows
-  // the ceiling (design D10), so an admin can record their own roles.
+  // the workspace admin flag (design D10), so an admin can record their own roles.
   // The side decides the frame (change add-workspace-switch, D5); capabilities
   // still decide All cases, the Workload and Add a case.
   const admin = isAdmin(person);
   const canSwitch = hasWorkspaceSwitch(state.principal, person);
   const side = workspaceSide(state.principal, person, state.workspaceSide);
   const office = side === "office";
-  const volunteers = ceilingAdmin(state.principal);
+  const volunteers = workspaceAdmin(state.principal);
   // The Schedule is every schedule viewer's, cleared or not (design D11).
   const viewer = scheduleViewer(state.principal);
   const open = state.sidebarOpen !== false;
@@ -494,11 +494,11 @@ export function staffScreen(state) {
   // Post an update, and for a schedule viewer the Schedule. No work, and no
   // My profile (a cleared window's).
   if (awaitingClearance(state)) {
-    const onCeiling = volunteers && CEILING_SCREENS.includes(state.screen);
+    const onWorkspaceAdminPage = volunteers && WORKSPACE_ADMIN_SCREENS.includes(state.screen);
     const onSchedule = viewer && state.screen === "schedule";
     return appShell({
       sidebar: staffSidebar(
-        { ...state, screen: onCeiling || onSchedule ? state.screen : "staff" },
+        { ...state, screen: onWorkspaceAdminPage || onSchedule ? state.screen : "staff" },
         person,
         false,
         { volunteers, board: false, schedule: viewer, side },
@@ -508,8 +508,8 @@ export function staffScreen(state) {
       body:
         state.principal?.clearance?.siteCheck === true
           ? siteCheckScreen(state)
-          : onCeiling
-            ? ceilingPage(state)
+          : onWorkspaceAdminPage
+            ? workspaceAdminPage(state)
             : onSchedule
               ? scheduleScreen(state)
               : setupScreen(state),
@@ -517,7 +517,7 @@ export function staffScreen(state) {
     });
   }
   // A volunteer whose window was left on an office screen gets the work board.
-  // Post an update and Season settings follow the ceiling only, as the
+  // Post an update and Season settings follow the workspace admin flag only, as the
   // controller does.
   const allowed = (name) =>
     name === "office-updates" || name === "office-settings"

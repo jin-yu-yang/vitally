@@ -14,14 +14,14 @@ export const ROLE_CAPABILITIES = Object.freeze({
   admin: Object.freeze(["admin", "followup", "assist", "receive_documents"]),
 });
 
-// The union of the volunteer's roles' capabilities, within the person's
-// roster ceiling (`people.capabilities`), as the database computes it.
+// The union of the volunteer's roles' capabilities, intersected with the
+// person's recorded capabilities (`people.capabilities`).
 export function effectiveCapabilities(volunteer, person) {
-  const ceiling = new Set(person?.capabilities ?? []);
+  const personCapabilities = new Set(person?.capabilities ?? []);
   const granted = new Set();
   for (const role of volunteer?.roles ?? []) {
     for (const capability of ROLE_CAPABILITIES[role] ?? []) {
-      if (ceiling.has(capability)) granted.add(capability);
+      if (personCapabilities.has(capability)) granted.add(capability);
     }
   }
   return [...granted];

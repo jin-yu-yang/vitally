@@ -524,7 +524,7 @@ test("on the Workload tab the table replaces the Roster, with names and no Add b
   assert.match(bare, /aria-sort="descending"><button type="button"[^>]*data-key="open"/);
 });
 
-test("an uncleared ceiling admin keeps the Roster alone, even if the tab says Workload", () => {
+test("an uncleared workspace admin keeps the Roster alone, even if the tab says Workload", () => {
   const uncleared = { ...cleared({ isAdmin: true }), cleared: false, missing: [{ kind: "photoId" }] };
   const html = staffScreen(
     workloadState({
@@ -536,7 +536,7 @@ test("an uncleared ceiling admin keeps the Roster alone, even if the tab says Wo
   assert.doesNotMatch(html, /data-tab="workload"|workload-table|Lena Ortiz/);
 });
 
-test("a cleared ceiling admin without effective admin gets no Workload", () => {
+test("a cleared workspace admin without effective admin gets no Workload", () => {
   const html = staffScreen(
     workloadState({
       volunteerTab: "workload",
@@ -596,7 +596,7 @@ test("the badge shows the unread count and names it", () => {
   assert.match(entry, /<span class="nav-badge" aria-hidden="true">3<\/span>/);
 });
 
-test("a ceiling admin gets Post an update after Volunteers, and Notifications", () => {
+test("a workspace admin gets Post an update after Volunteers, and Notifications", () => {
   const html = staffScreen(baseState({ screen: "staff" }));
   assert.match(html, /data-action="open-post-update"[^>]*>(?:<svg[\s\S]*?<\/svg>)? Post an update<\/button>/);
   assert.ok(
@@ -612,7 +612,7 @@ test("a non-admin left on Post an update gets the work board", () => {
   assert.doesNotMatch(html, /OFFICE · ADMIN|update-form/);
 });
 
-test("the setup screen still has Notifications; an uncleared ceiling admin also gets Post an update", () => {
+test("the setup screen still has Notifications; an uncleared workspace admin also gets Post an update", () => {
   const uncleared = { cleared: false, missing: [{ kind: "form13615" }], capabilities: [], isAdmin: false, siteCoordinatorName: null };
   const volunteerHtml = staffScreen(
     preparerState({ principal: { userId: "u2", workspaceId: "w1", access: "staff", personId: "p-alex", clearance: uncleared }, updatesUnread: 1 }),

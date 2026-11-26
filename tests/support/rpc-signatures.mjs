@@ -734,7 +734,7 @@ export const RPC_SIGNATURES = Object.freeze([
     receiptKeys: Object.freeze(["status"]),
     args: () => ({}),
   }),
-  // Posted updates (OpenSpec change add-posted-updates): a ceiling admin writes
+  // Posted updates (OpenSpec change add-posted-updates): a workspace admin writes
   // them; every staff member reads and marks the ones addressed to them. The
   // two reads and the mark store no receipt, so their keys are their answers.
   Object.freeze({

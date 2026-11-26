@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ceilingAdmin, missingLines, reviewLine, uploadItems, siteCoordinator, withOwnCapabilities } from "../src/clearance.mjs";
+import { workspaceAdmin, missingLines, reviewLine, uploadItems, siteCoordinator, withOwnCapabilities } from "../src/clearance.mjs";
 
 const clearance = (extra = {}) => ({
   cleared: false,
@@ -35,11 +35,11 @@ test("withOwnCapabilities gives an empty list to an uncleared person with none",
   assert.deepEqual(result[0].capabilities, []);
 });
 
-test("ceilingAdmin reads isAdmin and is false without a clearance", () => {
-  assert.equal(ceilingAdmin({ clearance: clearance({ isAdmin: true }) }), true);
-  assert.equal(ceilingAdmin({ clearance: clearance() }), false);
-  assert.equal(ceilingAdmin({ access: "applicant" }), false);
-  assert.equal(ceilingAdmin(null), false);
+test("workspaceAdmin reads isAdmin and is false without a clearance", () => {
+  assert.equal(workspaceAdmin({ clearance: clearance({ isAdmin: true }) }), true);
+  assert.equal(workspaceAdmin({ clearance: clearance() }), false);
+  assert.equal(workspaceAdmin({ access: "applicant" }), false);
+  assert.equal(workspaceAdmin(null), false);
 });
 
 test("missingLines gives the copy in order: Form 13615, photo ID, then roles", () => {
