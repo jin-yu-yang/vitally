@@ -62,7 +62,7 @@ export const EXIT_FORM_LAYOUT = Object.freeze({
   groups: {
     federal: {
       amount: { x: 503, y: 246, width: 76 },
-      debitOn: { x: 390, y: 299, width: 33 },
+      debitOn: { x: 388, y: 299, width: 46 },
       boxes: {
         efile: [174, 241], paper: [281, 241],
         direct_deposit: [134, 267], check: [444, 267],
@@ -71,7 +71,7 @@ export const EXIT_FORM_LAYOUT = Object.freeze({
     },
     state: {
       amount: { x: 467, y: 350, width: 95 },
-      debitOn: { x: 390, y: 403, width: 33 },
+      debitOn: { x: 388, y: 403, width: 46 },
       boxes: {
         efile: [147.5, 345], paper: [254.5, 345],
         direct_deposit: [134, 371], check: [444, 371],
@@ -236,6 +236,43 @@ export async function buildExitFormPdf({ PDFLib, fontkit, formBytes, fontFiles =
     page.drawRectangle({ x: q.x, y: PAGE_HEIGHT - q.y - q.height, width: q.width, height: q.height, borderColor: color, borderWidth: 0.75 });
   for (const r of marks.rules ?? [])
     page.drawLine({ start: { x: r.from, y: PAGE_HEIGHT - r.y }, end: { x: r.to, y: PAGE_HEIGHT - r.y }, thickness: 0.6, color });
+  // Give the full 9 pt debit date room without moving
+  // the bilingual label or the Mail Check checkbox (#122).
+  for (const place of [
+    EXIT_FORM_LAYOUT.groups.federal.debitOn,
+    EXIT_FORM_LAYOUT.groups.state.debitOn,
+  ]) {
+    const top = place.y - 19;
+    const bottom = place.y + 5;
+    const right = 436;
+
+    // Remove the template's old right edge and date underline.
+    // Keep the original Date / 日期 label intact.
+    page.drawRectangle({
+      x: 386,
+      y: PAGE_HEIGHT - bottom - 1,
+      width: 50.5,
+      height: bottom - top + 2,
+      color: rgb(1, 1, 1),
+    });
+
+    for (const y of [top, bottom]) {
+      page.drawLine({
+        start: { x: 386, y: PAGE_HEIGHT - y },
+        end: { x: right, y: PAGE_HEIGHT - y },
+        thickness: 0.75,
+        color,
+      });
+    }
+
+    page.drawLine({
+      start: { x: right, y: PAGE_HEIGHT - top },
+      end: { x: right, y: PAGE_HEIGHT - bottom },
+      thickness: 0.75,
+      color,
+    });
+  }
+
   for (const mark of marks.text) {
     let text = mark.value;
     let size = mark.size;

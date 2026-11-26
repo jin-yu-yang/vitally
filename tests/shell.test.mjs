@@ -115,7 +115,9 @@ test("app.mjs makes the Exit Form for a staff window only, and records nothing",
   const app = read("../src/app.mjs");
   assert.match(app, /case "view-exit-form":/);
   const body = app.slice(app.indexOf("async function viewExitForm"), app.indexOf("// ---- leaving Add a case"));
-  assert.match(body, /if \(!isStaffWindow\(state\.principal\)\) return;/);
+  assert.match(body, /if \(!isStaffWindow\(state\.principal\) \|\| by !== signedInUserId\(\)\) return;/);
+  assert.match(body, /if \(by !== signedInUserId\(\)\) \{\s*if \(tab && !tab.closed\) tab.close\(\);\s*return;\s*\}/);
+  assert.match(body, /draftOffers\.offer\(\{ url, fileName: marks\.fileName, caseId: record\.id, userId: by, kind: "exit-form", reviewId \}\)/);
   assert.match(body, /spouseShown\(visible\)/);
   // What it prints follows the rule in src/exit-form-source.mjs (#173).
   assert.match(app, /exitFormSource\(record, review\)/);
@@ -418,13 +420,17 @@ test("app.mjs handles every version-2 action and no longer moves the form by ste
   assert.ok(built > 0);
   assert.ok(draft.indexOf("draftOffers.offer(") > built, "the link is offered after the build");
   const show = app.slice(app.indexOf("function showDraftLink("), app.indexOf("async function viewDraft("));
-  assert.match(show, /draftLink\(document, offer, t\("draft\.link", \{\}, screenLang\(\)\)\)/);
+  assert.match(show, /draftLink\(document, offer, offer\.kind === "exit-form"\s*\? "Exit Form ready: download PDF"\s*:\s*t\("draft\.link", \{\}, screenLang\(\)\)\)/);
+  assert.match(show, /root\.querySelector\("#draft-ready"\)/);
+  assert.match(show, /root\.querySelectorAll\("\[data-exit-form-ready\]"\)/);
+  assert.match(show, /ready\.dataset\.exitFormReady === String\(offer\.reviewId\)/);
+  assert.match(show, /if \(offer\.kind === "exit-form"\) link\.id = "exit-form-ready-link"/);
   // The offer is its maker's: any other principal (or none) ends it before
   // anything is drawn, and only that user's offer is ever drawn.
-  assert.match(show, /const userId = signedInUserId\(\);\s*draftOffers\.follow\(userId\);\s*const ready = root\.querySelector\("#draft-ready"\);/);
+  assert.match(show, /const userId = signedInUserId\(\);\s*draftOffers\.follow\(userId\);\s*const offer = draftOffers\.current\(state\.savedCase\?\.id \?\? null, userId\);/);
   assert.match(show, /draftOffers\.current\(state\.savedCase\?\.id \?\? null, userId\)/);
   assert.match(draft, /draftOffers\.offer\(\{ url, fileName: fields\.fileName, caseId, userId \}\)/);
-  assert.match(show, /addEventListener\("click", \(\) => draftOffers\.drop\(\)\)/, "an opened link is not drawn again");
+  assert.match(show, /addEventListener\("click", \(\) => \{\s*draftOffers\.drop\(\);\s*showDraftLink\(\);\s*\}\)/, "an opened link is not drawn again");
   // Showing the link comes before the render's focus restore, so a keyboard
   // user on it stays on it (it has an id: draft-pdf.mjs draftLink).
   const renderBody = app.slice(app.indexOf("function render(focus = false) {"), app.indexOf("function v2OnPage("));

@@ -256,13 +256,17 @@ test("a name Helvetica can't draw is not bold, and is drawn whole in the downloa
   assert.ok(accented.fonts.every((font) => !plain.fonts.includes(font)), JSON.stringify([plain.fonts, accented.fonts]));
 });
 
-// Known problem, #122: this records what happens, not what we want.
-test("a State direct debit date is drawn at 6.5 pt, because its place is small (#122)", async () => {
-  const q = { exitForm: { federal: null, state: { method: "efile", result: "owe", amount: "86", oweBy: "direct_debit", debitOn: "2027-04-15" }, local: [] } };
-  // The template's own words share this baseline, so keep only the date.
-  const { text, sizes } = await lineAt(exitFormMarks(q, CASE, "2026-11-01"), L.groups.state.debitOn, (str) => /\d\d\/\d\d\/\d{4}/.test(str));
-  assert.match(text, /^\s*04\/15\/2027$/);
-  assert.ok(sizes.every((size) => Math.abs(size - 6.5) < 0.01), JSON.stringify(sizes));
+test("Federal and State direct debit dates print in full at 9 pt (#122)", async () => {
+  const debit = { method: "efile", result: "owe", amount: "86", oweBy: "direct_debit", debitOn: "2027-04-15" };
+  const q = { exitForm: { federal: debit, state: debit, local: [] } };
+  const marks = exitFormMarks(q, CASE, "2026-11-01");
+  for (const group of ["federal", "state"]) {
+    const place = L.groups[group].debitOn;
+    const { text, sizes } = await lineAt(marks, place, (str) => /\d\d\/\d\d\/\d{4}/.test(str));
+    assert.match(text, /^\s*04\/15\/2027$/);
+    assert.ok(sizes.length && sizes.every((size) => Math.abs(size - 9) < 0.01), JSON.stringify(sizes));
+    assert.ok(place.x + place.width < L.groups[group].boxes.mail_check[0] - 5);
+  }
 });
 
 test("a Local note at the front of the Remarks leaves less room for them (#122)", async () => {

@@ -1753,16 +1753,30 @@ if (!config) {
     const state = controller.getState();
     const userId = signedInUserId();
     draftOffers.follow(userId);
-    const ready = root.querySelector("#draft-ready");
-    if (!ready) return;
     const offer = draftOffers.current(state.savedCase?.id ?? null, userId);
-    if (!offer) {
-      ready.replaceChildren();
-      return;
+    const draftReady = root.querySelector("#draft-ready");
+    const exitReady = [...root.querySelectorAll("[data-exit-form-ready]")];
+    draftReady?.replaceChildren();
+    for (const ready of exitReady) ready.replaceChildren();
+    if (!offer) return;
+    const matching = exitReady.filter((ready) => ready.dataset.exitFormReady === String(offer.reviewId));
+    const ready = offer.kind === "exit-form"
+      ? matching.find((element) => element.getClientRects().length) ?? matching[0]
+      : draftReady;
+    if (!ready) return;
+    const link = draftLink(document, offer, offer.kind === "exit-form"
+      ? "Exit Form ready: download PDF"
+      : t("draft.link", {}, screenLang()));
+    if (offer.kind === "exit-form") link.id = "exit-form-ready-link";
+    link.addEventListener("click", () => {
+      draftOffers.drop();
+      showDraftLink();
+    });
+    if (offer.kind === "exit-form") {
+      ready.replaceChildren(link, document.createTextNode(" (Available for 60 seconds; press Download Exit Form again if it expires.)"));
+    } else {
+      ready.replaceChildren(link);
     }
-    const link = draftLink(document, offer, t("draft.link", {}, screenLang()));
-    link.addEventListener("click", () => draftOffers.drop());
-    ready.replaceChildren(link);
   }
 
   const isoToday = () => {
@@ -2054,7 +2068,7 @@ if (!config) {
   // methods that still hold are ticked.
   async function viewExitForm(reviewId, by) {
     const state = controller.getState();
-    if (!isStaffWindow(state.principal)) return;
+    if (!isStaffWindow(state.principal) || by !== signedInUserId()) return;
     const record = state.savedCase;
     const review = (record?.reviews ?? []).find((r) => r?.id === reviewId);
     const source = exitFormSource(record, review);
@@ -2088,12 +2102,16 @@ if (!config) {
           : [],
       ]);
       const bytes = await buildExitFormPdf({ PDFLib, fontkit: PDFLib.fontkit, formBytes, fontFiles, marks });
+      if (by !== signedInUserId()) {
+        if (tab && !tab.closed) tab.close();
+        return;
+      }
       const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
       draftOffers.keep(url);
       if (tab && !tab.closed) {
         tab.location.href = url;
       } else {
-        draftOffers.offer({ url, fileName: marks.fileName, caseId: record.id, userId: signedInUserId() });
+        draftOffers.offer({ url, fileName: marks.fileName, caseId: record.id, userId: by, kind: "exit-form", reviewId });
         showDraftLink();
       }
       controller.clearError("DRAFT");
