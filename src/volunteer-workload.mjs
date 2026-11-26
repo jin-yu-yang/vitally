@@ -61,17 +61,12 @@ export function taxpayerName(answers) {
   return name || "—";
 }
 
-// Hours this week (change add-volunteer-schedule, design D9): the sum of
-// (end - start) over the person's live shifts, every role, flagged or not.
-// Given `week` ({monday, sunday}, ISO dates) only shifts dated inside it count.
-export function weekHours(shifts, personId, week = null) {
-  let hours = 0;
-  for (const shift of shifts ?? []) {
-    if (shift?.person_id !== personId) continue;
-    if (week && !(shift.shift_date >= week.monday && shift.shift_date <= week.sunday)) continue;
-    hours += Number(shift.end_hour) - Number(shift.start_hour);
-  }
-  return hours;
+// Hours this week (change add-volunteer-check-in, design D8): the minutes the
+// server counted for the person from their check-ins. `hours` is the answer's
+// `[{volunteerId, minutes}]`; anyone not in it has 0.
+export function weekMinutes(hours, personId) {
+  const entry = (hours ?? []).find((item) => item?.volunteerId === personId);
+  return Number(entry?.minutes) || 0;
 }
 
 const holdsWork = (capabilities) => capabilities.includes("prepare") || capabilities.includes("review");
@@ -83,7 +78,7 @@ const SLOT_NEEDS = Object.freeze({ preparer: "prepare", reviewer: "review" });
 // was removed (a certificate unticked, say), or a person no longer on this
 // season's roster. Such a row has `roleRemoved`: it holds at least one case in
 // a slot whose capability its person no longer has, so an admin can reassign it.
-export function workloadRows({ volunteers = [], people = [], cases = [], now = Date.now(), shifts = [], week = null } = {}) {
+export function workloadRows({ volunteers = [], people = [], cases = [], now = Date.now(), hours = [] } = {}) {
   const personById = new Map(people.map((p) => [p.id, p]));
   const listed = new Set(volunteers.map((volunteer) => volunteer.id));
   // Holders of an open case who are not on the roster, as the people list names them.
@@ -111,7 +106,7 @@ export function workloadRows({ volunteers = [], people = [], cases = [], now = D
       open: 0,
       waiting: 0,
       stalled: 0,
-      hours: weekHours(shifts, volunteer.id, week),
+      minutes: weekMinutes(hours, volunteer.id),
       cases: [],
     };
     for (const record of cases) {
@@ -153,7 +148,8 @@ export function sortRows(rows, { key = "open", dir = "desc" } = {}) {
   const sign = dir === "asc" ? 1 : -1;
   return [...rows].sort((a, b) => {
     if (key === "name") return sign * byName(a, b);
-    const diff = (a[key] ?? 0) - (b[key] ?? 0);
+    const field = key === "hours" ? "minutes" : key;
+    const diff = (a[field] ?? 0) - (b[field] ?? 0);
     return diff !== 0 ? sign * diff : byName(a, b);
   });
 }

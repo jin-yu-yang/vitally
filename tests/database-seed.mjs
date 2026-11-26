@@ -338,6 +338,7 @@ test("seed command against real Supabase", async (t) => {
           caseIds: [],
           assistanceIds: [],
           shifts: [],
+          checkInIds: [],
         });
         assert.equal(
           runFilePath(workspaceId, runDir),
@@ -357,6 +358,7 @@ test("seed command against real Supabase", async (t) => {
           caseIds: [randomUUID(), randomUUID()],
           assistanceIds: [randomUUID()],
           shifts: [{ id: randomUUID(), revision: 1 }],
+          checkInIds: [randomUUID()],
         };
         await recordRun(run, runDir);
         assert.deepEqual(await readRun(run.workspaceId, runDir), run);
@@ -378,6 +380,7 @@ test("seed command against real Supabase", async (t) => {
           caseIds: [],
           assistanceIds: [],
           shifts: [],
+          checkInIds: [],
         });
       } finally {
         await rm(runDir, { recursive: true, force: true });
@@ -1036,13 +1039,14 @@ test("seed command against real Supabase", async (t) => {
     // Change add-volunteer-schedule (spec local-seed-data, "The local seed
     // fills a week of the schedule"). Every test puts the schedule back.
     const resetSchedule = async () => {
+      await f.sql("delete from public.check_ins where workspace_id=$1", [f.workspaceId]);
       await f.sql("delete from public.shifts where workspace_id=$1", [f.workspaceId]);
       await f.sql("delete from public.schedule_settings where workspace_id=$1", [f.workspaceId]);
     };
     const liveShifts = async () =>
       (
         await f.sql(
-          `select s.id, s.revision, s.shift_date::text as date, s.start_hour, s.end_hour, s.role,
+          `select s.id, s.person_id, s.revision, s.shift_date::text as date, s.start_hour, s.end_hour, s.role,
                   p.user_id is null as no_sign_in
              from public.shifts s join public.people p on p.id=s.person_id
             where s.workspace_id=$1 and s.removed_at is null order by s.shift_date, s.start_hour, s.id`,
@@ -1080,9 +1084,27 @@ test("seed command against real Supabase", async (t) => {
         assert.ok(days.filter((d) => d.includes("sat")).length >= 2, "two usually come on Saturdays");
 
         const first = await liveShifts();
-        assert.ok(first.length >= 5 && first.length <= 8, `about six shifts, got ${first.length}`);
+        // About six in the current week, as before. Any other seeded shift is
+        // one the check-ins follow: on a past day, with a seeded check-in on it.
+        const inWeek = first.filter((s) => s.date >= monday && s.date <= sunday);
+        const extra = first.filter((s) => !(s.date >= monday && s.date <= sunday));
+        assert.ok(inWeek.length >= 5 && inWeek.length <= 8, `about six shifts this week, got ${inWeek.length}`);
+        const seededCheckIns = (
+          await f.sql(
+            `select c.person_id, c.check_in_date::text as date from public.check_ins c
+              where c.workspace_id=$1 and c.removed_at is null`,
+            [f.workspaceId],
+          )
+        ).rows;
+        assert.ok(extra.length <= 3, "at most three shifts added for check-ins");
+        for (const s of extra) {
+          assert.ok(s.date < today, `${s.date} is a past day`);
+          assert.ok(
+            seededCheckIns.some((c) => c.person_id === s.person_id && c.date === s.date),
+            "an extra shift has a seeded check-in on it",
+          );
+        }
         for (const shift of first) {
-          assert.ok(shift.date >= monday && shift.date <= sunday, `${shift.date} is outside this week`);
           const hours = settings.site_hours[isoDay(shift.date)];
           assert.ok(hours && shift.start_hour >= hours.open && shift.end_hour <= hours.close, "inside site hours");
         }
@@ -1338,6 +1360,106 @@ test("seed command against real Supabase", async (t) => {
         assert.equal((await f.sql("select count(*)::int n from public.schedule_settings where workspace_id=$1", [f.workspaceId])).rows[0].n, 0);
         assert.equal((await liveShifts()).length, 0);
         assert.equal((await readRunFile(f.workspaceId, runDir)).shifts, undefined);
+      } finally {
+        await deletePreviousRun(client, await readRun(f.workspaceId, runDir));
+        await rm(runDir, { recursive: true, force: true });
+      }
+    });
+
+    const liveCheckIns = async () =>
+      (
+        await f.sql(
+          `select c.id, c.check_in_date::text as date, c.checked_out_at, c.corrected_by_person_id,
+                  p.person_key, p.user_id is not null as signed_in,
+                  exists (select 1 from public.shifts s
+                           where s.workspace_id=c.workspace_id and s.person_id=c.person_id
+                             and s.shift_date=c.check_in_date and s.removed_at is null) as has_shift
+             from public.check_ins c join public.people p on p.id=c.person_id
+            where c.workspace_id=$1 and c.removed_at is null order by c.check_in_date, c.checked_in_at, c.id`,
+          [f.workspaceId],
+        )
+      ).rows;
+
+    // Each runs the seed as if "today" were that New York date (all past, so
+    // no time is ever in the future): a Monday, a Saturday and a Sunday, and
+    // the real today.
+    const realToday = async () =>
+      (await f.sql("select (now() at time zone 'America/New_York')::date::text as d")).rows[0].d;
+    for (const label of ["Monday 2026-11-16", "Saturday 2026-11-21", "Sunday 2026-11-22", "today"]) {
+      await t.test(`seed: adds check-ins on recent open days (${label})`, async () => {
+        const runDir = await tempRunDir();
+        const today = label === "today" ? await realToday() : label.split(" ")[1];
+        const args = { workspaceId: f.workspaceId, clientAEmail: f.applicantAEmail, runDir, today };
+        try {
+          await resetSchedule();
+          await seedWorkspace(args);
+          const rows = await liveCheckIns();
+          assert.ok(rows.length >= 3, "at least three check-ins");
+          assert.ok(rows.every((r) => r.date < today), "all dated before today");
+          assert.ok(rows.every((r) => r.corrected_by_person_id), "all set by the admin");
+          assert.ok(rows.some((r) => r.checked_out_at === null), "one has no check-out");
+          assert.ok(
+            rows.filter((r) => r.has_shift).length >= 3,
+            "at least three sit on their volunteer's own live shift",
+          );
+          const reviewer = rows.filter((r) => r.person_key === "reviewer");
+          assert.equal(reviewer.length, 1, "one for the reviewer account");
+          assert.equal(reviewer[0].has_shift, false, "with no shift that day");
+          const run = await readRunFile(f.workspaceId, runDir);
+          assert.deepEqual(run.checkInIds.sort(), rows.map((r) => r.id).sort());
+          // Every live shift the seed added is recorded, so a re-run removes it.
+          const shifts = await liveShifts();
+          assert.deepEqual(run.shifts.map((x) => x.id).sort(), shifts.map((x) => x.id).sort());
+          await seedWorkspace(args);
+          assert.equal((await liveCheckIns()).length, rows.length, "a re-run leaves one set");
+          assert.equal((await liveShifts()).length, shifts.length);
+        } finally {
+          await deletePreviousRun(client, await readRun(f.workspaceId, runDir));
+          await resetSchedule();
+          await rm(runDir, { recursive: true, force: true });
+        }
+      });
+    }
+
+    await t.test("seed: re-run replaces only its own check-ins", async () => {
+      const runDir = await tempRunDir();
+      const args = { workspaceId: f.workspaceId, clientAEmail: f.applicantAEmail, runDir };
+      try {
+        await resetSchedule();
+        await seedWorkspace(args);
+        const first = await liveCheckIns();
+        const intaker = (
+          await f.sql("select id from public.people where workspace_id=$1 and person_key='intaker'", [f.workspaceId])
+        ).rows[0].id;
+        const yesterday = (await f.sql("select ((now() at time zone 'America/New_York')::date-1)::text as d")).rows[0].d;
+        const { data: own, error } = await f.siteCoordinator.rpc("vitally_save_check_in", {
+          p_action_id: randomUUID(),
+          p_check_in_id: null,
+          p_expected_revision: null,
+          p_check_in: { volunteerId: intaker, date: yesterday, checkedIn: "06:00", checkedOut: "06:30" },
+        });
+        assert.equal(error, null);
+
+        await seedWorkspace(args);
+
+        const after = await liveCheckIns();
+        assert.ok(after.some((r) => r.id === own.checkInId), "the admin's check-in is still live");
+        assert.equal(after.length, first.length + 1, "one seeded set plus the admin's");
+        assert.ok(first.every((r) => !after.some((x) => x.id === r.id)), "the earlier seeded ones are replaced");
+      } finally {
+        await deletePreviousRun(client, await readRun(f.workspaceId, runDir));
+        await resetSchedule();
+        await rm(runDir, { recursive: true, force: true });
+      }
+    });
+
+    await t.test("seed: the story's seed adds no check-ins", async () => {
+      const runDir = await tempRunDir();
+      try {
+        await resetSchedule();
+        await seedCases(client, await targetsFor(), { runDir });
+        assert.equal((await f.sql("select count(*)::int n from public.check_ins where workspace_id=$1", [f.workspaceId])).rows[0].n, 0);
+        assert.equal((await readRunFile(f.workspaceId, runDir)).checkInIds, undefined);
       } finally {
         await deletePreviousRun(client, await readRun(f.workspaceId, runDir));
         await rm(runDir, { recursive: true, force: true });
