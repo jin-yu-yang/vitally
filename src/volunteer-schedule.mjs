@@ -124,15 +124,23 @@ export function orderCandidates(candidates, weekday) {
   return [...marked.filter((c) => c.usual).sort(byName), ...marked.filter((c) => !c.usual).sort(byName)];
 }
 
-// One row per volunteer, by name, each with their shifts in time order.
-export function scheduleRows(shifts) {
+// One row per volunteer with a shift or a check-in (an admin's day only;
+// change add-volunteer-check-in), by name, each with their shifts and their
+// check-ins in time order.
+export function scheduleRows(shifts, checkIns = []) {
   const rows = new Map();
-  for (const s of shifts) {
-    if (!rows.has(s.volunteerId)) rows.set(s.volunteerId, { volunteerId: s.volunteerId, name: s.name, shifts: [] });
-    rows.get(s.volunteerId).shifts.push(s);
-  }
+  const row = (entry) => {
+    if (!rows.has(entry.volunteerId)) rows.set(entry.volunteerId, { volunteerId: entry.volunteerId, name: entry.name, shifts: [], checkIns: [] });
+    return rows.get(entry.volunteerId);
+  };
+  for (const s of shifts) row(s).shifts.push(s);
+  for (const c of checkIns) row(c).checkIns.push(c);
   return [...rows.values()]
-    .map((r) => ({ ...r, shifts: r.shifts.toSorted((a, b) => a.startHour - b.startHour) }))
+    .map((r) => ({
+      ...r,
+      shifts: r.shifts.toSorted((a, b) => a.startHour - b.startHour),
+      checkIns: r.checkIns.toSorted((a, b) => Date.parse(a.checkedInAt) - Date.parse(b.checkedInAt)),
+    }))
     .sort(byName);
 }
 

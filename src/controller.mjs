@@ -1,5 +1,5 @@
 import { awaitingClearance, ceilingAdmin, scheduleViewer, withOwnCapabilities } from "./clearance.mjs";
-import { nyToday, addDays, weekBounds, SHIFT_REFUSALS, WEEKDAYS } from "./volunteer-schedule.mjs";
+import { nyToday, addDays, SHIFT_REFUSALS, WEEKDAYS } from "./volunteer-schedule.mjs";
 import {
   CASE_ACTIONS,
   ASSISTANCE_ACTIONS,
@@ -41,6 +41,7 @@ import { volunteerProblem, profileProblem, withoutLostRoles, roleNeedsMessage, o
 import { emptyUpdateForm, toUpdateRequest, validateUpdate } from "./posted-updates.mjs";
 import { nowInput } from "./contact-log.mjs";
 import { seasonRefusalLines } from "./season-settings-views.mjs";
+import { CHECK_IN_REFUSALS, hhmm } from "./volunteer-check-in.mjs";
 
 // The one place browser state lives. It owns what is loaded, what is being
 // edited, and which action envelope is in flight; it renders nothing and knows
@@ -94,6 +95,8 @@ const STAFF_SCREENS = Object.freeze([
 // schedule viewer's; its "Your shifts this week" follows a cleared window's
 // channel (design D8).
 const SCHEDULE_SCREENS = Object.freeze(["schedule"]);
+// The dialogs the Schedule opens, which go when it does.
+const SCHEDULE_DIALOGS = Object.freeze(["shift", "remove-shift", "check-in", "remove-check-in"]);
 // The admin screens an uncleared workspace admin keeps (design D10 of
 // add-volunteer-clearance, add-posted-updates and add-season-settings).
 const ADMIN_SETUP_SCREENS = Object.freeze(["office-volunteers", "office-updates", "office-settings"]);
@@ -106,6 +109,13 @@ const CLEARED_ONLY_SCREENS = Object.freeze(["my-profile"]);
 // are the only failures worth retrying with the same envelope; a refusal is
 // final and its expected revision is already stale.
 const UNKNOWN_OUTCOME = Object.freeze(["OFFLINE", "SERVER_ERROR"]);
+
+// The check-in strip's state (change add-volunteer-check-in, design D6):
+// `vitally_my_check_in`'s canCheckIn and open as last read, and whether a
+// Check in or Check out is out. Window-local, never persisted.
+const freshCheckIn = () => ({ loaded: false, canCheckIn: false, open: null, busy: false });
+// Another device already did it: the strip re-reads and says nothing.
+const QUIET_CHECK_IN_REASONS = Object.freeze(["ALREADY_CHECKED_IN", "NOT_CHECKED_IN"]);
 
 // Assistance is its own workflow: its own RPC, its own revision and its own
 // list, beside the tax case rather than inside it (Ruling R22). Its two actions
@@ -158,12 +168,18 @@ const STAFF_SEASON_MOVED_MESSAGE = "The season has already moved.";
 const freshSettingsUi = () => ({ notice: null, fieldErrors: null, sidnError: null, startRefusal: null });
 // The Schedule (change add-volunteer-schedule, design D7 and D10). Staff-only.
 const STAFF_SHIFT_CONFLICT_MESSAGE = "Someone changed this shift. The schedule has been refreshed.";
+// The same for a check-in corrected from the Schedule (change
+// add-volunteer-check-in, design D9).
+const STAFF_CHECK_IN_CONFLICT_MESSAGE = "Someone changed this check-in. The schedule has been refreshed.";
 const STAFF_SHIFT_ORDER_MESSAGE = "The shift must end after it starts.";
 const STAFF_SHIFT_VOLUNTEER_MESSAGE = "Choose a volunteer.";
 // The day on screen (null: today in New York, set when it opens), the
 // `vitally_schedule_day` answer as last read, and the open shift drawer's
 // draft. None persisted but the screen itself.
-const freshSchedule = () => ({ date: null, day: null, drawer: null });
+// `checkInDrawer` is the open check-in drawer's draft (change
+// add-volunteer-check-in): `{mode: "add" | "edit", checkInId, revision,
+// volunteerId, name, checkedIn: "HH:MM", checkedOut: "HH:MM" | null, actionId}`.
+const freshSchedule = () => ({ date: null, day: null, drawer: null, checkInDrawer: null });
 // The site hours card on Season settings: what its save says, and the
 // sentence for each field the database can name (VT007 detail).
 const STAFF_SITE_HOURS_SAVED = "Site hours saved";
@@ -423,9 +439,10 @@ export function createController({
     // tab is only ever set for a cleared, effective admin (`canSeeWorkload`).
     volunteerTab: "roster",
     workload: freshWorkloadView(),
-    // The live shifts of the week holding today, for the Workload's Hours
-    // this week (design D9); read only while the Workload is open.
-    weekShifts: [],
+    // Each volunteer's counted check-in minutes in the week holding today,
+    // `[{volunteerId, minutes}]` from `vitally_hours_this_week`, for the
+    // Workload's Hours this week (design D8); read only while the Workload is open.
+    weekHours: [],
     // Posted updates (change add-posted-updates). The feed is every staff
     // window's, cleared or not: `updates` is the RPC's items as read,
     // `updatesUnread` its own badge count (never recounted here), and
@@ -465,6 +482,8 @@ export function createController({
     // design D8): the `vitally_my_shifts` answer `{weekStart, weekEnd,
     // shifts}` as last read, or null until then. Not persisted.
     myShifts: null,
+    // The check-in strip (change add-volunteer-check-in, design D6).
+    checkIn: freshCheckIn(),
     // The caller's own workspace row, read only for a staff window: the
     // office's defaults.
     workspace: null,
@@ -1115,6 +1134,8 @@ export function createController({
         }
       // Its shifts this week too (design D8); that read never throws.
       if (state.screen === "my-profile") await readMyShifts();
+      // The check-in strip, on every screen (never throws).
+      await readMyCheckIn();
       // A wake, focus or reconnect re-reads the week too (it may have turned).
       try {
         await readWorkloadHours();
@@ -1282,20 +1303,35 @@ export function createController({
     // (a workspace change may move the season, and so every audience).
     const touchesUpdates = touchesWorkspace || change.table === "posted_updates";
     // A shift or the site hours move the day on the Schedule (design D10).
+    // So does any check-in, on an admin's day only: the read-only day shows
+    // none (change add-volunteer-check-in, design D9).
     const touchesSchedule =
       state.screen === "schedule" &&
-      (touchesWorkspace || change.table === "shifts" || change.table === "schedule_settings");
+      (touchesWorkspace ||
+        change.table === "shifts" ||
+        change.table === "schedule_settings" ||
+        (change.table === "check_ins" && state.schedule.day?.canEdit === true));
     // ... and My profile's shifts this week, which a new season changes too
     // (design D8). The site hours do not: they move no shift.
     const touchesProfile = state.screen === "my-profile" && (touchesWorkspace || change.table === "shifts");
     // The site hours card on Season settings.
     const touchesSettings = state.screen === "office-settings" && change.table === "schedule_settings";
-    // A shift moves the Workload's Hours this week (a new season too).
+    // A check-in, a shift or the site hours move the Workload's Hours this week
+    // (a new season too).
     const touchesHours =
       state.screen === "office-volunteers" &&
       state.volunteerTab === "workload" &&
-      (touchesWorkspace || change.table === "shifts");
+      (touchesWorkspace ||
+        change.table === "check_ins" ||
+        change.table === "shifts" ||
+        change.table === "schedule_settings");
+    // The caller's own check-in moved (another device, or an admin's
+    // correction): the strip re-reads. Another person's never does (D9).
+    const touchesCheckIn =
+      touchesWorkspace ||
+      (change.table === "check_ins" && Boolean(change.personId) && change.personId === state.principal?.personId);
     if (
+      !touchesCheckIn &&
       !touchesList &&
       !touchesOpen &&
       !touchesAssistance &&
@@ -1320,6 +1356,7 @@ export function createController({
       if (touchesUpdates && state.screen === "office-updates") await readPostedUpdates();
       if (touchesSchedule && state.screen === "schedule") await readScheduleDay();
       if (touchesProfile && state.screen === "my-profile") await readMyShifts();
+      if (touchesCheckIn) await readMyCheckIn();
       if (touchesSettings && state.screen === "office-settings") await readSeasonSettings();
       if (touchesHours)
         try {
@@ -1378,6 +1415,9 @@ export function createController({
         await readMyProfile();
         await readMyShifts();
       }
+      // The check-in strip: sign-in, restore, and a window that just became
+      // cleared all come through here (never throws).
+      await readMyCheckIn();
     } else {
       state.lists.assistance = "ready";
     }
@@ -1504,11 +1544,11 @@ export function createController({
     await loadVolunteers();
   }
 
-  // The Workload's Hours this week: the live shifts dated Monday to Sunday of
-  // the week holding today in New York. A failed read keeps the last hours.
+  // The Workload's Hours this week: the minutes checked in this New York week,
+  // counted by the server (design D8). A failed read keeps the last hours.
   async function readWorkloadHours() {
     if (!canSeeWorkload() || state.screen !== "office-volunteers" || state.volunteerTab !== "workload") return;
-    state.weekShifts = (await store.weekShifts(weekBounds(nyToday(clock())))) ?? [];
+    state.weekHours = (await store.hoursThisWeek())?.hours ?? [];
   }
 
 
@@ -1817,7 +1857,7 @@ export function createController({
     const from = state.schedule.date ?? nyToday(clock());
     const date =
       direction === "prev" ? addDays(from, -1) : direction === "next" ? addDays(from, 1) : nyToday(clock());
-    state.schedule = { date, day: null, drawer: null };
+    state.schedule = { date, day: null, drawer: null, checkInDrawer: null };
     state.lists = { ...state.lists, schedule: "loading" };
     state.error = null;
     dropLocalRetry();
@@ -1908,13 +1948,20 @@ export function createController({
   // (matched on `key`). After any answer the day is read again. CONFLICT
   // closes the dialog and says the schedule was refreshed; another refusal is
   // said in the dialog, which stays. Resolves to `{done, toast}` when the
-  // dialog is done with (`toast` the warning to show, or null), or null.
-  async function shiftWrite(key, makeRequest, send) {
+  // dialog is done with (`toast` the warning to show, or null), or null. A
+  // check-in write (change add-volunteer-check-in) is the same, with its own
+  // drawer, CONFLICT sentence and refusals.
+  async function shiftWrite(
+    key,
+    makeRequest,
+    send,
+    { drawer: draftKey = "drawer", conflict = STAFF_SHIFT_CONFLICT_MESSAGE, refusals = SHIFT_REFUSALS } = {},
+  ) {
     let request = pendingShiftWrite?.key === key ? pendingShiftWrite.request : null;
     pendingShiftWrite = null;
     if (!request) request = makeRequest();
-    if (state.schedule.drawer)
-      state.schedule = { ...state.schedule, drawer: { ...state.schedule.drawer, actionId: request.actionId } };
+    if (state.schedule[draftKey])
+      state.schedule = { ...state.schedule, [draftKey]: { ...state.schedule[draftKey], actionId: request.actionId } };
     state.busy = true;
     state.error = null;
     dropLocalRetry();
@@ -1922,7 +1969,7 @@ export function createController({
     const done = (toast) => {
       state.dialog = null;
       state.dialogContext = null;
-      state.schedule = { ...state.schedule, drawer: null };
+      state.schedule = { ...state.schedule, drawer: null, checkInDrawer: null };
       return { done: true, toast };
     };
     try {
@@ -1931,9 +1978,9 @@ export function createController({
       state.busy = false;
       if (UNKNOWN_OUTCOME.includes(error?.code)) pendingShiftWrite = { key, request };
       let result = null;
-      if (error?.code === "CONFLICT") result = done(STAFF_SHIFT_CONFLICT_MESSAGE);
+      if (error?.code === "CONFLICT") result = done(conflict);
       else {
-        const reason = error?.code === "VALIDATION" ? SHIFT_REFUSALS[String(error?.cause?.details ?? "")] : null;
+        const reason = error?.code === "VALIDATION" ? refusals[String(error?.cause?.details ?? "")] : null;
         noteFailure(error, reason ? { message: reason } : {});
       }
       // What the write did, or what changed under it: the day as it is now.
@@ -2038,10 +2085,148 @@ export function createController({
     );
   }
 
+  // ---- Check-ins on the Schedule (change add-volunteer-check-in, design D7) --
+  //
+  // An admin's only (the read's own `canEdit`): a bar pressed opens the
+  // check-in drawer with its times; "+ Add check-in" opens it empty, on today
+  // and past days. The drawer holds the times as "HH:MM" and sends them as it
+  // holds them, so a saved minute off the 5-minute step goes back unchanged
+  // unless it is changed (Review Focus 4).
+
+  const scheduleCheckIn = (checkInId) =>
+    (state.schedule.day?.checkIns ?? []).find((entry) => entry?.checkInId === checkInId) ?? null;
+
+  // A check-out at the midnight that ends the day reads "24:00", not "00:00".
+  const checkedOutValue = (checkIn) => {
+    if (!checkIn.checkedOutAt) return null;
+    const value = hhmm(checkIn.checkedOutAt);
+    return value === "00:00" && Date.parse(checkIn.checkedOutAt) > Date.parse(checkIn.checkedInAt) ? "24:00" : value;
+  };
+
+  function showCheckInDrawer(drawer) {
+    endNotifications();
+    state.schedule = { ...state.schedule, checkInDrawer: drawer };
+    state.dialog = "check-in";
+    state.dialogContext = { checkInId: drawer.checkInId };
+    state.error = null;
+    dropLocalRetry();
+    show();
+  }
+
+  // A check-in pressed: the drawer with its times.
+  function openCheckIn(checkInId) {
+    if (!checkInId) return openAddCheckIn();
+    if (state.screen !== "schedule" || state.schedule.day?.canEdit !== true) return;
+    const checkIn = scheduleCheckIn(checkInId);
+    if (!checkIn) return;
+    showCheckInDrawer({
+      mode: "edit",
+      checkInId: checkIn.checkInId,
+      revision: Number(checkIn.revision),
+      volunteerId: checkIn.volunteerId,
+      name: checkIn.name,
+      checkedIn: hhmm(checkIn.checkedInAt),
+      checkedOut: checkedOutValue(checkIn),
+      actionId: null,
+    });
+  }
+
+  // "+ Add check-in": today or a past day only, starting at the opening hour.
+  function openAddCheckIn() {
+    const day = state.schedule.day;
+    if (state.screen !== "schedule" || day?.canEdit !== true) return;
+    const date = state.schedule.date;
+    if (!date || date > nyToday(clock())) return;
+    const open = day.hours ? `${String(day.hours.open).padStart(2, "0")}:00` : "09:00";
+    showCheckInDrawer({
+      mode: "add",
+      checkInId: null,
+      revision: null,
+      volunteerId: null,
+      name: null,
+      checkedIn: open,
+      checkedOut: null,
+      actionId: null,
+    });
+  }
+
+  // What the drawer holds as chosen: an empty Checked out is none, a value
+  // left out keeps the drawer's own, and an edit keeps its volunteer.
+  const checkInDraftValues = (drawer, values = {}) => {
+    const edit = drawer.mode === "edit";
+    const volunteerId = edit ? drawer.volunteerId : (values.volunteerId ?? drawer.volunteerId) || null;
+    return {
+      ...drawer,
+      volunteerId,
+      name: edit ? drawer.name : (shiftCandidate(volunteerId)?.name ?? null),
+      checkedIn: values.checkedIn || drawer.checkedIn,
+      checkedOut: values.checkedOut === undefined ? drawer.checkedOut : values.checkedOut || null,
+    };
+  };
+
+  // A choice in the drawer: kept, so a redraw keeps it.
+  function editCheckInDraft(values = {}) {
+    const drawer = state.schedule.checkInDrawer;
+    if (!drawer) return;
+    state.schedule = { ...state.schedule, checkInDrawer: checkInDraftValues(drawer, values) };
+    show();
+  }
+
+  const checkInWriteOptions = Object.freeze({
+    drawer: "checkInDrawer",
+    conflict: STAFF_CHECK_IN_CONFLICT_MESSAGE,
+    refusals: CHECK_IN_REFUSALS,
+  });
+
+  // Save in the drawer: an add sends the volunteer and the day on screen, an
+  // edit only the times, at the revision the drawer opened with.
+  async function saveCheckIn(values = {}) {
+    const open = state.schedule.checkInDrawer;
+    if (state.busy || !staffWindow() || !open || state.schedule.day?.canEdit !== true) return null;
+    const drawer = checkInDraftValues(open, values);
+    state.schedule = { ...state.schedule, checkInDrawer: drawer };
+    const edit = drawer.mode === "edit";
+    if (!edit && !drawer.volunteerId) {
+      noteFailure({ code: "VALIDATION" }, { message: STAFF_SHIFT_VOLUNTEER_MESSAGE });
+      show();
+      return null;
+    }
+    const checkIn = edit
+      ? { checkedIn: drawer.checkedIn, checkedOut: drawer.checkedOut }
+      : { volunteerId: drawer.volunteerId, date: state.schedule.date, checkedIn: drawer.checkedIn, checkedOut: drawer.checkedOut };
+    const key = JSON.stringify({ saveCheckIn: drawer.checkInId, revision: drawer.revision, checkIn });
+    return await shiftWrite(
+      key,
+      () => ({
+        actionId: newActionId(),
+        checkInId: edit ? drawer.checkInId : null,
+        revision: edit ? drawer.revision : null,
+        checkIn,
+      }),
+      (request) => store.saveCheckIn(request),
+      checkInWriteOptions,
+    );
+  }
+
+  // Remove check-in, once its confirmation is pressed, at the revision read.
+  async function removeCheckIn(checkInId) {
+    if (state.busy || !staffWindow() || !checkInId || state.schedule.day?.canEdit !== true) return null;
+    const checkIn = scheduleCheckIn(checkInId);
+    const revision = Number(checkIn?.revision ?? state.schedule.checkInDrawer?.revision);
+    if (!Number.isFinite(revision)) return null;
+    const key = JSON.stringify({ removeCheckIn: checkInId, revision });
+    return await shiftWrite(
+      key,
+      () => ({ actionId: newActionId(), checkInId, revision }),
+      (request) => store.removeCheckIn(request),
+      checkInWriteOptions,
+    );
+  }
+
   // Leaving the Schedule because this person may no longer be on it: its data
   // goes with it. (My profile is main's, change add-my-profile.)
   function leaveSchedule() {
-    if (state.dialog === "shift" || state.dialog === "remove-shift") {
+    if (SCHEDULE_DIALOGS.includes(state.dialog)) {
       state.dialog = null;
       state.dialogContext = null;
     }
@@ -2099,6 +2284,83 @@ export function createController({
     } catch {
       if (state.lists.myShifts !== "ready") state.lists = { ...state.lists, myShifts: "failed" };
     }
+  }
+
+  // ---- The check-in strip (change add-volunteer-check-in, design D6) ------
+  //
+  // `vitally_my_check_in`, read on sign-in and restore (loadData), on focus
+  // (refresh), on the caller's own `check_ins` change (handleChange), and when
+  // the window becomes cleared (loadWork). A cleared window's only. A failed
+  // read keeps what the strip showed; it never throws and raises no banner.
+  // A store without the call (an older double) reads nothing.
+  async function readMyCheckIn() {
+    if (!staffWindow() || awaitingClearance(state) || typeof store.myCheckIn !== "function") return;
+    const asked = state.principal.userId;
+    let answer;
+    try {
+      answer = await store.myCheckIn();
+    } catch {
+      return;
+    }
+    // Signed out, another user, or no longer cleared while it was out.
+    if (!staffWindow() || state.principal.userId !== asked || awaitingClearance(state)) return;
+    state.checkIn = {
+      ...state.checkIn,
+      loaded: true,
+      canCheckIn: answer?.canCheckIn === true,
+      open: answer?.open ?? null,
+    };
+    noteConnected();
+  }
+
+  // A Check in or Check out whose answer never arrived: the next press of the
+  // same button sends the same action id, so the server answers from its
+  // receipt instead of acting twice. `{kind, request}` or null.
+  let pendingCheckInWrite = null;
+
+  // Check in (`kind` "in") or Check out ("out"): sent at once, with no
+  // question asked. One action id per press; the button is busy until the
+  // answer, and a press while busy sends nothing. ALREADY_CHECKED_IN and
+  // NOT_CHECKED_IN mean another device did it: the strip re-reads, with no
+  // error. Any other refusal is said, and the strip re-reads too.
+  // Resolves to the answer, or null.
+  async function checkInWrite(kind) {
+    if (state.checkIn.busy || !staffWindow() || awaitingClearance(state) || state.checkIn.canCheckIn !== true) return null;
+    let request = pendingCheckInWrite?.kind === kind ? pendingCheckInWrite.request : null;
+    pendingCheckInWrite = null;
+    if (!request) request = { actionId: newActionId() };
+    const asked = state.principal.userId;
+    const same = () => staffWindow() && state.principal.userId === asked;
+    state.checkIn = { ...state.checkIn, busy: true };
+    state.error = null;
+    dropLocalRetry();
+    show();
+    let answer;
+    try {
+      answer = kind === "in" ? await store.checkIn(request) : await store.checkOut(request);
+    } catch (error) {
+      if (!same()) return null;
+      state.checkIn = { ...state.checkIn, busy: false };
+      const reason = error?.code === "VALIDATION" ? String(error?.cause?.details ?? error?.reason ?? "") : "";
+      if (!QUIET_CHECK_IN_REASONS.includes(reason)) {
+        if (UNKNOWN_OUTCOME.includes(error?.code)) pendingCheckInWrite = { kind, request };
+        const message = Object.hasOwn(CHECK_IN_REFUSALS, reason) ? CHECK_IN_REFUSALS[reason] : undefined;
+        noteFailure(error, message ? { message } : {});
+      }
+      await readMyCheckIn();
+      show();
+      return null;
+    }
+    if (!same()) return null;
+    noteConnected();
+    state.checkIn = {
+      ...state.checkIn,
+      busy: false,
+      loaded: true,
+      open: kind === "in" ? (answer?.open ?? null) : null,
+    };
+    show();
+    return answer ?? {};
   }
 
   // The six fields the save sends, and nothing else: strings trimmed, an
@@ -2883,6 +3145,9 @@ export function createController({
     state.dialogContext = null;
     // The Workload is case data: back to the Roster.
     state.volunteerTab = "roster";
+    // No strip in an uncleared window: the next clearance reads it afresh.
+    state.checkIn = freshCheckIn();
+    pendingCheckInWrite = null;
     endNotifications();
     if (!(ceilingAdmin(state.principal) && ADMIN_SETUP_SCREENS.includes(state.screen)) && !keepsSchedule())
       state.screen = "staff";
@@ -3204,6 +3469,8 @@ export function createController({
       myShifts: "loading",
     };
     dataLoaded = false;
+    state.checkIn = freshCheckIn();
+    pendingCheckInWrite = null;
     state.people = [];
     state.volunteers = [];
     state.earlierVolunteers = [];
@@ -3294,7 +3561,7 @@ export function createController({
     // The Schedule is a schedule viewer's (design D11).
     if (SCHEDULE_SCREENS.includes(screen) && !screenAllowed(screen)) screen = homeScreen();
     // Leaving the Schedule leaves its drawer.
-    if (screen !== "schedule") state.schedule = { ...state.schedule, drawer: null };
+    if (screen !== "schedule") state.schedule = { ...state.schedule, drawer: null, checkInDrawer: null };
     // My profile is a cleared window's: an uncleared one stays on its home.
     if (CLEARED_ONLY_SCREENS.includes(screen) && !screenAllowed(screen)) screen = homeScreen();
     // Season settings starts without an earlier visit's sentences.
@@ -3343,6 +3610,8 @@ export function createController({
   function openDialog(name, context = null) {
     // The shift drawer opens only on the Schedule, for an admin (openShiftDrawer).
     if (name === "shift") return openShiftDrawer(context?.shiftId ?? null);
+    // So does the check-in drawer (openCheckIn, openAddCheckIn).
+    if (name === "check-in") return openCheckIn(context?.checkInId ?? null);
     if (name !== "notifications") endNotifications();
     // Change the SIDN and Start next season open without an earlier refusal.
     if (name === "change-sidn") state.seasonSettingsUi = { ...state.seasonSettingsUi, sidnError: null };
@@ -3366,8 +3635,14 @@ export function createController({
       show();
       return;
     }
-    if (state.dialog === "shift" || state.dialog === "remove-shift")
-      state.schedule = { ...state.schedule, drawer: null };
+    // Keeping the check-in goes back to its drawer the same way.
+    if (state.dialog === "remove-check-in" && state.schedule.checkInDrawer) {
+      state.dialog = "check-in";
+      state.dialogContext = { checkInId: state.schedule.checkInDrawer.checkInId };
+      show();
+      return;
+    }
+    if (SCHEDULE_DIALOGS.includes(state.dialog)) state.schedule = { ...state.schedule, drawer: null, checkInDrawer: null };
     // Keeping the account (or the roster entry, or not sending, or keeping the
     // invitation) goes back to the drawer it was asked from.
     if (
@@ -5727,7 +6002,7 @@ export function createController({
       volunteers: state.volunteers.map((entry) => ({ ...entry })),
       earlierVolunteers: state.earlierVolunteers.map((entry) => ({ ...entry })),
       volunteerFilters: { ...state.volunteerFilters },
-      weekShifts: state.weekShifts.map((entry) => ({ ...entry })),
+      weekHours: state.weekHours.map((entry) => ({ ...entry })),
       workload: {
         ...state.workload,
         sort: { ...state.workload.sort },
@@ -5826,8 +6101,21 @@ export function createController({
     openShiftDrawer,
     editShiftDraft,
     saveShift,
+    // The check-in strip (change add-volunteer-check-in).
+    readMyCheckIn: async () => {
+      await readMyCheckIn();
+      show();
+    },
+    checkIn: () => checkInWrite("in"),
+    checkOut: () => checkInWrite("out"),
     saveShiftDrag,
     removeShift,
+    // Check-ins on the Schedule (change add-volunteer-check-in, design D7).
+    openCheckIn,
+    openAddCheckIn,
+    editCheckInDraft,
+    saveCheckIn,
+    removeCheckIn,
     loadMyProfile,
     saveMyProfile,
     saveSidn,

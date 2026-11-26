@@ -145,3 +145,19 @@ test("SHIFT_REFUSALS has exactly the six reasons", () => {
     DEACTIVATED: "That volunteer's account is deactivated.",
   });
 });
+
+test("scheduleRows: a row per volunteer with a shift or a check-in, by name", () => {
+  const shifts = [{ shiftId: "1", volunteerId: "v2", name: "Wen", role: "greeter", startHour: 10, endHour: 12 }];
+  const checkIns = [
+    { checkInId: "c2", volunteerId: "v2", name: "Wen", checkedInAt: "2027-02-06T16:00:00Z" },
+    { checkInId: "c3", volunteerId: "v1", name: "Ari", checkedInAt: "2027-02-06T17:00:00Z" },
+    { checkInId: "c1", volunteerId: "v2", name: "Wen", checkedInAt: "2027-02-06T15:00:00Z" },
+  ];
+  const rows = scheduleRows(shifts, checkIns);
+  assert.deepEqual(rows.map((r) => r.name), ["Ari", "Wen"]);
+  assert.deepEqual(rows[0].shifts, []);
+  assert.deepEqual(rows[0].checkIns.map((c) => c.checkInId), ["c3"]);
+  assert.deepEqual(rows[1].checkIns.map((c) => c.checkInId), ["c1", "c2"]);
+  // Shifts alone: each row has no check-ins.
+  assert.deepEqual(scheduleRows(shifts)[0].checkIns, []);
+});

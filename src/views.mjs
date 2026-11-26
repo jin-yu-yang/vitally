@@ -54,7 +54,18 @@ import {
   updateGoneBody,
 } from "./update-views.mjs";
 import { renderSeasonSettings, changeSidnDialogBody, startSeasonDialogBody } from "./season-settings-views.mjs";
-import { scheduleScreen, shiftDrawer, shiftDrawerTitle, removeShiftDialogBody, removeShiftTitle } from "./schedule-views.mjs";
+import { timeLabel } from "./volunteer-check-in.mjs";
+import {
+  scheduleScreen,
+  shiftDrawer,
+  shiftDrawerTitle,
+  removeShiftDialogBody,
+  removeShiftTitle,
+  checkInDrawer,
+  checkInDrawerTitle,
+  removeCheckInDialogBody,
+  removeCheckInTitle,
+} from "./schedule-views.mjs";
 
 // The shared shell: the frame every screen sits in, the dialogs, the two
 // screens that belong to nobody in particular (setup needed, no access), and
@@ -144,10 +155,26 @@ export function footer(lang = "en") {
 // the toggle pinned to the top-left corner so it is always reachable. Nothing
 // passes a sidebar yet (Phase 0), and without one the body comes back exactly
 // as it went in, so no screen changes until it opts in.
-export function appShell({ sidebar = "", body = "", open = true } = {}) {
+// `strip` is the check-in strip (design D6): the first thing in the main area,
+// so collapsing the sidebar never hides it.
+export function appShell({ sidebar = "", body = "", open = true, strip = "" } = {}) {
   if (!sidebar) return body;
   const label = open ? "Hide the sidebar" : "Show the sidebar";
-  return `<div class="app-shell${open ? "" : " sidebar-closed"}"><button type="button" class="sidebar-toggle" data-action="toggle-sidebar" aria-controls="app-sidebar" aria-expanded="${open}" aria-label="${label}" title="${label}">${icon("sidebar")}</button><aside id="app-sidebar" class="app-sidebar" aria-label="Workspace"${open ? "" : " hidden"}>${sidebar}</aside><div class="app-main">${body}</div></div>`;
+  return `<div class="app-shell${open ? "" : " sidebar-closed"}"><button type="button" class="sidebar-toggle" data-action="toggle-sidebar" aria-controls="app-sidebar" aria-expanded="${open}" aria-label="${label}" title="${label}">${icon("sidebar")}</button><aside id="app-sidebar" class="app-sidebar" aria-label="Workspace"${open ? "" : " hidden"}>${sidebar}</aside><div class="app-main">${strip}${body}</div></div>`;
+}
+
+// The check-in strip (change add-volunteer-check-in, design D6): a cleared
+// staff window's, when the last `vitally_my_check_in` read said canCheckIn.
+// Never on the setup screen (an uncleared window) or for a client.
+export function checkInStrip(state) {
+  if (!isStaffWindow(state?.principal) || awaitingClearance(state)) return "";
+  const checkIn = state.checkIn;
+  if (checkIn?.canCheckIn !== true) return "";
+  const busy = checkIn.busy === true ? 'disabled aria-busy="true"' : "";
+  const open = checkIn.open;
+  return open
+    ? `<div class="check-in-strip"><span class="check-in-since">Checked in since ${esc(timeLabel(open.checkedInAt))}</span>${button("Check out", "check-out", "secondary", busy)}</div>`
+    : `<div class="check-in-strip">${button("Check in", "check-in", "primary", busy)}</div>`;
 }
 
 export function page(state, body) {
@@ -363,8 +390,8 @@ const workloadPanel = (state) => {
       people: state.people ?? [],
       cases,
       now: Date.now(),
-      // Already the week's shifts: the controller read them for that week.
-      shifts: state.weekShifts ?? [],
+      // The checked-in minutes of this week, as the server counted them.
+      hours: state.weekHours ?? [],
     }),
     unassigned: unassignedCases(cases),
     sort: view.sort ?? DEFAULT_WORKLOAD_SORT,
@@ -601,6 +628,7 @@ export function staffScreen(state) {
     sidebar: staffSidebar({ ...state, screen }, person, office, { volunteers, schedule: viewer }),
     body: main,
     open,
+    strip: checkInStrip(state),
   });
 }
 
@@ -810,6 +838,16 @@ export function dialog(state) {
     title = removeShiftTitle(state);
     body = removeShiftDialogBody(state);
   }
+  // The check-in drawer and its Remove check-in confirmation (change
+  // add-volunteer-check-in, design D7), the same way.
+  if (state.dialog === "check-in") {
+    title = checkInDrawerTitle(state);
+    body = checkInDrawer(state);
+  }
+  if (state.dialog === "remove-check-in") {
+    title = removeCheckInTitle(state);
+    body = removeCheckInDialogBody(state);
+  }
   if (state.dialog === "notifications") {
     title = "Notifications";
     // A drawer says its own failure (a confirm that did not go through).
@@ -892,7 +930,7 @@ export function dialog(state) {
     title = t("print.title", {}, lang);
     body = `<div class="print-card"><strong>${say("print.org")}</strong><span>${say("id.application_caps")}</span><b>${esc(state.savedCase?.reference)}</b>${state.savedCase?.clientNumber != null ? `<span>${say("id.client_number_caps")}</span><b>${esc(formatClientNumber(state.savedCase.clientNumber))}</b>` : ""}<p>${say("print.return")}</p></div><p class="field-note">${say("print.note")}</p>${button(`${icon("print")} ${say("print.button")}`, "print-now", "primary full")}`;
   }
-  const drawer = DRAWERS.includes(state.dialog) || state.dialog === "shift";
+  const drawer = DRAWERS.includes(state.dialog) || state.dialog === "shift" || state.dialog === "check-in";
   const overline =
     state.dialog === "volunteer"
       ? "OFFICE · VOLUNTEERS"
@@ -902,7 +940,7 @@ export function dialog(state) {
           ? "FROM THE OFFICE"
           : ["update-people", "unpublish-update", "delete-update", "change-sidn", "start-season"].includes(state.dialog)
             ? "OFFICE · ADMIN"
-            : state.dialog === "shift" || state.dialog === "remove-shift"
+            : ["shift", "remove-shift", "check-in", "remove-check-in"].includes(state.dialog)
               ? "VOLUNTEERS · SCHEDULE"
               : drawer
                 ? "OFFICE FOLLOW-UP"

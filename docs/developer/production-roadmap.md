@@ -47,8 +47,8 @@ of the six RPCs and the demonstration people (Alex, Morgan, Sam) are gone. See
   (`vitally_private.role_capabilities`), each role needs its confirmed certificates, and a staff
   member acts only when cleared, with their roles' capabilities (since 052 `people.capabilities` mirrors the roles)
   ([Database: roster clearance](database.md#roster-clearance)). Volunteers > Workload (046) shows each
-  volunteer's open cases and lets an admin assign or reassign; its Hours this week column comes from
-  the Schedule (058, #140; [Database](database.md#the-volunteer-schedule)). Since 052 there is no ceiling: site coordinators change the Admin role and
+  volunteer's open cases and lets an admin assign or reassign; its Hours this week column is the
+  time volunteers checked in this week (060, #257; [Database](database.md#volunteer-check-in)), not their planned shifts (058, #140). Since 052 there is no ceiling: site coordinators change the Admin role and
   edit Season settings ([Database](database.md#season-settings-and-site-coordinators)).
 - **One person, two workspaces** ([#104](https://github.com/jin-yu-yang/vitally/issues/104)).
   The screens are chosen by the acting person's capabilities (ruling R55): `admin` gets the office
@@ -195,7 +195,7 @@ screen readers, and testing with the site's actual clients.
 
 - **Admin dashboard** (spec §8.5): clients on hold, counts by stage (the
   board already counts), reports, reference materials. Workload per
-  volunteer, reassignment and hours per volunteer (from the Schedule, #140) are built (046, 058; [§4](#4-workflow-coverage)).
+  volunteer, reassignment and hours per volunteer (checked-in time, #257) are built (046, 058, 060; [§4](#4-workflow-coverage)).
 - **Volunteer profiles** (spec §8.4): name, certifications, contact details.
 - **Form generation** (spec §8.6): drafts of IRS Form 13614-C and Form 14446 from intake answers.
   This needs a server-side service with PDF generation; see
@@ -236,7 +236,7 @@ The demo is sized for a classroom: a handful of cases per workspace.
 - The staff case list reads every visible case plus per-case summaries, with no pagination.
 - Child tables (`documents`, `contact_log`, `case_events`, `client_events`) have no index on
   `case_id`; add them before real volumes.
-- Each staff window keeps one Realtime channel over twenty-five tables and re-reads on each event. With many
+- Each staff window keeps one Realtime channel over twenty-six tables and re-reads on each event. With many
   staff online at once, measure and consider narrower subscriptions.
 - One account has one active membership, so one person cannot work at two sites. Revisit if PCDC
   runs several sites.
