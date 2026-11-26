@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
+import { createDraftOffer, draftLink } from "../src/draft-pdf.mjs";
 import { appShell, checkInStrip, staffSidebar, staffScreen, noAccessScreen, showsNoAccess, page, clientHeader, languageSwitch, dialog, DRAWERS } from "../src/views.mjs";
 import { icon, ICON_NAMES, describeFocus, focusSelectors } from "../src/ui.mjs";
 import { TEXT, SENTENCES } from "../src/client-text.mjs";
@@ -116,7 +118,7 @@ test("app.mjs makes the Exit Form for a staff window only, and records nothing",
   assert.match(app, /case "view-exit-form":/);
   const body = app.slice(app.indexOf("async function viewExitForm"), app.indexOf("// ---- leaving Add a case"));
   assert.match(body, /if \(!isStaffWindow\(state\.principal\) \|\| by !== signedInUserId\(\)\) return;/);
-  assert.match(body, /if \(by !== signedInUserId\(\)\) \{\s*if \(tab && !tab.closed\) tab.close\(\);\s*return;\s*\}/);
+  assert.match(body, /if \(by !== signedInUserId\(\) \|\| !isStaffWindow\(controller\.getState\(\)\.principal\)\) \{\s*if \(tab && !tab.closed\) tab.close\(\);\s*return;\s*\}/);
   assert.match(body, /draftOffers\.offer\(\{ url, fileName: marks\.fileName, caseId: record\.id, userId: by, kind: "exit-form", reviewId \}\)/);
   assert.match(body, /spouseShown\(visible\)/);
   // What it prints follows the rule in src/exit-form-source.mjs (#173).
@@ -424,13 +426,11 @@ test("app.mjs handles every version-2 action and no longer moves the form by ste
   assert.match(show, /root\.querySelector\("#draft-ready"\)/);
   assert.match(show, /root\.querySelectorAll\("\[data-exit-form-ready\]"\)/);
   assert.match(show, /ready\.dataset\.exitFormReady === String\(offer\.reviewId\)/);
-  assert.match(show, /if \(offer\.kind === "exit-form"\) link\.id = "exit-form-ready-link"/);
   // The offer is its maker's: any other principal (or none) ends it before
   // anything is drawn, and only that user's offer is ever drawn.
   assert.match(show, /const userId = signedInUserId\(\);\s*draftOffers\.follow\(userId\);\s*const offer = draftOffers\.current\(state\.savedCase\?\.id \?\? null, userId\);/);
   assert.match(show, /draftOffers\.current\(state\.savedCase\?\.id \?\? null, userId\)/);
   assert.match(draft, /draftOffers\.offer\(\{ url, fileName: fields\.fileName, caseId, userId \}\)/);
-  assert.match(show, /addEventListener\("click", \(\) => \{\s*draftOffers\.drop\(\);\s*showDraftLink\(\);\s*\}\)/, "an opened link is not drawn again");
   // Showing the link comes before the render's focus restore, so a keyboard
   // user on it stays on it (it has an id: draft-pdf.mjs draftLink).
   const renderBody = app.slice(app.indexOf("function render(focus = false) {"), app.indexOf("function v2OnPage("));
@@ -1706,4 +1706,153 @@ test("strip: the stylesheet wraps it and gives its button 44 px", () => {
   assert.match(rule, /gap:/);
   assert.match(rule, /max-width:\s*100%/);
   assert.match(css, /\.check-in-strip \.btn\s*\{[^}]*min-height:\s*44px/);
+});
+
+function downloadOfferHarness() {
+  const app = readFileSync(new URL("../src/app.mjs", import.meta.url), "utf8");
+  const timers = [];
+  const revoked = [];
+  const setTimeout = (run, delay = 0) => timers.push({ run, delay });
+  let userId = "user-1";
+  const state = { savedCase: { id: "case-1" }, principal: { access: "staff" } };
+  const downloadReady = (reviewId) => ({
+    dataset: { exitFormReady: reviewId },
+    isConnected: true,
+    children: [],
+    getClientRects: () => [1],
+    replaceChildren(...children) { this.children = children; },
+    contains(child) { return this.children.includes(child); },
+  });
+  const draft = downloadReady();
+  const review = downloadReady("review-1");
+  const otherReview = downloadReady("review-2");
+  const document = {
+    createElement: () => {
+      const link = new EventTarget();
+      link.click = () => link.dispatchEvent(new Event("click", { cancelable: true }));
+      return link;
+    },
+    createTextNode: (text) => text,
+  };
+  const offers = createDraftOffer({
+    revoke: (url) => revoked.push(url),
+    onExpire: () => show(),
+    setTimer: setTimeout,
+  });
+  const { showDraftLink: show, viewExitForm } = runInNewContext(
+    app.slice(app.indexOf("function showDraftLink()"), app.indexOf("const isoToday")) +
+    app.slice(app.indexOf("async function viewExitForm("), app.indexOf("// ---- leaving Add a case")) +
+    "({ showDraftLink, viewExitForm })",
+    {
+      controller: { getState: () => state },
+      signedInUserId: () => userId,
+      draftOffers: offers,
+      root: { querySelector: () => draft, querySelectorAll: () => [review, otherReview] },
+      draftLink, document, setTimeout, isStaffWindow, t: () => "Draft ready", screenLang: () => "en",
+    },
+  );
+  return {
+    show, viewExitForm, timers, revoked, draft, review, otherReview, state,
+    signIn(id) { userId = id; show(); },
+    offer(url, kind = "exit-form") {
+      offers.keep(url);
+      offers.offer({
+        url, fileName: kind === "exit-form" ? "exit-form-1234.pdf" : "13614-C-draft-1234.pdf",
+        caseId: "case-1", userId, kind, reviewId: "review-1",
+      });
+      show();
+    },
+  };
+}
+
+test("a clicked Exit Form link stays attached for the native default action", () => {
+  const { offer, review, timers, revoked, show } = downloadOfferHarness();
+  offer("blob:first");
+  const [link] = review.children;
+  assert.equal(link.id, "exit-form-ready-link");
+  assert.equal(link.download, "exit-form-1234.pdf");
+  assert.equal(link.click(), true);
+  assert.equal(review.children[0], link, "keep the anchor until the click completes");
+  assert.deepEqual(revoked, []);
+  const cleanup = timers.find(({ delay }) => delay === 0);
+  assert.ok(cleanup, "clear the used link in a later task");
+  cleanup.run();
+  assert.deepEqual(review.children, []);
+  show();
+  assert.deepEqual(review.children, [], "a redraw cannot restore the used link");
+  assert.deepEqual(revoked, []);
+  timers.find(({ delay }) => delay === 60_000).run();
+  assert.deepEqual(revoked, ["blob:first"]);
+});
+
+test("old Exit Form click and expiry cleanup leave a regenerated link intact", () => {
+  const { offer, timers, revoked, review } = downloadOfferHarness();
+  offer("blob:old");
+  const [oldLink] = review.children;
+  oldLink.click();
+  offer("blob:new");
+  const [newLink] = review.children;
+  assert.equal(oldLink.click(), false, "a stale anchor cannot start a download");
+  assert.equal(review.children[0], newLink);
+  timers.find(({ delay }) => delay === 0)?.run();
+  assert.equal(review.children[0], newLink);
+  timers.find(({ delay }) => delay === 60_000).run();
+  assert.equal(review.children[0], newLink);
+  assert.equal(newLink.href, "blob:new");
+  assert.deepEqual(revoked, ["blob:old"]);
+});
+
+test("an Exit Form offer is confined to its user, case and review and expires", () => {
+  const { offer, review, otherReview, draft, state, signIn, show, timers, revoked } = downloadOfferHarness();
+  offer("blob:first");
+  assert.equal(review.children[0].href, "blob:first");
+  assert.deepEqual(otherReview.children, []);
+  assert.deepEqual(draft.children, []);
+  state.savedCase = { id: "case-2" };
+  show();
+  assert.deepEqual(review.children, []);
+  state.savedCase = { id: "case-1" };
+  show();
+  assert.equal(review.children[0].href, "blob:first");
+  signIn("user-2");
+  assert.deepEqual(review.children, []);
+  assert.deepEqual(revoked, ["blob:first"]);
+  signIn("user-1");
+  assert.deepEqual(review.children, []);
+  offer("blob:second");
+  timers.filter(({ delay }) => delay === 60_000).at(-1).run();
+  assert.deepEqual(review.children, []);
+  assert.deepEqual(revoked, ["blob:first", "blob:second"]);
+  offer("blob:third");
+  assert.equal(review.children[0].href, "blob:third");
+});
+
+test("an Exit Form offer is hidden when its user loses staff access", () => {
+  const { state, offer, show, review } = downloadOfferHarness();
+  offer("blob:first");
+  const [link] = review.children;
+  state.principal = { access: "client" };
+  show();
+  assert.deepEqual(review.children, []);
+  assert.equal(link.click(), false);
+});
+
+test("a client cannot generate an Exit Form", async () => {
+  const { state, viewExitForm } = downloadOfferHarness();
+  state.principal = { access: "client" };
+  state.savedCase = { id: "case-1", get reviews() { assert.fail("a client cannot access review data"); } };
+  await viewExitForm("review-1", "user-1");
+});
+
+test("a clicked Draft 13614-C link keeps its native action and clears on redraw", () => {
+  const { offer, draft, review, revoked, show } = downloadOfferHarness();
+  offer("blob:draft", "13614c");
+  assert.deepEqual(review.children, []);
+  const [link] = draft.children;
+  assert.equal(link.download, "13614-C-draft-1234.pdf");
+  assert.equal(link.click(), true);
+  assert.equal(draft.children[0], link);
+  show();
+  assert.deepEqual(draft.children, []);
+  assert.deepEqual(revoked, []);
 });

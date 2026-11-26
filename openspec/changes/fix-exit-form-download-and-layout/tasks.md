@@ -18,13 +18,13 @@
 
 ## 3. Blocked-popup download lifecycle
 
-- [ ] 3.1 Inspect the existing draft offer lifecycle, redraw behavior and authorization boundaries.
+- [x] 3.1 Inspect the existing draft offer lifecycle, redraw behavior and authorization boundaries.
 - [ ] 3.2 Add regression coverage for native download behavior and offer cleanup.
-- [ ] 3.3 Remove synchronous anchor replacement from the download click path.
-- [ ] 3.4 Ensure used or expired links are cleared without interrupting downloading.
-- [ ] 3.5 Verify user, case and review isolation, expiration and regeneration.
+- [x] 3.3 Remove synchronous anchor replacement from the download click path.
+- [x] 3.4 Ensure used or expired links are cleared without interrupting downloading.
+- [x] 3.5 Verify user, case and review isolation, expiration and regeneration.
 - [ ] 3.6 Verify authorized volunteers without contact access can obtain the Exit Form.
-- [ ] 3.7 Preserve ordinary Draft 13614-C behavior and existing staff authorization.
+- [x] 3.7 Preserve ordinary Draft 13614-C behavior and existing staff authorization.
 
 ## 4. Browser verification
 

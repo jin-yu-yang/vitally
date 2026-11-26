@@ -1780,7 +1780,7 @@ if (!config) {
     const exitReady = [...root.querySelectorAll("[data-exit-form-ready]")];
     draftReady?.replaceChildren();
     for (const ready of exitReady) ready.replaceChildren();
-    if (!offer) return;
+    if (!offer || (offer.kind === "exit-form" && !isStaffWindow(state.principal))) return;
     const matching = exitReady.filter((ready) => ready.dataset.exitFormReady === String(offer.reviewId));
     const ready = offer.kind === "exit-form"
       ? matching.find((element) => element.getClientRects().length) ?? matching[0]
@@ -1789,14 +1789,26 @@ if (!config) {
     const link = draftLink(document, offer, offer.kind === "exit-form"
       ? "Exit Form ready: download PDF"
       : t("draft.link", {}, screenLang()));
-    if (offer.kind === "exit-form") link.id = "exit-form-ready-link";
-    link.addEventListener("click", () => {
-      draftOffers.drop();
-      showDraftLink();
-    });
     if (offer.kind === "exit-form") {
+      link.id = "exit-form-ready-link";
+      link.addEventListener("click", (event) => {
+        const currentState = controller.getState();
+        const current = draftOffers.current(currentState.savedCase?.id ?? null, signedInUserId());
+        if (!ready.isConnected || !ready.contains(link) || current?.url !== offer.url ||
+            !isStaffWindow(currentState.principal)) {
+          event.preventDefault();
+          return;
+        }
+        draftOffers.drop();
+        // Keep the anchor attached through the default download action.
+        // Only clear this link: a render may already have drawn a new one.
+        setTimeout(() => {
+          if (ready.contains(link)) ready.replaceChildren();
+        }, 0);
+      });
       ready.replaceChildren(link, document.createTextNode(" (Available for 60 seconds; press Download Exit Form again if it expires.)"));
     } else {
+      link.addEventListener("click", () => draftOffers.drop());
       ready.replaceChildren(link);
     }
   }
@@ -2124,7 +2136,7 @@ if (!config) {
           : [],
       ]);
       const bytes = await buildExitFormPdf({ PDFLib, fontkit: PDFLib.fontkit, formBytes, fontFiles, marks });
-      if (by !== signedInUserId()) {
+      if (by !== signedInUserId() || !isStaffWindow(controller.getState().principal)) {
         if (tab && !tab.closed) tab.close();
         return;
       }
