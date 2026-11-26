@@ -3257,38 +3257,117 @@ async function runPermutation(t, roles) {
       evidence.story.shortPath = "claimed and approved with no correction round";
     });
 
-    await phase("the Exit Form opens from an approved review, and says so when it can't be made", async () => {
-      // Chrome only: Firefox may download a blob PDF instead of opening it.
-      let exitForm = `not run: the staff engine is ${roles.staff}, which may download the PDF instead of opening it`;
-      if (roles.staff === "chrome") {
-        // The class case: its review was approved a moment ago with a Federal
-        // amount. The seeded review_approved case's Exit Form records none
-        // (tools/admin/seed-values.mjs), so it has no amount to print.
-        const sample = { id: classCase.id, reference: classReference };
-        const before = await caseById(fixture, sample.id);
-        const expected = await one(
-          fixture,
-          "select c.season,c.client_number,c.answers->>'tp_first_name' first_name,c.answers->>'tp_last_name' last_name,c.answers->>'sp_first_name' sp_first_name,c.answers->>'sp_last_name' sp_last_name,q.exit_form from public.cases c join public.reviewer_questionnaires q on q.case_id=c.id where c.id=$1",
-          [sample.id],
-        );
-        const wrongFont = { on: false };
-        const fontRoutes = [];
+    await phase("staff preview, download and regenerate the Exit Form without changing the case", async () => {
+      const sample = { id: classCase.id, reference: classReference };
+      const before = await caseById(fixture, sample.id);
+      const expected = await one(
+        fixture,
+        `select c.season,c.client_number,c.answers->>'tp_first_name' first_name,c.answers->>'tp_last_name' last_name,
+                c.answers->>'sp_first_name' sp_first_name,c.answers->>'sp_last_name' sp_last_name,q.exit_form,q.review_id,
+                (select r.id from public.reviews r where r.case_id=c.id and r.status='corrections_requested') earlier_review_id
+         from public.cases c join public.reviewer_questionnaires q on q.case_id=c.id where c.id=$1`,
+        [sample.id],
+      );
+      const filename = `exit-form-${expected.client_number}.pdf`;
+      const exitForm = { engine: roles.staff };
+      const office = roleWins.siteCoordinator.page;
+      const reviewer = roleWins.reviewer.page;
+      const fontRoutes = [];
+      const wrongFont = { on: false };
+      const buttonSelector = '[data-action="view-exit-form"]';
+      const linkSelector = "#exit-form-ready-link";
+      const errorSelector = '.notice.error:has-text("The Exit Form could not be made")';
+
+      const pressBlocked = async (page) => {
+        await waitForQuiet(page);
+        const button = page.locator(`#case-panel-overview ${buttonSelector}[data-review="${expected.review_id}"]`);
+        await button.click({ timeout: CLICK_MS });
+        const ready = button.locator("..").locator(`[data-exit-form-ready="${expected.review_id}"]`);
+        const link = ready.locator(linkSelector);
+        await link.waitFor({ state: "visible", timeout: ARRIVAL_MS });
+        assert.match(await ready.innerText(), /Available for 60 seconds; press Download Exit Form again if it expires/);
+        assert.equal(await page.locator('#case-tab-overview[aria-selected="true"]').count(), 1, "the fallback left Overview");
+        assert.equal(await page.locator(errorSelector).count(), 0, "a blocked tab showed the Exit Form error");
+        const url = await link.getAttribute("href");
+        assert.match(url, /^blob:/);
+        assert.equal(await link.getAttribute("download"), filename);
+        return { link, url };
+      };
+
+      const downloadExitForm = async (page, link) => {
+        const [download] = await Promise.all([
+          page.waitForEvent("download", { timeout: ARRIVAL_MS }),
+          link.click({ timeout: CLICK_MS }),
+        ]);
+        assert.equal(download.suggestedFilename(), filename);
+        const bytes = await readFile(await download.path());
+        assert.equal(bytes.subarray(0, 5).toString("latin1"), "%PDF-");
+        assert.equal((await PDFDocument.load(bytes)).getPageCount(), 1);
+        await link.waitFor({ state: "detached", timeout: ARRIVAL_MS });
+        const after = await caseById(fixture, sample.id);
+        assert.equal(after.stage, before.stage, "downloading the Exit Form moved the case");
+        assert.equal(after.revision, before.revision, "downloading the Exit Form changed the case");
+      };
+
+      const withBlockedPopup = async (page, check) => {
+        await page.evaluate(() => {
+          const open = window.open;
+          const revoke = URL.revokeObjectURL;
+          const observed = { opens: 0, revoked: [], restore: () => {
+            window.open = open;
+            URL.revokeObjectURL = revoke;
+          } };
+          window.__vitallyExitForm = observed;
+          window.open = () => { observed.opens++; return null; };
+          URL.revokeObjectURL = (url) => { revoke.call(URL, url); observed.revoked.push(url); };
+        });
         try {
-          // The fonts come from the packages npm installed, never the internet.
-          for (const [url, file] of Object.entries(DRAFT_FONT_FIXTURES)) {
-            const bytes = await readFile(path.join(ROOT, file.path));
-            const handler = (route) =>
-              route.fulfill({
-                status: 200,
-                headers: { "content-type": "font/ttf", "access-control-allow-origin": "*" },
-                body: wrongFont.on ? Buffer.from("not the pinned font") : bytes,
-              });
-            // Both windows this phase presses in: the Reviewer's and the Site Coordinator's.
-            for (const page of [roleWins.reviewer.page, roleWins.siteCoordinator.page]) {
-              await page.route(url, handler);
-              fontRoutes.push([page, url, handler]);
-            }
+          await check();
+        } finally {
+          await page.evaluate(() => {
+            window.__vitallyExitForm.restore();
+            delete window.__vitallyExitForm;
+          }).catch(() => {});
+        }
+      };
+
+      // A real review ID with a button inserted into the current screen.
+      const tryUnavailableReview = async (page, reviewId) => {
+        await page.evaluate((id) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.dataset.action = "view-exit-form";
+          button.dataset.review = id;
+          document.querySelector("#main").append(button);
+          try {
+            button.click();
+          } finally {
+            button.remove();
           }
+        }, reviewId);
+        assert.equal(await page.evaluate(() => window.__vitallyExitForm.opens), 0, "an unavailable review tried to open a PDF");
+        assert.equal(await page.locator(linkSelector).count(), 0);
+      };
+
+      const volunteerWin = await openWindow(staffEngine);
+      try {
+        // The fonts come from the packages npm installed, never the internet.
+        for (const [url, file] of Object.entries(DRAFT_FONT_FIXTURES)) {
+          const bytes = await readFile(path.join(ROOT, file.path));
+          const handler = (route) =>
+            route.fulfill({
+              status: 200,
+              headers: { "content-type": "font/ttf", "access-control-allow-origin": "*" },
+              body: wrongFont.on ? Buffer.from("not the pinned font") : bytes,
+            });
+          for (const page of [reviewer, office, volunteerWin.page]) {
+            await page.route(url, handler);
+            fontRoutes.push([page, url, handler]);
+          }
+        }
+
+        // Firefox may download a blob PDF instead of showing it in the new tab.
+        if (roles.staff === "chrome") {
           const press = async () => {
             await revealCaseControl(staff, '[data-action="view-exit-form"]');
             await waitForQuiet(staff);
@@ -3346,6 +3425,7 @@ async function runPermutation(t, roles) {
             "The Exit Form could not be made. Try again.",
             ARRIVAL_MS,
           );
+          assert.equal(await failed.title(), "Exit Form");
           await failed.close();
           wrongFont.on = false;
           const retried = staff.waitForEvent("popup", { timeout: ARRIVAL_MS }).catch(() => null);
@@ -3358,8 +3438,9 @@ async function runPermutation(t, roles) {
             assert.equal((await draftBytes(again)).subarray(0, 5).toString("latin1"), "%PDF-", "Try again did not make the Exit Form");
             await again.close();
           } else {
-            // The Exit Form fallback is visible beside its download button (#122).
-            await staff.locator("#exit-form-ready-link").waitFor({ state: "visible", timeout: ARRIVAL_MS });
+            const link = staff.locator(linkSelector);
+            await link.waitFor({ state: "visible", timeout: ARRIVAL_MS });
+            await downloadExitForm(staff, link);
           }
           await waitFor(
             staff,
@@ -3369,50 +3450,96 @@ async function runPermutation(t, roles) {
             ARRIVAL_MS,
           );
 
-          // A blocked tab must offer a visible Exit Form download link
-          // beside the button on Overview (#122).
-          await staff.evaluate(() => {
-            window.__vitallyOpen = window.open;
-            window.open = () => null;
-          });
-          await openCaseTab(staff, "overview");
-          await waitForQuiet(staff);
-          await staff.locator('[data-action="view-exit-form"]').first().click({ timeout: CLICK_MS });
-          const link = staff.locator("#exit-form-ready-link");
-          await link.waitFor({ state: "visible", timeout: ARRIVAL_MS });
-          assert.equal(
-            await staff.locator('.notice.error:has-text("The Exit Form could not be made")').count(),
-            0,
-            "a blocked tab showed the Exit Form error",
-          );
-          assert.equal(await link.isVisible(), true, "the blocked-tab link is not visible from Overview");
-          assert.equal(
-            await link.evaluate((a) => Boolean(a.closest("[data-exit-form-ready]"))),
-            true,
-            "the fallback link is not in the Exit Form download area",
-          );
-          const blocked = await link.evaluate((a) => ({ download: a.download, blob: a.href.startsWith("blob:") }));
-          await staff.evaluate(() => {
-            window.open = window.__vitallyOpen;
-          });
-          assert.deepEqual(blocked, { download: `exit-form-${expected.client_number}.pdf`, blob: true });
-
-          // Nothing is kept: the case did not move.
-          const after = await caseById(fixture, sample.id);
-          assert.equal(after.stage, before.stage, "making the Exit Form moved the case");
-          assert.equal(after.revision, before.revision, "making the Exit Form changed the case");
-          await openBoard(staff, OFFICE_BOARD_HEADING);
-          exitForm = {
+          exitForm.preview = {
             opened: "one page with the season, client number, name, amount and a date",
             failure: "tab and error notice said so; Try again " + (again ? "opened a new tab" : "offered the link"),
-            blocked: `${blocked.download}, a visible link beside the Exit Form button (#122)`,
           };
-        } finally {
-          await staff.evaluate(() => { if (window.__vitallyOpen) window.open = window.__vitallyOpen; }).catch(() => {});
-          for (const [page, url, handler] of fontRoutes) await page.unroute(url, handler).catch(() => {});
         }
+
+        await use("siteCoordinator", sample.reference);
+        await openCaseTab(office, "overview");
+        assert.ok(expected.earlier_review_id, "this case has no earlier review attempt");
+        assert.equal(await office.locator(`${buttonSelector}[data-review="${expected.earlier_review_id}"]`).count(), 0);
+
+        await withBlockedPopup(office, async () => {
+          await tryUnavailableReview(office, expected.earlier_review_id);
+          const offered = await pressBlocked(office);
+          await downloadExitForm(office, offered.link);
+
+          const expiring = await pressBlocked(office);
+          const offeredAt = Date.now();
+          const other = seeded.review_approved;
+          await clickAction(office, "open-cases");
+          await waitForText(office, "Case pool", RENDER_MS);
+          await openCaseByReference(office, other.reference);
+          await openCaseTab(office, "overview");
+          await office.locator(`#case-panel-overview ${buttonSelector}`).waitFor({ state: "visible", timeout: ARRIVAL_MS });
+          assert.equal(await office.locator(linkSelector).count(), 0, "another case displayed the offer");
+          await openBoard(office, OFFICE_BOARD_HEADING);
+          await openCaseByReference(office, sample.reference);
+          await openCaseTab(office, "overview");
+          assert.equal(await expiring.link.getAttribute("href"), expiring.url, "the offer was lost when returning to its case");
+
+          // Wait for the production timer and verify that it revokes the address
+          // as well as withdrawing the unused offer.
+          await waitFor(
+            office,
+            "the unused Exit Form address to be revoked",
+            (url) => window.__vitallyExitForm.revoked.includes(url),
+            expiring.url,
+            65_000,
+          );
+          assert.ok(Date.now() - offeredAt >= 55_000, "the Exit Form address expired before its advertised lifetime");
+          await expiring.link.waitFor({ state: "detached", timeout: ARRIVAL_MS });
+          const regenerated = await pressBlocked(office);
+          assert.notEqual(regenerated.url, expiring.url);
+          await downloadExitForm(office, regenerated.link);
+        });
+
+        const volunteerAccount = await fixture.database.staff({
+          key: "exit_form_volunteer",
+          name: "Riley Cruz",
+          capabilities: ["prepare"],
+        });
+        const volunteer = volunteerWin.page;
+        await loginTestUser({
+          page: volunteer,
+          actor: { key: "exit_form_volunteer", email: volunteerAccount.email, userId: volunteerAccount.userId },
+          fixture,
+          heading: WORK_BOARD_HEADING,
+        });
+        await openCaseByReference(volunteer, sample.reference);
+        await openCaseTab(volunteer, "overview");
+        const contactCard = volunteer.locator("#case-panel-intake .contact-card");
+        assert.ok((await contactCard.textContent()).includes(CONTACT_NOT_SHOWN), "the volunteer sees contact details");
+        assert.equal(await contactCard.locator(".phone-full").count(), 0);
+        assert.doesNotMatch(await volunteer.locator("#app").textContent(), SAMPLE_PHONE, "the unassigned volunteer saw a full phone number");
+        await withBlockedPopup(volunteer, async () => {
+          const offered = await pressBlocked(volunteer);
+          await downloadExitForm(volunteer, offered.link);
+          const abandoned = await pressBlocked(volunteer);
+          await clickAction(volunteer, "sign-out");
+          await waitForText(volunteer, "Sign in with your email", RENDER_MS);
+          assert.equal(await volunteer.locator(linkSelector).count(), 0, "the offer outlived the originating user");
+          assert.equal(await volunteer.evaluate((url) => window.__vitallyExitForm.revoked.includes(url), abandoned.url), true);
+        });
+
+        assert.equal(await client.locator(buttonSelector).count(), 0, "the client was offered an Exit Form");
+        await withBlockedPopup(client, () => tryUnavailableReview(client, expected.review_id));
+
+        const after = await caseById(fixture, sample.id);
+        assert.equal(after.stage, before.stage, "making the Exit Form moved the case");
+        assert.equal(after.revision, before.revision, "making the Exit Form changed the case");
+        exitForm.downloaded = filename;
+        exitForm.expiration = "expired address revoked and a fresh PDF downloaded";
+        exitForm.unassignedVolunteer = "downloaded without contact details; sign-out revoked the outstanding offer";
+        exitForm.isolation = "older review and client action opened nothing; another case had no offer";
+        await openBoard(office, OFFICE_BOARD_HEADING);
+        evidence.story.exitForm = exitForm;
+      } finally {
+        for (const [page, url, handler] of fontRoutes) await page.unroute(url, handler).catch(() => {});
+        await volunteerWin.context.close();
       }
-      evidence.story.exitForm = exitForm;
     });
 
     let loopKit = null;
