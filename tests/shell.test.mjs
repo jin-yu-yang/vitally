@@ -1670,6 +1670,22 @@ test("strip: is inside .app-main and outside the sidebar, and stays when the sid
   }
 });
 
+test("strip: shows on both sides for a person with Office and Cases", () => {
+  const both = ["admin", "review"];
+  for (const workspaceSide of ["office", "cases"]) {
+    const html = staffScreen(
+      stripState({
+        principal: { access: "staff", personId: "person-riley", clearance: cleared({ capabilities: both }) },
+        people: [{ id: "person-riley", name: "Riley Park", capabilities: both }],
+        workspaceSide,
+      }),
+    );
+    assert.match(html, /role="group" aria-label="Workspace"/, `switch shows (${workspaceSide})`);
+    assert.match(html, new RegExp(workspaceSide === "office" ? "Follow-ups</h1>" : "Work board</h1>"));
+    assert.match(html, /<div class="app-main"><div class="check-in-strip">/, `strip shows (${workspaceSide})`);
+  }
+});
+
 test("strip: appShell renders the strip first in .app-main and nothing without one", () => {
   const html = appShell({ sidebar: "<nav></nav>", body: "<main></main>", strip: "<div class=\"check-in-strip\"></div>" });
   assert.match(html, /<div class="app-main"><div class="check-in-strip"><\/div><main><\/main><\/div>/);
