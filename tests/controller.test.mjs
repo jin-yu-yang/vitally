@@ -113,13 +113,13 @@ function fakeStore({
       store.calls.push("listPeople");
       return people;
     },
-    // The Workload's hours: the live shifts of the week asked for.
-    weekShiftRows: [],
-    weekRequests: [],
-    async weekShifts(week) {
-      store.calls.push("weekShifts");
-      store.weekRequests.push(week);
-      return store.weekShiftRows.map((row) => ({ ...row }));
+    // The Workload's hours: the checked-in minutes of the week, from the server.
+    hourRows: [],
+    hourReads: 0,
+    async hoursThisWeek() {
+      store.calls.push("hoursThisWeek");
+      store.hourReads += 1;
+      return { weekStart: "2026-11-09", weekEnd: "2026-11-15", hours: store.hourRows.map((row) => ({ ...row })) };
     },
     async listCases() {
       store.calls.push("listCases");
@@ -8388,7 +8388,9 @@ test("a screening start refused NOT_CLEARED switches the window to the setup scr
   controller.stop();
 });
 
-test("a ceiling admin whose only role is Intaker gets Volunteers, and none of the office admin's screens", async () => {
+// Change add-workspace-switch: an Intaker is office-capable, so the Office side
+// draws Follow-ups and the office case page; All cases stays the admin's.
+test("a ceiling admin whose only role is Intaker gets Volunteers and Follow-ups, and none of the office admin's screens", async () => {
   const store = rosterStore({
     people: [{ id: "person-sam", name: "Sam", capabilities: ["admin", "followup", "assist", "receive_documents"] }],
     clearance: { cleared: true, missing: [], capabilities: ["assist", "receive_documents"], isAdmin: true, siteCoordinatorName: null },
@@ -8399,14 +8401,15 @@ test("a ceiling admin whose only role is Intaker gets Volunteers, and none of th
   const board = staffScreen(controller.getState());
   assert.match(board, /data-action="open-volunteers"/);
   assert.doesNotMatch(board, /data-action="open-cases"/);
-  assert.doesNotMatch(board, /Follow-ups/);
-  assert.match(board, /Work board/);
+  assert.match(board, /Follow-ups/);
+  assert.doesNotMatch(board, /Work board/);
+  assert.doesNotMatch(board, /data-action="open-add-case"/);
   controller.navigate("office-cases");
   assert.doesNotMatch(staffScreen(controller.getState()), /Case pool/);
   await controller.selectCase("case-a");
   const onCase = staffScreen(controller.getState());
-  assert.doesNotMatch(onCase, /OFFICE WORKSPACE/);
-  assert.match(onCase, /VOLUNTEER WORKSPACE/);
+  assert.match(onCase, /OFFICE WORKSPACE/);
+  assert.doesNotMatch(onCase, /VOLUNTEER WORKSPACE/);
   controller.navigate("office-volunteers");
   await controller.loadVolunteers();
   assert.equal(volunteerReads(store), 1);
@@ -9169,76 +9172,71 @@ test("a cleared staff member without effective admin gets no Workload and no ass
   controller.stop();
 });
 
-test("Hours this week: read for the week holding today, sortable, and re-read when a shift changes", async () => {
+test("workload: hours from minutes, and re-reads on check_ins, shifts and schedule_settings changes", async () => {
   const store = workloadStore();
-  store.weekShiftRows = [{ person_id: "v-1", shift_date: "2026-11-10", start_hour: 9, end_hour: 13, role: "preparer" }];
+  store.hourRows = [{ volunteerId: "v-1", minutes: 390 }];
   const { controller } = build({ store, clock: () => Date.parse("2026-11-13T15:00:00-05:00") });
   await controller.start();
   controller.navigate("office-volunteers");
   await controller.setVolunteerTab("workload");
-  assert.deepEqual(store.weekRequests, [{ monday: "2026-11-09", sunday: "2026-11-15" }]);
+  assert.equal(store.hourReads, 1);
   const hours = (id) =>
     new RegExp(String.raw`data-row-id="${id}">[\s\S]*?<td data-col="hours">([^<]*)</td>`).exec(staffScreen(controller.getState()))?.[1];
-  assert.equal(hours("v-1"), "4");
+  assert.equal(hours("v-1"), "6.5");
   assert.equal(hours("v-2"), "0");
   controller.setWorkloadView({ sortBy: "hours" });
   assert.deepEqual(controller.getState().workload.sort, { key: "hours", dir: "desc" });
   controller.setWorkloadView({ sortBy: "hours" });
   assert.deepEqual(controller.getState().workload.sort, { key: "hours", dir: "asc" });
-  // A shift changed in another window: the week is read again, and only it.
-  store.weekShiftRows = [
-    ...store.weekShiftRows,
-    { person_id: "v-2", shift_date: "2026-11-12", start_hour: 10, end_hour: 15, role: "reviewer" },
-  ];
+  store.hourRows = [...store.hourRows, { volunteerId: "v-2", minutes: 300 }];
   const casesBefore = caseListReads(store);
   const volunteersBefore = volunteerReads(store);
-  await store.handlers.onChange({ table: "shifts", eventType: "INSERT", id: "s-1" });
-  assert.equal(store.weekRequests.length, 2);
+  let expected = 1;
+  for (const table of ["check_ins", "shifts", "schedule_settings"]) {
+    await store.handlers.onChange({ table, eventType: "INSERT", id: "x-1" });
+    expected += 1;
+    assert.equal(store.hourReads, expected, `${table} re-reads the hours`);
+  }
   assert.equal(hours("v-2"), "5");
   assert.equal(caseListReads(store), casesBefore, "no case list is re-read");
   assert.equal(volunteerReads(store), volunteersBefore, "nor the volunteers");
-  // On the Roster tab a shift change reads nothing for the Workload.
   await controller.setVolunteerTab("roster");
-  await store.handlers.onChange({ table: "shifts", eventType: "UPDATE", id: "s-1" });
-  assert.equal(store.weekRequests.length, 2);
+  await store.handlers.onChange({ table: "check_ins", eventType: "UPDATE", id: "x-1" });
+  assert.equal(store.hourReads, expected, "on the Roster tab nothing is read for the Workload");
   controller.stop();
 });
 
-test("a refresh on the Workload tab reads the week again, and a clock past Sunday midnight in New York reads the new week", async () => {
+test("a refresh on the Workload tab reads the hours again, and not off the Workload tab", async () => {
   const store = workloadStore();
-  let now = Date.parse("2026-11-15T22:00:00-05:00");
-  const { controller } = build({ store, clock: () => now });
+  const { controller } = build({ store, clock: () => Date.parse("2026-11-15T22:00:00-05:00") });
   await controller.start();
   controller.navigate("office-volunteers");
   await controller.setVolunteerTab("workload");
-  assert.deepEqual(store.weekRequests, [{ monday: "2026-11-09", sunday: "2026-11-15" }]);
-  now = Date.parse("2026-11-16T00:30:00-05:00");
+  assert.equal(store.hourReads, 1);
   await controller.refresh();
-  assert.equal(store.weekRequests.length, 2);
-  assert.deepEqual(store.weekRequests[1], { monday: "2026-11-16", sunday: "2026-11-22" });
-  // Off the Workload tab, a refresh reads no week.
+  assert.equal(store.hourReads, 2);
   await controller.setVolunteerTab("roster");
   await controller.refresh();
-  assert.equal(store.weekRequests.length, 2);
+  assert.equal(store.hourReads, 2);
   controller.stop();
 });
 
-test("arriving on the Volunteers page with the Workload tab already chosen reads the week", async () => {
+test("a navigation to the Workload reads the hours with the rows", async () => {
   const store = workloadStore();
   const { controller } = build({ store, clock: () => Date.parse("2026-11-13T15:00:00-05:00") });
   await controller.start();
   controller.navigate("office-volunteers");
   await controller.setVolunteerTab("workload");
-  assert.equal(store.weekRequests.length, 1);
+  assert.equal(store.hourReads, 1);
   controller.navigate("staff");
   controller.navigate("office-volunteers");
   assert.equal(controller.getState().volunteerTab, "workload");
   await controller.loadVolunteers();
-  assert.equal(store.weekRequests.length, 2, "the arrival reads the week with the rows");
+  assert.equal(store.hourReads, 2, "the arrival reads the hours with the rows");
   controller.stop();
 });
 
-test("a failed week read in a shift change does not stop the open case from being re-read", async () => {
+test("a failed hours read in a change does not stop the open case from being re-read", async () => {
   const store = workloadStore();
   const { controller } = build({ store, clock: () => Date.parse("2026-11-13T15:00:00-05:00") });
   await controller.start();
@@ -9246,7 +9244,7 @@ test("a failed week read in a shift change does not stop the open case from bein
   await controller.setVolunteerTab("workload");
   await controller.selectCase("case-w2");
   controller.navigate("office-volunteers");
-  store.weekShifts = async () => {
+  store.hoursThisWeek = async () => {
     throw Object.assign(new Error("offline"), { code: "OFFLINE" });
   };
   const before = store.calls.filter((entry) => entry === "getCase:case-w2").length;
@@ -10265,6 +10263,13 @@ test("an added Preparer role and an assignment show the preparation form after f
   store.records.set("case-a", { ...other, preparerId: "person-riley", participants: ["person-riley"], revision: 2 });
   store.nextClearance = { ...RILEY_CLEARED, capabilities: ["receive_documents", "assist", "prepare"], isAdmin: false };
   await events.emit("focus");
+  // Now on both sides: Office by default, so the preparation form is on the Cases side.
+  assert.doesNotMatch(staffScreen(controller.getState()), /Record that preparation is complete in TaxSlayer/);
+  assert.equal(controller.getState().screen, "staff-case", "the office case page stays");
+  const office = staffScreen(controller.getState());
+  assert.match(office, /role="group" aria-label="Workspace"/);
+  assert.match(office, /You&#39;re preparing this case — switch to Cases/);
+  await controller.setWorkspaceSide("cases");
   assert.match(staffScreen(controller.getState()), /Record that preparation is complete in TaxSlayer/);
   controller.stop();
 });
@@ -12694,6 +12699,425 @@ test("an Edit of a current volunteer to an earlier volunteer's email does not ge
   controller.stop();
 });
 
+// ---- The check-in strip (change add-volunteer-check-in, Task 5, design D6) ----
+
+// 9:52 am in New York on Saturday, February 6, 2027.
+const CHECKED_IN_AT = "2027-02-06T14:52:00Z";
+// A cleared Preparer's store with the three self calls. `store.checkInState`
+// is what `myCheckIn` answers; `failNextCheckIn` / `failNextCheckOut` make the
+// next write reject; `holdNextWrite` keeps the next write waiting until its
+// `release()` is called.
+const checkInStore = (overrides = {}) => {
+  const people = [{ id: "person-riley", name: "Riley Park", capabilities: ["prepare"] }];
+  const store = staffStore({ people, clearance: { ...PREPARER_CLEARED }, ...overrides });
+  store.checkInState = { today: "2027-02-06", canCheckIn: true, open: null };
+  store.failNextCheckIn = null;
+  store.failNextCheckOut = null;
+  store.holdNextWrite = false;
+  store.release = null;
+  const hold = async () => {
+    if (!store.holdNextWrite) return;
+    store.holdNextWrite = false;
+    await new Promise((resolve) => {
+      store.release = resolve;
+    });
+  };
+  store.myCheckIn = async () => {
+    store.calls.push("myCheckIn");
+    return structuredClone(store.checkInState);
+  };
+  store.checkIn = async (request) => {
+    store.calls.push("checkIn");
+    store.writes.push({ type: "checkIn", ...request });
+    await hold();
+    const error = store.failNextCheckIn;
+    store.failNextCheckIn = null;
+    if (error) throw error;
+    store.checkInState = { ...store.checkInState, open: { checkInId: "ci-1", checkedInAt: CHECKED_IN_AT } };
+    return { open: structuredClone(store.checkInState.open) };
+  };
+  store.checkOut = async (request) => {
+    store.calls.push("checkOut");
+    store.writes.push({ type: "checkOut", ...request });
+    await hold();
+    const error = store.failNextCheckOut;
+    store.failNextCheckOut = null;
+    if (error) throw error;
+    store.checkInState = { ...store.checkInState, open: null };
+    return { open: null };
+  };
+  return store;
+};
+const checkInReads = (store) => callCount(store, "myCheckIn");
+async function onStrip(overrides = {}, options = {}) {
+  const store = checkInStore(overrides);
+  let n = 0;
+  const built = build({ store, clock: SCHEDULE_NOW, newActionId: () => `action-${++n}`, ...options });
+  await built.controller.start();
+  return { store, ...built };
+}
+
+test("strip: sign-in reads it, and a cleared preparer sees Check in", async () => {
+  const { store, controller } = await onStrip();
+  assert.equal(checkInReads(store), 1);
+  const state = controller.getState();
+  assert.deepEqual(state.checkIn, { loaded: true, canCheckIn: true, open: null, busy: false });
+  assert.match(staffScreen(state), /data-action="check-in"[^>]*>Check in<\/button>/);
+  controller.stop();
+});
+
+test("strip: check in sends one action id and is busy until the answer", async () => {
+  const { store, controller } = await onStrip();
+  store.holdNextWrite = true;
+  const first = controller.checkIn();
+  await Promise.resolve();
+  assert.equal(controller.getState().checkIn.busy, true);
+  // A second press while busy sends nothing.
+  assert.equal(await controller.checkIn(), null);
+  assert.equal(await controller.checkOut(), null);
+  assert.equal(callCount(store, "checkIn"), 1);
+  assert.equal(callCount(store, "checkOut"), 0);
+  store.release();
+  await first;
+  const state = controller.getState();
+  assert.equal(state.checkIn.busy, false);
+  assert.deepEqual(state.checkIn.open, { checkInId: "ci-1", checkedInAt: CHECKED_IN_AT });
+  assert.deepEqual(store.writes.filter((w) => w.type === "checkIn"), [{ type: "checkIn", actionId: "action-1" }]);
+  assert.match(staffScreen(state), /Checked in since 9:52 am/);
+  assert.match(staffScreen(state), /data-action="check-out"/);
+  controller.stop();
+});
+
+test("strip: check out asks nothing and shows Check in again", async () => {
+  const { store, controller } = await onStrip();
+  store.checkInState = { ...store.checkInState, open: { checkInId: "ci-1", checkedInAt: CHECKED_IN_AT } };
+  await controller.readMyCheckIn();
+  await controller.checkOut();
+  const state = controller.getState();
+  assert.equal(state.dialog ?? null, null);
+  assert.equal(state.checkIn.open, null);
+  assert.equal(state.checkIn.busy, false);
+  assert.equal(store.writes.filter((w) => w.type === "checkOut").length, 1);
+  assert.match(staffScreen(state), /data-action="check-in"/);
+  controller.stop();
+});
+
+test("strip: ALREADY_CHECKED_IN re-reads quietly", async () => {
+  const { store, controller } = await onStrip();
+  const reads = checkInReads(store);
+  // Another device checked in first.
+  store.checkInState = { ...store.checkInState, open: { checkInId: "ci-9", checkedInAt: CHECKED_IN_AT } };
+  store.failNextCheckIn = domainError("VALIDATION", "ALREADY_CHECKED_IN");
+  await controller.checkIn();
+  const state = controller.getState();
+  assert.equal(checkInReads(store), reads + 1);
+  assert.equal(state.error, null);
+  assert.equal(state.checkIn.busy, false);
+  assert.deepEqual(state.checkIn.open, { checkInId: "ci-9", checkedInAt: CHECKED_IN_AT });
+  controller.stop();
+});
+
+test("strip: NOT_CHECKED_IN on check out re-reads quietly", async () => {
+  const { store, controller } = await onStrip();
+  store.checkInState = { ...store.checkInState, open: { checkInId: "ci-1", checkedInAt: CHECKED_IN_AT } };
+  await controller.readMyCheckIn();
+  const reads = checkInReads(store);
+  // Another device checked out first.
+  store.checkInState = { ...store.checkInState, open: null };
+  store.failNextCheckOut = domainError("VALIDATION", "NOT_CHECKED_IN");
+  await controller.checkOut();
+  const state = controller.getState();
+  assert.equal(checkInReads(store), reads + 1);
+  assert.equal(state.error, null);
+  assert.equal(state.checkIn.open, null);
+  controller.stop();
+});
+
+test("strip: another refusal is said, the strip re-reads, and a retry keeps the action id", async () => {
+  const { store, controller } = await onStrip();
+  const reads = checkInReads(store);
+  store.failNextCheckIn = domainError("OFFLINE");
+  await controller.checkIn();
+  const state = controller.getState();
+  assert.equal(state.error?.code, "OFFLINE");
+  assert.equal(state.checkIn.busy, false);
+  assert.equal(checkInReads(store), reads + 1);
+  // The retry of an unknown outcome sends the same action id again.
+  await controller.checkIn();
+  const ids = store.writes.filter((w) => w.type === "checkIn").map((w) => w.actionId);
+  assert.deepEqual(ids, ["action-1", "action-1"]);
+  controller.stop();
+});
+
+test("strip: own check_ins change re-reads, another person's does not", async () => {
+  const { store, controller } = await onStrip();
+  const reads = checkInReads(store);
+  store.checkInState = { ...store.checkInState, open: { checkInId: "ci-2", checkedInAt: CHECKED_IN_AT } };
+  await store.handlers.onChange({ table: "check_ins", eventType: "INSERT", id: "ci-2", personId: "person-riley" });
+  assert.equal(checkInReads(store), reads + 1);
+  assert.match(staffScreen(controller.getState()), /Checked in since 9:52 am/);
+  await store.handlers.onChange({ table: "check_ins", eventType: "INSERT", id: "ci-3", personId: "person-sam" });
+  assert.equal(checkInReads(store), reads + 1);
+  controller.stop();
+});
+
+test("strip: focus re-reads", async () => {
+  const { store, controller, events } = await onStrip();
+  const reads = checkInReads(store);
+  await events.emit("focus");
+  assert.equal(checkInReads(store), reads + 1);
+  controller.stop();
+});
+
+test("strip: a clearance change re-reads", async () => {
+  const { store, controller } = await onStrip({ clearance: { ...UNCLEARED_VOLUNTEER } });
+  // Uncleared: no strip read and no strip.
+  assert.equal(checkInReads(store), 0);
+  assert.doesNotMatch(staffScreen(controller.getState()), /check-in-strip/);
+  store.nextClearance = { ...PREPARER_CLEARED };
+  await controller.checkClearance();
+  assert.equal(checkInReads(store), 1);
+  assert.match(staffScreen(controller.getState()), /data-action="check-in"/);
+  // Losing it again drops the strip.
+  store.nextClearance = { ...UNCLEARED_VOLUNTEER };
+  await controller.checkClearance();
+  assert.equal(controller.getState().checkIn.canCheckIn, false);
+  assert.doesNotMatch(staffScreen(controller.getState()), /check-in-strip/);
+  controller.stop();
+});
+
+test("strip: restore reads it", async () => {
+  const sessionStorage = fakeSession();
+  const first = await onStrip({}, { sessionStorage });
+  first.controller.stop();
+  const second = await onStrip({}, { sessionStorage });
+  assert.equal(checkInReads(second.store), 1);
+  assert.equal(second.controller.getState().checkIn.canCheckIn, true);
+  second.controller.stop();
+});
+
+test("strip: canCheckIn false draws no strip, and a failed read keeps what it showed", async () => {
+  const { store, controller } = await onStrip();
+  store.myCheckIn = async () => {
+    store.calls.push("myCheckIn");
+    throw domainError("OFFLINE");
+  };
+  await controller.readMyCheckIn();
+  assert.equal(controller.getState().checkIn.canCheckIn, true);
+  assert.equal(controller.getState().error, null);
+  store.myCheckIn = async () => ({ today: "2027-02-06", canCheckIn: false, open: null });
+  await controller.readMyCheckIn();
+  assert.doesNotMatch(staffScreen(controller.getState()), /check-in-strip/);
+  controller.stop();
+});
+
+// ---------------------------------------------------------------------------
+// Check-ins on the admin Schedule (change add-volunteer-check-in, Task 6)
+// ---------------------------------------------------------------------------
+
+// Ari Moss (fictional) checked in at 9:52 am and out at 1:10 pm New York time.
+const ARI_CHECK_IN = Object.freeze({
+  checkInId: "ci-ari",
+  revision: 4,
+  volunteerId: "person-ari",
+  name: "Ari Moss",
+  checkedInAt: "2027-02-06T14:52:00.000Z",
+  checkedOutAt: "2027-02-06T18:10:00.000Z",
+  endsAt: "2027-02-06T18:10:00.000Z",
+  state: "out",
+  minutes: 198,
+  flags: Object.freeze({ noCheckOut: false, notScheduled: true, corrected: false, outsideSiteHours: false }),
+  correctedByName: null,
+});
+// The schedule store, with check-ins on an admin's day and the two writes.
+const checkInScheduleStore = (options = {}) => {
+  const store = scheduleStore(options);
+  const read = store.scheduleDay;
+  store.scheduleDay = async (date) => {
+    const day = await read(date);
+    return day.canEdit ? { ...day, checkIns: [structuredClone(ARI_CHECK_IN)] } : day;
+  };
+  store.failNextCheckIn = null;
+  const fail = () => {
+    const error = store.failNextCheckIn;
+    store.failNextCheckIn = null;
+    if (error) throw error;
+  };
+  store.saveCheckIn = async (request) => {
+    store.calls.push("saveCheckIn");
+    store.writes.push({ type: "saveCheckIn", ...structuredClone(request) });
+    fail();
+    return { checkInId: request.checkInId ?? "ci-new", revision: (request.revision ?? 0) + 1 };
+  };
+  store.removeCheckIn = async (request) => {
+    store.calls.push("removeCheckIn");
+    store.writes.push({ type: "removeCheckIn", ...request });
+    fail();
+    return { checkInId: request.checkInId, revision: request.revision + 1 };
+  };
+  return store;
+};
+async function onCheckInSchedule(options = {}) {
+  const store = checkInScheduleStore(options);
+  const built = build({ store, clock: SCHEDULE_NOW });
+  await built.controller.start();
+  await built.controller.openSchedule();
+  return { store, ...built };
+}
+
+test("check-in drawer: a bar opens it with its times", async () => {
+  const { controller } = await onCheckInSchedule();
+  controller.openCheckIn("ci-ari");
+  const state = controller.getState();
+  assert.equal(state.dialog, "check-in");
+  assert.deepEqual(state.schedule.checkInDrawer, {
+    mode: "edit",
+    checkInId: "ci-ari",
+    revision: 4,
+    volunteerId: "person-ari",
+    name: "Ari Moss",
+    checkedIn: "09:52",
+    checkedOut: "13:10",
+    actionId: null,
+  });
+  assert.match(dialog(state), /<h2 id="modal-title">Ari Moss<\/h2>/);
+  controller.stop();
+});
+
+test("drawer keeps 9:52 when only out changes", async () => {
+  const { store, controller } = await onCheckInSchedule();
+  controller.openCheckIn("ci-ari");
+  const reads = dayReads(store);
+  const result = await controller.saveCheckIn({ checkedIn: "09:52", checkedOut: "13:30" });
+  assert.deepEqual(result, { done: true, toast: null });
+  const write = store.writes.at(-1);
+  assert.equal(write.type, "saveCheckIn");
+  assert.equal(write.checkInId, "ci-ari");
+  assert.equal(write.revision, 4);
+  assert.deepEqual(write.checkIn, { checkedIn: "09:52", checkedOut: "13:30" });
+  assert.ok(write.actionId);
+  assert.equal(controller.getState().dialog, null);
+  assert.equal(controller.getState().schedule.checkInDrawer, null);
+  assert.equal(dayReads(store), reads + 1);
+  // Values left out keep what the drawer holds.
+  controller.openCheckIn("ci-ari");
+  await controller.saveCheckIn({ checkedOut: "13:30" });
+  assert.deepEqual(store.writes.at(-1).checkIn, { checkedIn: "09:52", checkedOut: "13:30" });
+  controller.stop();
+});
+
+test("drawer: Checked out may be empty", async () => {
+  const { store, controller } = await onCheckInSchedule();
+  controller.openAddCheckIn();
+  const drawer = controller.getState().schedule.checkInDrawer;
+  assert.equal(drawer.mode, "add");
+  assert.equal(drawer.checkedOut, null);
+  const result = await controller.saveCheckIn({ volunteerId: "person-rowan", checkedIn: "10:00", checkedOut: "" });
+  assert.deepEqual(result, { done: true, toast: null });
+  const write = store.writes.at(-1);
+  assert.equal(write.checkInId, null);
+  assert.equal(write.revision, null);
+  assert.deepEqual(write.checkIn, { volunteerId: "person-rowan", date: "2027-02-06", checkedIn: "10:00", checkedOut: null });
+  controller.stop();
+});
+
+test("check-in drawer: Add with no volunteer says so without sending", async () => {
+  const { store, controller } = await onCheckInSchedule();
+  controller.openAddCheckIn();
+  const writes = store.writes.length;
+  assert.equal(await controller.saveCheckIn({ checkedIn: "10:00", checkedOut: "" }), null);
+  assert.equal(store.writes.length, writes);
+  assert.equal(controller.getState().error.message, "Choose a volunteer.");
+  assert.equal(controller.getState().dialog, "check-in");
+  controller.stop();
+});
+
+test("check-in drawer: Add check-in opens on today and past days only, and only for an admin", async () => {
+  const { controller } = await onCheckInSchedule();
+  await controller.scheduleGo("next");
+  controller.openAddCheckIn();
+  assert.equal(controller.getState().dialog ?? null, null);
+  assert.equal(controller.getState().schedule.checkInDrawer ?? null, null);
+  await controller.scheduleGo("prev");
+  await controller.scheduleGo("prev");
+  controller.openDialog("check-in", { checkInId: null });
+  assert.equal(controller.getState().dialog, "check-in");
+  assert.equal(controller.getState().schedule.checkInDrawer.mode, "add");
+  controller.stop();
+  const viewer = await onCheckInSchedule({ clearance: PREPARER_VIEWER });
+  viewer.controller.openAddCheckIn();
+  viewer.controller.openCheckIn("ci-ari");
+  assert.equal(viewer.controller.getState().dialog ?? null, null);
+  assert.equal(await viewer.controller.saveCheckIn({ checkedIn: "10:00" }), null);
+  assert.equal(await viewer.controller.removeCheckIn("ci-ari"), null);
+  assert.equal(viewer.store.writes.length, 0);
+  viewer.controller.stop();
+});
+
+test("remove check-in asks first", async () => {
+  const { store, controller } = await onCheckInSchedule();
+  controller.openCheckIn("ci-ari");
+  controller.openDialog("remove-check-in", { checkInId: "ci-ari" });
+  const state = controller.getState();
+  assert.equal(state.dialog, "remove-check-in");
+  assert.match(dialog(state), /Remove Ari Moss&#39;s check-in\?/);
+  assert.equal(store.writes.length, 0);
+  // Keeping it goes back to the drawer.
+  controller.closeDialog();
+  assert.equal(controller.getState().dialog, "check-in");
+  assert.equal(controller.getState().schedule.checkInDrawer.checkInId, "ci-ari");
+  controller.openDialog("remove-check-in", { checkInId: "ci-ari" });
+  const result = await controller.removeCheckIn("ci-ari");
+  assert.deepEqual(result, { done: true, toast: null });
+  const write = store.writes.at(-1);
+  assert.equal(write.type, "removeCheckIn");
+  assert.equal(write.checkInId, "ci-ari");
+  assert.equal(write.revision, 4);
+  assert.equal(controller.getState().dialog, null);
+  assert.equal(controller.getState().schedule.checkInDrawer, null);
+  controller.stop();
+});
+
+test("conflict re-reads and says the check-in message", async () => {
+  const { store, controller } = await onCheckInSchedule();
+  controller.openCheckIn("ci-ari");
+  store.failNextCheckIn = shiftRefusal("CONFLICT");
+  const reads = dayReads(store);
+  const result = await controller.saveCheckIn({ checkedIn: "09:52", checkedOut: "13:30" });
+  assert.deepEqual(result, { done: true, toast: "Someone changed this check-in. The schedule has been refreshed." });
+  assert.equal(dayReads(store), reads + 1);
+  assert.equal(controller.getState().dialog, null);
+  assert.equal(controller.getState().error, null);
+  controller.stop();
+});
+
+test("check-in drawer: a refusal is said in the drawer, which stays open", async () => {
+  const { store, controller } = await onCheckInSchedule();
+  controller.openCheckIn("ci-ari");
+  store.failNextCheckIn = shiftRefusal("VALIDATION", "OVERLAP");
+  const result = await controller.saveCheckIn({ checkedIn: "09:52", checkedOut: "13:30" });
+  assert.equal(result, null);
+  const state = controller.getState();
+  assert.equal(state.dialog, "check-in");
+  assert.equal(state.error.message, "That volunteer already has a check-in at that time.");
+  assert.equal(state.schedule.checkInDrawer.checkedOut, "13:30");
+  assert.match(dialog(state), /That volunteer already has a check-in at that time\./);
+  controller.stop();
+});
+
+test("a check_ins change re-reads an admin's day, not a read-only one", async () => {
+  const admin = await onCheckInSchedule();
+  let reads = dayReads(admin.store);
+  await admin.store.handlers.onChange({ table: "check_ins", eventType: "INSERT", id: "ci-9", personId: "person-ari" });
+  assert.equal(dayReads(admin.store), reads + 1);
+  admin.controller.stop();
+  const viewer = await onCheckInSchedule({ clearance: PREPARER_VIEWER });
+  reads = dayReads(viewer.store);
+  await viewer.store.handlers.onChange({ table: "check_ins", eventType: "INSERT", id: "ci-9", personId: "person-ari" });
+  assert.equal(dayReads(viewer.store), reads);
+  viewer.controller.stop();
+});
+
 // Remove from this season's roster (change add-remove-from-roster, design D8)
 const removals = (store) => store.writes.filter((entry) => entry.type === "remove");
 
@@ -12892,5 +13316,248 @@ test("any other save still closes the drawer: a picked earlier volunteer with no
   assert.equal(await controller.saveVolunteer(VOLUNTEER_PAYLOAD), true);
   assert.deepEqual(controller.getState().dialogContext, { volunteerId: "v-1" });
   assert.equal(controller.getState().volunteerAccountNotice, null);
+  controller.stop();
+});
+
+// ---------------------------------------------------------------------------
+// The workspace switch: the controller's side (change add-workspace-switch)
+// ---------------------------------------------------------------------------
+
+const SIDE_KEY = "vitally.workspace-side:p1";
+const bothSidesPeople = [{ id: "person-sam", name: "Sam", capabilities: ["admin", "prepare"] }];
+const bothSidesStore = (overrides = {}) => adminStaffStore({ people: bothSidesPeople, ...overrides });
+
+test("sign-in uses the remembered side", async () => {
+  const { controller } = build({ store: bothSidesStore(), localStorage: fakeSession({ [SIDE_KEY]: "cases" }) });
+  await controller.start();
+  assert.equal(controller.getState().workspaceSide, "cases");
+  controller.stop();
+});
+
+test("nothing remembered opens Office, also when storage throws", async () => {
+  const first = build({ store: bothSidesStore(), localStorage: fakeSession() });
+  await first.controller.start();
+  assert.equal(first.controller.getState().workspaceSide, "office");
+  first.controller.stop();
+  const blocked = {
+    getItem() { throw new Error("blocked"); },
+    setItem() { throw new Error("blocked"); },
+    removeItem() {},
+  };
+  const second = build({ store: bothSidesStore(), localStorage: blocked });
+  await second.controller.start();
+  assert.equal(second.controller.getState().workspaceSide, "office");
+  second.controller.stop();
+});
+
+test("sign-out keeps the remembered side, and a second user does not inherit it", async () => {
+  const localStorage = fakeSession({ [SIDE_KEY]: "cases" });
+  const { controller } = build({ store: bothSidesStore(), localStorage });
+  await controller.start();
+  await controller.signOut();
+  assert.equal(localStorage.raw(SIDE_KEY), "cases");
+  controller.stop();
+  const other = build({
+    store: fakeStore({
+      principal: { userId: "p2", workspaceId: "w1", access: "staff", personId: "person-sam" },
+      people: bothSidesPeople,
+    }),
+    localStorage,
+  });
+  await other.controller.start();
+  assert.equal(other.controller.getState().workspaceSide, "office");
+  other.controller.stop();
+});
+
+test("pressing Cases on a case page keeps the case and resets the tab", async () => {
+  const localStorage = fakeSession();
+  const store = bothSidesStore({ cases: [sampleCase()] });
+  const { controller } = build({ store, localStorage });
+  await controller.start();
+  await controller.selectCase("fixture-a");
+  controller.setCaseTab("contacts");
+  assert.equal(controller.getState().caseTab, "contacts");
+  await controller.setWorkspaceSide("cases");
+  const state = controller.getState();
+  assert.equal(state.screen, "staff-case");
+  assert.equal(state.selectedCaseId, "fixture-a");
+  assert.equal(state.caseTab, "overview");
+  assert.equal(state.workspaceSide, "cases");
+  assert.equal(localStorage.raw(SIDE_KEY), "cases");
+  controller.stop();
+});
+
+test("pressing Cases on All cases lands on the board; on Volunteers it stays", async () => {
+  const { controller } = build({ store: bothSidesStore(), localStorage: fakeSession() });
+  await controller.start();
+  controller.navigate("office-cases");
+  await controller.setWorkspaceSide("cases");
+  assert.equal(controller.getState().screen, "staff");
+  await controller.setWorkspaceSide("office");
+  controller.navigate("office-volunteers");
+  await controller.setWorkspaceSide("cases");
+  assert.equal(controller.getState().screen, "office-volunteers");
+  controller.stop();
+});
+
+test("pressing Cases on Add a case lands on the board and clears the office draft", async () => {
+  const { controller } = build({ store: bothSidesStore(), localStorage: fakeSession() });
+  await controller.start();
+  await controller.openAddCase();
+  assert.equal(controller.getState().screen, "office-add-case");
+  assert.equal(controller.getState().officeDraft, true);
+  await controller.setWorkspaceSide("cases");
+  const state = controller.getState();
+  assert.equal(state.screen, "staff");
+  assert.equal(state.workspaceSide, "cases");
+  assert.equal(state.officeDraft, false);
+  assert.equal(state.officeDraftCaseId, null);
+  assert.equal(state.addCaseShowMissing, false);
+  assert.equal(state.error, null);
+  controller.stop();
+});
+
+test("pressing the pressed side does nothing", async () => {
+  const localStorage = fakeSession();
+  const { controller, renders } = build({ store: bothSidesStore(), localStorage });
+  await controller.start();
+  const before = renders.count;
+  await controller.setWorkspaceSide("office");
+  assert.equal(renders.count, before, "no render");
+  assert.equal(localStorage.raw(SIDE_KEY), null, "no write");
+  controller.stop();
+});
+
+test("a person with one side has no switch: pressing does nothing", async () => {
+  const localStorage = fakeSession();
+  const { controller } = build({ store: adminStaffStore(), localStorage });
+  await controller.start();
+  await controller.setWorkspaceSide("cases");
+  assert.equal(localStorage.raw(SIDE_KEY), null);
+  controller.stop();
+});
+
+test("an admin in Cases opening a Received case starts nothing; switching to Office starts screening", async () => {
+  const store = bothSidesStore({ cases: [RECEIVED] });
+  const { controller } = build({ store, localStorage: fakeSession({ [SIDE_KEY]: "cases" }) });
+  await controller.start();
+  await controller.selectCase("case-r");
+  await tick();
+  assert.equal(startWrites(store).length, 0);
+  await controller.setWorkspaceSide("office");
+  await tick();
+  assert.equal(startWrites(store).length, 1);
+  controller.stop();
+});
+
+test("an Intaker never starts screening", async () => {
+  const store = adminStaffStore({
+    cases: [RECEIVED],
+    people: [{ id: "person-sam", name: "Sam", capabilities: ["receive_documents"] }],
+  });
+  const { controller } = build({ store, localStorage: fakeSession() });
+  await controller.start();
+  await controller.selectCase("case-r");
+  await tick();
+  assert.equal(startWrites(store).length, 0);
+  controller.stop();
+});
+
+test("the Workload is readable on Cases for an admin", async () => {
+  const store = workloadStore({
+    people: [
+      { id: "person-sam", name: "Sam Lee", capabilities: ["admin", "prepare"] },
+      { id: "v-1", name: "Mira Patel", capabilities: ["prepare"] },
+    ],
+  });
+  const { controller } = build({ store, localStorage: fakeSession({ [SIDE_KEY]: "cases" }) });
+  await controller.start();
+  controller.navigate("office-volunteers");
+  await controller.setVolunteerTab("workload");
+  assert.equal(controller.getState().volunteerTab, "workload");
+  assert.equal(volunteerReads(store), 1);
+  controller.stop();
+});
+
+// ---------------------------------------------------------------------------
+// Capability changes mid-session (change add-workspace-switch, design D10)
+// ---------------------------------------------------------------------------
+const SIDE_KEY_RILEY = "vitally.workspace-side:user-riley";
+const writesTo = (storage) => {
+  const writes = [];
+  const set = storage.setItem;
+  storage.setItem = (key, value) => {
+    writes.push(key);
+    set(key, value);
+  };
+  return writes;
+};
+const caps = (capabilities, isAdmin = capabilities.includes("admin")) => ({ ...RILEY_CLEARED, capabilities, isAdmin });
+const sideStart = async (capabilities, remembered) => {
+  const localStorage = fakeSession(remembered ? { [SIDE_KEY_RILEY]: remembered } : {});
+  const store = staffStore({ cases: [{ ...SETUP_CASE }], clearance: caps(capabilities) });
+  const built = build({ store, localStorage });
+  await built.controller.start();
+  return { ...built, store, localStorage, writes: writesTo(localStorage) };
+};
+
+test("gaining Admin keeps the board and the storage", async () => {
+  const { controller, store, localStorage, writes } = await sideStart(["prepare"], "cases");
+  assert.equal(controller.getState().screen, "staff");
+  store.nextClearance = caps(["prepare", "admin", "followup"]);
+  await controller.checkClearance();
+  const state = controller.getState();
+  assert.equal(state.screen, "staff");
+  assert.equal(state.workspaceSide, "cases");
+  assert.match(staffScreen(state), /Work board/);
+  assert.deepEqual(writes, []);
+  assert.equal(localStorage.raw(SIDE_KEY_RILEY), "cases");
+  controller.stop();
+});
+
+test("losing the current side lands on the other", async () => {
+  const { controller, store, localStorage, writes } = await sideStart(["admin", "followup", "review"], "cases");
+  assert.equal(controller.getState().workspaceSide, "cases");
+  store.nextClearance = caps(["admin", "followup"]);
+  await controller.checkClearance();
+  assert.equal(controller.getState().workspaceSide, "office");
+  assert.deepEqual(writes, []);
+  assert.equal(localStorage.raw(SIDE_KEY_RILEY), "cases", "the remembered side is not rewritten");
+  controller.stop();
+});
+
+test("losing the other side keeps the screen", async () => {
+  const { controller, store, writes } = await sideStart(["admin", "followup", "review"], "cases");
+  await controller.selectCase("case-a");
+  store.nextClearance = caps(["followup", "review"], false);
+  await controller.checkClearance();
+  const state = controller.getState();
+  assert.equal(state.workspaceSide, "cases");
+  assert.equal(state.screen, "staff-case");
+  assert.deepEqual(writes, []);
+  controller.stop();
+});
+
+test("a reload after gaining Admin with nothing stored opens Office", async () => {
+  const first = await sideStart(["prepare"]);
+  first.store.nextClearance = caps(["prepare", "admin", "followup"]);
+  await first.controller.checkClearance();
+  assert.equal(first.localStorage.raw(SIDE_KEY_RILEY), null);
+  first.controller.stop();
+  const store = staffStore({ cases: [{ ...SETUP_CASE }], clearance: caps(["prepare", "admin", "followup"]) });
+  const second = build({ store, localStorage: first.localStorage });
+  await second.controller.start();
+  assert.equal(second.controller.getState().workspaceSide, "office");
+  second.controller.stop();
+});
+
+test("losing the Office side on All cases goes home", async () => {
+  const { controller, store } = await sideStart(["admin", "followup", "prepare"], "office");
+  controller.navigate("office-cases");
+  store.nextClearance = caps(["prepare"], false);
+  await controller.checkClearance();
+  const state = controller.getState();
+  assert.equal(state.screen, "staff");
+  assert.equal(state.workspaceSide, "cases");
   controller.stop();
 });

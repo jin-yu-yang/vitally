@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dragResult, createGesture, gestureLive } from "../src/schedule-drag.mjs";
+import { dragResult, createGesture, gestureLive, dragIgnores } from "../src/schedule-drag.mjs";
 
 const hours = { open: 9, close: 17 };
 const rowan = (extra = {}) => ({ shiftId: "s1", revision: 3, volunteerId: "v1", role: "preparer", startHour: 10, endHour: 13, ...extra });
@@ -110,4 +110,11 @@ test("a gesture is live only while its row is still on the page", () => {
   assert.equal(gestureLive({ isConnected: true }), true);
   assert.equal(gestureLive({ isConnected: false }), false);
   assert.equal(gestureLive(null), false);
+});
+
+test("a press on a check-in bar never starts a drag", () => {
+  const target = (classes) => ({ closest: (selector) => (selector === ".check-in-bar" && classes.includes("check-in-bar") ? {} : null) });
+  assert.equal(dragIgnores(target(["check-in-bar"])), true);
+  assert.equal(dragIgnores(target(["schedule-cell"])), false);
+  assert.equal(dragIgnores(null), false);
 });

@@ -73,3 +73,10 @@ export function createGesture({ kind, volunteerId, shift = null, fromHour, actio
     },
   };
 }
+
+/**
+ * Whether a press on this target starts no gesture at all: a check-in bar
+ * (change add-volunteer-check-in, design D7) is never dragged; its drawer is
+ * its only editor.
+ */
+export const dragIgnores = (target) => Boolean(target?.closest?.(".check-in-bar"));

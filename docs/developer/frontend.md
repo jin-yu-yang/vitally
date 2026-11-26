@@ -126,7 +126,7 @@ sign-in (`sendCode`, `verifyCode`, `editAuthEmail`, `editAuthCode`, `restartSign
 **`staffWindow()`** is everything a staff screen does (its reads, its eligibility rules and its
 actions), true only for a `staff` account (`isStaffWindow` in [`src/contracts.mjs`](../../src/contracts.mjs)
 says the same for the views). The person acting is always the account's own `principal.personId`; a
-client sends none. None of the thirty-nine RPCs takes the acting person, so the browser never claims an identity (`vitally_save_volunteer` takes a volunteer's person id, but as the record to change, not as who is acting); the
+client sends none. None of the forty-five RPCs takes the acting person, so the browser never claims an identity (`vitally_save_volunteer` takes a volunteer's person id, but as the record to change, not as who is acting); the
 database resolves it ([Database: who is acting](database.md#who-is-acting)). An account with any
 other access (a former presenter) gets the "This account has no access" screen and nothing is
 loaded for it.
@@ -150,10 +150,10 @@ Three rules the controller keeps:
 | --- | --- |
 | Signed out | Email and code form ([`client-views.mjs`](../../src/client-views.mjs) `accessScreen`); "cannot reach the server" and "no access" screens ([`views.mjs`](../../src/views.mjs)) |
 | Applicant | `applications` (list and lookup by Application ID), `reference` (new ID to keep), `intake` (the sub-step form, built by `src/intake-views.mjs`), `progress` (status, client number, requests, send document) |
-| Staff window, volunteer account | `staff`: the work board; `staff-case`: the case page with its tabs ([`staff-views.mjs`](../../src/staff-views.mjs)) |
-| Staff window, `admin` account | `staff`: the Follow-ups queue ([`office-views.mjs`](../../src/office-views.mjs)); `office-cases`: the case pool ([`pool-views.mjs`](../../src/pool-views.mjs)); `office-add-case`: Add a case for a walk-in client ([`office-views.mjs`](../../src/office-views.mjs)); `staff-case`: the office's case page ([`admin-views.mjs`](../../src/admin-views.mjs)); `office-volunteers`: the Volunteers Roster and its Add / Edit drawer ([`volunteer-views.mjs`](../../src/volunteer-views.mjs), rules in [`volunteer-roster.mjs`](../../src/volunteer-roster.mjs)); the same page's **Workload** tab for cleared admins, with the Unassigned lists, tagged rows for anyone holding a case without the role, and the Assign / Reassign drawer, which sends `ASSIGN_CASE` with the revision and holder it was opened on ([`workload-views.mjs`](../../src/workload-views.mjs), counts and candidates in [`volunteer-workload.mjs`](../../src/volunteer-workload.mjs)). The Workload is built from the staff case list, `volunteers` and `people` already in the window, so it adds no table or subscription; its tab, sort, search and open rows are window-local and never saved; `office-updates`: Post an update ([`update-views.mjs`](../../src/update-views.mjs)), for a workspace admin only (a site coordinator, or the Admin role this season), cleared or not; `office-settings`: Season settings ([`season-settings-views.mjs`](../../src/season-settings-views.mjs)), for the same admins, with the current season's links and SIDN and the **Next season** card, whose Start next season… dialog (site coordinators only) asks for the next year typed and lists what to finish first when `vitally_start_next_season` refuses ([Start next season](database.md#start-next-season)) |
+| Staff window, Cases side (a volunteer account, or a person with both sides who chose Cases) | `staff`: the work board; `staff-case`: the case page with its tabs ([`staff-views.mjs`](../../src/staff-views.mjs)) |
+| Staff window, Office side (`admin`, `followup`, `assist` or `receive_documents`, and the side chosen if the person has both) | `staff`: the Follow-ups queue ([`office-views.mjs`](../../src/office-views.mjs)); `office-cases`: the case pool ([`pool-views.mjs`](../../src/pool-views.mjs)); `office-add-case`: Add a case for a walk-in client ([`office-views.mjs`](../../src/office-views.mjs)); `staff-case`: the office's case page ([`admin-views.mjs`](../../src/admin-views.mjs)); `office-volunteers`: the Volunteers Roster and its Add / Edit drawer ([`volunteer-views.mjs`](../../src/volunteer-views.mjs), rules in [`volunteer-roster.mjs`](../../src/volunteer-roster.mjs)); the same page's **Workload** tab for cleared admins, with the Unassigned lists, tagged rows for anyone holding a case without the role, and the Assign / Reassign drawer, which sends `ASSIGN_CASE` with the revision and holder it was opened on ([`workload-views.mjs`](../../src/workload-views.mjs), counts and candidates in [`volunteer-workload.mjs`](../../src/volunteer-workload.mjs)). The Workload is built from the staff case list, `volunteers` and `people` already in the window, plus its Hours this week column, which is checked-in time: `state.weekHours`, the `vitally_hours_this_week` answer shown with `formatHours` (change `add-volunteer-check-in`; [below](#the-schedule-and-my-profile)); its tab, sort, search and open rows are window-local and never saved; `office-updates`: Post an update ([`update-views.mjs`](../../src/update-views.mjs)), for a workspace admin only (a site coordinator, or the Admin role this season), cleared or not; `office-settings`: Season settings ([`season-settings-views.mjs`](../../src/season-settings-views.mjs)), for the same admins, with the current season's links and SIDN and the **Next season** card, whose Start next season… dialog (site coordinators only) asks for the next year typed and lists what to finish first when `vitally_start_next_season` refuses ([Start next season](database.md#start-next-season)) |
 | Staff window, schedule viewer (a workspace admin, or anyone on the roster with an active account; cleared or not) | `schedule` ([below](#the-schedule-and-my-profile)), in the sidebar as Schedule. My profile (`my-profile`, main's) is a cleared window's, opened from the sidebar account row; its "Your shifts this week" is described below |
-| Staff account | The staff screens: the sidebar and the case page header say "Signed in as <name>", and the person is the account's own (`staffScreen` in `views.mjs` picks the office screens when that person has `admin`, and the volunteer work board otherwise). Always English |
+| Staff account | The staff screens: the sidebar and the case page header say "Signed in as <name>", and the person is the account's own (`staffScreen` in `views.mjs` picks the Office or Cases side from `workspaceSide` in `contracts.mjs`: a person with only one side's capabilities gets that side, and one with both gets the side they last chose, Office by default). Always English |
 
 **Fill tools.** They follow the demo-tools switch. Three controls exist: the staff "Auto-fill fictional data" button, the client intake's fiction toolbar and the office's Add a case "Fill fictional details" pill. With the switch on, an "Auto-fill fictional data" button appears at the top of each questionnaire, the review-contact form and the filing dialogs (Mark ready to e-file, Mark e-filed, Record filing result, Return to signing). [`src/demo-fill.mjs`](../../src/demo-fill.mjs) fills the form with fictional values that the form's own payload builder accepts. It never overwrites typed text or a defaulted choice, and it sends nothing: the form's own button still submits. `demoFillButton(enabled)` renders nothing when the switch (`state.demoTools`) is off, and the `demo-fill` handler in `app.mjs` checks `demoToolsOn` again. The switch is on only when `/public-config.json` sends `demoTools: true` (`server.mjs` does so only with `VITALLY_DEMO_TOOLS=1` and a loopback `SUPABASE_URL`) and the config's `supabaseUrl` is loopback. When on, these controls show to whoever is on that screen; when off, to no one
 
@@ -163,8 +163,15 @@ while a mouse rests on the toggle, and closes 300 ms after the pointer leaves th
 sidebar, unless keyboard focus is in the sidebar or a dialog is open (focus on the toggle never
 holds it); a click pins it. [`src/sidebar-peek.mjs`](../../src/sidebar-peek.mjs)
 decides, and `app.mjs` applies the peek in place after every render, so a realtime redraw keeps
-it. An office screen chosen while a volunteer account is acting shows
-the work board instead. A version-2 case's page reads its answers by sub-step, with the contact,
+it. A person with both sides gets an Office / Cases switch (`role="group"`, label "Workspace",
+buttons `set-workspace-side` with `aria-pressed`) at the top of the cleared sidebar; `setWorkspaceSide` in
+the controller keeps the open case (on its Overview tab), sends the Office-only pages to the work board,
+and writes the side to `localStorage` per user (`vitally.workspace-side:<userId>`, in
+[`workspace-side.mjs`](../../src/workspace-side.mjs), kept through sign-out). The Office side's
+All cases (Office side) and the Workload (either side) stay tied to `admin`. An Intaker (no `admin`) has the office with no
+switch: Follow-ups lists only help requests and documents to receive, with no Add a case. An office
+case page says when the person could claim or work the case on the Cases side, with a Switch to
+Cases button. An office screen chosen while the Cases side is showing shows the work board instead. A version-2 case's page reads its answers by sub-step, with the contact,
 materials and document-checklist cards, and Add a case follows the workspace's version
 ([below](#staff-views-and-add-a-case-version-2)).
 
@@ -353,7 +360,7 @@ Result uses, so a value left in a hidden field is never sent.
   missing or invalid answers saves the draft and is refused: "Needs an answer" shows, every part
   that counts opens, and the keyboard goes to the count.
 - Leaving with unsaved answers (Cancel, the breadcrumb's Work board, "Back to Follow-ups", or
-  the sidebar's Work board and All cases) asks "Leave without saving?" first; Sign out leaves
+  the sidebar's Work board and All cases, or the Office / Cases switch) asks "Leave without saving?" first; Sign out leaves
   without asking. The guard also covers `open-add-case`, though that button
   isn't shown on the page. A conflict with another window shows the shared reconcile choice.
 - The same redraw rules as the client's form bind `#add-case-v2-form`.
@@ -647,7 +654,7 @@ that has methods was returned to signing, and its message asks the client to sig
 An admin opening a `received` case's page starts its screening. `startScreeningIfDue` in
 [`controller.mjs`](../../src/controller.mjs) sends `START_SCREENING` (empty payload) when all of
 these hold: the open case is at `received`, the screen is `staff-case`, the acting person has
-the `admin` capability, and nothing else is busy or pending. It runs after a case is opened
+the `admin` capability, the window is on the Office side, and nothing else is busy or pending. Switching to Office on a `received` case also starts screening. It runs after a case is opened
 (`selectCase`), after a reload on a case page, after a
 refresh or reconnect, and when a busy action ends. Nothing is pressed, so:
 
@@ -838,6 +845,7 @@ re-reads it:
 - a `workspaces` event (a change to the workspace row, such as its intake
   version): everything, with a notice if the open case vanished;
 - a `shifts` or `schedule_settings` event: the Schedule's open day, My profile's "Your shifts this week" (a `shifts` event) and, on Season settings, the site hours card (an uncleared viewer's window follows only these two tables, and only while it is on the Schedule);
+- a `check_ins` event: an admin's open Schedule day, the Workload's Hours this week (a `shifts` or `schedule_settings` event re-reads it too), and the check-in strip when the row is the window's own person's (the event carries `personId` for this);
 - a `posted_updates` event: the Notifications feed, and the admin's table when Post an update is
   open. `update_reads` is not published, so the table re-reads on opening and on focus instead.
 
@@ -1043,7 +1051,7 @@ them. The database side is in [Database: posted updates](database.md#posted-upda
 
 ## The Schedule and My profile
 
-The Schedule is who works when, one day at a time. It is for a schedule viewer, cleared or not (a
+The Schedule is who works when, one day at a time, and for an admin who checked in. It is for a schedule viewer, cleared or not (a
 workspace admin, or anyone on the current roster with an active staff account). A volunteer's own
 shifts are a section, "Your shifts this week", on main's My profile page (change `add-my-profile`),
 which a cleared staff member opens from the sidebar account row. The database side is in
@@ -1095,6 +1103,31 @@ which a cleared staff member opens from the sidebar account row. The database si
 - **Usual days** are main's (057): the toggles on My profile and in the Roster's drawer save through
   `vitally_save_my_profile` and `vitally_save_volunteer`. The Schedule only reads them, to put a
   rostered volunteer whose usual days include the day first among Add shift's candidates.
+- **The check-in strip** (change `add-volunteer-check-in`; [Database: volunteer check-in](database.md#volunteer-check-in))
+  is a slim bar at the top of `.app-main` on every staff screen (`checkInStrip` in
+  [`views.mjs`](../../src/views.mjs)): "Check in", or "Checked in since 9:52 am" with "Check out". It
+  shows only in a cleared window whose last `vitally_my_check_in` read said `canCheckIn`, never on the
+  setup screen or for a client. `state.checkIn` is `{loaded, canCheckIn, open, busy}`, read by
+  `readMyCheckIn` on sign-in and restore, on focus, when the window becomes cleared and on a change to
+  the caller's own `check_ins` row; a failed read keeps what it showed and raises no banner. A press
+  is sent at once with its own action id, and the button is busy until the answer; a press whose
+  answer was lost resends the same id. `ALREADY_CHECKED_IN` and `NOT_CHECKED_IN` mean another device
+  did it, so the strip re-reads quietly.
+- **Check-ins on the Schedule** are an admin's only. Each one in `day.checkIns` is a
+  `.check-in-bar` button (`data-action="open-check-in"`) in a track under the row's shifts, placed
+  from its instants by `barPlacement` and labelled by `barLabel` ("9:52 am – 1:10 pm", "9:52 am –
+  now", "9:52 am – no check-out"), with the tags "No check-out", "Not scheduled", "Corrected" and
+  "Outside site hours". One with no part in the open hours sits beside the name, and a closed day
+  lists them by name. A drag never starts on a bar (`dragIgnores`). Pure helpers are in
+  [`volunteer-check-in.mjs`](../../src/volunteer-check-in.mjs).
+- **The check-in drawer** (`checkInDrawer` in [`schedule-views.mjs`](../../src/schedule-views.mjs);
+  the draft is `state.schedule.checkInDrawer`) opens from a bar, or from "+ Add check-in" (today and
+  past days) with a volunteer picker. "Checked in" and "Checked out" are selects in 5-minute steps
+  (`timeOptions`, which keeps a saved off-step time such as 9:52 so an edit that changes only the
+  other field sends it unchanged); "Checked out" can be "Not checked out", and offers no 12:00 am at
+  the day's start: midnight appears once, at the end, as "12:00 am (midnight)" (sent as `24:00`). Save sends
+  `vitally_save_check_in` at the revision the drawer opened on; Remove check-in asks first. A saved
+  check-in shows "Corrected by" and the admin's name, and a missed check-out "No check-out. Counted to 1 pm."
 
 ## Sign-in
 

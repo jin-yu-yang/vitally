@@ -40,6 +40,9 @@ export const WORKSPACE_ADMIN_DIALOGS = Object.freeze([
   // The Schedule's shift drawer and Remove shift (change add-volunteer-schedule).
   "shift",
   "remove-shift",
+  // The check-in drawer and Remove check-in (change add-volunteer-check-in).
+  "check-in",
+  "remove-check-in",
 ]);
 
 // Dialogs that need no capability: never swapped.

@@ -90,7 +90,7 @@ Closing SHALL stay one move to Closed, by an admin, with a reason (see "A closed
 - **THEN** the case is Accepted, with the staff name "Paper", and it never shows at E-filed
 
 ### Requirement: Screening starts when an admin first opens a case
-When a staff member with `admin` opens a case's page at Request sent, their window SHALL start screening for that case. It SHALL do this whether the case page was opened by its reference, the search, Follow-ups, the case pool or a reload. A list control that acts on a case without opening its page (for example Log contact on Follow-ups) SHALL NOT start screening. The window of a staff member without `admin` SHALL start nothing. The start SHALL be sent once per case.
+When a staff member with `admin` opens a case's page at Request sent while their window is on the office side, their window SHALL start screening for that case. It SHALL do this whether the case page was opened by its reference, the search, Follow-ups, the case pool or a reload. A list control that acts on a case without opening its page (for example Log contact on Follow-ups) SHALL NOT start screening. The window of a staff member without `admin` SHALL start nothing, and so SHALL a window on the Cases side, whatever its capabilities. When a staff member with `admin` switches from Cases to Office while a case at Request sent is open, their window SHALL start screening for it, as opening it there would. The start SHALL be sent once per case.
 
 **Quietly:**
 - It SHALL NOT disable the page's buttons.
@@ -112,8 +112,20 @@ Starting screening SHALL tell the client (see "Clients are told at each new step
 - **WHEN** a staff member without `admin`, such as the Preparer, opens a case at Request sent
 - **THEN** the case stays at Request sent
 
+#### Scenario: An Intaker opens it
+- **WHEN** an Intaker, whose window is on the office side, opens a case at Request sent
+- **THEN** the case stays at Request sent
+
+#### Scenario: An admin on the Cases side opens it
+- **WHEN** an Admin who is also a Reviewer, on the Cases side, opens a case at Request sent
+- **THEN** the case stays at Request sent
+
+#### Scenario: Switching to Office on the case
+- **WHEN** that Admin then presses Office on the workspace switch while the case is open
+- **THEN** the case moves to Screening in progress
+
 #### Scenario: A reload on the case page
-- **WHEN** an admin window reloads while it shows a case at Request sent
+- **WHEN** an admin window on the office side reloads while it shows a case at Request sent
 - **THEN** the case moves to Screening in progress
 
 #### Scenario: Logging a contact from Follow-ups

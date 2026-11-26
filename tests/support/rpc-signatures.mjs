@@ -45,6 +45,19 @@ async function scheduleCleanup(f, context) {
   else await f.sql("delete from public.schedule_settings where workspace_id=$1", [f.workspaceId]);
 }
 
+// Leaves the workspace without check-ins (for the check-in entries).
+async function checkInCleanup(f) {
+  await f.sql("delete from public.check_ins where workspace_id=$1", [f.workspaceId]);
+}
+
+// Yesterday in New York and the preparer, for the admin check-in entries.
+async function checkInContext(f) {
+  const { rows } = await f.sql(
+    "select to_char((now() at time zone 'America/New_York')::date-1,'YYYY-MM-DD') as d",
+  );
+  return { checkInVolunteerId: f.preparerId, checkInYesterday: rows[0].d };
+}
+
 // Every public application entry point installed so far, with a valid argument
 // shape, the exact receipt it answers with, and the member allowed to call it.
 // The database suite asserts this list matches exactly what the database
@@ -411,6 +424,7 @@ export const RPC_SIGNATURES = Object.freeze([
       "hours",
       "settingsRevision",
       "shifts",
+      "checkIns", // 060
       "targets",
       "weekday",
     ]),
@@ -423,6 +437,93 @@ export const RPC_SIGNATURES = Object.freeze([
     signature: "vitally_my_shifts()",
     authorized: (f) => f.siteCoordinator,
     receiptKeys: Object.freeze(["shifts", "weekEnd", "weekStart"]),
+    args: () => ({}),
+  }),
+  // Self check-in and check-out (add-volunteer-check-in, design D3): the caller's
+  // own day. The site coordinator is cleared and on the roster. A check-out
+  // needs an open check-in, which its context inserts.
+  Object.freeze({
+    name: "vitally_my_check_in",
+    signature: "vitally_my_check_in()",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["canCheckIn", "open", "today"]),
+    args: () => ({}),
+  }),
+  Object.freeze({
+    name: "vitally_check_in",
+    signature: "vitally_check_in(uuid)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["open"]),
+    args: () => ({ p_action_id: crypto.randomUUID() }),
+    cleanup: checkInCleanup,
+  }),
+  Object.freeze({
+    name: "vitally_check_out",
+    signature: "vitally_check_out(uuid)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["checkInId", "checkedInAt", "checkedOutAt"]),
+    args: () => ({ p_action_id: crypto.randomUUID() }),
+    context: async (f) => {
+      await f.sql(
+        `insert into public.check_ins(workspace_id,season,person_id,check_in_date,checked_in_at)
+          select w.id,w.current_season,$2,(now() at time zone 'America/New_York')::date,now()-interval '1 second'
+          from public.workspaces w where w.id=$1`,
+        [f.workspaceId, f.siteCoordinatorId],
+      );
+      return {};
+    },
+    cleanup: checkInCleanup,
+  }),
+  // Admin corrections and hours (add-volunteer-check-in, design D4, D8). The
+  // site coordinator is an admin. A save adds a check-in for the preparer
+  // yesterday, a removal takes one that its context inserts, and the hours are
+  // a read.
+  Object.freeze({
+    name: "vitally_save_check_in",
+    signature: "vitally_save_check_in(uuid,uuid,bigint,jsonb)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze([
+      "checkInId", "checkedInAt", "checkedOutAt", "correctedByName", "endsAt", "flags", "minutes", "name",
+      "revision", "state", "volunteerId",
+    ]),
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_check_in_id: null,
+      p_expected_revision: null,
+      p_check_in: { volunteerId: context.checkInVolunteerId, date: context.checkInYesterday, checkedIn: "10:00", checkedOut: "13:00" },
+    }),
+    context: async (f) => checkInContext(f),
+    cleanup: checkInCleanup,
+  }),
+  Object.freeze({
+    name: "vitally_remove_check_in",
+    signature: "vitally_remove_check_in(uuid,uuid,bigint)",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["checkInId", "revision"]),
+    args: (context) => ({
+      p_action_id: crypto.randomUUID(),
+      p_check_in_id: context.checkInId,
+      p_expected_revision: 1,
+    }),
+    context: async (f) => {
+      const context = await checkInContext(f);
+      const { rows } = await f.sql(
+        `insert into public.check_ins(workspace_id,season,person_id,check_in_date,checked_in_at,checked_out_at)
+          select w.id,w.current_season,$2,$3::date,
+           ($3::date+time '10:00')::timestamp at time zone 'America/New_York',
+           ($3::date+time '11:00')::timestamp at time zone 'America/New_York'
+          from public.workspaces w where w.id=$1 returning id`,
+        [f.workspaceId, f.preparerId, context.checkInYesterday],
+      );
+      return { ...context, checkInId: rows[0].id };
+    },
+    cleanup: checkInCleanup,
+  }),
+  Object.freeze({
+    name: "vitally_hours_this_week",
+    signature: "vitally_hours_this_week()",
+    authorized: (f) => f.siteCoordinator,
+    receiptKeys: Object.freeze(["hours", "weekEnd", "weekStart"]),
     args: () => ({}),
   }),
   // Setting the site's SIDN (design D5): the answer says only that it is set.

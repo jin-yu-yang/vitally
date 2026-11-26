@@ -9,6 +9,7 @@ import { rolesChangedLine } from "./role-gates.mjs";
 import { languagesText } from "./volunteer-views.mjs";
 import { ROLES } from "./volunteer-roster.mjs";
 import { sortRows, searchRows, taxpayerName } from "./volunteer-workload.mjs";
+import { formatHours } from "./volunteer-check-in.mjs";
 
 const when = (condition, html) => (condition ? html : "");
 const plural = (count, one, many) => `${count} ${count === 1 ? one : many}`;
@@ -139,7 +140,7 @@ function volunteerRows(row, expanded) {
   )}</th>${cell("open", row.open)}${cell("bar", bar(row.preparing, row.review, `${row.preparing} preparing, ${row.review} in review`))}${cell(
     "preparing",
     row.preparing,
-  )}${cell("review", row.review)}${cell("waiting", row.waiting)}${cell("stalled", row.stalled)}${cell("hours", row.hours ?? 0)}</tr>`;
+  )}${cell("review", row.review)}${cell("waiting", row.waiting)}${cell("stalled", row.stalled)}${cell("hours", formatHours(row.minutes ?? 0))}</tr>`;
   if (!open) return line;
   const items = (row.cases ?? []).map(({ record, slot, stalled, roleRemoved }) =>
     caseItem(record, { slotText: SLOT_LABEL[slot] ?? slot, stalled, roleRemoved, action: "Reassign", slot }),

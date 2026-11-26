@@ -36,6 +36,7 @@ import {
   chooseAnswer,
   clearToast,
   clickAction,
+  clickCaseAction,
   clickCaseActionUntil,
   continueToSubmit,
   fieldByLabel,
@@ -10211,6 +10212,103 @@ test(
         ARRIVAL_MS,
       );
       assert.equal(await preparer.locator("#my-profile-shifts li").count(), 1, "the Preparer's shifts this week");
+
+      // 7. Check-ins (change add-volunteer-check-in, design D11). The Preparer
+      // checks in from the strip on a 390 px phone, with the sidebar (an
+      // overlay at that width) closed.
+      await preparer.setViewportSize({ width: MOBILE_WIDTH, height: 844 });
+      if ((await preparer.locator('[data-action="toggle-sidebar"]').getAttribute("aria-expanded")) === "true") {
+        await preparer.locator('[data-action="toggle-sidebar"]').click({ timeout: CLICK_MS });
+        await waitFor(
+          preparer,
+          "the sidebar to be closed",
+          () => document.querySelector('[data-action="toggle-sidebar"]')?.getAttribute("aria-expanded") === "false",
+          undefined,
+          RENDER_MS,
+        );
+      }
+      await clickAction(preparer, "check-in");
+      await waitFor(
+        preparer,
+        "Checked in since on the strip",
+        () => (document.querySelector(".check-in-strip")?.textContent ?? "").startsWith("Checked in since"),
+        undefined,
+        ARRIVAL_MS,
+      );
+      await waitForQuiet(preparer);
+      assert.ok(
+        await preparer.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+        `the strip makes the page scroll sideways at ${MOBILE_WIDTH}px`,
+      );
+      await mkdir(SHOTS, { recursive: true });
+      await preparer.evaluate(() => window.scrollTo(0, 0));
+      await preparer.screenshot({ path: path.join(SHOTS, `check-in-strip-${MOBILE_WIDTH}.png`) });
+
+      // 8. Today's Schedule in the Site Coordinator's window: the Preparer's
+      // check-in is a bar. The walk's day is today only on a weekend, and then
+      // the Preparer has a shift today, so "Not scheduled" is tagged only on
+      // other days.
+      const scheduledToday = stepsToDay === 0;
+      await clickAction(admin, "open-schedule");
+      await admin.getByRole("heading", { name: "Schedule", exact: true }).waitFor({ timeout: ARRIVAL_MS });
+      const checkInBar = admin.locator(`button.check-in-bar[aria-label^="${ROLE_NAMES.preparer}, checked in "]`);
+      await checkInBar.waitFor({ timeout: ARRIVAL_MS });
+      await waitForQuiet(admin);
+      const barTags = async () => (await checkInBar.getAttribute("aria-label")) ?? "";
+      assert.equal(
+        (await barTags()).includes("Not scheduled"),
+        !scheduledToday,
+        `the check-in bar is ${scheduledToday ? "" : "not "}tagged Not scheduled: ${await barTags()}`,
+      );
+      assert.ok(!(await barTags()).includes("Corrected"), "a fresh check-in is tagged Corrected");
+      // Checked in one 5-minute step earlier, then Save.
+      await pressControl(admin, checkInBar, { selector: ".check-in-bar", what: "the Preparer's check-in bar" });
+      await admin.locator("#check-in-form").waitFor({ timeout: ARRIVAL_MS });
+      const earlier = await admin.locator("#check-in-in").evaluate((select) => select.options[select.selectedIndex - 1]?.value ?? null);
+      assert.ok(earlier, "no 5-minute step before the check-in time");
+      await admin.locator("#check-in-in").selectOption(earlier);
+      await pressControl(admin, admin.locator('#check-in-form [data-action="save-check-in"]'), { selector: "button", what: "Save" });
+      await waitFor(admin, "the check-in drawer to close", () => !document.querySelector("#check-in-form"), undefined, ARRIVAL_MS);
+      await waitFor(
+        admin,
+        "the bar to be tagged Corrected",
+        (name) =>
+          [...document.querySelectorAll("button.check-in-bar")].some((bar) => {
+            const label = bar.getAttribute("aria-label") ?? "";
+            return label.startsWith(`${name}, checked in `) && label.includes("Corrected");
+          }),
+        ROLE_NAMES.preparer,
+        ARRIVAL_MS,
+      );
+      await shootDay(admin, "check-in-bars");
+
+      // 9. The Preparer checks out, and the strip offers Check in again.
+      await clickAction(preparer, "check-out");
+      await waitFor(
+        preparer,
+        "Check in on the strip again",
+        () => document.querySelector('.check-in-strip [data-action="check-in"]')?.textContent.trim() === "Check in",
+        undefined,
+        ARRIVAL_MS,
+      );
+      await preparer.setViewportSize(DESKTOP);
+
+      // 10. The Workload's Hours this week for the Preparer: checked-in time,
+      // to one decimal or none.
+      await clickAction(admin, "open-volunteers");
+      await clickAction(admin, "volunteer-tab", { attributes: '[data-tab="workload"]' });
+      await waitFor(
+        admin,
+        "the Preparer's Hours this week",
+        (name) =>
+          [...document.querySelectorAll("tr.workload-row")].some(
+            (row) =>
+              row.querySelector(".workload-name")?.textContent.trim() === name &&
+              /^\d+(\.\d)?$/.test(row.querySelector('td[data-col="hours"]')?.textContent.trim() ?? ""),
+          ),
+        ROLE_NAMES.preparer,
+        ARRIVAL_MS,
+      );
       assertConsoleQuiet(adminWin, { name: "the Site Coordinator's Schedule window" });
       assertConsoleQuiet(preparerWin, { name: "the Preparer's Schedule window" });
       t.diagnostic(`schedule walk ${((Date.now() - started) / 1000).toFixed(1)} s`);
@@ -10866,14 +10964,15 @@ test(
         ARRIVAL_MS,
       );
 
-      // 4. Robin's window regains focus, and the work board opens.
+      // 4. Robin's window regains focus, and the office opens (an Intaker works
+      //    in the office, #104).
       await regainFocusUntil(
         robinPage,
-        "the work board",
+        "the office queue",
         (heading) => [...document.querySelectorAll("h1, h2")].some((h) => h.textContent.trim() === heading),
-        WORK_BOARD_HEADING,
+        OFFICE_BOARD_HEADING,
       );
-      await robinPage.getByRole("heading", { name: WORK_BOARD_HEADING, exact: true }).first().waitFor({ timeout: RENDER_MS });
+      await robinPage.getByRole("heading", { name: OFFICE_BOARD_HEADING, exact: true }).first().waitFor({ timeout: RENDER_MS });
       assert.equal(await robinPage.getByRole("heading", { name: SETUP_HEADING, exact: true }).count(), 0);
       assertConsoleQuiet(robinWin, { name: "Robin's window" });
 
@@ -11687,6 +11786,186 @@ test(
       assertConsoleQuiet(adminWin, { name: "the Site Coordinator's Roster window" });
     } finally {
       t.diagnostic(`remove-from-roster steps ${JSON.stringify(marks)}`);
+      await fixture.close();
+    }
+  },
+);
+
+// One person switches between Office and Cases (change add-workspace-switch,
+// #104) has its own test, outside the story and its time limit: it adds no
+// phase to either order. Chrome only, on a fixture of its own. Rowan, an Admin
+// and a Reviewer, opens a Pending review case that the fixture's Preparer
+// handed over, in Office; the case page offers "You can review this case —
+// switch to Cases". Switching shows Claim review, the claim makes Rowan the
+// reviewer, Office brings back Follow-ups and All cases, and Cases kept
+// through a reload shows the Work board. Ines, an Intaker, has only the
+// office: Follow-ups and no switch. Fictional people only; the addresses are
+// the synthetic ones the fixture makes.
+test(
+  "one person switches between Office and Cases",
+  { timeout: 300_000 },
+  async (t) => {
+    const fixture = await createBrowserFixture();
+    const db = fixture.database;
+    const HINT = "You can review this case — switch to Cases";
+    const marks = [];
+    const started = Date.now();
+    const step = (name) => marks.push(`${name} ${Date.now() - started}ms`);
+    // The switch's group: the sidebar <aside> is also labelled "Workspace",
+    // so the group is named by its role as well.
+    const SWITCH = '[role="group"][aria-label="Workspace"]';
+    const sideButton = (page, side) =>
+      page.locator(`${SWITCH} [data-action="set-workspace-side"][data-side="${side}"]`);
+    const pressedSides = (page) =>
+      page.evaluate(
+        (group) =>
+          Object.fromEntries(
+            [...document.querySelectorAll(`${group} [data-action="set-workspace-side"]`)].map((node) => [
+              node.dataset.side,
+              node.getAttribute("aria-pressed"),
+            ]),
+          ),
+        SWITCH,
+      );
+    const sidebarText = (page, action) =>
+      page.locator(`#app-sidebar [data-action="${action}"]`).first().innerText();
+    try {
+      // 1. Rowan (Admin and Reviewer), Ines (Intaker), and a case the
+      //    fixture's Preparer handed to review: Pending review, no reviewer.
+      const rowan = await db.staff({
+        key: "workspace_switch",
+        name: "Rowan Pike",
+        capabilities: ["admin", "followup", "prepare", "review"],
+      });
+      const ines = await db.staff({
+        key: "workspace_switch_intaker",
+        name: "Ines Ford",
+        capabilities: ["receive_documents", "assist"],
+      });
+      const caseId = await db.preparedCase();
+      const { reference, stage, preparer_id: preparerId } = await caseById(fixture, caseId);
+      assert.equal(stage, "review_ready", "the case Rowan opens");
+      assert.notEqual(preparerId, rowan.personId, "Rowan prepared the case");
+
+      const engine = await fixture.launch("chrome");
+      const rowanWin = await engine.newPage({ viewport: DESKTOP });
+      const page = rowanWin.page;
+      await guardToast(page);
+      await loginTestUser({
+        page,
+        actor: { key: "workspace_switch", email: rowan.email, userId: rowan.userId },
+        fixture,
+        heading: OFFICE_BOARD_HEADING,
+      });
+      await watchAlerts(page);
+
+      // 2. Office is pressed, and the sidebar offers Follow-ups and All cases.
+      await sideButton(page, "office").waitFor({ timeout: RENDER_MS });
+      assert.deepEqual(await pressedSides(page), { office: "true", cases: "false" }, "the sides on sign-in");
+      assert.equal((await sidebarText(page, "open-board")).trim(), "Follow-ups");
+      assert.equal(await page.locator('#app-sidebar [data-action="open-cases"]').count(), 1, "All cases in Office");
+      step("2 office");
+
+      // 3. Rowan opens the case from All cases: it says Rowan can review it,
+      //    and offers no Claim review yet.
+      await clickAction(page, "open-cases");
+      await page
+        .locator("button.board-reference")
+        .filter({ hasText: reference })
+        .first()
+        .waitFor({ timeout: ARRIVAL_MS });
+      await openCaseByReference(page, reference);
+      await waitForText(page, HINT, RENDER_MS);
+      assert.equal(await caseActionCount(page, "CLAIM_REVIEW"), 0, "Office offers Claim review");
+      step("3 hint");
+
+      // 4. Switch to Cases: the same case page now shows Claim review, the
+      //    hint is gone, and Cases is pressed and remembered for this user.
+      await waitForQuiet(page);
+      await page
+        .locator('#main [data-action="set-workspace-side"][data-side="cases"]')
+        .click({ timeout: CLICK_MS });
+      await waitFor(
+        page,
+        "Claim review on the case page in Cases",
+        () => Boolean(document.querySelector('[data-case-action="CLAIM_REVIEW"]')),
+        undefined,
+        RENDER_MS,
+      );
+      assert.deepEqual(await pressedSides(page), { office: "false", cases: "true" }, "the sides after Switch to Cases");
+      assert.equal(await page.locator("#main").getByText(HINT).count(), 0, "the hint is still shown in Cases");
+      assert.equal(
+        await page.evaluate((id) => localStorage.getItem(`vitally.workspace-side:${id}`), rowan.userId),
+        "cases",
+        "the remembered side",
+      );
+      step("4 switched");
+
+      // 5. Claim the review: Rowan is the reviewer and the stage is Reviewing.
+      await clickCaseAction(page, "CLAIM_REVIEW");
+      await waitFor(page, "Rowan as the reviewer", HAS_DETAIL, { label: "Reviewer", value: "Rowan Pike" }, ARRIVAL_MS);
+      const claimed = await caseById(fixture, caseId);
+      assert.deepEqual(
+        { stage: claimed.stage, reviewer: claimed.reviewer_id },
+        { stage: "reviewing", reviewer: rowan.personId },
+        "the case after the claim",
+      );
+      step("5 claimed");
+
+      // 6. Office again: Follow-ups and All cases are back, Office is pressed.
+      await waitForQuiet(page);
+      await sideButton(page, "office").click({ timeout: CLICK_MS });
+      await waitFor(
+        page,
+        "the sidebar to show Follow-ups and All cases",
+        () =>
+          document.querySelector('#app-sidebar [data-action="open-board"]')?.textContent.trim() === "Follow-ups" &&
+          Boolean(document.querySelector('#app-sidebar [data-action="open-cases"]')),
+        undefined,
+        RENDER_MS,
+      );
+      assert.deepEqual(await pressedSides(page), { office: "true", cases: "false" }, "the sides after Office");
+      step("6 office again");
+
+      // 7. Cases, then the Work board, then a reload: the side is kept.
+      await waitForQuiet(page);
+      await sideButton(page, "cases").click({ timeout: CLICK_MS });
+      await waitFor(
+        page,
+        "the sidebar to show the Work board link and no All cases",
+        () =>
+          document.querySelector('#app-sidebar [data-action="open-board"]')?.textContent.trim() === "Work board" &&
+          !document.querySelector('#app-sidebar [data-action="open-cases"]'),
+        undefined,
+        RENDER_MS,
+      );
+      await openBoard(page, WORK_BOARD_HEADING);
+      await page.reload();
+      await sideButton(page, "cases").waitFor({ timeout: ARRIVAL_MS });
+      await waitForText(page, WORK_BOARD_HEADING, ARRIVAL_MS);
+      assert.deepEqual(await pressedSides(page), { office: "false", cases: "true" }, "the sides after a reload");
+      assert.equal((await sidebarText(page, "open-board")).trim(), "Work board");
+      assert.deepEqual(rowanWin.pageErrors, [], "Rowan's window threw in the page");
+      step("7 reloaded");
+
+      // 8. Ines, in her own window, has only the office: Follow-ups, and no
+      //    Workspace switch at all.
+      const inesWin = await engine.newPage({ viewport: DESKTOP });
+      const inesPage = inesWin.page;
+      await guardToast(inesPage);
+      await loginTestUser({
+        page: inesPage,
+        actor: { key: "workspace_switch_intaker", email: ines.email, userId: ines.userId },
+        fixture,
+        heading: OFFICE_BOARD_HEADING,
+      });
+      assert.equal((await sidebarText(inesPage, "open-board")).trim(), "Follow-ups");
+      assert.equal(await inesPage.locator(SWITCH).count(), 0, "the Intaker is offered a switch");
+      assert.equal(await inesPage.locator('[data-action="set-workspace-side"]').count(), 0, "the Intaker is offered a side");
+      assert.deepEqual(inesWin.pageErrors, [], "Ines's window threw in the page");
+      step("8 intaker");
+    } finally {
+      t.diagnostic(`workspace-switch steps ${JSON.stringify(marks)}`);
       await fixture.close();
     }
   },
