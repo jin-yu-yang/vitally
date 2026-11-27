@@ -1870,6 +1870,19 @@ if (!config) {
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 
+  // The Season export's ZIP, saved the way the Roster's CSV is.
+  function downloadSeasonZip({ filename, bytes }) {
+    const url = URL.createObjectURL(new Blob([bytes], { type: "application/zip" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.hidden = true;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
+
   // A filled copy is read, then held for the preparer to check (change
   // guard-shaded-upload-against-preview, design D1): the case's reference,
   // then the shaded fields by name into readShaded (with the case's household
@@ -2307,6 +2320,20 @@ if (!config) {
         formDrafts.delete("start-season-year");
         openDialog("start-season", null, describeFocus(target));
         break;
+      case "open-export-season":
+        controller.dismissError();
+        openDialog("export-season", null, describeFocus(target));
+        break;
+      case "export-season": {
+        const file = await controller.exportSeason();
+        if (file) {
+          downloadSeasonZip(file);
+          focusBeforeDialog = null;
+          notify("success", "Season exported", by);
+          root.querySelector('[data-action="open-export-season"]')?.focus();
+        }
+        break;
+      }
       case "add-site-coordinator": {
         const text = await controller.addSiteCoordinator(root.querySelector("#sc-pick")?.value ?? "");
         if (text) {

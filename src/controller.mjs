@@ -44,6 +44,7 @@ import { volunteerProblem, profileProblem, withoutLostRoles, roleNeedsMessage, o
 import { emptyUpdateForm, toUpdateRequest, validateUpdate } from "./posted-updates.mjs";
 import { nowInput } from "./contact-log.mjs";
 import { seasonRefusalLines } from "./season-settings-views.mjs";
+import { seasonExportZip } from "./season-export.mjs";
 import { CHECK_IN_REFUSALS, hhmm } from "./volunteer-check-in.mjs";
 
 // The one place browser state lives. It owns what is loaded, what is being
@@ -2752,6 +2753,44 @@ export function createController({
       show();
     }
     return `The ${season} season has started`;
+  }
+
+  // Season export (change add-season-export, design D8). One call, no action
+  // id, so it does not go through settingsWrite. The file is built only when
+  // the answer arrives; the card's Last export line shows the exporter and
+  // time from that answer. FORBIDDEN closes the dialog and reads Season
+  // settings again; any other error keeps the dialog with the window's usual
+  // notice. Resolves to `{filename, bytes}`, or null.
+  async function exportSeason() {
+    if (state.busy || !staffWindow() || state.screen !== "office-settings" || !state.seasonSettings) return null;
+    if (state.seasonSettingsUi?.exportBusy) return null;
+    state.seasonSettingsUi = { ...state.seasonSettingsUi, exportBusy: true };
+    state.error = null;
+    show();
+    try {
+      const answer = await store.exportSeason();
+      const file = seasonExportZip(answer, new Date());
+      state.seasonSettings = {
+        ...state.seasonSettings,
+        lastExport: { name: answer.exportedByName, exportedAt: answer.exportedAt },
+      };
+      noteConnected();
+      state.dialog = null;
+      state.dialogContext = null;
+      return file;
+    } catch (error) {
+      if (error?.code === "FORBIDDEN") {
+        state.dialog = null;
+        state.dialogContext = null;
+        await readSeasonSettings().catch(() => {});
+      } else {
+        noteFailure(error);
+      }
+      return null;
+    } finally {
+      state.seasonSettingsUi = { ...state.seasonSettingsUi, exportBusy: false };
+      show();
+    }
   }
 
   // Add (the picker's volunteer) or Remove (a row's), at the account
@@ -6187,6 +6226,7 @@ export function createController({
     saveMyProfile,
     saveSidn,
     startNextSeason,
+    exportSeason,
     addSiteCoordinator,
     removeSiteCoordinator,
     saveUpdate,

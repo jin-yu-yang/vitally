@@ -5,6 +5,7 @@
 // English only. Pure: `view` is the `vitally_season_settings()` answer.
 import { esc, button, loadingLine, unloadedLine } from "./ui.mjs";
 import { WEEKDAYS, hourLabel } from "./volunteer-schedule.mjs";
+import { FREE_TEXT_WARNING } from "./season-export.mjs";
 
 export const LINK_MESSAGE = "Enter a link that starts with https://.";
 export const READ_ONLY_NOTE = "Only site coordinators can change these settings.";
@@ -207,6 +208,51 @@ export function seasonRefusalLines(counts) {
   });
 }
 
+// "Nov 27, 3:05 pm": the export's moment in New York, whatever the machine's
+// time zone.
+const EXPORT_MOMENT = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+/** The card's line for the latest export of the season: `{name, exportedAt}` or none. */
+export function lastExportLine(lastExport) {
+  const at = lastExport?.exportedAt ? new Date(lastExport.exportedAt) : null;
+  if (!lastExport?.name || !at || Number.isNaN(at.getTime())) return "No export yet this season.";
+  const part = Object.fromEntries(EXPORT_MOMENT.formatToParts(at).map((p) => [p.type, p.value]));
+  const moment = `${part.month} ${part.day}, ${part.hour}:${part.minute} ${String(part.dayPeriod).toLowerCase()}`;
+  return `Last export: ${lastExport.name} · ${moment}`;
+}
+
+// The card: one ZIP of CSVs, the Last export line, and for a site coordinator
+// the button. Any other workspace admin reads the line.
+function exportCard(view, canEdit, ui) {
+  const busy = ui?.busy === true;
+  const open = canEdit
+    ? `<div class="settings-actions">${button("Export this season…", "open-export-season", "secondary", `aria-describedby="season-export-title"${disabled(busy)}`)}</div>`
+    : "";
+  return `<section class="panel settings-card" aria-labelledby="season-export-title"><div class="card-head"><h2 id="season-export-title">Season export</h2><span class="muted small">${esc(
+    seasonLabel(view.season),
+  )}</span></div><p>One ZIP of CSVs for PCDC's archive.</p><p class="field-note" id="season-export-last">${esc(lastExportLine(view.lastExport))}</p>${open}</section>`;
+}
+
+/**
+ * The Export the season dialog's body. `season` is the season the page read;
+ * `busy` is true while the export runs (the confirm reads Preparing…).
+ */
+export function exportSeasonDialogBody({ season, busy = false } = {}) {
+  return `<div id="export-season-body" class="staff-form"><p>Export the ${esc(
+    season,
+  )} season as one ZIP of CSV files.</p><p class="field-note">Included: cases and intake answers, household members, status history, messages between clients and staff, follow-ups, the call log, and help requests.</p><p class="field-note">Not included: the roster and certificates (use Roster → Export CSV), and the 13614-C PDFs (rebuilt from the answers).</p><p class="notice" role="note">${esc(
+    FREE_TEXT_WARNING,
+  )}</p><div class="drawer-actions"><button type="button" class="btn primary" id="export-season-submit" data-action="export-season"${
+    busy ? " disabled" : ""
+  }>${busy ? "Preparing…" : "Download ZIP"}</button>${button("Cancel", "close-dialog", "text", disabled(busy).trim())}</div></div>`;
+}
+
 // The card: what starting the next season does, and for a site coordinator
 // the button. Any other workspace admin reads the same text.
 function nextSeasonCard(view, canEdit, ui) {
@@ -309,7 +355,7 @@ export function renderSeasonSettings(view, { canEdit = false, selfId = null, lis
     return loadingLine("Loading Season settings…");
   }
   const readOnly = canEdit ? "" : `<p class="notice settings-readonly" role="note">${esc(READ_ONLY_NOTE)}</p>`;
-  return `<div class="season-settings">${readOnly}${seasonCard(view, canEdit, ui)}${siteHoursCard(view, canEdit, ui)}${nextSeasonCard(view, canEdit, ui)}${coordinatorsCard(view, { canEdit, selfId, ui })}</div>`;
+  return `<div class="season-settings">${readOnly}${seasonCard(view, canEdit, ui)}${siteHoursCard(view, canEdit, ui)}${exportCard(view, canEdit, ui)}${nextSeasonCard(view, canEdit, ui)}${coordinatorsCard(view, { canEdit, selfId, ui })}</div>`;
 }
 
 /** The Change the SIDN dialog's body: one field, Save and Cancel. */

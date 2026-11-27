@@ -36,6 +36,7 @@ export const WORKSPACE_ADMIN_DIALOGS = Object.freeze([
   "delete-update",
   "change-sidn",
   "start-season",
+  "export-season",
   "notifications",
   // The Schedule's shift drawer and Remove shift (change add-volunteer-schedule).
   "shift",

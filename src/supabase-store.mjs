@@ -1083,6 +1083,13 @@ export function createStore(client) {
       });
     },
 
+    // Season export (change add-season-export): no arguments, no action id.
+    // The answer is the season's rows for the CSVs; FORBIDDEN unless the
+    // acting person is a site coordinator.
+    async exportSeason() {
+      return await call("vitally_export_season");
+    },
+
     async setSiteCoordinator(request) {
       return await call("vitally_set_site_coordinator", {
         p_action_id: actionId(request),

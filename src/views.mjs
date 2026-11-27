@@ -53,7 +53,7 @@ import {
   deleteDraftConfirm,
   updateGoneBody,
 } from "./update-views.mjs";
-import { renderSeasonSettings, changeSidnDialogBody, startSeasonDialogBody } from "./season-settings-views.mjs";
+import { renderSeasonSettings, changeSidnDialogBody, startSeasonDialogBody, exportSeasonDialogBody } from "./season-settings-views.mjs";
 import { timeLabel } from "./volunteer-check-in.mjs";
 import {
   scheduleScreen,
@@ -860,6 +860,12 @@ export function dialog(state) {
       busy: state.busy === true,
     });
   }
+  // Season export (change add-season-export, design D8): the season the page read.
+  if (state.dialog === "export-season") {
+    const season = state.seasonSettings?.season ?? state.workspace?.currentSeason ?? null;
+    title = season == null ? "Export the season" : `Export the ${season} season`;
+    body = exportSeasonDialogBody({ season, busy: state.seasonSettingsUi?.exportBusy === true });
+  }
   // The Schedule's shift drawer and its Remove shift confirmation (change
   // add-volunteer-schedule). The drawer's refusals are said above its body.
   if (state.dialog === "shift") {
@@ -970,7 +976,7 @@ export function dialog(state) {
         ? "OFFICE · WORKLOAD"
         : state.dialog === "notifications"
           ? "FROM THE OFFICE"
-          : ["update-people", "unpublish-update", "delete-update", "change-sidn", "start-season"].includes(state.dialog)
+          : ["update-people", "unpublish-update", "delete-update", "change-sidn", "start-season", "export-season"].includes(state.dialog)
             ? "OFFICE · ADMIN"
             : ["shift", "remove-shift", "check-in", "remove-check-in"].includes(state.dialog)
               ? "VOLUNTEERS · SCHEDULE"
