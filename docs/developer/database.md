@@ -423,6 +423,9 @@ and the behaviour in the canonical spec
   Preparer and Reviewer need Basic or Advanced (`vitally_private.missing_certificates`). The
   deferred constraint triggers on `roster_entries` and `certificates` refuse an unsupported role at
   commit, in any season, so one transaction may write roles and certificates in either order.
+  Each entry is checked against its own season's certificates: a past season's entry (Start next
+  season leaves them with their roles) needs that season's certificates, and this season's don't
+  count for it (#193; `tests/database-clearance.mjs`).
 - **Cleared** (`vitally_private.cleared`): the current-season roster entry has a role, and is not
   `is_new` or has `photo_id_checked_at` set.
 - **The read gate.** The staff branch of the 23 case-data policies (045's 21 and 051's two label policies) also requires
