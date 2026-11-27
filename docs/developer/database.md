@@ -90,7 +90,8 @@ in order by [`tools/admin/migrate.mjs`](../../tools/admin/migrate.mjs).
 | `058_volunteer_schedule.sql` | Hand-written: the volunteer schedule (change `add-volunteer-schedule`; [below](#the-volunteer-schedule)). The tables `shifts` and `schedule_settings`, with their SELECT policies (for Realtime only, no write grant) and their place in the Realtime publication; the private helpers `vitally_private.valid_site_hours`, `schedule_viewer`, `schedule_settings_answer`, `schedule_target`, `shift_flags`, `shift_counts` and `ny_week`, and the policy helper `vitally_policy.is_schedule_viewer`; the RPCs `vitally_save_schedule_settings`, `vitally_save_shift`, `vitally_remove_shift`, `vitally_schedule_day` and `vitally_my_shifts`; and `vitally_season_settings` (from 052) and `vitally_my_clearance` (from 057) re-created, with a `schedule` answer and `scheduleViewer`. Usual days are 057's `volunteer_profiles.usual_days`; 058 only reads them. No seed and no `vitally_save_volunteer` change |
 | `059_remove_from_roster.sql` | Hand-written: removing a volunteer from this season's Roster (change `add-remove-from-roster`; [below](#removing-a-volunteer-from-the-roster)). The audit table `roster_removals` and the RPC `vitally_remove_from_roster`, which also marks the person's shifts from today on removed (058's `shifts`). No existing function changes |
 | `060_volunteer_check_in.sql` | Hand-written: volunteer check-in (change `add-volunteer-check-in`; [below](#volunteer-check-in)). The table `check_ins`, with its SELECT policy (an admin reads every row, anyone else their own; for Realtime only, no write grant) and its place in the Realtime publication; the private helpers `vitally_private.check_in_day_end`, `check_in_span`, `check_in_person`, `can_check_in`, `open_check_in` and `check_in_item`, and the policy helper `vitally_policy.is_own_person`; the RPCs `vitally_my_check_in`, `vitally_check_in`, `vitally_check_out`, `vitally_save_check_in`, `vitally_remove_check_in` and `vitally_hours_this_week`; and `vitally_schedule_day` (from 058) re-created, with `checkIns` for an admin. Nothing else existing changes |
-| `061_admin_role_after_receipt.sql` | Hand-written: `vitally_save_volunteer` re-created from 057 with the Admin role check (`VT001` `ADMIN_ROLE`) moved below the receipt lookup, so a repeated action id returns its stored result although the volunteer's Admin role has changed since (#238). A refusal still stores no receipt. Nothing else changes; `vitally_remove_from_roster` (059) keeps its order |
+| `061_admin_role_after_receipt.sql` | Hand-written: `vitally_save_volunteer` re-created from 057 with the Admin role check (`VT001` `ADMIN_ROLE`) moved below the receipt lookup, so a repeated action id returns its stored result although the volunteer's Admin role has changed since (#238). A refusal still stores no receipt. Nothing else changes; `vitally_remove_from_roster` (059) keeps its order until 062 |
+| `062_close_check_in_on_roster_removal.sql` | Hand-written: change `close-check-in-on-roster-removal` (#277, #300; [below](#removing-a-volunteer-from-the-roster)). The column `roster_removals.check_in_closed`, and `vitally_remove_from_roster` re-created from 059: it checks the person out of today's open check-in, and looks up the receipt before the Admin role check, as 061 does for Save. The answer is unchanged. Nothing else changes |
 **Catalogue changes ship as a new `NNN_intake_catalogue_*.sql` written by `npm run build:intake`;
 never edit an applied one.** The build writes a file only when the hash differs from the newest
 catalogue migration's. The hash covers the catalogue and `LOADER_VERSION` in
@@ -141,7 +142,7 @@ do not copy them from older files:
 | `vitally_private.household_rows`, `act_save_preparer_fields` | `050_hidden_household_rows.sql` |
 | `vitally_private.check_preparer_fields` | `039_preparer_shaded_fields.sql` |
 | `vitally_private.lock_case`, `open_work`, and the RPCs `public.vitally_assistance_action`, `vitally_start_next_season` | `055_start_next_season.sql` |
-| `public.vitally_remove_from_roster` and the table `public.roster_removals` | `059_remove_from_roster.sql` |
+| `public.vitally_remove_from_roster` (re-created by 062) and the table `public.roster_removals` (059; 062 adds `check_in_closed`) | `059_remove_from_roster.sql`, `062_close_check_in_on_roster_removal.sql` |
 | `vitally_private.acting_person`, `contact_person`, `require_cleared`, the role helpers, `role_certificates_check`, `vitally_policy.cleared_workspace_id`, and the RPCs `public.vitally_create_case`, `vitally_log_contact`, `vitally_edit_contact` | `045_volunteer_clearance.sql` |
 | `vitally_private.audience_member`, `vitally_policy.in_update_audience`, `vitally_policy.unpublished_read_window`, and the RPCs `public.vitally_save_update`, `vitally_update_action`, `vitally_mark_updates`, `vitally_my_updates`, `vitally_posted_updates` | `049_posted_updates.sql` |
 | `public.vitally_mark_upload_sent`, `vitally_mark_upload_reviewed` | `053_clearance_uploads.sql` |
@@ -255,7 +256,7 @@ erDiagram
 | `vitally_private.intake_substeps` | The version-2 sub-steps, in order | Private; one row per catalogue sub-step (id, step, position), loaded with the catalogue through 015's `load_intake_catalogue`; read by SAVE_ANSWERS' `visited` check |
 | `assistance_items` | Requests for help with forms, beside the tax workflow | Own `revision`; `status`: `open` → `assigned` → `resolved`; optional `case_id`; `language`, `contact_preference` |
 | `season_starts` | One row per Start next season (055) | `from_season`, `to_season` (always `from_season` + 1), `started_by_person_id`, `started_at`, `default_followup_from` and `default_followup_to` (both null when the default follow-up person was kept), `deactivated_count`. Row security on, no policy, no grant to signed-in users and none for `service_role` (as on 049's, 051's and 054's tables); written only by `vitally_start_next_season`; not published |
-| `roster_removals` | One row per removal from the Roster (059) | `season`, `person_id` and `removed_by_person_id` (historical scalars, no key), `removed_at`, `account_deactivated`, `shifts_removed`. Row security on with no policy, and no grant to any browser role or `service_role`; only `vitally_remove_from_roster` writes it, and no screen reads it |
+| `roster_removals` | One row per removal from the Roster (059) | `season`, `person_id` and `removed_by_person_id` (historical scalars, no key), `removed_at`, `account_deactivated`, `shifts_removed`, `check_in_closed` (062; whether the removal checked the person out, false for earlier rows). Row security on with no policy, and no grant to any browser role or `service_role`; only `vitally_remove_from_roster` writes it, and no screen reads it |
 | `vitally_private.schema_migrations` | Migration ledger | `name`, `digest` (SHA-256 of the file) |
 | `vitally_private.test_workspaces` | Workspaces created by test runs | Test only |
 
@@ -586,18 +587,27 @@ confirmed step.
   already removed and other people's are untouched. The count is `shiftsRemoved` and
   `roster_removals.shifts_removed`. The marks are `UPDATE`s on a Realtime table, so open Schedule, My
   profile and Workload screens follow on their own.
+- **Check-ins** (062). Right after the shifts, the same transaction checks the person out of their live
+  open check-in dated today (`open_check_in`'s test: no check-out, today in `America/New_York`), so it
+  doesn't stay open with nobody able to close it. The check-out is `greatest(now(), checked_in_at + 1
+  µs)`, as `vitally_check_out` has it, for `check_ins_out_after_in`. The row reads as Corrected by the
+  remover: `corrected_by_person_id` and `updated_by_person_id` are the caller, `revision + 1`,
+  `updated_at` now. An earlier day's open check-in stays, missed to its day's end as it already counts.
+  Whether one was closed is `roster_removals.check_in_closed`; the answer has no field for it. The
+  `UPDATE` is a Realtime event, so open Schedules re-read.
 - **Order of checks:**
   1. Not a workspace admin (a site coordinator, or the Admin role this season; cleared or not) is
      `FORBIDDEN`, with no receipt.
   2. A null argument is `VALIDATION`. The caller's own row is `VALIDATION` with detail `SELF`. It comes
      before `ADMIN_ROLE`: every admin who isn't a site coordinator holds the Admin role, so after it
      they would never see `SELF`.
-  3. The workspace advisory lock, then the person's membership `for update` when step 13 will deactivate it
-     (their account invited or active, not a site coordinator's).
-  4. A person who holds the Admin role this season, removed by a caller who isn't a site coordinator, is
-     `FORBIDDEN` with message `ADMIN_ROLE` (052 rule 3), before the receipt, as Save does.
-  5. The receipt is reserved, so a repeated action id returns the stored answer although its revision is
-     now stale.
+  3. The workspace advisory lock, then the person's membership `for update` when the account step will
+     deactivate it (their account invited or active, not a site coordinator's).
+  4. The receipt is reserved, so a repeated action id returns the stored answer although its revision is
+     now stale, and although the person's stored roles have changed since (062; #300).
+  5. A person who holds the Admin role this season, removed by a caller who isn't a site coordinator, is
+     `FORBIDDEN` with message `ADMIN_ROLE` (052 rule 3). Since 062 it comes after the receipt lookup, as
+     Save's has since 061; the refusal rolls the reserved receipt back, so none is stored.
   6. Invitations past their expiry are cancelled.
   7. The profile, `for update`: `NOT_FOUND` if there is none in the workspace, `CONFLICT` if its revision
      differs from `p_expected_revision`.
@@ -606,8 +616,10 @@ confirmed step.
   10. Open work: `VT004` `OPEN_WORK` with the labels as JSON in the detail, from the whole `open_work`
       list. Unlike Save, a site coordinator who is the default follow-up person is not excused.
 - **Locks, in order:** the workspace advisory lock, the person's membership, the profile, the entry,
-  the shifts, the account. Save, Deactivate, Start next season, Save shift, Remove shift and Remove all
-  take the workspace lock first, so none of them can deadlock with another. The person's own writes
+  the shifts, the check-in (062), the account. Save, Deactivate, Start next season, Save shift, Remove
+  shift, Remove all and the check-in RPCs (`vitally_check_in`, `vitally_check_out`,
+  `vitally_save_check_in`, `vitally_remove_check_in`) take the workspace lock first, so none of them can
+  deadlock with another. The person's own writes
   take no workspace lock: `vitally_save_my_profile` and `vitally_mark_upload_sent` (057) hold `for
   share` on their membership (`require_membership`), then lock the profile (and the entry). Remove
   deactivates that membership, so it locks it before the profile, in the same order: a write already
@@ -615,7 +627,11 @@ confirmed step.
   coordinator's membership isn't deactivated, so it isn't locked. Known limit, shared with Deactivate
   and Start next season: a call of the person's own that takes the workspace lock after their
   membership (an Admin-role volunteer's admin RPC, an invited volunteer's site check) can still
-  deadlock with it.
+  deadlock with it. Two 060 shapes stay as they are (#305): a volunteer's own check-in or check-out holds
+  their membership `for share` and then waits for the workspace lock, so it can deadlock with Remove
+  (`40P01`; Postgres aborts one and nothing half-written remains), and a site coordinator's check-in
+  tests `can_check_in` before the workspace lock and Remove doesn't lock their membership, so one can
+  land just after their removal and stay open.
 - **The account.** When it is `invited` or `active` and not a site coordinator's, the same transaction
   calls `deactivate_account` (never `cancel_invitation`, so adding the person back means Reactivate).
   With no account, or one already `deactivated`, only the entry is deleted, so a Remove racing a
