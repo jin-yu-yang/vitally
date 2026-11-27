@@ -1,17 +1,17 @@
 ## 1. Database (migration 062)
 
-- [ ] 1.1 Merge `main` and confirm `062` is the next free migration number
-- [ ] 1.2 Add `season_exports` (RLS on, no grants to signed-in users, index on workspace, season, time) in `supabase/migrations/062_season_export.sql`
-- [ ] 1.3 Add `public.vitally_export_season()`: `FORBIDDEN` first for anyone not an active site coordinator; one-snapshot answer of the current season's cases, events, client events, document requests, follow-ups, contact log, contact attempts and help requests (named fields only); insert one record with row counts
-- [ ] 1.4 Replace `public.vitally_season_settings()` with 058's body plus `lastExport` for the current season
-- [ ] 1.5 Database tests (`tests/database-season-export.mjs`): refusals record nothing; only current-season submitted cases; help requests with no case; one record per call with counts; `lastExport` latest-of-current-season and null after Start next season; no direct table access
+- [x] 1.1 Merge `main` and confirm `062` is the next free migration number
+- [x] 1.2 Add `season_exports` (RLS on, no grants to signed-in users, index on workspace, season, time) in `supabase/migrations/062_season_export.sql`
+- [x] 1.3 Add `public.vitally_export_season()`: `FORBIDDEN` first for anyone not an active site coordinator; one-snapshot answer of the current season's cases, events, client events, document requests, follow-ups, contact log, contact attempts and help requests (named fields only); insert one record with row counts
+- [x] 1.4 Replace `public.vitally_season_settings()` with 058's body plus `lastExport` for the current season
+- [x] 1.5 Database tests (`tests/database-season-export.mjs`): refusals record nothing; only current-season submitted cases; help requests with no case; one record per call with counts; `lastExport` latest-of-current-season and null after Start next season; no direct table access
 
 ## 2. Export files in the browser (`src/season-export.mjs`)
 
-- [ ] 2.1 `zipStored(files, date)`: stored entries, CRC-32, UTF-8 names; unit test parses it back and checks names, order and CRCs
-- [ ] 2.2 CSV builders for the eight files from the RPC answer with the spec's columns, New York times and English labels, using `toCsv`; unit tests per file, including visible answers only, multi-select joining, household rows, messages of both kinds, help request with no case, empty files
-- [ ] 2.3 `README.txt` builder and `seasonExportFilename(season, now)`; unit tests
-- [ ] 2.4 Sensitive-field guard test over the catalogue (SSN, ITIN, routing, account number)
+- [x] 2.1 `zipStored(files, date)`: stored entries, CRC-32, UTF-8 names; unit test parses it back and checks names, order and CRCs
+- [x] 2.2 CSV builders for the eight files from the RPC answer with the spec's columns, New York times and English labels, using `toCsv`; unit tests per file, including visible answers only, multi-select joining, household rows, messages of both kinds, help request with no case, empty files
+- [x] 2.3 `README.txt` builder and `seasonExportFilename(season, now)`; unit tests
+- [x] 2.4 Sensitive-field guard test over the catalogue (SSN, ITIN, routing, account number)
 
 ## 3. Season settings page
 
