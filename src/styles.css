@@ -2784,6 +2784,34 @@ textarea::placeholder {
   background: var(--vt-primary-soft);
   font-size: 12px;
 }
+/* Issue 147: when the work board is narrower than its three tabs in a row
+   (about 505 px: a phone, or a narrow window with the sidebar open), the tabs
+   share the width in thirds and a long name takes two or three lines, so the
+   last tab is no longer off-screen. */
+.staff-board {
+  container-type: inline-size;
+}
+@container (max-width: 520px) {
+  .board-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: end;
+    gap: 6px;
+    overflow-x: visible;
+  }
+  .board-tabs .btn.tab {
+    display: block;
+    min-width: 0;
+    padding: 8px 0;
+    font-size: 14px;
+    line-height: 1.35;
+    text-align: center;
+    white-space: normal;
+  }
+  .board-tabs .tab-count {
+    white-space: nowrap;
+  }
+}
 /* A Language cell's letters: the names are on hover (allow-multiple-service-languages). */
 .language-letters {
   white-space: nowrap;
