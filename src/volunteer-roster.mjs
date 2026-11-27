@@ -85,6 +85,37 @@ const ACCOUNT_MISSING = Object.freeze({ none: "noAccount", invited: "notSignedIn
 // Joins raw PostgREST rows into volunteers. Only people with a roster entry appear.
 // `shifts` are the live current-season shifts from today on (person_id only),
 // so the remove confirmation can say they go too (change add-remove-from-roster, D12).
+/**
+ * The earlier volunteers (change add-returning-volunteers-and-roster-csv):
+ * people with a profile and no entry in `entries` (this season's), so the
+ * Roster's Add can pick one instead of retyping them. `lastSeason` marks those
+ * in `lastEntries` (last season's, person ids only). Sorted by name.
+ */
+export function earlierVolunteers({ profiles = [], people = [], entries = [], lastEntries = [] }) {
+  const now = new Set(entries.map((e) => e.person_id));
+  const last = new Set(lastEntries.map((e) => e.person_id));
+  const profileById = new Map(profiles.map((p) => [p.person_id, p]));
+  const list = [];
+  for (const person of people) {
+    const profile = profileById.get(person.id);
+    if (!profile || now.has(person.id)) continue;
+    list.push({
+      id: person.id,
+      name: person.name,
+      email: profile.email,
+      phone: profile.phone ?? null,
+      works: profile.works,
+      languages: [...(profile.languages ?? [])],
+      otherLanguage: profile.other_language ?? null,
+      usualDays: [...(profile.usual_days ?? [])],
+      revision: profile.revision,
+      hasSignIn: Boolean(person.user_id),
+      lastSeason: last.has(person.id),
+    });
+  }
+  return list.sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
+}
+
 export function combineVolunteers({ profiles = [], entries = [], certificates = [], people = [], accounts = [], shifts = [] }) {
   const withShifts = new Set(shifts.map((s) => s.person_id));
   const accountById = new Map(accounts.map((a) => [a.person_id, a]));

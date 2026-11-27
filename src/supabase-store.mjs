@@ -1,7 +1,7 @@
 import { createAppError } from "./errors.mjs";
 import { SQLSTATE_ERROR_CODES } from "./contracts.mjs";
 import { isAuthTransportError } from "./auth.mjs";
-import { combineVolunteers } from "./volunteer-roster.mjs";
+import { combineVolunteers, earlierVolunteers } from "./volunteer-roster.mjs";
 import { nyToday } from "./volunteer-schedule.mjs";
 import { sortLabels } from "./case-labels.mjs";
 
@@ -801,8 +801,11 @@ export function createStore(client) {
     },
 
     // The admin Roster (migration 044): the workspace's volunteers for the
-    // current season. The tables are admin-only under RLS and are not watched.
-    async listVolunteers() {
+    // current season, and the earlier volunteers its Add can pick (change
+    // add-returning-volunteers-and-roster-csv), from one read of the tables
+    // they share (#270). The tables are admin-only under RLS and are not
+    // watched.
+    async listRoster() {
       await requireStaffAccess();
       // Expired invitations are cancelled when next looked at (migration 047),
       // so the list never shows one as Invited.
@@ -810,9 +813,7 @@ export function createStore(client) {
       const season = (await read(client.from("workspaces").select("current_season")))[0]
         ?.current_season;
       const bySeason = (table) =>
-        season == null
-          ? []
-          : read(client.from(table).select("*").eq("season", season));
+        season == null ? [] : read(client.from(table).select("*").eq("season", season));
       // Who has a live shift this season from today (New York's date) on: the
       // remove confirmation says those go too (change add-remove-from-roster, D12).
       const upcomingShifts = () =>
@@ -826,7 +827,12 @@ export function createStore(client) {
                 .is("removed_at", null)
                 .gte("shift_date", nyToday(Date.now())),
             );
-      const [profiles, entries, certificates, people, accounts, shifts] = await Promise.all([
+      // Last season's entries mark the earlier volunteers who were on it.
+      const lastSeasonEntries = () =>
+        season == null
+          ? []
+          : read(client.from("roster_entries").select("person_id").eq("season", season - 1));
+      const [profiles, entries, certificates, people, accounts, shifts, lastEntries] = await Promise.all([
         read(client.from("volunteer_profiles").select("*")),
         bySeason("roster_entries"),
         bySeason("certificates"),
@@ -837,46 +843,12 @@ export function createStore(client) {
             .select("workspace_id,user_id,person_id,status,revision,activated_at,expires_at,is_site_coordinator"),
         ),
         upcomingShifts(),
+        lastSeasonEntries(),
       ]);
-      return combineVolunteers({ profiles, entries, certificates, people, accounts, shifts });
-    },
-
-    // Earlier volunteers (change add-returning-volunteers-and-roster-csv): people
-    // with a profile and no roster entry for the current season, so the Roster's
-    // Add can pick one instead of retyping them. `lastSeason` marks those who
-    // had an entry the season before. Staff only; none without a season.
-    async listEarlierVolunteers() {
-      await requireStaffAccess();
-      const season = (await read(client.from("workspaces").select("current_season")))[0]
-        ?.current_season;
-      if (season == null) return [];
-      const [profiles, people, entries] = await Promise.all([
-        read(client.from("volunteer_profiles").select("*")),
-        read(client.from("people").select("id,name,user_id")),
-        read(client.from("roster_entries").select("person_id,season").in("season", [season, season - 1])),
-      ]);
-      const now = new Set(entries.filter((e) => e.season === season).map((e) => e.person_id));
-      const last = new Set(entries.filter((e) => e.season === season - 1).map((e) => e.person_id));
-      const profileById = new Map(profiles.map((p) => [p.person_id, p]));
-      const list = [];
-      for (const person of people) {
-        const profile = profileById.get(person.id);
-        if (!profile || now.has(person.id)) continue;
-        list.push({
-          id: person.id,
-          name: person.name,
-          email: profile.email,
-          phone: profile.phone ?? null,
-          works: profile.works,
-          languages: [...(profile.languages ?? [])],
-          otherLanguage: profile.other_language ?? null,
-          usualDays: [...(profile.usual_days ?? [])],
-          revision: profile.revision,
-          hasSignIn: Boolean(person.user_id),
-          lastSeason: last.has(person.id),
-        });
-      }
-      return list.sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
+      return {
+        volunteers: combineVolunteers({ profiles, entries, certificates, people, accounts, shifts }),
+        earlier: season == null ? [] : earlierVolunteers({ profiles, people, entries, lastEntries }),
+      };
     },
 
     async saveVolunteer(request) {

@@ -1886,9 +1886,9 @@ const ROSTER_ROWS = {
   ],
 };
 
-test("listVolunteers reads the current season and returns combined volunteers", async () => {
+test("listRoster reads the current season and returns combined volunteers", async () => {
   const client = fakeClient({ access: "staff", rows: ROSTER_ROWS });
-  const list = await createStore(client).listVolunteers();
+  const { volunteers: list } = await createStore(client).listRoster();
   assert.equal(list.length, 1);
   assert.equal(list[0].name, "Ana Example");
   assert.equal(list[0].email, "ana@example.com");
@@ -1900,7 +1900,7 @@ test("listVolunteers reads the current season and returns combined volunteers", 
   assert.equal(client.reads.find((read) => read.table === "people").columns, "id,name,user_id");
 });
 
-test("listVolunteers marks who has a live current-season shift from today on", async () => {
+test("listRoster marks who has a live current-season shift from today on", async () => {
   const today = nyToday(Date.now());
   const shift = (person_id, shift_date, extra = {}) => ({
     workspace_id: "workspace-1",
@@ -1915,7 +1915,7 @@ test("listVolunteers marks who has a live current-season shift from today on", a
     shifts: [shift("person-ana", today)],
   };
   const client = fakeClient({ access: "staff", rows });
-  const [ana] = await createStore(client).listVolunteers();
+  const [ana] = (await createStore(client).listRoster()).volunteers;
   assert.equal(ana.hasShiftsFromToday, true);
   const read = client.reads.find((entry) => entry.table === "shifts");
   assert.equal(read.columns, "person_id");
@@ -1929,15 +1929,16 @@ test("listVolunteers marks who has a live current-season shift from today on", a
     [shift("person-ana", today, { removed_at: "2026-11-01T00:00:00Z" })],
     [shift("person-ana", today, { season: 2025 })],
   ]) {
-    const [plain] = await createStore(fakeClient({ access: "staff", rows: { ...ROSTER_ROWS, shifts: others } })).listVolunteers();
+    const [plain] = (await createStore(fakeClient({ access: "staff", rows: { ...ROSTER_ROWS, shifts: others } })).listRoster())
+      .volunteers;
     assert.equal(plain.hasShiftsFromToday, false);
   }
 });
 
-test("listVolunteers is staff-only and maps a failed read", async () => {
-  await assert.rejects(() => createStore(fakeClient({ access: "applicant", rows: ROSTER_ROWS })).listVolunteers());
+test("listRoster is staff-only and maps a failed read", async () => {
+  await assert.rejects(() => createStore(fakeClient({ access: "applicant", rows: ROSTER_ROWS })).listRoster());
   await assert.rejects(
-    () => createStore(fakeClient({ access: "staff", readError: { code: "VT001" } })).listVolunteers(),
+    () => createStore(fakeClient({ access: "staff", readError: { code: "VT001" } })).listRoster(),
     { code: "FORBIDDEN" },
   );
 });
@@ -1970,9 +1971,10 @@ const EARLIER_ROWS = () => ({
   ],
 });
 
-test("listEarlierVolunteers returns people without a current entry, flagging last season", async () => {
+test("listRoster's earlier volunteers are people without a current entry, flagging last season", async () => {
   const client = fakeClient({ access: "staff", rows: EARLIER_ROWS() });
-  const list = await createStore(client).listEarlierVolunteers();
+  const { volunteers, earlier: list } = await createStore(client).listRoster();
+  assert.deepEqual(volunteers.map((entry) => entry.id), ["p-now"]);
   assert.deepEqual(list.map((entry) => entry.id), ["p-old", "p-last"]);
   const [old, last] = list;
   assert.equal(old.lastSeason, false);
@@ -1989,16 +1991,27 @@ test("listEarlierVolunteers returns people without a current entry, flagging las
     hasSignIn: true,
     lastSeason: true,
   });
-  assert.deepEqual(client.reads.find((read) => read.table === "roster_entries").within, ["season", [2026, 2025]]);
+  // One read of the shared tables (#270): this season's entries in full, last
+  // season's person ids, and the profiles and people once.
+  const entryReads = client.reads.filter((read) => read.table === "roster_entries");
+  assert.deepEqual(
+    entryReads.map((read) => [read.columns, read.filters]),
+    [
+      ["*", [["season", 2026]]],
+      ["person_id", [["season", 2025]]],
+    ],
+  );
+  for (const table of ["volunteer_profiles", "people"])
+    assert.equal(client.reads.filter((read) => read.table === table).length, 1, table);
 });
 
-test("listEarlierVolunteers returns nothing without a current season, and refuses an applicant", async () => {
+test("listRoster has no earlier volunteers without a current season, and refuses an applicant", async () => {
   const rows = EARLIER_ROWS();
   rows.workspaces = [{ id: "workspace-1", current_season: null }];
-  assert.deepEqual(await createStore(fakeClient({ access: "staff", rows })).listEarlierVolunteers(), []);
-  await assert.rejects(() =>
-    createStore(fakeClient({ access: "applicant", rows: EARLIER_ROWS() })).listEarlierVolunteers(),
-  );
+  const client = fakeClient({ access: "staff", rows });
+  assert.deepEqual((await createStore(client).listRoster()).earlier, []);
+  assert.equal(client.reads.some((read) => read.table === "roster_entries"), false);
+  await assert.rejects(() => createStore(fakeClient({ access: "applicant", rows: EARLIER_ROWS() })).listRoster());
 });
 
 test("saveVolunteer sends the RPC parameters, nulls for an Add", async () => {
@@ -2091,7 +2104,7 @@ test("saveMyProfile sends its three parameters", async () => {
   assert.ok(request.actionId);
 });
 
-test("listVolunteers carries the review fields and usual days", async () => {
+test("listRoster carries the review fields and usual days", async () => {
   const rows = {
     ...ROSTER_ROWS,
     volunteer_profiles: [{ ...ROSTER_ROWS.volunteer_profiles[0], usual_days: ["mon", "fri"] }],
@@ -2108,13 +2121,13 @@ test("listVolunteers carries the review fields and usual days", async () => {
       },
     ],
   };
-  const [ana] = await createStore(fakeClient({ access: "staff", rows })).listVolunteers();
+  const [ana] = (await createStore(fakeClient({ access: "staff", rows })).listRoster()).volunteers;
   assert.deepEqual(ana.usualDays, ["mon", "fri"]);
   assert.equal(ana.form13615ReviewedAt, "2026-11-20T15:00:00Z");
   assert.equal(ana.form13615ReviewReason, "Not signed");
   assert.equal(ana.photoIdReviewedAt, "2026-11-21T15:00:00Z");
   assert.equal(ana.photoIdReviewReason, "Expired");
-  const [plain] = await createStore(fakeClient({ access: "staff", rows: ROSTER_ROWS })).listVolunteers();
+  const [plain] = (await createStore(fakeClient({ access: "staff", rows: ROSTER_ROWS })).listRoster()).volunteers;
   assert.deepEqual(plain.usualDays, []);
   for (const key of ["form13615ReviewedAt", "form13615ReviewReason", "photoIdReviewedAt", "photoIdReviewReason"])
     assert.equal(plain[key], null, key);
@@ -2148,12 +2161,12 @@ test("countUploadsToReview is 0 with no season, staff-only, and maps a failed re
   );
 });
 
-test("listVolunteers reads the accounts and puts each on its volunteer", async () => {
+test("listRoster reads the accounts and puts each on its volunteer", async () => {
   const client = fakeClient({
     access: "staff",
     rows: { ...ROSTER_ROWS, accounts: [{ workspace_id: "workspace-1", user_id: "u", person_id: "person-ana", status: "invited", revision: 2 }] },
   });
-  const list = await createStore(client).listVolunteers();
+  const { volunteers: list } = await createStore(client).listRoster();
   assert.deepEqual(list[0].account, { status: "invited", revision: 2, activatedAt: null, expiresAt: null });
   assert.equal(
     client.reads.find((read) => read.table === "accounts").columns,
@@ -2161,7 +2174,7 @@ test("listVolunteers reads the accounts and puts each on its volunteer", async (
   );
 });
 
-test("listVolunteers cancels expired invitations before it reads the Roster", async () => {
+test("listRoster cancels expired invitations before it reads the Roster", async () => {
   const client = fakeClient({ access: "staff", rows: ROSTER_ROWS });
   // One log of what was asked, in order: the RPCs and the table reads.
   const order = [];
@@ -2175,7 +2188,7 @@ test("listVolunteers cancels expired invitations before it reads the Roster", as
     order.push(`read:${name}`);
     return from(name);
   };
-  await createStore(client).listVolunteers();
+  await createStore(client).listRoster();
   const expire = order.indexOf("rpc:vitally_expire_invitations");
   assert.notEqual(expire, -1);
   for (const table of ["workspaces", "volunteer_profiles", "roster_entries", "certificates", "people", "accounts"])
@@ -2189,7 +2202,7 @@ test("a failed expiry fails the Roster read like any other", async () => {
     rows: ROSTER_ROWS,
     rpc: async () => ({ data: null, error: { code: "VT001", message: "FORBIDDEN" } }),
   });
-  await assert.rejects(() => createStore(client).listVolunteers(), { code: "FORBIDDEN" });
+  await assert.rejects(() => createStore(client).listRoster(), { code: "FORBIDDEN" });
   assert.equal(client.reads.some((read) => read.table === "volunteer_profiles"), false);
 });
 

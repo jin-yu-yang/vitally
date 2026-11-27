@@ -943,9 +943,10 @@ The database side is in [Database: clearance uploads](database.md#clearance-uplo
   sentences; other failures use the usual notice.
 - **The returning-volunteer picker** (change `add-returning-volunteers-and-roster-csv`). The Add a
   volunteer drawer can pick an earlier volunteer instead of retyping them. The controller's
-  `readVolunteers` reads `store.listEarlierVolunteers()` beside `listVolunteers()` into
-  `state.earlierVolunteers` (people with a profile and no current-season roster entry, each marked
-  `lastSeason` when they had an entry the season before). `returningCandidates` in
+  `readVolunteers` gets both lists from one `store.listRoster()` call (#270), which reads the shared
+  tables once; its `earlier` goes into `state.earlierVolunteers` (people with a profile and no
+  current-season roster entry, each marked `lastSeason` when they had an entry the season before,
+  built by `earlierVolunteers` in `volunteer-roster.mjs`). `returningCandidates` in
   [`volunteer-roster.mjs`](../../src/volunteer-roster.mjs) lists last season's people matching the
   search, plus an older volunteer whose full email was typed (flagged `earlier`); `returningFill`
   builds the drawer's volunteer from a pick, with no roles or certificates. A pick sets
@@ -996,7 +997,7 @@ Change `add-remove-from-roster`. The database side is in
   active because they are a site coordinator, but they will have no roles this season.", "Their
   account is already deactivated.", or none when there is no account. When the volunteer has a live
   shift this season from today on (`hasShiftsFromToday`, from the Roster read's `shifts` query in
-  `listVolunteers`), "Their shifts from today on are removed from the Schedule." Then "Their cases and contact
+  `listRoster`), "Their shifts from today on are removed from the Schedule." Then "Their cases and contact
   details are kept. To add them back, search for <email> in Add a volunteer." The buttons are
   **Remove from roster** and **Cancel**. Nothing is sent until the first.
 - **`controller.removeFromRoster()`** calls the store's `removeFromRoster` at the profile revision the
