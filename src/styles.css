@@ -3313,6 +3313,42 @@ textarea::placeholder {
     margin-top: 16px;
   }
 }
+/* Issue 147, on a phone: a staff page's intro (overline, title, its line,
+   Back) took about 205 px above the case header. The title and its line are
+   a size smaller, the gaps tighter, and Back sits on the overline's row, so
+   the work starts higher. Nothing is left out. */
+@media (max-width: 800px) {
+  .app-main .page-intro {
+    margin-bottom: 16px;
+  }
+  .app-main .page-intro h1 {
+    margin: 4px 0 6px;
+    font-size: 24px;
+    letter-spacing: -0.5px;
+  }
+  .app-main .page-intro p {
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .app-main .page-intro:has(> [data-action="open-board"]) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 12px;
+  }
+  .app-main .page-intro:has(> [data-action="open-board"]) > * {
+    grid-column: 1 / -1;
+  }
+  .app-main .page-intro:has(> [data-action="open-board"]) > .overline {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .app-main .page-intro > [data-action="open-board"] {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+  }
+}
 
 /* ---- Follow-ups: the office queue ---- */
 /* The Invite a client panel sits under the queue as a card of the same shape. */
