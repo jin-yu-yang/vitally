@@ -3673,7 +3673,7 @@ textarea::placeholder {
   .office-queue .queue-waiting {
     grid-column: -2 / -1;
   }
-  .office-queue .queue-action {
+  .office-queue .queue-table .queue-action {
     text-align: right;
   }
   .office-queue .queue-action .btn {
