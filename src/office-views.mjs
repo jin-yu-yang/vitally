@@ -388,7 +388,8 @@ function queueRow(row, person, ui) {
     : item?.caseId
       ? '<span class="muted">A case in this workspace</span>'
       : '<span class="muted">No case yet</span>';
-  return `<tr class="queue-row" data-kind="${kind}"><td><span class="kind-pill ${kind}">${icon(KIND_ICONS[kind])} ${esc(KIND_LABELS[kind])}</span></td><th scope="row">${client}</th><td class="queue-needed">${needed(row)}</td><td>${languageCell(languageSummary(rowLanguages(row)))}</td><td>${esc(item?.contactPreference || "—")}</td><td class="queue-waiting ${rowTone(row)}">${esc(waitingLabel(row.days))}</td><td class="queue-action">${rowAction(row, person, ui)}</td></tr>`;
+  // The classes and data-labels let a phone show the row as a card (issue 147).
+  return `<tr class="queue-row" data-kind="${kind}"><td class="queue-kind"><span class="kind-pill ${kind}">${icon(KIND_ICONS[kind])} ${esc(KIND_LABELS[kind])}</span></td><th scope="row" class="queue-client">${client}</th><td class="queue-needed">${needed(row)}</td><td class="queue-language" data-label="Language">${languageCell(languageSummary(rowLanguages(row)))}</td><td class="queue-contact" data-label="Contact preference">${esc(item?.contactPreference || "—")}</td><td class="queue-waiting ${rowTone(row)}">${esc(waitingLabel(row.days))}</td><td class="queue-action">${rowAction(row, person, ui)}</td></tr>`;
 }
 
 /**

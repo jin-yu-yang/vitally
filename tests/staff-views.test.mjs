@@ -1755,7 +1755,7 @@ test("a listed case with no phone shows a dash, and a spouse phone is never list
   for (const reference of ["VT-PHON-0003", "VT-PHON-0004", "VT-PHON-0005"]) {
     const row = boardRowOf(html, reference);
     assert.doesNotMatch(row, /phone-mask/);
-    assert.match(row, /<td>—<\/td>/);
+    assert.match(row, /<td class="board-phone-cell" data-label="Phone">—<\/td>/);
   }
   assert.doesNotMatch(html, /0188/, "a spouse phone reached the board");
 });
@@ -3468,6 +3468,23 @@ test("the staff history says who added or removed a label", () => {
 
 test("#147: the board's service cell is marked so the stylesheet keeps it on one line", () => {
   const html = board({ person: ALEX, filters: { status: "preparation" } });
-  assert.match(html, /<td class="board-service">[^<]+<\/td>/);
+  assert.match(html, /<td class="board-service" data-label="Service">[^<]+<\/td>/);
   assert.doesNotMatch(html, /<td>(Drop-off|Online|Same-day)<\/td>/);
+});
+
+test("issue 147: a board row names its cells and labels the small ones, so a phone can show it as a card", () => {
+  const html = board({ person: ALEX, filters: { status: "preparation" } });
+  const row = html.split('<tr class="board-row')[1] ?? "";
+  assert.match(row, /<th scope="row" class="board-client">/);
+  assert.match(row, /<td class="board-stage">/);
+  for (const [cls, label] of [
+    ["board-phone-cell", "Phone"],
+    ["board-language", "Language"],
+    ["board-service", "Service"],
+    ["board-preparer", "Preparer"],
+    ["board-reviewer", "Reviewer"],
+    ["board-updated", "Updated"],
+  ])
+    assert.match(row, new RegExp(`<td class="${cls}" data-label="${label}">`));
+  assert.match(row, /<td class="board-actions">/);
 });
