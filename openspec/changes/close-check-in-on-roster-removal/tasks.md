@@ -26,6 +26,6 @@
 
 ## 3. Developer docs and final checks (plan.md Task 3)
 
-- [ ] 3.1 In `docs/developer/database.md`: the 062 row in the migrations table and 061's note; the function index; the `roster_removals` columns; and in "Removing a volunteer from the roster", the check-in bullet, the order of checks and the lock order.
-- [ ] 3.2 Run `npm test`, `npx openspec validate --all` and `npm run build:hant -- --check`. All pass.
+- [x] 3.1 In `docs/developer/database.md`: the 062 row in the migrations table and 061's note; the function index; the `roster_removals` columns; and in "Removing a volunteer from the roster", the check-in bullet, the order of checks and the lock order.
+- [x] 3.2 Run `npm test`, `npx openspec validate --all` and `npm run build:hant -- --check`. All pass.
 - [ ] 3.3 Commit and push. The PR's full CI run (checks, database, sign-in, both story legs) stands in for the local database, sign-in and story runs. It is linked in verify.md, which is outside this plan.
