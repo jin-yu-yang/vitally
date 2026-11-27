@@ -394,12 +394,36 @@ export const rangeText = (question, lang = "en") =>
       ? t("range.or_more", { min: num(question.min, lang) }, lang)
       : t("range.between", { min: num(question.min ?? 0, lang), max: num(question.max, lang) }, lang);
 
+// The taxpayer's own fields carry an autocomplete token, so a phone or browser
+// can offer what the client saved there (issue 147). Only in the client's own
+// intake (scope "client"): the office's forms hold someone else's answers.
+// The spouse, household members, signatures and identity numbers get none, so
+// the client's own details are never offered for another person.
+export const CLIENT_AUTOFILL = Object.freeze({
+  tp_first_name: "given-name",
+  tp_middle_name: "additional-name",
+  tp_last_name: "family-name",
+  tp_dob: Object.freeze({ month: "bday-month", day: "bday-day", year: "bday-year" }),
+  tp_job_title: "organization-title",
+  tp_phone: "tel",
+  email: "email",
+  addr_street: "address-line1",
+  addr_apt: "address-line2",
+  addr_city: "address-level2",
+  addr_state: "address-level1",
+  addr_zip: "postal-code",
+});
+
 // One question's markup. `base` is its id (field-<scope>-<id>), `data` the
 // data-* attributes every control carries, and `wrapQ` the wrapper's data-q
 // (null inside a household card, so closest("[data-q]") finds the group).
 function renderField(question, value, ctx) {
-  const { base, data, wrapQ, variant, lang, answers } = ctx;
+  const { base, data, wrapQ, variant, lang, answers, autofill = null } = ctx;
   const type = question.type;
+  const ac = (part) => {
+    const token = part ? autofill?.[part] : typeof autofill === "string" ? autofill : null;
+    return token ? ` autocomplete="${token}"` : "";
+  };
   const note = noteState(question, value, { showMissing: ctx.showMissing, showInvalid: ctx.showInvalid, lang });
   const tips = tipsOf(question, { variant, lang, answers });
   const noteId = `${base}-note`;
@@ -430,14 +454,14 @@ function renderField(question, value, ctx) {
     case "email":
     case "phone": {
       const inputType = type === "email" ? "email" : "tel";
-      return single(`<input id="${base}" ${control} class="q-input" type="${inputType}" value="${esc(text)}">`);
+      return single(`<input id="${base}" ${control} class="q-input" type="${inputType}"${ac()} value="${esc(text)}">`);
     }
     case "zip":
     case "year":
     case "number": {
       const range = rangeText(question, lang);
       return single(
-        `<input id="${base}" ${control} class="q-input" type="text" inputmode="numeric" value="${esc(text)}">`,
+        `<input id="${base}" ${control} class="q-input" type="text" inputmode="numeric"${ac()} value="${esc(text)}">`,
         range ? ` <span class="q-range">${esc(range)}</span>` : "",
       );
     }
@@ -448,7 +472,7 @@ function renderField(question, value, ctx) {
       return group(
         `<div class="q-date">${datePartsFor(lang).map(
           ({ part, label, hint, size }) =>
-            `<label for="${base}-${part}" class="q-date-part is-${part}"><span>${esc(label)}</span><input id="${base}-${part}" ${control} data-date-part="${part}" class="q-input" type="text" inputmode="numeric" maxlength="${size}" placeholder="${esc(hint)}" value="${esc(parts[part])}"></label>`,
+            `<label for="${base}-${part}" class="q-date-part is-${part}"><span>${esc(label)}</span><input id="${base}-${part}" ${control} data-date-part="${part}" class="q-input" type="text" inputmode="numeric"${ac(part)} maxlength="${size}" placeholder="${esc(hint)}" value="${esc(parts[part])}"></label>`,
         ).join("")}</div>`,
       );
     }
@@ -456,7 +480,7 @@ function renderField(question, value, ctx) {
     case "yesno": {
       if (type === "choice" && options.length > SELECT_OVER)
         return single(
-          `<select id="${base}" ${control} class="q-input"><option value="">${esc(t("form.select_option", {}, lang))}</option>${options
+          `<select id="${base}" ${control} class="q-input"${ac()}><option value="">${esc(t("form.select_option", {}, lang))}</option>${options
             .map(
               (option) =>
                 `<option value="${esc(option.value)}"${option.value === value ? " selected" : ""}>${esc(optionLabel(option, { variant, lang }))}</option>`,
@@ -495,7 +519,7 @@ function renderField(question, value, ctx) {
     }
     default: // text, signature
       return single(
-        `<input id="${base}" ${control} class="q-input${type === "signature" ? " q-signature" : ""}" type="text" maxlength="${question.maxlength ?? TEXT_LIMIT}" value="${esc(text)}">`,
+        `<input id="${base}" ${control} class="q-input${type === "signature" ? " q-signature" : ""}" type="text"${type === "signature" ? "" : ac()} maxlength="${question.maxlength ?? TEXT_LIMIT}" value="${esc(text)}">`,
       );
   }
 }
@@ -568,6 +592,7 @@ export function renderQuestion(
     data: `data-q="${esc(question.id)}"`,
     wrapQ: question.id,
     showInvalid: shown.has(question.id),
+    autofill: scope === "client" ? (CLIENT_AUTOFILL[question.id] ?? null) : null,
   });
 }
 

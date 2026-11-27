@@ -10830,8 +10830,14 @@ test(
       });
     const rowNames = (page) =>
       page.evaluate(() => [...document.querySelectorAll("tr.volunteer-row .volunteer-name")].map((n) => n.textContent.trim()));
-    const drawerOpen = (page, title) =>
-      waitFor(
+    // The drawer takes the keyboard on the next animation frame (render's
+    // requestAnimationFrame, onto its first field, the name). Typing into the
+    // phone before that frame is a race: fill focuses and selects the phone,
+    // the frame moves the keyboard to the name, and the typed text never
+    // reaches the phone (#254). So this waits for the keyboard too, as the
+    // My profile test's openDrawer does.
+    const drawerOpen = async (page, title) => {
+      await waitFor(
         page,
         `the volunteer drawer titled ${JSON.stringify(title)}`,
         (wanted) =>
@@ -10840,6 +10846,14 @@ test(
         title,
         RENDER_MS,
       );
+      await waitFor(
+        page,
+        "the volunteer drawer to take the keyboard",
+        () => Boolean(document.activeElement?.closest(".modal")),
+        undefined,
+        RENDER_MS,
+      );
+    };
     const drawerClosed = (page) =>
       waitFor(page, "the volunteer drawer to close", () => !document.querySelector("#volunteer-form"), undefined, ARRIVAL_MS);
     const volunteersLabel = (page) =>
