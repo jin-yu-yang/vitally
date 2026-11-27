@@ -1916,7 +1916,7 @@ const exitFormTool = (record, attempt) => {
   const note = source.corrected
     ? `<p class="field-note" data-role="exit-form-corrected">${esc(exitFormNote(source))}</p>`
     : "";
-  return `${note}<div class="summary-tools">${button("Download Exit Form", "view-exit-form", "secondary", `data-review="${esc(attempt.id)}"`)}</div>`;
+  return `${note}<div class="summary-tools">${button("Download Exit Form", "view-exit-form", "secondary", `data-review="${esc(attempt.id)}"`)}<p data-exit-form-ready="${esc(attempt.id)}" class="draft-ready" aria-live="polite"></p></div>`;
 };
 
 /**

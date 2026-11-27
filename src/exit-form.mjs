@@ -62,7 +62,7 @@ export const EXIT_FORM_LAYOUT = Object.freeze({
   groups: {
     federal: {
       amount: { x: 503, y: 246, width: 76 },
-      debitOn: { x: 390, y: 299, width: 33 },
+      debitOn: { x: 388, y: 299, width: 45.5 },
       boxes: {
         efile: [174, 241], paper: [281, 241],
         direct_deposit: [134, 267], check: [444, 267],
@@ -71,7 +71,7 @@ export const EXIT_FORM_LAYOUT = Object.freeze({
     },
     state: {
       amount: { x: 467, y: 350, width: 95 },
-      debitOn: { x: 390, y: 403, width: 33 },
+      debitOn: { x: 388, y: 403, width: 45.5 },
       boxes: {
         efile: [147.5, 345], paper: [254.5, 345],
         direct_deposit: [134, 371], check: [444, 371],
@@ -236,6 +236,7 @@ export async function buildExitFormPdf({ PDFLib, fontkit, formBytes, fontFiles =
     page.drawRectangle({ x: q.x, y: PAGE_HEIGHT - q.y - q.height, width: q.width, height: q.height, borderColor: color, borderWidth: 0.75 });
   for (const r of marks.rules ?? [])
     page.drawLine({ start: { x: r.from, y: PAGE_HEIGHT - r.y }, end: { x: r.to, y: PAGE_HEIGHT - r.y }, thickness: 0.6, color });
+
   for (const mark of marks.text) {
     let text = mark.value;
     let size = mark.size;
