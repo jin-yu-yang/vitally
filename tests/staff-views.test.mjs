@@ -1474,7 +1474,7 @@ test("the case header names the case, its stage and its people", () => {
   const html = caseHeader(staffCase({ stage: "reviewing", preparerId: "alex", reviewerId: "morgan" }), MORGAN);
   assert.match(html, /<h2 id="case-title" tabindex="-1">VT-AB2C-DE3F<\/h2>/);
   assert.match(html, /class="badge prep"/);
-  assert.match(html, /<ol class="lifecycle"/);
+  assert.match(html, /<ol id="case-lifecycle" class="lifecycle"/);
   assert.match(html, /Preparer<\/small> Alex/);
   assert.match(html, /Reviewer<\/small> <strong class="you">You<\/strong>/);
   assert.match(html, /Signed in as Morgan\./);
@@ -3487,4 +3487,28 @@ test("issue 147: a board row names its cells and labels the small ones, so a pho
   ])
     assert.match(row, new RegExp(`<td class="${cls}" data-label="${label}">`));
   assert.match(row, /<td class="board-actions">/);
+});
+
+test("issue 147: the lifecycle's phone line names the current step and where it sits, with All steps", () => {
+  const line = (stage, over = {}) => lifecycleBar({ stage, ...over }).match(/<span class="lifecycle-now">([^<]*)</)?.[1];
+  // It agrees with the list: the current step's position and its label.
+  const html = lifecycleBar("preparing");
+  const steps = [...html.matchAll(/class="lifecycle-step ([a-z ]+)"[^>]*><span class="lifecycle-dot"><\/span><span class="lifecycle-label">([^<]*)</g)];
+  const at = steps.findIndex((m) => m[1] === "current");
+  assert.equal(line("preparing"), `Step ${at + 1} of ${steps.length} · ${steps[at][2]}`);
+  // Corrections show on the step they return to, with their own name.
+  assert.match(line("corrections_required"), /^Step \d+ of \d+ · Corrections in progress$/);
+  // A closed case names the stage only: it can be closed from any stage.
+  assert.equal(line("closed"), "Closed");
+  // A stage off the bar names the stage only.
+  assert.doesNotMatch(line("draft"), /^Step/);
+
+  const shut = lifecycleBar("preparing");
+  assert.match(shut, /<div class="lifecycle-wrap">/);
+  assert.match(shut, /<button type="button" class="btn secondary" data-action="toggle-lifecycle" aria-expanded="false" aria-controls="case-lifecycle">All steps<\/button>/);
+  const open = lifecycleBar("preparing", { open: true });
+  assert.match(open, /<div class="lifecycle-wrap is-open">/);
+  assert.match(open, /aria-expanded="true"/);
+  // The full list is always in the page; the stylesheet hides it on a phone until opened.
+  assert.match(shut, /<ol id="case-lifecycle" class="lifecycle"/);
 });

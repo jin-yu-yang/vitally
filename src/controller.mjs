@@ -397,6 +397,9 @@ export function createController({
     //   editing: null | {labelId, revision, name, color, error}}.
     labels: [],
     labelMenu: null,
+    // On a phone, whether the case page's lifecycle shows every step
+    // (issue 147). Kept for the window, like the sidebar.
+    lifecycleOpen: false,
     // Whether each list has been read (design D6): a first load that failed
     // must never look like an empty list.
     lists: {
@@ -5122,6 +5125,11 @@ export function createController({
     show();
   }
 
+  function toggleLifecycle() {
+    state.lifecycleOpen = !state.lifecycleOpen;
+    show();
+  }
+
   function setLabelSearch(text) {
     if (!state.labelMenu) return;
     state.labelMenu = { ...state.labelMenu, search: String(text ?? "") };
@@ -6103,6 +6111,7 @@ export function createController({
     logContact,
     openLabelMenu,
     closeLabelMenu,
+    toggleLifecycle,
     setLabelSearch,
     toggleCaseLabel,
     startLabelEdit,

@@ -2957,6 +2957,11 @@ textarea::placeholder {
 .name-pill small {
   color: var(--vt-muted);
 }
+/* The phone line ("Step 4 of 10 · Preparing", All steps) shows only up to
+   800 px; see the end of this file (issue 147). */
+.lifecycle-phone {
+  display: none;
+}
 .lifecycle {
   display: flex;
   list-style: none;
@@ -7886,5 +7891,30 @@ button.schedule-shift {
     min-height: var(--vt-tap);
     margin: 0;
     align-items: center;
+  }
+}
+
+/* Issue 147, on a phone: the case header's lifecycle is one line, the
+   current step and where it sits, with All steps to open the list (the
+   intake's All steps works the same way). This keeps "Your next step" on the
+   first screen; the list itself is drawn by the block above. */
+@media (max-width: 800px) {
+  .lifecycle-phone {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 16px 0 8px;
+  }
+  .lifecycle-now {
+    min-width: 0;
+    font-weight: 600;
+  }
+  .lifecycle-phone .btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  .lifecycle-wrap:not(.is-open) .lifecycle {
+    display: none;
   }
 }

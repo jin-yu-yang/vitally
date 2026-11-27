@@ -833,8 +833,10 @@ const LIFECYCLE = Object.freeze([
 ]);
 
 // The record, so that E-filed and Accepted carry the filing method's staff
-// name. A bare stage name still works (a list row, a test).
-export function lifecycleBar(subject) {
+// name. A bare stage name still works (a list row, a test). On a phone (up to
+// 800 px) the stylesheet shows one line, "Step 4 of 10 · Preparing", with an
+// All steps button that opens the list (issue 147); `open` is that choice.
+export function lifecycleBar(subject, { open = false } = {}) {
   const record = typeof subject === "string" ? { stage: subject } : (subject ?? {});
   const stage = record.stage;
   // Corrections loop back into preparation; a rejection loops back into
@@ -855,7 +857,7 @@ export function lifecycleBar(subject) {
   const accepted = stage === "accepted";
   const steps = closed ? [...LIFECYCLE, "closed"] : LIFECYCLE;
   const at = steps.indexOf(amendStep ?? stage);
-  return `<ol class="lifecycle" aria-label="Where this case is">${steps.map((step, index) => {
+  const list = `<ol id="case-lifecycle" class="lifecycle" aria-label="Where this case is">${steps.map((step, index) => {
     // A case can be closed from any stage and nothing records which, so the
     // steps before Closed are neutral (neither done nor still to come); the
     // History tab shows the path it took. An accepted case has finished every
@@ -869,6 +871,13 @@ export function lifecycleBar(subject) {
     const label = describeStage(amend ? amendStage : step, "en", record).label;
     return `<li class="lifecycle-step ${state}${amend ? " amend" : ""}"${state === "current" ? ' aria-current="step"' : ""}><span class="lifecycle-dot"></span><span class="lifecycle-label">${esc(label)}</span></li>`;
   }).join("")}</ol>`;
+  // The phone line names the current step and where it sits; a closed case
+  // (closable from any stage) and a stage off the bar name the stage only.
+  const shownStage = amendStep !== null && !closed ? amendStage : stage;
+  const where = describeStage(shownStage, "en", record).label;
+  const counted = !closed && at >= 0;
+  const line = counted ? `Step ${at + 1} of ${steps.length} · ${where}` : where;
+  return `<div class="lifecycle-wrap${open ? " is-open" : ""}"><div class="lifecycle-phone"><span class="lifecycle-now">${esc(line)}</span><button type="button" class="btn secondary" data-action="toggle-lifecycle" aria-expanded="${open}" aria-controls="case-lifecycle">All steps</button></div>${list}</div>`;
 }
 
 const namePill = (role, id, name, personId) =>
@@ -940,7 +949,7 @@ function labelMenu(record, person, labels, menu, busy = false) {
 }
 
 export function caseHeader(record, person, principal = null, ui = {}) {
-  return `<section class="panel staff-header" aria-labelledby="case-title"><div class="case-title-row"><h2 id="case-title" tabindex="-1">${esc(record.reference ?? "This case")}</h2><div class="case-client-number">${esc(record.clientNumber == null ? clientNumberLabel(record) : `Client ${formatClientNumber(record.clientNumber)}`)}</div>${stageBadge(record.stage, "en", { record })}<span class="case-people">${namePill("Preparer", record.preparerId, record.preparerName, person?.id)}${namePill("Reviewer", record.reviewerId, record.reviewerName, person?.id)}</span></div>${labelRow(record, person, ui)}${lifecycleBar(record)}<p class="field-note">${esc(
+  return `<section class="panel staff-header" aria-labelledby="case-title"><div class="case-title-row"><h2 id="case-title" tabindex="-1">${esc(record.reference ?? "This case")}</h2><div class="case-client-number">${esc(record.clientNumber == null ? clientNumberLabel(record) : `Client ${formatClientNumber(record.clientNumber)}`)}</div>${stageBadge(record.stage, "en", { record })}<span class="case-people">${namePill("Preparer", record.preparerId, record.preparerName, person?.id)}${namePill("Reviewer", record.reviewerId, record.reviewerName, person?.id)}</span></div>${labelRow(record, person, ui)}${lifecycleBar(record, { open: ui?.lifecycleOpen === true })}<p class="field-note">${esc(
     whoThisWindowIs(person, principal),
   )}</p></section>`;
 }
