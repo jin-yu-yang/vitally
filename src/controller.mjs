@@ -400,6 +400,8 @@ export function createController({
     // On a phone, whether the case page's lifecycle shows every step
     // (issue 147). Kept for the window, like the sidebar.
     lifecycleOpen: false,
+    // On a phone, whether Follow-ups' filter chips are open (issue 147).
+    queueFiltersOpen: false,
     // Whether each list has been read (design D6): a first load that failed
     // must never look like an empty list.
     lists: {
@@ -5130,6 +5132,11 @@ export function createController({
     show();
   }
 
+  function toggleQueueFilters() {
+    state.queueFiltersOpen = !state.queueFiltersOpen;
+    show();
+  }
+
   function setLabelSearch(text) {
     if (!state.labelMenu) return;
     state.labelMenu = { ...state.labelMenu, search: String(text ?? "") };
@@ -6112,6 +6119,7 @@ export function createController({
     openLabelMenu,
     closeLabelMenu,
     toggleLifecycle,
+    toggleQueueFilters,
     setLabelSearch,
     toggleCaseLabel,
     startLabelEdit,

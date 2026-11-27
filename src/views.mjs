@@ -629,6 +629,8 @@ export function staffScreen(state) {
               person,
               list: combineLists(state.lists?.cases, state.lists?.assistance),
               filters: state.boardFilters,
+              // On a phone, whether the filter chips are open (issue 147).
+              filtersOpen: state.queueFiltersOpen === true,
               busy: state.busy,
               now: Date.now(),
               invitations: state.invitations ?? null,

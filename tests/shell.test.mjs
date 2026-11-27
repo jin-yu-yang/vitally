@@ -1754,3 +1754,13 @@ test("issue 147: phone media blocks don't shrink the client's buttons, badges, a
       if (shrunk.length) assert.doesNotMatch(rule[2], /font-size/, `${shrunk.join(", ")} gets a phone font-size`);
     }
 });
+
+// Issue 147: in a wide Follow-ups card the actions sit at the right. The
+// rule must outrank the card's `.office-queue .queue-table td` (Zeye, PR 292).
+test("issue 147: a wide Follow-ups card puts its actions at the right", () => {
+  const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
+  const start = css.indexOf("@container queue-table (min-width: 600px)");
+  assert.ok(start > 0, "the wide-card block is there");
+  const block = css.slice(start, css.indexOf("\n}\n", start));
+  assert.match(block, /\.office-queue \.queue-table \.queue-action\s*\{[^}]*text-align:\s*right/);
+});
