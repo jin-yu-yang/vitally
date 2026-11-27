@@ -1,6 +1,6 @@
 # ViTally roadmap
 
-Where ViTally stands and what comes next, as of **Nov 21, 2026**. Dates are targets, not promises.
+Where ViTally stands and what comes next, as of **Nov 27, 2026**. Dates are targets, not promises.
 Update this page when a row's state changes; the [README](../README.md) only links here.
 
 ## Where ViTally stands
@@ -28,8 +28,13 @@ the program manager. The next stage is about three things:
 - **Volunteer management (admin):** Roster with roles and certificates per season; a role exists
   only once its certificates are confirmed; an uncleared volunteer reads no case data and sees
   "Finish your setup" with Upload and "I've uploaded it" for the Form 13615 and photo ID, which
-  admins mark reviewed; Season settings and site coordinators; Start next season; Workload with Assign and Reassign;
-  account invitations by email.
+  admins mark reviewed, with a reason when one comes back; returning volunteers picked from last
+  season; Roster CSV; removing someone from this season's roster; Season settings and site
+  coordinators; Start next season; Workload with Assign and Reassign; account invitations by email.
+- **Schedule:** hourly shifts with a role each, site hours and coverage targets, volunteer check-in
+  and check-out, and hours this week on the Workload.
+- **For every volunteer:** My profile with their details, this season's roles and certificates, and
+  their shifts this week. Staff with both office and volunteer work switch between Office and Cases.
 - **Updates:** admins post updates to the team, with notifications.
 
 Behaviour is specified in [`openspec/specs/`](../openspec/specs/).
@@ -45,24 +50,24 @@ Slack). Screening stays in Airtable. Dates are targets.
 | Adoption | Roster: Form 13615 and photo ID uploads to PCDC's OneDrive link with "I've uploaded it" | [#138](https://github.com/jin-yu-yang/vitally/issues/138) | Nov 29 | **Done** (#243, Nov 21) |
 | Adoption | Season settings, site coordinator role, Start next season | [#138](https://github.com/jin-yu-yang/vitally/issues/138) | Nov 29 | **Done**: Season settings and site coordinators (#237, Nov 20), Start next season (#255, Nov 21) |
 | Adoption | My profile: a volunteer reads and edits their own details, and sees why an upload came back; the reason an admin gives when a document comes back; the upload link waits for the site check | [#242](https://github.com/jin-yu-yang/vitally/issues/242), [#246](https://github.com/jin-yu-yang/vitally/issues/246) | Nov 29 | **Done** (#262, Nov 22) |
-| Adoption | Returning-volunteer picker; Roster CSV export | [#138](https://github.com/jin-yu-yang/vitally/issues/138) | Nov 29 | Decided, not started; picker can be cut |
-| Adoption | Remove a volunteer from this season's roster | [#232](https://github.com/jin-yu-yang/vitally/issues/232) | Nov 29 | Decided; first to cut |
+| Adoption | Returning-volunteer picker; Roster CSV export | [#138](https://github.com/jin-yu-yang/vitally/issues/138) | Nov 29 | **Done** (#267, Nov 22) |
+| Adoption | Remove a volunteer from this season's roster | [#232](https://github.com/jin-yu-yang/vitally/issues/232) | Nov 29 | **Done** (#273, Nov 23) |
 | Adoption | Client documents through PCDC's OneDrive upload link | [#157](https://github.com/jin-yu-yang/vitally/issues/157) | Nov 29 | **Done** (#245, Nov 21) |
 | Adoption | Clearance fixes: role changes without a reload, a self-cleared admin, screen-reader announcement | [#190](https://github.com/jin-yu-yang/vitally/issues/190) #191 #192 | Nov 22 | **Done**: #191 and #192 (Nov 18), #190 (#234, Nov 19) |
 | Adoption | Workload and Reassign | #139 | — | **Done** |
-| Adoption | Hourly volunteer schedule with a role per shift | [#140](https://github.com/jin-yu-yang/vitally/issues/140) | Dec 6 | Decided |
-| Adoption | Volunteer check-in and check-out | [#257](https://github.com/jin-yu-yang/vitally/issues/257) | Dec 13 | Decided; after #140, can move to the pilot |
+| Adoption | Hourly volunteer schedule with a role per shift | [#140](https://github.com/jin-yu-yang/vitally/issues/140) | Dec 6 | **Done** (#271, Nov 22; a closed day's shifts, #284, Nov 26) |
+| Adoption | Volunteer check-in and check-out | [#257](https://github.com/jin-yu-yang/vitally/issues/257) | Dec 13 | **Done** (#278, Nov 26) |
 | Adoption | Posted updates and notifications | #150 | — | **Done** |
 | Adoption | Case labels (City Tax, MFS, Multi-state) | #148 | — | **Done** (Nov 17) |
-| Adoption | One account reaches both the office and the work board | [#104](https://github.com/jin-yu-yang/vitally/issues/104) | Dec 13 | Partly decided; can be cut |
-| Adoption | Mobile layouts: setup and check-in, Follow-ups and office case page, work board and case page, and a real-phone pass over client intake and status | [#147](https://github.com/jin-yu-yang/vitally/issues/147) | Dec 20 | Decided |
-| Trust | **Export this season's data** as a ZIP of CSVs, so PCDC can keep it in SharePoint | [#256](https://github.com/jin-yu-yang/vitally/issues/256) | Dec 13 | Decided |
+| Adoption | One account reaches both the office and the work board | [#104](https://github.com/jin-yu-yang/vitally/issues/104) | Dec 13 | **Done**: the Office / Cases switch (#279, Nov 26) |
+| Adoption | Mobile layouts: setup and check-in, Follow-ups and office case page, work board and case page, and a real-phone pass over client intake and status | [#147](https://github.com/jin-yu-yang/vitally/issues/147) | Dec 20 | **In progress**: 1280 px windows (#285); setup and check-in, Follow-ups, the work board, case pages and staff page intros on a phone (#286, #288–#292, #294, #296, Nov 26–27); client pages under way (#287) |
+| Trust | **Export this season's data** as a ZIP of CSVs, so PCDC can keep it in SharePoint | [#256](https://github.com/jin-yu-yang/vitally/issues/256) | Dec 13 | Decided; assigned |
 | Trust | **Plain-language security summary:** where data lives, who sees what, when it's deleted, compared with Airtable | [#259](https://github.com/jin-yu-yang/vitally/issues/259) | Dec 13 | Drafted |
 | Testing | **Hosted test environment**: project, email, migrations, Edge Function, Auth settings, custom domain, tester roster | #159 | — | **Done** (Nov 17) |
 | Testing | Keep the test environment on current `main`: redeploy as features land, invite testers, final deploy | — | Dec 20 | Ongoing |
 
-If we run late, we cut in this order: removing a volunteer, the #104 switch, the returning-volunteer
-picker, check-in. The note for the team moved to the pilot.
+Every Adoption row but the mobile layouts has landed. If we run late, the export (#256) moves to the
+pilot. The note for the team moved to the pilot.
 
 ## 2. Before the pilot (tax season 2027)
 
