@@ -67,12 +67,12 @@ test("volunteer clearance against real Supabase", async (t) => {
            from unnest($3::text[]) c`,
         [f.workspaceId, personId, certificates, forSeason, status],
       );
-    const rolesOf = async (personId) =>
+    const rolesOf = async (personId, forSeason = season) =>
       (
         await one(
           f,
           "select roles from public.roster_entries where workspace_id=$1 and person_id=$2 and season=$3",
-          [f.workspaceId, personId, season],
+          [f.workspaceId, personId, forSeason],
         )
       ).roles;
     const certificatesOf = async (personId) =>
@@ -305,8 +305,10 @@ test("volunteer clearance against real Supabase", async (t) => {
         });
         // Last season's VSC does; deleting it is then refused.
         await inTransaction(f, async () => {
-          await confirm(member.personId, ["vsc"], { forSeason: season - 1 });
+          // The entry first: certificates reference it (044's foreign key,
+          // not deferrable).
           await pastEntry(["greeter"]);
+          await confirm(member.personId, ["vsc"], { forSeason: season - 1 });
           await f.sql("set constraints all immediate");
           await f.sql("set constraints all deferred");
           await f.sql(
@@ -322,20 +324,27 @@ test("volunteer clearance against real Supabase", async (t) => {
       // deletes the VSC that Greeter needs, and its commit-time check waits
       // on that lock. Once A commits, B's check reads Greeter and refuses.
       // Without the lock B's check would not wait; the test asserts the wait.
-      await t.test("a role added and its certificate deleted concurrently: one commits", async () => {
-        const member = await f.staff({ key: "kit_concurrent", name: "Kit Arden", capabilities: [], cleared: false });
-        await confirm(member.personId, ["vsc"]); // autocommit: VSC, no roles
+      // Run for this season's entry and, since past-season rows are real
+      // (#193), for last season's.
+      const concurrentRoleAndDelete = async ({ key, name, forSeason }) => {
+        const member = await f.staff({ key, name, capabilities: [], cleared: false });
+        if (forSeason !== season)
+          await f.sql(
+            "insert into public.roster_entries(workspace_id,person_id,season) values($1,$2,$3)",
+            [f.workspaceId, member.personId, forSeason],
+          );
+        await confirm(member.personId, ["vsc"], { forSeason }); // autocommit: VSC, no roles
         const other = await openDatabase({ kind: "test" });
         try {
           const { pid } = (await other.query("select pg_backend_pid() as pid")).rows[0];
           await f.sql("begin");
           let committedA = false;
           try {
-            await setRoles(member.personId, ["greeter"]);
+            await setRoles(member.personId, ["greeter"], forSeason);
             await other.query("begin");
             await other.query(
-              "delete from public.certificates where workspace_id=$1 and person_id=$2 and certificate='vsc'",
-              [f.workspaceId, member.personId],
+              "delete from public.certificates where workspace_id=$1 and person_id=$2 and season=$3 and certificate='vsc'",
+              [f.workspaceId, member.personId, forSeason],
             );
             const commitB = other.query("commit").then(
               () => null,
@@ -362,16 +371,20 @@ test("volunteer clearance against real Supabase", async (t) => {
           } finally {
             if (!committedA) await f.sql("rollback");
           }
-          assert.deepEqual(await rolesOf(member.personId), ["greeter"]);
+          assert.deepEqual(await rolesOf(member.personId, forSeason), ["greeter"]);
           assert.deepEqual(
-            (await certificatesOf(member.personId)).map((row) => [row.certificate, row.status]),
-            [["vsc", "confirmed"]],
+            (await certificatesOf(member.personId)).map((row) => [row.season, row.certificate, row.status]),
+            [[forSeason, "vsc", "confirmed"]],
           );
         } finally {
           await other.query("rollback").catch(() => {});
           await other.end();
         }
-      });
+      };
+      await t.test("a role added and its certificate deleted concurrently: one commits", () =>
+        concurrentRoleAndDelete({ key: "kit_concurrent", name: "Kit Arden", forSeason: season }));
+      await t.test("the same on last season's entry", () =>
+        concurrentRoleAndDelete({ key: "kit_past_concurrent", name: "Kip Arden", forSeason: season - 1 }));
     });
 
     // The role check is deferred to commit, and each of these transactions is
