@@ -1791,6 +1791,14 @@ test("issue 147: a check-in bar grows with its tags instead of cutting them off"
   assert.doesNotMatch(bar, /position:\s*absolute|white-space:\s*nowrap/);
 });
 
+test("issue 147: up to 480 px the site coordinator picker takes its own row", () => {
+  const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
+  const start = css.indexOf("/* Up to 480 px, where Add stretches, the site coordinator picker");
+  assert.ok(start > 0, "the block is there");
+  const block = /@media \(max-width: 480px\)\s*\{([\s\S]*?)\n\}/.exec(css.slice(start))?.[1] ?? "";
+  assert.match(block, /\.sc-add select\s*\{[^}]*flex-basis:\s*100%/);
+});
+
 test("issue 147: the client bar's phone block comes after the 800 px block whose padding it narrows", () => {
   const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
   const wide = css.indexOf("@media (max-width: 800px) {\n  .client-bar {\n    padding: 10px 16px;");
