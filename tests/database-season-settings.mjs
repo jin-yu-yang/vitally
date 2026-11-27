@@ -60,7 +60,7 @@ test("Season settings against real Supabase", async (t) => {
       return error;
     };
     const SETTINGS_KEYS = ["certificateUploadUrl", "clientDocumentsUrl", "revision", "season"];
-    const READ_KEYS = [...SETTINGS_KEYS, "canEdit", "candidates", "history", "schedule", "siteCoordinators", "siteNumber"];
+    const READ_KEYS = [...SETTINGS_KEYS, "canEdit", "candidates", "history", "lastExport", "schedule", "siteCoordinators", "siteNumber"];
 
     // A workspace admin by the Admin role who is not a site coordinator.
     const nadia = await f.staff({
