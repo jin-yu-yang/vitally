@@ -20,9 +20,9 @@
 
 ## 2. The confirmation line (plan.md Task 2)
 
-- [ ] 2.1 In `tests/volunteer-views.test.mjs`, add a failing test that "If they are checked in now, they are checked out at this moment." is always shown, after the shifts line and before the cases line. Update the two tests that pin the shifts line directly before the cases line.
-- [ ] 2.2 Add the line to `removeFromRosterDialogBody` in `src/volunteer-views.mjs`.
-- [ ] 2.3 Run `npm test`. Confirm that no other test, the story included, pins the old order. Commit.
+- [x] 2.1 In `tests/volunteer-views.test.mjs`, add a failing test that "If they are checked in now, they are checked out at this moment." is always shown, after the shifts line and before the cases line. Update the two tests that pin the shifts line directly before the cases line.
+- [x] 2.2 Add the line to `removeFromRosterDialogBody` in `src/volunteer-views.mjs`.
+- [x] 2.3 Run `npm test`. Confirm that no other test, the story included, pins the old order. Commit.
 
 ## 3. Developer docs and final checks (plan.md Task 3)
 
