@@ -997,9 +997,9 @@ Change `add-remove-from-roster`. The database side is in
   active because they are a site coordinator, but they will have no roles this season.", "Their
   account is already deactivated.", or none when there is no account. When the volunteer has a live
   shift this season from today on (`hasShiftsFromToday`, from the Roster read's `shifts` query in
-  `listRoster`), "Their shifts from today on are removed from the Schedule." Then, always, "If they are checked in
-  now, they are checked out at this moment." Then "Their cases and contact
-  details are kept. To add them back, search for <email> in Add a volunteer." The buttons are
+  `listRoster`), "Their shifts from today on are removed from the Schedule." Then, always, "If they are
+  checked in now, they are checked out at this moment." Then "Their cases and contact details are
+  kept. To add them back, search for <email> in Add a volunteer." The buttons are
   **Remove from roster** and **Cancel**. Nothing is sent until the first.
 - **`controller.removeFromRoster()`** calls the store's `removeFromRoster` at the profile revision the
   drawer holds. A refusal that has a sentence (`OPEN_WORK` with the existing open-work message, the

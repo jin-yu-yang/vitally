@@ -113,13 +113,13 @@ begin
  -- stored roles have changed since (#300). The refusal rolls the reserved -- 062
  -- receipt back with the rest, so none is stored. From the stored roles of the -- 062
  -- current-season entry. -- 062
- select r.roles into v_stored_roles from public.roster_entries r
-  join public.workspaces w on w.id=r.workspace_id and w.current_season=r.season
-  where r.workspace_id=v_member.workspace_id and r.person_id=p_volunteer_id;
- if 'admin'=any(coalesce(v_stored_roles,'{}'::text[]))
-  and not vitally_private.is_site_coordinator(v_member.workspace_id,v_person.id) then
-  raise sqlstate 'VT001' using message='ADMIN_ROLE';
- end if;
+ select r.roles into v_stored_roles from public.roster_entries r -- 062
+  join public.workspaces w on w.id=r.workspace_id and w.current_season=r.season -- 062
+  where r.workspace_id=v_member.workspace_id and r.person_id=p_volunteer_id; -- 062
+ if 'admin'=any(coalesce(v_stored_roles,'{}'::text[])) -- 062
+  and not vitally_private.is_site_coordinator(v_member.workspace_id,v_person.id) then -- 062
+  raise sqlstate 'VT001' using message='ADMIN_ROLE'; -- 062
+ end if; -- 062
  -- 6. An invitation past its expiry is cancelled first, as the other account
  -- RPCs do, so step 14 sees the account as it now stands. -- 062
  perform vitally_private.expire_invitations(v_member.workspace_id);

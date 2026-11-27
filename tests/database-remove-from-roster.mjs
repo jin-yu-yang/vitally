@@ -17,9 +17,9 @@ import { openDatabase } from "../tools/admin/database.mjs";
 // as the remover's correction, and roster_removals.check_in_closed records it
 // (an earlier day's open check-in stays missed); and a replayed removal
 // returns its stored result although the volunteer has since gained the Admin
-// role. Specs: volunteer-roster and volunteer-check-in. One fixture is shared, and each scenario removes a
-// person of its own; the case history scenario removes the fixture's own
-// preparer, so it has its own fixture.
+// role. Specs: volunteer-roster and volunteer-check-in. One fixture is shared,
+// and each scenario removes a person of its own; the case history scenario
+// removes the fixture's own preparer, so it has its own fixture.
 
 const FORBIDDEN = "VT001";
 const NOT_FOUND = "VT002";
@@ -699,6 +699,23 @@ test("removing a volunteer from this season's roster", async (t) => {
       await removeNow(f, admin.client, cora.personId);
       assert.deepEqual(await checkInsOf(f, cora.personId), before);
       assert.equal((await removalsOf(f, cora.personId))[0].check_in_closed, false);
+    });
+
+    await t.test("a site coordinator removed while checked in: the check-in is closed and the account stays active", async () => {
+      const selma = await f.staff({
+        key: "selma_sc_checked_in",
+        name: "Selma Ortiz",
+        capabilities: ["admin"],
+        siteCoordinator: true,
+      });
+      await addCheckIn(f, selma.personId);
+      const { data } = await removeNow(f, sc.client, selma.personId);
+      const [after] = await checkInsOf(f, selma.personId);
+      assert.ok(after.checked_out_at > after.checked_in_at);
+      assert.equal(after.corrected_by_person_id, sc.personId);
+      assert.equal(data.accountDeactivated, false);
+      assert.equal((await removalsOf(f, selma.personId))[0].check_in_closed, true);
+      assert.equal((await accountOf(f, selma.personId)).status, "active");
     });
 
     await t.test("another volunteer's open check-in is untouched", async () => {

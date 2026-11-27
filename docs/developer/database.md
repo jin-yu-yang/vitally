@@ -617,9 +617,10 @@ confirmed step.
       list. Unlike Save, a site coordinator who is the default follow-up person is not excused.
 - **Locks, in order:** the workspace advisory lock, the person's membership, the profile, the entry,
   the shifts, the check-in (062), the account. Save, Deactivate, Start next season, Save shift, Remove
-  shift, Remove all and the check-in RPCs (`vitally_check_in`, `vitally_check_out`,
-  `vitally_save_check_in`, `vitally_remove_check_in`) take the workspace lock first, so none of them can
-  deadlock with another. The person's own writes
+  shift, Remove all and the admin check-in RPCs (`vitally_save_check_in`, `vitally_remove_check_in`)
+  take the workspace lock first, so none of them can deadlock with another. The self check-in RPCs
+  (`vitally_check_in`, `vitally_check_out`) take it after `require_membership`'s `for share` on the
+  caller's membership: the 060 shape left to #305, below. The person's own writes
   take no workspace lock: `vitally_save_my_profile` and `vitally_mark_upload_sent` (057) hold `for
   share` on their membership (`require_membership`), then lock the profile (and the entry). Remove
   deactivates that membership, so it locks it before the profile, in the same order: a write already
