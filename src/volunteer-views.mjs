@@ -291,6 +291,7 @@ export function removeFromRosterDialogBody({ volunteer = null, error = null } = 
     `${name} (${email}) comes off this season's roster, with their roles, certificates and the record of what they sent this season.`,
     accountLine,
     volunteer?.hasShiftsFromToday === true ? "Their shifts from today on are removed from the Schedule." : "",
+    "If they are checked in now, they are checked out at this moment.",
     `Their cases and contact details are kept. To add them back, search for ${email} in Add a volunteer.`,
   ]
     .filter(Boolean)

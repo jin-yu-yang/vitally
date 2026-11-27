@@ -1039,12 +1039,21 @@ test("the confirmation says shifts from today on go, only when there are some", 
   // After the account line, before the last line.
   assert.match(
     html,
-    /so they can no longer sign in\. Their shifts from today on are removed from the Schedule\. Their cases and contact details are kept\./,
+    /so they can no longer sign in\. Their shifts from today on are removed from the Schedule\. If they are checked in now, they are checked out at this moment\. Their cases and contact details are kept\./,
   );
   const none = removeFromRosterDialogBody({ volunteer: withStatus("none", { hasShiftsFromToday: true }) });
-  assert.match(none, /this season\. Their shifts from today on are removed from the Schedule\. Their cases/);
+  assert.match(none, /this season\. Their shifts from today on are removed from the Schedule\. If they are checked in now/);
   for (const v of [withStatus("active"), withStatus("active", { hasShiftsFromToday: false })])
     assert.ok(!removeFromRosterDialogBody({ volunteer: v }).includes(SHIFTS));
+});
+
+test("the confirmation always says a check-in is checked out, before the cases line", () => {
+  const LINE = /If they are checked in now, they are checked out at this moment\. Their cases and contact details are kept\./;
+  for (const v of [withStatus("active"), withStatus("none"), withStatus("deactivated"),
+    withStatus("active", { isSiteCoordinator: true }), withStatus("active", { hasShiftsFromToday: true })])
+    assert.match(removeFromRosterDialogBody({ volunteer: v }), LINE);
+  assert.match(removeFromRosterDialogBody({ volunteer: withStatus("active", { hasShiftsFromToday: true }) }),
+    /removed from the Schedule\. If they are checked in now/);
 });
 
 test("the confirmation escapes the name and email, and shows a refusal", () => {
