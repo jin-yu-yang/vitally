@@ -1309,7 +1309,7 @@ test("sign-in accounts against real Supabase", async (t) => {
           await f.sql(`insert into ${schema}.hold values($1,$2)`, [f.workspaceId, held.userId]);
           await expire(held.userId);
         }
-        // The Roster read: the sweep, then the tables, as listVolunteers does.
+        // The Roster read: the sweep, then the tables, as listRoster does.
         const swept = await rpc(admin, "vitally_expire_invitations");
         assert.ok(swept.failed >= 1, `failed ${swept.failed}`);
         for (const table of ["volunteer_profiles", "roster_entries", "certificates", "people", "accounts"])
