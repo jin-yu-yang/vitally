@@ -13669,6 +13669,38 @@ test("season export: a dialog opened meanwhile is not closed by the answer", asy
   controller.stop();
 });
 
+test("season export: a wake refresh during the export still returns the file and clears busy", async () => {
+  const { store, controller, events } = await onExportSeason();
+  let release;
+  store.exportGate = new Promise((resolve) => (release = resolve));
+  const pending = controller.exportSeason();
+  await new Promise((resolve) => setImmediate(resolve));
+  const before = controller.getState().principal;
+  await events.emit("focus");
+  release();
+  assert.ok(await pending, "the same user's export is still downloaded");
+  const state = controller.getState();
+  assert.equal(state.principal.userId, before.userId);
+  assert.equal(state.seasonSettingsUi.exportBusy, false);
+  assert.ok(state.seasonSettings.lastExport);
+  controller.stop();
+});
+
+test("season export: leaving Season settings and returning keeps the busy flag", async () => {
+  const { store, controller } = await onExportSeason();
+  let release;
+  store.exportGate = new Promise((resolve) => (release = resolve));
+  const pending = controller.exportSeason();
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.navigate("office-home");
+  controller.navigate("office-settings");
+  assert.equal(controller.getState().seasonSettingsUi.exportBusy, true);
+  release();
+  await pending;
+  assert.equal(controller.getState().seasonSettingsUi.exportBusy, false);
+  controller.stop();
+});
+
 test("season export: a second press while one is in flight sends nothing", async () => {
   const { store, controller } = await onExportSeason();
   let release;

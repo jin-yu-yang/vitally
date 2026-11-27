@@ -2776,8 +2776,10 @@ export function createController({
     show();
     // Who asked: a sign-out (or another sign-in) while the export is out
     // replaces both, and that window must not download or write anything.
-    const { session, principal } = state;
-    const stale = () => state.session !== session || state.principal !== principal;
+    const { session } = state;
+    const userId = state.principal?.userId;
+    // The user, not the object: a wake refresh replaces the principal object.
+    const stale = () => state.session !== session || state.principal?.userId !== userId;
     try {
       const answer = await store.exportSeason();
       if (stale()) return null;
@@ -2809,10 +2811,8 @@ export function createController({
       }
       return null;
     } finally {
-      if (!stale()) {
-        state.seasonSettingsUi = { ...state.seasonSettingsUi, exportBusy: false };
-        show();
-      }
+      state.seasonSettingsUi = { ...state.seasonSettingsUi, exportBusy: false };
+      show();
     }
   }
 
@@ -3653,7 +3653,7 @@ export function createController({
     // My profile is a cleared window's: an uncleared one stays on its home.
     if (CLEARED_ONLY_SCREENS.includes(screen) && !screenAllowed(screen)) screen = homeScreen();
     // Season settings starts without an earlier visit's sentences.
-    if (screen === "office-settings") state.seasonSettingsUi = freshSettingsUi();
+    if (screen === "office-settings") state.seasonSettingsUi = freshSettingsUi(state.seasonSettingsUi);
     // Leaving or opening a page ends its draft, and the revision it began at.
     siteHoursBaseRevision = null;
     linksBaseRevision = null;
