@@ -7572,6 +7572,28 @@ button.schedule-shift {
 .setup-reason {
   margin: 4px 0 0;
 }
+/* The setup screen and the check-in drawer on a phone (issue 147). Up to
+   800 px: the setup panel gives its width back to the list and each missing
+   item stands apart from the next; the drawer's Checked in and Checked out
+   stack when two would cut "Not checked out" short (at 390 px, not at 768),
+   and its close button takes a 44 px touch target around the same circle. */
+@media (max-width: 800px) {
+  .setup-screen {
+    padding: 20px 16px;
+  }
+  .setup-missing > li + li {
+    margin-top: 12px;
+  }
+  .check-in-form .shift-hours .field {
+    flex-basis: 12rem;
+  }
+  .modal:has(#check-in-form) .close-btn::before {
+    content: "";
+    position: absolute;
+    inset: -7px;
+    border-radius: 50%;
+  }
+}
 /* My profile (change add-my-profile): the sidebar's account link and the screen */
 .account-row .btn.account-link {
   flex-direction: column;
