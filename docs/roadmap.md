@@ -56,7 +56,7 @@ Slack). Screening stays in Airtable. Dates are targets.
 | Adoption | Clearance fixes: role changes without a reload, a self-cleared admin, screen-reader announcement | [#190](https://github.com/jin-yu-yang/vitally/issues/190) #191 #192 | Nov 22 | **Done**: #191 and #192 (Nov 18), #190 (#234, Nov 19) |
 | Adoption | Workload and Reassign | #139 | — | **Done** |
 | Adoption | Hourly volunteer schedule with a role per shift | [#140](https://github.com/jin-yu-yang/vitally/issues/140) | Dec 6 | **Done** (#271, Nov 22; a closed day's shifts, #284, Nov 26) |
-| Adoption | Volunteer check-in and check-out | [#257](https://github.com/jin-yu-yang/vitally/issues/257) | Dec 13 | **Done** (#278, Nov 25) |
+| Adoption | Volunteer check-in and check-out | [#257](https://github.com/jin-yu-yang/vitally/issues/257) | Dec 13 | **Done** (#278, Nov 26) |
 | Adoption | Posted updates and notifications | #150 | — | **Done** |
 | Adoption | Case labels (City Tax, MFS, Multi-state) | #148 | — | **Done** (Nov 17) |
 | Adoption | One account reaches both the office and the work board | [#104](https://github.com/jin-yu-yang/vitally/issues/104) | Dec 13 | **Done**: the Office / Cases switch (#279, Nov 26) |
