@@ -1790,3 +1790,11 @@ test("issue 147: a check-in bar grows with its tags instead of cutting them off"
   assert.match(bar, /flex-wrap:\s*wrap/);
   assert.doesNotMatch(bar, /position:\s*absolute|white-space:\s*nowrap/);
 });
+
+test("issue 147: up to 600 px the site coordinator picker takes its own row", () => {
+  const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
+  const start = css.indexOf("/* Issue 147: up to 600 px the site coordinator picker");
+  assert.ok(start > 0, "the block is there");
+  const block = /@media \(max-width: 600px\)\s*\{([\s\S]*?)\n\}/.exec(css.slice(start))?.[1] ?? "";
+  assert.match(block, /\.sc-add select\s*\{[^}]*flex-basis:\s*100%/);
+});

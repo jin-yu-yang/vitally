@@ -7369,6 +7369,14 @@ html:lang(zh-Hant) {
     flex: 1 1 auto;
   }
 }
+/* Issue 147: up to 600 px the site coordinator picker takes its own row, so
+   "Make someone a site coordinator…" isn't cut off beside Add (seen in PR 237's
+   390 px screenshots); Add sits under it. */
+@media (max-width: 600px) {
+  .sc-add select {
+    flex-basis: 100%;
+  }
+}
 
 /* Volunteers: the Schedule (change add-volunteer-schedule, design D7). One
    day: a column per open hour after the names, a row per volunteer. The grid
