@@ -7361,20 +7361,19 @@ html:lang(zh-Hant) {
   font-weight: 600;
   color: var(--vt-error);
 }
+/* Up to 480 px, where Add stretches, the site coordinator picker takes its
+   own row so "Make someone a site coordinator…" isn't cut off beside Add
+   (issue 147; seen in PR 237's 390 px screenshots). From 481 px it fits
+   beside Add. */
 @media (max-width: 480px) {
   .settings-card {
     padding: 16px 14px;
   }
-  .sc-add .btn {
-    flex: 1 1 auto;
-  }
-}
-/* Issue 147: up to 600 px the site coordinator picker takes its own row, so
-   "Make someone a site coordinator…" isn't cut off beside Add (seen in PR 237's
-   390 px screenshots); Add sits under it. */
-@media (max-width: 600px) {
   .sc-add select {
     flex-basis: 100%;
+  }
+  .sc-add .btn {
+    flex: 1 1 auto;
   }
 }
 
