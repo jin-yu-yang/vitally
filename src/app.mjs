@@ -2684,6 +2684,10 @@ if (!config) {
       case "open-label-menu":
         controller.openLabelMenu(target.dataset.caseId);
         break;
+      case "toggle-lifecycle":
+        controller.toggleLifecycle();
+        root.querySelector('[data-action="toggle-lifecycle"]')?.focus();
+        break;
       case "close-label-menu":
         closeLabelMenu();
         break;
