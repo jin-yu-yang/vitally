@@ -11,7 +11,13 @@ import { openDatabase } from "../tools/admin/database.mjs";
 // does, unless there is none, it is already deactivated, or it is a site
 // coordinator's; the profile revision goes up and the removal is recorded.
 // Specs: volunteer-roster, sign-in-accounts, site-coordinators and
-// volunteer-clearance. One fixture is shared, and each scenario removes a
+// volunteer-clearance.
+// OpenSpec change close-check-in-on-roster-removal (#277, #300), migration
+// 062: the volunteer's open check-in from today is checked out at the removal
+// as the remover's correction, and roster_removals.check_in_closed records it
+// (an earlier day's open check-in stays missed); and a replayed removal
+// returns its stored result although the volunteer has since gained the Admin
+// role. Specs: volunteer-roster and volunteer-check-in. One fixture is shared, and each scenario removes a
 // person of its own; the case history scenario removes the fixture's own
 // preparer, so it has its own fixture.
 
@@ -73,7 +79,7 @@ const membershipOf = (f, userId) =>
 const removalsOf = async (f, personId) =>
   (
     await f.sql(
-      `select season,person_id,removed_by_person_id,account_deactivated,shifts_removed,removed_at
+      `select season,person_id,removed_by_person_id,account_deactivated,shifts_removed,check_in_closed,removed_at
         from public.roster_removals where workspace_id=$1 and person_id=$2 order by removed_at`,
       [f.workspaceId, personId],
     )
@@ -103,8 +109,35 @@ const shiftsOf = async (f, personId) =>
   ).rows;
 const shiftById = (f, id) =>
   one(f, "select id,revision::int as revision,removed_at,updated_at,updated_by_person_id from public.shifts where id=$1", [id]);
+// The start of today's New York date, and a time just before now that never
+// falls before it, so a "today" row is on today's date even just after
+// midnight.
+const TODAY_START = "(((now() at time zone 'America/New_York')::date)::timestamp at time zone 'America/New_York')";
+const todayAgo = (minutes) => `greatest(now() - interval '${minutes} minutes', ${TODAY_START})`;
+// A live current-season check-in for the person at `at` (a timestamptz SQL
+// expression), with a check-out at `out` when given. Returns its id.
+const addCheckIn = async (f, personId, { at = todayAgo(2), out = null } = {}) =>
+  (
+    await one(
+      f,
+      `insert into public.check_ins(workspace_id,season,person_id,check_in_date,checked_in_at,checked_out_at)
+        select w.id,w.current_season,$2,((${at}) at time zone 'America/New_York')::date,${at},${out ?? "null"}
+        from public.workspaces w where w.id=$1 returning id`,
+      [f.workspaceId, personId],
+    )
+  ).id;
+const checkInsOf = async (f, personId) =>
+  (
+    await f.sql(
+      `select id,check_in_date::text as day,checked_in_at,checked_out_at,revision::int as revision,
+        updated_by_person_id,corrected_by_person_id
+        from public.check_ins where workspace_id=$1 and person_id=$2 order by checked_in_at,id`,
+      [f.workspaceId, personId],
+    )
+  ).rows;
 // Everything a refused removal must leave as it was.
 const stateOf = async (f, personId) => ({
+  checkIns: await checkInsOf(f, personId),
   shifts: await shiftsOf(f, personId),
   person: await personOf(f, personId),
   profile: await profileOf(f, personId),
@@ -625,6 +658,137 @@ test("removing a volunteer from this season's roster", async (t) => {
       assert.ok(entry, "back on the roster");
       assert.deepEqual(entry.roles, []);
       assert.equal((await accountOf(f, member.personId)).status, "deactivated");
+    });
+
+    await t.test("an open check-in today is checked out at the removal, corrected by the remover", async () => {
+      const nadia = await f.staff({ key: "nadia_checked_in", name: "Nadia Kerr", capabilities: ["prepare"] });
+      const id = await addCheckIn(f, nadia.personId);
+      const [before] = await checkInsOf(f, nadia.personId);
+      await removeNow(f, admin.client, nadia.personId);
+      const [after] = await checkInsOf(f, nadia.personId);
+      assert.equal(after.id, id);
+      assert.ok(after.checked_out_at > after.checked_in_at);
+      assert.equal(after.revision, before.revision + 1);
+      assert.equal(after.corrected_by_person_id, admin.personId);
+      assert.equal(after.updated_by_person_id, admin.personId);
+      assert.equal(
+        (await one(f, "select (vitally_private.open_check_in($1,$2)).id as id", [f.workspaceId, nadia.personId])).id,
+        null,
+      );
+      assert.equal((await removalsOf(f, nadia.personId))[0].check_in_closed, true);
+    });
+
+    await t.test("yesterday's open check-in is left missed", async () => {
+      const yara = await f.staff({ key: "yara_yesterday", name: "Yara Voss", capabilities: ["prepare"] });
+      await addCheckIn(f, yara.personId, {
+        at: "(((now() at time zone 'America/New_York')::date - 1) + time '12:00') at time zone 'America/New_York'",
+      });
+      const before = await checkInsOf(f, yara.personId);
+      assert.equal(before.length, 1);
+      assert.equal(before[0].checked_out_at, null);
+      await removeNow(f, admin.client, yara.personId);
+      assert.deepEqual(await checkInsOf(f, yara.personId), before);
+      assert.equal((await removalsOf(f, yara.personId))[0].check_in_closed, false);
+    });
+
+    await t.test("a check-in already checked out today is left, and nothing is recorded as closed", async () => {
+      const cora = await f.staff({ key: "cora_checked_out", name: "Cora Lind", capabilities: ["prepare"] });
+      await addCheckIn(f, cora.personId, { at: todayAgo(3), out: "now()" });
+      const before = await checkInsOf(f, cora.personId);
+      assert.ok(before[0].checked_out_at, "already checked out");
+      await removeNow(f, admin.client, cora.personId);
+      assert.deepEqual(await checkInsOf(f, cora.personId), before);
+      assert.equal((await removalsOf(f, cora.personId))[0].check_in_closed, false);
+    });
+
+    await t.test("another volunteer's open check-in is untouched", async () => {
+      const mina = await f.staff({ key: "mina_in", name: "Mina Okoro", capabilities: ["prepare"] });
+      const gus = await f.staff({ key: "gus_leaving", name: "Gus Almeida", capabilities: ["prepare"] });
+      await addCheckIn(f, mina.personId);
+      const before = await checkInsOf(f, mina.personId);
+      await removeNow(f, admin.client, gus.personId);
+      assert.deepEqual(await checkInsOf(f, mina.personId), before);
+      assert.equal(before[0].checked_out_at, null);
+    });
+
+    await t.test("a refused removal (OPEN_WORK) leaves an open check-in", async () => {
+      const member = await f.staff({ key: "olga_open", name: "Olga Reyes", capabilities: ["prepare"] });
+      const checkInId = await addCheckIn(f, member.personId);
+      const caseId = await f.readyCase();
+      await f.act(member.client, caseId, "CLAIM_PREPARATION", {});
+      const before = await checkInsOf(f, member.personId);
+      await refused(f, sc.client, member.personId, { code: OPEN_WORK, message: "OPEN_WORK" });
+      const after = await checkInsOf(f, member.personId);
+      assert.deepEqual(after, before);
+      assert.equal(after[0].id, checkInId);
+      assert.equal(after[0].checked_out_at, null);
+    });
+
+    await t.test("the closed check-in reads as corrected, and counts to the removal", async () => {
+      const lena = await f.staff({ key: "lena_counted", name: "Lena Fox", capabilities: ["prepare"] });
+      await addCheckIn(f, lena.personId);
+      await removeNow(f, admin.client, lena.personId);
+      const [row] = await checkInsOf(f, lena.personId);
+      const today = (await one(f, "select (now() at time zone 'America/New_York')::date::text as d")).d;
+      const day = await rpc(sc.client, "vitally_schedule_day", { p_date: today });
+      const item = day.checkIns.find((c) => c.volunteerId === lena.personId);
+      assert.ok(item, "on the Schedule");
+      assert.equal(item.flags.corrected, true);
+      assert.equal(item.correctedByName, "Ines Dalton");
+      const week = await rpc(sc.client, "vitally_hours_this_week", {});
+      const entry = week.hours.find((h) => h.volunteerId === lena.personId);
+      assert.ok(entry, "in this week's hours");
+      assert.equal(entry.minutes, Math.floor((row.checked_out_at - row.checked_in_at) / 60000));
+    });
+
+    await t.test("same instant: the check-out is after the check-in", async () => {
+      const sam = await f.staff({ key: "sam_same_instant", name: "Sam Ortiz", capabilities: ["prepare"] });
+      const revision = await profileRevision(f, sam.personId);
+      await f.sql("begin");
+      try {
+        await f.sql(
+          `insert into public.check_ins(workspace_id,season,person_id,check_in_date,checked_in_at)
+            select w.id,w.current_season,$2,(now() at time zone 'America/New_York')::date,now()
+            from public.workspaces w where w.id=$1`,
+          [f.workspaceId, sam.personId],
+        );
+        await f.sql("select set_config('request.jwt.claims',$1,true)", [
+          JSON.stringify({ sub: sc.userId, role: "authenticated" }),
+        ]);
+        await f.sql("set local role authenticated");
+        await f.sql("select public.vitally_remove_from_roster($1,$2,$3)", [randomUUID(), sam.personId, revision]);
+        await f.sql("reset role");
+        const row = await one(
+          f,
+          `select checked_in_at,checked_out_at,check_in_date::text as day,
+            (checked_out_at at time zone 'America/New_York')::date::text as out_day
+            from public.check_ins where workspace_id=$1 and person_id=$2`,
+          [f.workspaceId, sam.personId],
+        );
+        assert.ok(row.checked_out_at > row.checked_in_at, "after the check-in");
+        assert.equal(row.out_day, row.day);
+      } finally {
+        await f.sql("rollback");
+      }
+    });
+
+    await t.test("a replay returns its stored result after the volunteer gained the Admin role (#300)", async () => {
+      const rowan = await f.staff({ key: "rowan_replay", name: "Rowan Pike", capabilities: ["prepare"] });
+      const { email } = await profileOf(f, rowan.personId);
+      const { data, revision, actionId } = await removeNow(f, admin.client, rowan.personId);
+      await rpc(sc.client, "vitally_save_volunteer", {
+        p_action_id: randomUUID(),
+        p_volunteer_id: rowan.personId,
+        p_expected_revision: data.revision,
+        p_volunteer: volunteer(email, { roles: ["admin"], certificates: ["vsc", "itqr"] }),
+      });
+      const entry = await currentEntry(f, rowan.personId);
+      assert.deepEqual(entry.roles, ["admin"]);
+      const again = await remove(admin.client, { actionId, volunteerId: rowan.personId, revision });
+      assert.equal(again.error, null, failure(again.error));
+      assert.deepEqual(again.data, data);
+      assert.deepEqual(await currentEntry(f, rowan.personId), entry);
+      assert.equal((await removalsOf(f, rowan.personId)).length, 1);
     });
   } finally {
     await f.close();
