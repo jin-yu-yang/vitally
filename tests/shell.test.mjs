@@ -1798,3 +1798,13 @@ test("issue 147: up to 480 px the site coordinator picker takes its own row", ()
   const block = /@media \(max-width: 480px\)\s*\{([\s\S]*?)\n\}/.exec(css.slice(start))?.[1] ?? "";
   assert.match(block, /\.sc-add select\s*\{[^}]*flex-basis:\s*100%/);
 });
+
+test("issue 147: the client bar's phone block comes after the 800 px block whose padding it narrows", () => {
+  const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
+  const wide = css.indexOf("@media (max-width: 800px) {\n  .client-bar {\n    padding: 10px 16px;");
+  const phone = css.indexOf("/* Issue 147, on a phone (after the 800 px block");
+  assert.ok(wide > 0 && phone > wide, "the 600 px block follows the 800 px one");
+  const block = /@media \(max-width: 600px\)\s*\{([\s\S]*?)\n\}/.exec(css.slice(phone))?.[1] ?? "";
+  assert.match(block, /\.client-bar\s*\{[^}]*padding:\s*8px 12px/);
+  assert.match(block, /\.client-wordmark\s*\{[^}]*font-size:\s*16px/);
+});
