@@ -278,13 +278,21 @@ const ALLOWED = new Set([
   // (ids that only name a document card are listed here, each with a comment)
 ]);
 
+// An id counts with "_" read as a separator, since  never fires inside snake_case.
+const sensitive = (id, text) => SENSITIVE.test(String(id).replace(/_/g, " ")) || SENSITIVE.test(text ?? "");
+
+test("the sensitive-field check flags snake_case ids", () => {
+  for (const id of ["routing_number", "account_number", "tp_ssn", "itin_number"]) assert.ok(sensitive(id, ""), id);
+  assert.ok(!sensitive("tp_first_name", "First name"));
+});
+
 test("no SSN, ITIN, routing or account-number question in the catalogue", () => {
   const questions = CATALOGUE.steps.flatMap((s) => s.sections.flatMap((x) => x.questions));
   const hits = [];
   for (const q of questions) {
     for (const p of [q, ...(q.fields ?? [])]) {
       const text = wording(p, { lang: "en" });
-      if ((SENSITIVE.test(p.id) || SENSITIVE.test(text)) && !ALLOWED.has(p.id)) hits.push(`${p.id}: ${text}`);
+      if (sensitive(p.id, text) && !ALLOWED.has(p.id)) hits.push(`${p.id}: ${text}`);
     }
   }
   assert.deepEqual(hits, []);
