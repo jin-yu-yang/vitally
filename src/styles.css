@@ -2944,6 +2944,7 @@ textarea::placeholder {
   width: 16px;
   height: 16px;
 }
+
 .you {
   color: var(--vt-you);
 }
@@ -3445,6 +3446,129 @@ textarea::placeholder {
 .office-queue .kind-pill,
 .office-queue .queue-table .badge {
   white-space: normal;
+}
+
+/* ---- Phone: Follow-ups and the work board as cards (issue 147) ----
+   Up to 800 px (where the sidebar becomes a menu) each row is a card, so nothing sits off-screen to the right:
+   Follow-ups puts the task and how long it has waited on top, then the
+   client, what's needed, language and contact preference; the work board
+   puts the client and stage on top, then phone, updated, language, service,
+   preparer and reviewer in two columns. Each smaller field carries its
+   column name above it (its data-label). The actions take the card's full
+   width at the bottom. The column headers stay for screen readers. */
+@media (max-width: 800px) {
+  .office-queue .board-table-wrap,
+  .staff-board .board-table-wrap {
+    overflow: visible;
+  }
+  .office-queue .queue-table,
+  .office-queue .queue-table tbody,
+  .staff-board .board-table,
+  .staff-board .board-table tbody {
+    display: block;
+  }
+  .office-queue .queue-table thead,
+  .staff-board .board-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .office-queue .queue-table tr,
+  .staff-board .board-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px 12px;
+    padding: 14px 14px 16px;
+    border-top: 1px solid var(--vt-line);
+  }
+  .office-queue .queue-table tbody tr:first-child,
+  .staff-board .board-table tbody tr:first-child {
+    border-top: 0;
+  }
+  .office-queue .queue-table td,
+  .office-queue .queue-table tbody th,
+  .staff-board .board-table td,
+  .staff-board .board-table tbody th {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    text-align: left;
+    white-space: normal;
+  }
+  .office-queue .queue-table td[data-label]::before,
+  .staff-board .board-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 2px;
+    color: var(--vt-muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .office-queue .queue-needed {
+    min-width: 0;
+    max-width: none;
+  }
+  .office-queue .queue-kind,
+  .staff-board .board-client {
+    grid-row: 1;
+    grid-column: 1;
+  }
+  .office-queue .queue-waiting,
+  .staff-board .board-stage {
+    grid-row: 1;
+    grid-column: 2;
+    justify-self: end;
+    text-align: right;
+  }
+  .staff-board .board-phone-cell {
+    order: 1;
+  }
+  .staff-board .board-updated {
+    order: 2;
+  }
+  .staff-board .board-language {
+    order: 3;
+  }
+  .staff-board .board-service {
+    order: 4;
+  }
+  .staff-board .board-preparer {
+    order: 5;
+  }
+  .staff-board .board-reviewer {
+    order: 6;
+  }
+  .staff-board .board-actions {
+    order: 7;
+  }
+  .office-queue .queue-client,
+  .office-queue .queue-needed,
+  .office-queue .queue-action,
+  .staff-board .board-actions {
+    grid-column: 1 / -1;
+  }
+  .office-queue .queue-action,
+  .staff-board .board-actions {
+    text-align: left;
+  }
+  .office-queue .queue-action .btn,
+  .staff-board .board-row-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+  .staff-board .board-row-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .staff-board .board-row-actions .staff-reason {
+    max-width: none;
+  }
 }
 .kind-pill .icon {
   width: 14px;
