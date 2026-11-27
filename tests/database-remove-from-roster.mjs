@@ -760,12 +760,13 @@ test("removing a volunteer from this season's roster", async (t) => {
         await f.sql("reset role");
         const row = await one(
           f,
-          `select checked_in_at,checked_out_at,check_in_date::text as day,
+          `select checked_out_at>checked_in_at as later,check_in_date::text as day,
             (checked_out_at at time zone 'America/New_York')::date::text as out_day
             from public.check_ins where workspace_id=$1 and person_id=$2`,
           [f.workspaceId, sam.personId],
         );
-        assert.ok(row.checked_out_at > row.checked_in_at, "after the check-in");
+        // Compared in SQL: a JS Date keeps milliseconds, and the gap is a microsecond.
+        assert.equal(row.later, true, "after the check-in");
         assert.equal(row.out_day, row.day);
       } finally {
         await f.sql("rollback");
