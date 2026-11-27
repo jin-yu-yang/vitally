@@ -3277,7 +3277,25 @@ textarea::placeholder {
   opacity: 1;
   color: var(--vt-intake-hint);
 }
-/* Issue 147, on a phone: the client bar took four rows (about 240 px) while
+@media (max-width: 800px) {
+  .client-bar {
+    padding: 10px 16px;
+  }
+  /* Issue 147, on a phone: text links that act (Change, "1 more document
+     may be needed", the draft's other-language link) are full tap targets,
+     and the rail's All steps stays on one line beside a long step title. */
+  .client-shell button.inline,
+  .client-shell .btn.inline {
+    min-height: var(--vt-tap);
+    min-width: var(--vt-tap);
+  }
+  .client-shell .rail-phone .btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+}
+/* Issue 147, on a phone (after the 800 px block, whose padding it narrows):
+   the client bar took four rows (about 240 px) while
    a draft was open. Its controls now flow in one wrapping line after the
    brand, a little tighter, so the brand and the language switch share the
    first row and the rest take one or two more. Every control stays, at
@@ -3299,7 +3317,7 @@ textarea::placeholder {
     height: 28px;
   }
   .client-wordmark {
-    font-size: 17px;
+    font-size: 16px;
   }
   .client-bar .language-switch .lang {
     padding: 4px 8px;
@@ -3310,23 +3328,6 @@ textarea::placeholder {
   .client-bar .btn.text {
     padding-left: 8px;
     padding-right: 8px;
-  }
-}
-@media (max-width: 800px) {
-  .client-bar {
-    padding: 10px 16px;
-  }
-  /* Issue 147, on a phone: text links that act (Change, "1 more document
-     may be needed", the draft's other-language link) are full tap targets,
-     and the rail's All steps stays on one line beside a long step title. */
-  .client-shell button.inline,
-  .client-shell .btn.inline {
-    min-height: var(--vt-tap);
-    min-width: var(--vt-tap);
-  }
-  .client-shell .rail-phone .btn {
-    flex-shrink: 0;
-    white-space: nowrap;
   }
 }
 

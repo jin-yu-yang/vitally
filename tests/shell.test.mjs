@@ -1790,3 +1790,13 @@ test("issue 147: a check-in bar grows with its tags instead of cutting them off"
   assert.match(bar, /flex-wrap:\s*wrap/);
   assert.doesNotMatch(bar, /position:\s*absolute|white-space:\s*nowrap/);
 });
+
+test("issue 147: the client bar's phone block comes after the 800 px block whose padding it narrows", () => {
+  const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
+  const wide = css.indexOf("@media (max-width: 800px) {\n  .client-bar {\n    padding: 10px 16px;");
+  const phone = css.indexOf("/* Issue 147, on a phone (after the 800 px block");
+  assert.ok(wide > 0 && phone > wide, "the 600 px block follows the 800 px one");
+  const block = /@media \(max-width: 600px\)\s*\{([\s\S]*?)\n\}/.exec(css.slice(phone))?.[1] ?? "";
+  assert.match(block, /\.client-bar\s*\{[^}]*padding:\s*8px 12px/);
+  assert.match(block, /\.client-wordmark\s*\{[^}]*font-size:\s*16px/);
+});
