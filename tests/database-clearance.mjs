@@ -287,6 +287,37 @@ test("volunteer clearance against real Supabase", async (t) => {
         });
       });
 
+      // #193 item 2: the rule holds in every season, each entry against its
+      // own season's certificates. Start next season (055) leaves last
+      // season's entries with their roles, so past-season rows are real.
+      await t.test("a past season's entry is checked against its own season's certificates", async () => {
+        const member = await f.staff({ key: "pia_past_season", name: "Pia Lindahl", capabilities: [], cleared: false });
+        const pastEntry = (roles) =>
+          f.sql(
+            "insert into public.roster_entries(workspace_id,person_id,season,roles) values($1,$2,$3,$4::text[])",
+            [f.workspaceId, member.personId, season - 1, roles],
+          );
+        // This season's VSC does not support last season's Greeter.
+        await inTransaction(f, async () => {
+          await confirm(member.personId, ["vsc"]);
+          await pastEntry(["greeter"]);
+          await assert.rejects(() => f.sql("set constraints all immediate"), roleNeeds("greeter: VSC"));
+        });
+        // Last season's VSC does; deleting it is then refused.
+        await inTransaction(f, async () => {
+          await confirm(member.personId, ["vsc"], { forSeason: season - 1 });
+          await pastEntry(["greeter"]);
+          await f.sql("set constraints all immediate");
+          await f.sql("set constraints all deferred");
+          await f.sql(
+            "delete from public.certificates where workspace_id=$1 and person_id=$2 and season=$3 and certificate='vsc'",
+            [f.workspaceId, member.personId, season - 1],
+          );
+          await assert.rejects(() => f.sql("set constraints all immediate"), roleNeeds("greeter: VSC"));
+        });
+        assert.deepEqual(await certificatesOf(member.personId), []);
+      });
+
       // Two connections. A adds Greeter and holds the entry's row lock; B
       // deletes the VSC that Greeter needs, and its commit-time check waits
       // on that lock. Once A commits, B's check reads Greeter and refuses.
