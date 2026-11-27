@@ -19,7 +19,7 @@
 - [x] 3.2 View: the Season export card (Last export line, button for site coordinators only) and the dialog with included / not-included lists, warning, Cancel and Download ZIP / Preparing…
 - [x] 3.3 Controller and app: open / cancel the dialog, run the export, download the ZIP, say "Season exported", update the Last export line, re-read on `FORBIDDEN`
 - [x] 3.4 View unit tests for the card and dialog for a site coordinator and another admin
-- [ ] 3.5 Browser test: a site coordinator exports, the download's name and entries are checked, and another admin sees the Last export line with no button
+- [x] 3.5 Browser test: a site coordinator exports, the download's name and entries are checked, and another admin sees the Last export line with no button
 
 ## 4. Checks
 
