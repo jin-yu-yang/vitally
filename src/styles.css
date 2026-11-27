@@ -1513,6 +1513,14 @@ textarea::placeholder {
   border-radius: 50%;
   color: var(--vt-muted);
 }
+/* The 30 px circle takes taps 44 px across, in every dialog and drawer
+   (issue 147; first done for the check-in drawer in PR 288). */
+.close-btn::before {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 50%;
+}
 .close-btn .icon {
   height: 16px;
   width: 16px;
@@ -2140,6 +2148,13 @@ textarea::placeholder {
 .connection-notice {
   background: var(--vt-attention-bg);
   color: var(--vt-stage-amend);
+}
+/* On a staff screen the sidebar toggle is fixed at the top left (12 px in,
+   44 px wide), over the start of these lines; they start after it instead
+   (issue 147). */
+.connection-notice:has(~ .app-shell),
+.problem-banner:has(~ .app-shell) {
+  padding-left: 68px;
 }
 .problem-banner {
   background: var(--vt-error-bg);
@@ -7552,7 +7567,14 @@ button.schedule-shift {
 .schedule-row > .check-in-track {
   grid-row: 2;
   position: relative;
+  /* One grid cell that every bar shares (issue 147): a bar's left and width
+     still place it along the open hours, and the track grows when a short
+     bar's tags take two lines instead of cutting them off. */
+  display: grid;
+  align-items: start;
+  padding: 4px 0;
   min-height: var(--vt-tap);
+  box-sizing: border-box;
   border-top: 1px dashed var(--vt-line);
 }
 .check-in-bar {
@@ -7573,11 +7595,17 @@ button.schedule-shift {
   overflow: hidden;
 }
 .check-in-track > .check-in-bar {
-  position: absolute;
-  top: 4px;
-  bottom: 4px;
+  position: relative;
+  grid-area: 1 / 1;
+  min-height: 36px;
   box-sizing: border-box;
-  white-space: nowrap;
+  flex-wrap: wrap;
+}
+/* In a bar narrower than its time or a tag (one hour on a phone), they break
+   at their spaces rather than run out of the bar. */
+.check-in-track .check-in-time,
+.check-in-track .check-in-bar .badge {
+  white-space: normal;
 }
 .check-in-bar.flagged {
   border-left-color: var(--vt-office);
@@ -7591,7 +7619,7 @@ button.schedule-shift {
   z-index: 1;
 }
 .check-in-bar .schedule-tags {
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
 }
 .schedule-off > .check-in-bar,
 .check-in-list .check-in-bar {
@@ -7718,12 +7746,6 @@ button.schedule-shift {
   }
   .check-in-form .shift-hours .field {
     flex-basis: 12rem;
-  }
-  .modal:has(#check-in-form) .close-btn::before {
-    content: "";
-    position: absolute;
-    inset: -7px;
-    border-radius: 50%;
   }
 }
 /* My profile (change add-my-profile): the sidebar's account link and the screen */
