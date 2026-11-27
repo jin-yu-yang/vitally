@@ -141,7 +141,7 @@ function poolRow(record, now, person) {
   const phase = TAB_LABELS[poolPhase(record)];
   return `<tr class="pool-row"><th scope="row">${clientNumberTag(record)}<button class="board-reference" data-action="open-case" data-case-id="${esc(record.id)}">${esc(record.reference)}</button>${rowLabels(record)}</th><td>${stageBadge(record.stage, "en", { record })}${
     phase ? `<span class="pool-phase">${esc(phase)}</span>` : ""
-  }</td><td>${listPhone(record, person, "pool-phone")}</td><td>${languageCell(languageSummary(clientLanguages(record?.answers)))}</td><td>${esc(serviceLabel(record?.answers?.service) || "—")}</td><td>${who(record.preparerName, record.preparerId)}</td><td>${who(record.reviewerName, record.reviewerId)}</td><td class="board-updated">${esc(
+  }</td><td>${listPhone(record, person, "pool-phone")}</td><td>${languageCell(languageSummary(clientLanguages(record?.answers)))}</td><td class="board-service">${esc(serviceLabel(record?.answers?.service) || "—")}</td><td>${who(record.preparerName, record.preparerId)}</td><td>${who(record.reviewerName, record.reviewerId)}</td><td class="board-updated">${esc(
     record.updatedAt ? relativeDay(record.updatedAt, now) : "No updates yet",
   )}</td></tr>`;
 }
