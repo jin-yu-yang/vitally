@@ -1766,6 +1766,14 @@ test("issue 147: a wide Follow-ups card puts its actions at the right", () => {
   assert.match(block, /\.office-queue \.queue-table \.queue-action\s*\{[^}]*text-align:\s*right/);
 });
 
+test("issue 147: on a phone a staff page's intro is compact and Back sits on the overline's row", () => {
+  const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
+  const start = css.indexOf("/* Issue 147, on a phone: a staff page's intro");
+  assert.ok(start > 0, "the block is there");
+  const block = /@media \(max-width: 800px\)\s*\{([\s\S]*?)\n\}/.exec(css.slice(start))?.[1] ?? "";
+  assert.match(block, /\.app-main \.page-intro h1\s*\{[^}]*font-size:\s*24px/);
+  assert.match(block, /\.app-main \.page-intro > \[data-action="open-board"\]\s*\{[^}]*grid-row:\s*1/);
+});
 // Issue 147 follow-ups from PR 288's list.
 test("issue 147: on a staff screen the connection notice starts after the fixed sidebar toggle", () => {
   const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
