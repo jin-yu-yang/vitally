@@ -6688,26 +6688,26 @@ const VOLUNTEER_PAYLOAD = Object.freeze({
   photoIdChecked: false,
 });
 
-// The admin store, with the Roster's two calls. `volunteers` is what the next
+// The admin store, with the Roster's calls. `volunteers` is what the next
 // read returns; `failRead` / `failSave` make the next call reject.
 const rosterStore = (overrides = {}) => {
   const store = adminStaffStore(overrides);
   store.volunteers = [{ ...ROSTER_VOLUNTEER }];
   store.failRead = null;
   store.failSave = null;
-  store.listVolunteers = async () => {
-    store.calls.push("listVolunteers");
+  store.earlier = [];
+  // Both lists come from one store call (#270).
+  store.listRoster = async () => {
+    store.calls.push("listRoster");
     if (store.failRead) {
       const error = store.failRead;
       store.failRead = null;
       throw error;
     }
-    return store.volunteers.map((entry) => ({ ...entry }));
-  };
-  store.earlier = [];
-  store.listEarlierVolunteers = async () => {
-    store.calls.push("listEarlierVolunteers");
-    return store.earlier.map((entry) => ({ ...entry }));
+    return {
+      volunteers: store.volunteers.map((entry) => ({ ...entry })),
+      earlier: store.earlier.map((entry) => ({ ...entry })),
+    };
   };
   store.saveVolunteer = async (request) => {
     store.calls.push("saveVolunteer");
@@ -6755,7 +6755,7 @@ const rosterStore = (overrides = {}) => {
   };
   return store;
 };
-const volunteerReads = (store) => store.calls.filter((entry) => entry === "listVolunteers").length;
+const volunteerReads = (store) => store.calls.filter((entry) => entry === "listRoster").length;
 
 test("the Roster is a staff screen: navigated to and restored from a saved session", async () => {
   const shared = fakeSession();
@@ -12618,7 +12618,7 @@ const earlierRoster = async (store) => {
   await built.controller.loadVolunteers();
   return built.controller;
 };
-const earlierReads = (store) => store.calls.filter((entry) => entry === "listEarlierVolunteers").length;
+const earlierReads = (store) => store.calls.filter((entry) => entry === "listRoster").length;
 
 test("readVolunteers also reads the earlier volunteers", async () => {
   const store = rosterStore();

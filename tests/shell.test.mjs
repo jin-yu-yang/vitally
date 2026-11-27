@@ -1711,8 +1711,9 @@ test("phone: the setup screen and the check-in drawer have their own block up to
   assert.match(block, /\.setup-missing > li \+ li\s*\{[^}]*margin-top:/);
   // Two time fields of 12rem do not fit a 390 px drawer, so they stack there.
   assert.match(block, /\.check-in-form \.shift-hours \.field\s*\{[^}]*flex-basis:\s*12rem/);
-  // The 30 px close circle gets 7 px of touch target on each side: 44 px.
-  assert.match(block, /\.modal:has\(#check-in-form\) \.close-btn::before\s*\{[^}]*inset:\s*-7px/);
+  // The 30 px close circle gets 7 px of touch target on each side: 44 px. Since
+  // issue 147's follow-up that holds for every close button, outside this block.
+  assert.match(css, /\n\.close-btn::before\s*\{[^}]*inset:\s*-7px/);
   for (const rule of [/^\.setup-screen \{/m, /^\.shift-hours \.field \{/m, /^\.close-btn \{/m])
     assert.ok(css.search(rule) < start, `${rule} comes before the phone block`);
 });
@@ -1772,4 +1773,20 @@ test("issue 147: on a phone a staff page's intro is compact and Back sits on the
   const block = /@media \(max-width: 800px\)\s*\{([\s\S]*?)\n\}/.exec(css.slice(start))?.[1] ?? "";
   assert.match(block, /\.app-main \.page-intro h1\s*\{[^}]*font-size:\s*24px/);
   assert.match(block, /\.app-main \.page-intro > \[data-action="open-board"\]\s*\{[^}]*grid-row:\s*1/);
+});
+// Issue 147 follow-ups from PR 288's list.
+test("issue 147: on a staff screen the connection notice starts after the fixed sidebar toggle", () => {
+  const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
+  assert.match(css, /\.connection-notice:has\(~ \.app-shell\),\s*\.problem-banner:has\(~ \.app-shell\)\s*\{[^}]*padding-left:\s*68px/);
+});
+
+test("issue 147: a check-in bar grows with its tags instead of cutting them off", () => {
+  const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
+  const track = /\n\.schedule-row > \.check-in-track\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(track, /display:\s*grid/);
+  const bar = /\n\.check-in-track > \.check-in-bar\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(bar, /position:\s*relative/);
+  assert.match(bar, /grid-area:\s*1 \/ 1/);
+  assert.match(bar, /flex-wrap:\s*wrap/);
+  assert.doesNotMatch(bar, /position:\s*absolute|white-space:\s*nowrap/);
 });

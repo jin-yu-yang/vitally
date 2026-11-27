@@ -1444,7 +1444,8 @@ export function createController({
   async function readVolunteers() {
     if (!staffWindow() || !workspaceAdmin(state.principal)) return;
     try {
-      const [volunteers, earlier] = await Promise.all([store.listVolunteers(), store.listEarlierVolunteers()]);
+      // One read for both lists (#270).
+      const { volunteers, earlier } = await store.listRoster();
       state.volunteers = volunteers;
       state.earlierVolunteers = earlier;
       state.lists.volunteers = "ready";
