@@ -300,7 +300,7 @@ async function openTab(context, appOrigin) {
 // screen with Sign out, and nothing of a staff or client window.
 const NO_ACCESS_HEADING = "This account has no access";
 const NO_ACCESS_TEXT =
-  "ViTally is a closed demo: an organiser adds each address before it can be used. Ask the person running this session to add yours, then sign in again.";
+  "ViTally is open only to addresses the PCDC office has added. Ask the office to add yours, then sign in again.";
 
 /**
  * The `unapproved` actor (signed up, no membership) signs in through the real

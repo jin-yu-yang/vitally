@@ -31,7 +31,7 @@ export const TEXT = Object.freeze({
   "unreachable.note": { en: "This page also retries by itself when the connection returns or when you come back to this window.", zh: "连接恢复或您回到这个窗口时，此页也会自动重试。" },
   "no_access.overline": { en: "NOT ON THIS ROSTER", zh: "不在名单上" },
   "no_access.title": { en: "This account has no access", zh: "此账户无权使用" },
-  "no_access.body": { en: "ViTally is a closed demo: an organiser adds each address before it can be used. Ask the person running this session to add yours, then sign in again.", zh: "ViTally 是封闭的演示：每个电子邮箱都要由组织者添加后才能使用。请联系本场演示的负责人添加您的电子邮箱，然后重新登录。" },
+  "no_access.body": { en: "ViTally is open only to addresses the PCDC office has added. Ask the office to add yours, then sign in again.", zh: "ViTally 只对 PCDC 办公室添加过的电子邮箱开放。请联系办公室添加您的电子邮箱，然后重新登录。" },
   // The client dialogs (views.mjs dialog): help, replacing the fictional answers, the reference card
   "dialog.overline": { en: "ViTally · HERE TO HELP", zh: "ViTally · 随时为您提供帮助" },
   "dialog.close": { en: "Close dialog", zh: "关闭对话框" },
