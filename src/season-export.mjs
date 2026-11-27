@@ -196,6 +196,8 @@ export function seasonExportReadme(answer, csvs) {
     "",
     FREE_TEXT_WARNING,
     "",
+    "Status, action, outcome, origin, language and similar columns use ViTally's internal codes where no staff label exists.",
+    "",
     "This file is PCDC's archive. It is not re-imported into ViTally.",
   ];
   return `${lines.join("\r\n")}\r\n`;

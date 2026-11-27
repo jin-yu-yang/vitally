@@ -983,5 +983,5 @@ export function dialog(state) {
               : drawer
                 ? "OFFICE FOLLOW-UP"
                 : t("dialog.overline", {}, lang);
-  return `<div class="modal-backdrop"><section class="modal${drawer ? " office-drawer" : ""}" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1"><button class="close-btn" data-action="close-dialog" aria-label="${say("dialog.close")}">${icon("close")}</button><span class="overline">${esc(overline)}</span><h2 id="modal-title">${esc(title)}</h2>${dialogError(state, lang)}${body}</section></div>`;
+  return `<div class="modal-backdrop"><section class="modal${drawer ? " office-drawer" : ""}" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1"><button class="close-btn" data-action="close-dialog" aria-label="${say("dialog.close")}"${state.dialog === "export-season" && state.seasonSettingsUi?.exportBusy === true ? " disabled" : ""}>${icon("close")}</button><span class="overline">${esc(overline)}</span><h2 id="modal-title">${esc(title)}</h2>${dialogError(state, lang)}${body}</section></div>`;
 }

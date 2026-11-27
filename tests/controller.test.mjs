@@ -13640,6 +13640,35 @@ test("season export: another error keeps the dialog open and clears the busy fla
   controller.stop();
 });
 
+test("season export: an answer after sign-out downloads and writes nothing", async () => {
+  const { store, controller } = await onExportSeason();
+  let release;
+  store.exportGate = new Promise((resolve) => (release = resolve));
+  const pending = controller.exportSeason();
+  await new Promise((resolve) => setImmediate(resolve));
+  await controller.signOut();
+  release();
+  assert.equal(await pending, null);
+  const state = controller.getState();
+  assert.equal(state.seasonSettings, null);
+  assert.equal(state.dialog, null);
+  assert.equal(state.seasonSettingsUi.exportBusy ?? false, false);
+  controller.stop();
+});
+
+test("season export: a dialog opened meanwhile is not closed by the answer", async () => {
+  const { store, controller } = await onExportSeason();
+  let release;
+  store.exportGate = new Promise((resolve) => (release = resolve));
+  const pending = controller.exportSeason();
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.openDialog("start-season");
+  release();
+  assert.ok(await pending);
+  assert.equal(controller.getState().dialog, "start-season");
+  controller.stop();
+});
+
 test("season export: a second press while one is in flight sends nothing", async () => {
   const { store, controller } = await onExportSeason();
   let release;
@@ -13648,6 +13677,7 @@ test("season export: a second press while one is in flight sends nothing", async
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(controller.getState().seasonSettingsUi.exportBusy, true);
   assert.match(dialog(controller.getState()), /Preparing…/);
+  assert.match(dialog(controller.getState()), /<button class="close-btn"[^>]*disabled/);
   assert.equal(await controller.exportSeason(), null);
   assert.equal(store.calls.filter((c) => c === "exportSeason").length, 1);
   release();

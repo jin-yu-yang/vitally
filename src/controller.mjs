@@ -169,7 +169,14 @@ const STAFF_SIDN_UPDATED = "SIDN updated";
 const SETTINGS_LINK_FIELDS = Object.freeze(["certificateUploadUrl", "clientDocumentsUrl"]);
 // Start next season (change add-start-next-season, design D8).
 const STAFF_SEASON_MOVED_MESSAGE = "The season has already moved.";
-const freshSettingsUi = () => ({ notice: null, fieldErrors: null, sidnError: null, startRefusal: null });
+const freshSettingsUi = (previous = null) => ({
+  notice: null,
+  fieldErrors: null,
+  sidnError: null,
+  startRefusal: null,
+  // An export in flight keeps its busy flag when a write resets the rest.
+  ...(previous?.exportBusy ? { exportBusy: true } : {}),
+});
 // The Schedule (change add-volunteer-schedule, design D7 and D10). Staff-only.
 const STAFF_SHIFT_CONFLICT_MESSAGE = "Someone changed this shift. The schedule has been refreshed.";
 // The same for a check-in corrected from the Schedule (change
@@ -2509,7 +2516,7 @@ export function createController({
     let request = pendingSettingsWrite?.key === key ? pendingSettingsWrite.request : null;
     pendingSettingsWrite = null;
     if (!request) request = makeRequest();
-    state.seasonSettingsUi = freshSettingsUi();
+    state.seasonSettingsUi = freshSettingsUi(state.seasonSettingsUi);
     state.busy = true;
     state.error = null;
     show();
@@ -2767,29 +2774,45 @@ export function createController({
     state.seasonSettingsUi = { ...state.seasonSettingsUi, exportBusy: true };
     state.error = null;
     show();
+    // Who asked: a sign-out (or another sign-in) while the export is out
+    // replaces both, and that window must not download or write anything.
+    const { session, principal } = state;
+    const stale = () => state.session !== session || state.principal !== principal;
     try {
       const answer = await store.exportSeason();
+      if (stale()) return null;
       const file = seasonExportZip(answer, new Date());
-      state.seasonSettings = {
-        ...state.seasonSettings,
-        lastExport: { name: answer.exportedByName, exportedAt: answer.exportedAt },
-      };
+      // Patch Last export only onto the same season's page (a Start next
+      // season meanwhile shows another one).
+      if (state.seasonSettings && Number(state.seasonSettings.season) === Number(answer.season)) {
+        state.seasonSettings = {
+          ...state.seasonSettings,
+          lastExport: { name: answer.exportedByName, exportedAt: answer.exportedAt },
+        };
+      }
       noteConnected();
-      state.dialog = null;
-      state.dialogContext = null;
-      return file;
-    } catch (error) {
-      if (error?.code === "FORBIDDEN") {
+      if (state.dialog === "export-season") {
         state.dialog = null;
         state.dialogContext = null;
+      }
+      return file;
+    } catch (error) {
+      if (stale()) return null;
+      if (error?.code === "FORBIDDEN") {
+        if (state.dialog === "export-season") {
+          state.dialog = null;
+          state.dialogContext = null;
+        }
         await readSeasonSettings().catch(() => {});
       } else {
         noteFailure(error);
       }
       return null;
     } finally {
-      state.seasonSettingsUi = { ...state.seasonSettingsUi, exportBusy: false };
-      show();
+      if (!stale()) {
+        state.seasonSettingsUi = { ...state.seasonSettingsUi, exportBusy: false };
+        show();
+      }
     }
   }
 

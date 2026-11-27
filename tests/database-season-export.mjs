@@ -150,6 +150,8 @@ test("Season export against real Supabase", async (t) => {
         const { lastExport } = await read();
         assert.equal(lastExport.name, "Avery Lin");
         assert.equal(new Date(lastExport.exportedAt).getTime(), latest.exported_at.getTime());
+        const seen = (await nadia.client.rpc("vitally_season_settings")).data;
+        assert.deepEqual(seen.lastExport, lastExport, "a non-coordinator admin reads the same lastExport");
         await f.sql("update public.season_exports set season=season-1 where workspace_id=$1", [f.workspaceId]);
         assert.equal((await read()).lastExport, null);
       });

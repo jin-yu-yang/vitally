@@ -258,6 +258,7 @@ test("README", () => {
   for (const f of csvs) assert.ok(text.includes(`${f.name}: ${f.rows} rows`), f.name);
   assert.ok(text.includes("Messages, notes and call log entries are exported as staff and clients wrote them. Notes must not hold amounts or ID numbers."));
   assert.ok(text.includes("not re-imported"));
+  assert.ok(text.includes("use ViTally's internal codes where no staff label exists."));
   assert.ok(text.endsWith("\r\n"));
   assert.ok(!/(^|[^\r])\n/.test(text), "a bare LF");
 });
@@ -278,7 +279,7 @@ const ALLOWED = new Set([
   // (ids that only name a document card are listed here, each with a comment)
 ]);
 
-// An id counts with "_" read as a separator, since  never fires inside snake_case.
+// An id counts with "_" read as a separator, since `\b` never fires inside snake_case.
 const sensitive = (id, text) => SENSITIVE.test(String(id).replace(/_/g, " ")) || SENSITIVE.test(text ?? "");
 
 test("the sensitive-field check flags snake_case ids", () => {
