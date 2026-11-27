@@ -797,6 +797,51 @@ test("volunteer roster records against real Supabase", async (t) => {
       assert.deepEqual(await rolesOf(f, target.personId), ["intaker"]);
     });
 
+    // 061 (#238): the Admin role check runs after the receipt lookup. A save by
+    // an admin who is not a site coordinator lands; a site coordinator then
+    // gives the volunteer the Admin role; the first save, repeated with its
+    // action id, returns its stored result, not ADMIN_ROLE, and writes nothing.
+    await t.test("admin role: a replay of a landed save returns its stored result", async () => {
+      const nonCoordinator = await f.staff({
+        key: "ren_replaying_admin",
+        name: "Ren Okafor",
+        capabilities: ["admin", "followup"],
+        siteCoordinator: false,
+      });
+      const target = await f.staff({ key: "lia_later_admin", name: "Lia Marchetti", capabilities: [] });
+      const adminCertificates = ["vsc", "itqr"];
+      const args = await editOf(f, target.personId, {
+        name: "Lia Marchetti",
+        roles: ["intaker"],
+        certificates: adminCertificates,
+      });
+      const first = await save(nonCoordinator.client, args);
+      assert.deepEqual(await rolesOf(f, target.personId), ["intaker"]);
+
+      await save(
+        admin,
+        await editOf(f, target.personId, {
+          name: "Lia Marchetti",
+          roles: ["intaker", "admin"],
+          certificates: adminCertificates,
+        }),
+      );
+      const revision = await revisionOf(f, target.personId);
+
+      const replay = await save(nonCoordinator.client, args);
+      assert.deepEqual(replay, first);
+      assert.deepEqual(await rolesOf(f, target.personId), ["intaker", "admin"]);
+      assert.equal(await revisionOf(f, target.personId), revision);
+      assert.equal(await f.receiptsFor(args.p_action_id), 1);
+
+      // A new action id with the same payload is still refused.
+      const fresh = { ...args, p_action_id: randomUUID(), p_expected_revision: revision };
+      const { error } = await nonCoordinator.client.rpc(RPC, fresh);
+      assert.equal(error?.code, FORBIDDEN, `${error?.code} ${error?.message}`);
+      assert.equal(error.message, "ADMIN_ROLE");
+      assert.equal(await f.receiptsFor(fresh.p_action_id), 0);
+    });
+
     // The open-work rule (spec "A save cannot take away what a person's open
     // work needs"). Every refusal changes nothing.
     await t.test("open work: removing Preparer while preparing is refused", async () => {

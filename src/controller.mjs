@@ -397,6 +397,11 @@ export function createController({
     //   editing: null | {labelId, revision, name, color, error}}.
     labels: [],
     labelMenu: null,
+    // On a phone, whether the case page's lifecycle shows every step
+    // (issue 147). Kept for the window, like the sidebar.
+    lifecycleOpen: false,
+    // On a phone, whether Follow-ups' filter chips are open (issue 147).
+    queueFiltersOpen: false,
     // Whether each list has been read (design D6): a first load that failed
     // must never look like an empty list.
     lists: {
@@ -1439,7 +1444,8 @@ export function createController({
   async function readVolunteers() {
     if (!staffWindow() || !workspaceAdmin(state.principal)) return;
     try {
-      const [volunteers, earlier] = await Promise.all([store.listVolunteers(), store.listEarlierVolunteers()]);
+      // One read for both lists (#270).
+      const { volunteers, earlier } = await store.listRoster();
       state.volunteers = volunteers;
       state.earlierVolunteers = earlier;
       state.lists.volunteers = "ready";
@@ -5122,6 +5128,16 @@ export function createController({
     show();
   }
 
+  function toggleLifecycle() {
+    state.lifecycleOpen = !state.lifecycleOpen;
+    show();
+  }
+
+  function toggleQueueFilters() {
+    state.queueFiltersOpen = !state.queueFiltersOpen;
+    show();
+  }
+
   function setLabelSearch(text) {
     if (!state.labelMenu) return;
     state.labelMenu = { ...state.labelMenu, search: String(text ?? "") };
@@ -6103,6 +6119,8 @@ export function createController({
     logContact,
     openLabelMenu,
     closeLabelMenu,
+    toggleLifecycle,
+    toggleQueueFilters,
     setLabelSearch,
     toggleCaseLabel,
     startLabelEdit,

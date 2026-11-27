@@ -300,7 +300,7 @@ async function openTab(context, appOrigin) {
 // screen with Sign out, and nothing of a staff or client window.
 const NO_ACCESS_HEADING = "This account has no access";
 const NO_ACCESS_TEXT =
-  "ViTally is a closed demo: an organiser adds each address before it can be used. Ask the person running this session to add yours, then sign in again.";
+  "ViTally is open only to addresses the PCDC office has added. Ask the office to add yours, then sign in again.";
 
 /**
  * The `unapproved` actor (signed up, no membership) signs in through the real
@@ -10959,8 +10959,14 @@ test(
       });
     const rowNames = (page) =>
       page.evaluate(() => [...document.querySelectorAll("tr.volunteer-row .volunteer-name")].map((n) => n.textContent.trim()));
-    const drawerOpen = (page, title) =>
-      waitFor(
+    // The drawer takes the keyboard on the next animation frame (render's
+    // requestAnimationFrame, onto its first field, the name). Typing into the
+    // phone before that frame is a race: fill focuses and selects the phone,
+    // the frame moves the keyboard to the name, and the typed text never
+    // reaches the phone (#254). So this waits for the keyboard too, as the
+    // My profile test's openDrawer does.
+    const drawerOpen = async (page, title) => {
+      await waitFor(
         page,
         `the volunteer drawer titled ${JSON.stringify(title)}`,
         (wanted) =>
@@ -10969,6 +10975,14 @@ test(
         title,
         RENDER_MS,
       );
+      await waitFor(
+        page,
+        "the volunteer drawer to take the keyboard",
+        () => Boolean(document.activeElement?.closest(".modal")),
+        undefined,
+        RENDER_MS,
+      );
+    };
     const drawerClosed = (page) =>
       waitFor(page, "the volunteer drawer to close", () => !document.querySelector("#volunteer-form"), undefined, ARRIVAL_MS);
     const volunteersLabel = (page) =>

@@ -22,6 +22,8 @@ import { STATES, SENTENCES } from "./empty-states.states.mjs";
 // Both case headers gained the label row ("+ Add a label") for staff who can
 // label the case, on purpose (change add-case-labels).
 // The office case page's Follow-up note changed on purpose (change let-follow-up-holders-work-any-follow-up).
+// Both case headers' lifecycle gained its phone line and All steps (issue 147), on purpose.
+// Follow-ups' filter chips gained their phone line and Filters button (issue 147), on purpose.
 //
 // The case pages print "Updated" with formatTime, in the machine's own time
 // zone, and the fixture was captured in New York. Node re-reads TZ when it is

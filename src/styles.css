@@ -1513,6 +1513,14 @@ textarea::placeholder {
   border-radius: 50%;
   color: var(--vt-muted);
 }
+/* The 30 px circle takes taps 44 px across, in every dialog and drawer
+   (issue 147; first done for the check-in drawer in PR 288). */
+.close-btn::before {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 50%;
+}
 .close-btn .icon {
   height: 16px;
   width: 16px;
@@ -1787,7 +1795,6 @@ textarea::placeholder {
   }
   .site-footer {
     padding: 20px;
-    font-size: 9px;
     margin-bottom: 116px;
   }
   .demo-bar {
@@ -1796,26 +1803,20 @@ textarea::placeholder {
   }
   .demo-label {
     margin-bottom: 7px;
-    font-size: 10px;
   }
   .demo-actions {
     gap: 5px;
   }
   .demo-actions .btn {
     flex: 1;
-    font-size: 9px;
     white-space: nowrap;
     padding: 6px 8px;
   }
   .demo-actions .subtle {
     flex: unset;
   }
-  .demo-label strong {
-    font-size: 10px;
-  }
   .demo-fiction {
     display: block;
-    font-size: 9px;
   }
   .workspace {
     display: block;
@@ -1843,19 +1844,11 @@ textarea::placeholder {
   .form-workspace .page-intro p {
     font-size: 15px;
   }
-  .field > span {
-    font-size: 13px;
-  }
   .form-actions > .btn {
-    font-size: 12px;
     padding: 11px 15px;
   }
   .form-actions .btn.text {
     padding: 9px;
-    font-size: 11px;
-  }
-  .form-blocked {
-    font-size: 12px;
   }
   .dashboard {
     padding: 30px 22px;
@@ -1894,9 +1887,6 @@ textarea::placeholder {
   }
   .section-head h2 {
     font-size: 17px;
-  }
-  .badge {
-    font-size: 9px;
   }
   .history-panel .section-head .small {
     display: none;
@@ -1990,17 +1980,12 @@ textarea::placeholder {
     letter-spacing: 2px;
   }
   .reference-bottom {
-    font-size: 11px;
     gap: 10px;
   }
   .reference-card {
     padding: 23px;
   }
-  .reference-card > span small {
-    font-size: 11px;
-  }
   .card-tools .btn {
-    font-size: 11px;
     padding: 10px 15px;
   }
   .access-panel {
@@ -2009,9 +1994,6 @@ textarea::placeholder {
   .section-head {
     gap: 8px;
     flex-wrap: wrap;
-  }
-  .progress-steps small {
-    font-size: 10px;
   }
   .action-card h2 {
     font-size: 22px;
@@ -2022,14 +2004,7 @@ textarea::placeholder {
   .received-card h2 {
     font-size: 23px;
   }
-  .file-chip {
-    font-size: 9px;
-  }
-  .site-footer {
-    font-size: 8px;
-  }
   .demo-actions .btn {
-    font-size: 8px;
     gap: 5px;
     padding: 6px;
   }
@@ -2048,12 +2023,6 @@ textarea::placeholder {
   }
   .demo-label {
     gap: 6px;
-  }
-  .demo-fiction {
-    font-size: 8px;
-  }
-  .detail-row {
-    font-size: 11px;
   }
   .modal-backdrop {
     padding: 15px;
@@ -2179,6 +2148,13 @@ textarea::placeholder {
 .connection-notice {
   background: var(--vt-attention-bg);
   color: var(--vt-stage-amend);
+}
+/* On a staff screen the sidebar toggle is fixed at the top left (12 px in,
+   44 px wide), over the start of these lines; they start after it instead
+   (issue 147). */
+.connection-notice:has(~ .app-shell),
+.problem-banner:has(~ .app-shell) {
+  padding-left: 68px;
 }
 .problem-banner {
   background: var(--vt-error-bg);
@@ -2629,6 +2605,14 @@ textarea::placeholder {
 .sidebar-closed .app-main {
   padding-left: 76px;
 }
+/* Between a phone and 1440 px, with the sidebar open, the page keeps 24 px
+   at its sides, so the staff lists fit a 1280 px window (issue 147). */
+@media (min-width: 801px) and (max-width: 1439px) {
+  .app-shell:not(.sidebar-closed) .app-main {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+}
 .app-main .narrow {
   width: 100%;
   max-width: 1240px;
@@ -2815,6 +2799,34 @@ textarea::placeholder {
   background: var(--vt-primary-soft);
   font-size: 12px;
 }
+/* Issue 147: when the work board is narrower than its three tabs in a row
+   (about 505 px: a phone, or a narrow window with the sidebar open), the tabs
+   share the width in thirds and a long name takes two or three lines, so the
+   last tab is no longer off-screen. */
+.staff-board {
+  container-type: inline-size;
+}
+@container (max-width: 520px) {
+  .board-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: end;
+    gap: 6px;
+    overflow-x: visible;
+  }
+  .board-tabs .btn.tab {
+    display: block;
+    min-width: 0;
+    padding: 8px 0;
+    font-size: 14px;
+    line-height: 1.35;
+    text-align: center;
+    white-space: normal;
+  }
+  .board-tabs .tab-count {
+    white-space: nowrap;
+  }
+}
 /* A Language cell's letters: the names are on hover (allow-multiple-service-languages). */
 .language-letters {
   white-space: nowrap;
@@ -2878,6 +2890,65 @@ textarea::placeholder {
   max-width: 260px;
   white-space: normal;
 }
+/* The work board and All cases fit a 1280 px window with the sidebar open
+   (issue 147): the stage, labels, names and date wrap rather than pushing the
+   last column out of the box, and a reason sits above its Open button when
+   the row is tight. The reference, the phone, the service, the language
+   letters and the buttons stay on one line. */
+.staff-board .board-table td,
+.staff-board .board-table tbody th,
+.case-pool .pool-table td,
+.case-pool .pool-table tbody th {
+  white-space: normal;
+}
+.staff-board .board-table thead th,
+.staff-board .board-table td,
+.staff-board .board-table tbody th,
+.case-pool .pool-table thead th,
+.case-pool .pool-table td,
+.case-pool .pool-table tbody th {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.staff-board .board-table .badge,
+.case-pool .pool-table .badge {
+  white-space: normal;
+}
+.staff-board .board-table .board-reference,
+.staff-board .board-table .client-number,
+.staff-board .board-table .board-service,
+.staff-board .board-table .phone-mask,
+.case-pool .pool-table .board-reference,
+.case-pool .pool-table .client-number,
+.case-pool .pool-table .board-service,
+.case-pool .pool-table .phone-mask {
+  white-space: nowrap;
+}
+.staff-board .board-row-actions {
+  flex-wrap: wrap;
+  align-items: center;
+}
+/* Below 1440 px with the sidebar open, the two lists' text is a size
+   smaller, so the reviewer's Waiting for review tab keeps Claim review
+   inside the box at 1280 px. */
+@media (max-width: 1439px) {
+  .app-shell:not(.sidebar-closed) .staff-board .board-table-wrap,
+  .app-shell:not(.sidebar-closed) .case-pool .pool-table {
+    font-size: 13px;
+  }
+}
+/* Row buttons the size of Follow-ups' (still a 44 px target). */
+.staff-board .board-row-actions .btn {
+  padding: 6px 12px;
+  gap: 6px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.staff-board .board-row-actions .btn .icon {
+  width: 16px;
+  height: 16px;
+}
+
 .you {
   color: var(--vt-you);
 }
@@ -2928,6 +2999,11 @@ textarea::placeholder {
 }
 .name-pill small {
   color: var(--vt-muted);
+}
+/* The phone line ("Step 4 of 10 · Preparing", All steps) shows only up to
+   800 px; see the end of this file (issue 147). */
+.lifecycle-phone {
+  display: none;
 }
 .lifecycle {
   display: flex;
@@ -3205,6 +3281,54 @@ textarea::placeholder {
   .client-bar {
     padding: 10px 16px;
   }
+  /* Issue 147, on a phone: text links that act (Change, "1 more document
+     may be needed", the draft's other-language link) are full tap targets,
+     and the rail's All steps stays on one line beside a long step title. */
+  .client-shell button.inline,
+  .client-shell .btn.inline {
+    min-height: var(--vt-tap);
+    min-width: var(--vt-tap);
+  }
+  .client-shell .rail-phone .btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+}
+/* Issue 147, on a phone (after the 800 px block, whose padding it narrows):
+   the client bar took four rows (about 240 px) while
+   a draft was open. Its controls now flow in one wrapping line after the
+   brand, a little tighter, so the brand and the language switch share the
+   first row and the rest take one or two more. Every control stays, at
+   least 44 px tall. */
+@media (max-width: 600px) {
+  .client-bar {
+    justify-content: flex-start;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+  .client-bar-actions {
+    display: contents;
+  }
+  .client-brand {
+    gap: 8px;
+  }
+  .client-brand img {
+    width: 28px;
+    height: 28px;
+  }
+  .client-wordmark {
+    font-size: 16px;
+  }
+  .client-bar .language-switch .lang {
+    padding: 4px 8px;
+  }
+  .client-bar .senior-switch {
+    padding: 4px 10px;
+  }
+  .client-bar .btn.text {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
 }
 
 /* PR 4: office screens */
@@ -3238,6 +3362,42 @@ textarea::placeholder {
     grid-row: auto;
     justify-content: flex-start;
     margin-top: 16px;
+  }
+}
+/* Issue 147, on a phone: a staff page's intro (overline, title, its line,
+   Back) took about 205 px above the case header. The title and its line are
+   a size smaller, the gaps tighter, and Back sits on the overline's row, so
+   the work starts higher. Nothing is left out. */
+@media (max-width: 800px) {
+  .app-main .page-intro {
+    margin-bottom: 16px;
+  }
+  .app-main .page-intro h1 {
+    margin: 4px 0 6px;
+    font-size: 24px;
+    letter-spacing: -0.5px;
+  }
+  .app-main .page-intro p {
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .app-main .page-intro:has(> [data-action="open-board"]) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 12px;
+  }
+  .app-main .page-intro:has(> [data-action="open-board"]) > * {
+    grid-column: 1 / -1;
+  }
+  .app-main .page-intro:has(> [data-action="open-board"]) > .overline {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .app-main .page-intro > [data-action="open-board"] {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
   }
 }
 
@@ -3303,10 +3463,10 @@ textarea::placeholder {
 .office-queue .queue-table td,
 .office-queue .queue-table tbody th {
   vertical-align: top;
-  padding: 12px 10px;
+  padding: 12px 8px;
 }
 .office-queue .queue-table thead th {
-  padding: 10px;
+  padding: 10px 8px;
   white-space: normal;
 }
 .office-queue .queue-table td {
@@ -3318,7 +3478,7 @@ textarea::placeholder {
   margin-bottom: 6px;
 }
 .office-queue .queue-needed {
-  min-width: 200px;
+  min-width: 160px;
   max-width: 340px;
 }
 .office-queue .queue-needed small {
@@ -3337,12 +3497,15 @@ textarea::placeholder {
 .office-queue .queue-waiting.late {
   color: var(--vt-stage-stopped);
 }
+/* Two actions stack rather than sit side by side, so the column fits a
+   1280 px window with the sidebar open (issue 147). Each label stays on one line. */
 .office-queue .queue-action {
   text-align: right;
-  white-space: nowrap;
+  white-space: normal;
 }
 .office-queue .queue-action .btn {
   min-height: var(--vt-tap);
+  margin: 2px 0;
   padding: 6px 12px;
   gap: 6px;
   font-size: 13px;
@@ -3370,6 +3533,261 @@ textarea::placeholder {
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+}
+/* In the queue the longer kinds ("Waiting for documents") and stages take
+   two lines. */
+.office-queue .kind-pill,
+.office-queue .queue-table .badge {
+  white-space: normal;
+}
+/* Follow-ups' filters on a phone (issue 147): one line naming the current
+   task type, its count and the language, with Filters to open the chips (up
+   to 13 task types took about 400 px above the first row). */
+.queue-filters-phone {
+  display: none;
+}
+@media (max-width: 800px) {
+  .queue-filters-phone {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 4px 0 14px;
+  }
+  .queue-filters-now {
+    min-width: 0;
+    font-weight: 600;
+  }
+  .queue-filters-phone .btn {
+    flex-shrink: 0;
+  }
+  .queue-filters-wrap:not(.is-open) .queue-filters {
+    display: none;
+  }
+}
+
+/* ---- Follow-ups and the work board as cards (issue 147) ----
+   Whenever a table's box is narrower than the table needs (a phone, a
+   tablet, or a laptop window with the sidebar open), each row is a card, so
+   nothing sits off to the right. Follow-ups' table needs about 860 px; the
+   board's about 900 px at 13 px text and 930 at 14, so the board's limit is
+   in em of its own text size. At 1280 px with the sidebar open both stay
+   tables (PR 285).
+   Follow-ups puts the task and how long it has waited on top, then the
+   client, what's needed, language and contact preference; the work board
+   puts the client and stage on top, then phone, updated, language, service,
+   preparer and reviewer. Each smaller field carries its column name above it
+   (its data-label). Below 600 px the fields sit in two columns and the
+   actions take the card's full width; in a wider box, four columns and the
+   actions at the right. The column headers stay for screen readers. */
+.office-queue .board-table-wrap {
+  container: queue-table / inline-size;
+}
+.staff-board .board-table-wrap {
+  container: board-table / inline-size;
+  font-size: 14px;
+}
+.staff-board .board-table {
+  font-size: inherit;
+}
+@container queue-table (max-width: 879px) {
+  .office-queue .queue-table,
+  .office-queue .queue-table tbody {
+    display: block;
+  }
+  .office-queue .queue-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .office-queue .queue-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px 12px;
+    padding: 14px 14px 16px;
+    border-top: 1px solid var(--vt-line);
+  }
+  .office-queue .queue-table tbody tr:first-child {
+    border-top: 0;
+  }
+  .office-queue .queue-table td,
+  .office-queue .queue-table tbody th {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    text-align: left;
+    white-space: normal;
+  }
+  .office-queue .queue-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 2px;
+    color: var(--vt-muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .office-queue .queue-needed {
+    min-width: 0;
+    max-width: none;
+  }
+  .office-queue .queue-kind {
+    grid-row: 1;
+    grid-column: 1;
+  }
+  .office-queue .queue-waiting {
+    grid-row: 1;
+    grid-column: 2;
+    justify-self: end;
+    text-align: right;
+  }
+  .office-queue .queue-client,
+  .office-queue .queue-needed,
+  .office-queue .queue-action {
+    grid-column: 1 / -1;
+  }
+  .office-queue .queue-action {
+    text-align: left;
+  }
+  .office-queue .queue-action .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+@container board-table (max-width: 70em) {
+  .staff-board .board-table,
+  .staff-board .board-table tbody {
+    display: block;
+  }
+  .staff-board .board-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .staff-board .board-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px 12px;
+    padding: 14px 14px 16px;
+    border-top: 1px solid var(--vt-line);
+  }
+  .staff-board .board-table tbody tr:first-child {
+    border-top: 0;
+  }
+  .staff-board .board-table td,
+  .staff-board .board-table tbody th {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    text-align: left;
+    white-space: normal;
+  }
+  .staff-board .board-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 2px;
+    color: var(--vt-muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .staff-board .board-client {
+    grid-row: 1;
+    grid-column: 1;
+  }
+  .staff-board .board-stage {
+    grid-row: 1;
+    grid-column: 2;
+    justify-self: end;
+    text-align: right;
+  }
+  .staff-board .board-phone-cell {
+    order: 1;
+  }
+  .staff-board .board-updated {
+    order: 2;
+  }
+  .staff-board .board-language {
+    order: 3;
+  }
+  .staff-board .board-service {
+    order: 4;
+  }
+  .staff-board .board-preparer {
+    order: 5;
+  }
+  .staff-board .board-reviewer {
+    order: 6;
+  }
+  .staff-board .board-actions {
+    order: 7;
+  }
+  .staff-board .board-actions {
+    grid-column: 1 / -1;
+  }
+  .staff-board .board-actions {
+    text-align: left;
+  }
+  .staff-board .board-row-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+  .staff-board .board-row-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .staff-board .board-row-actions .staff-reason {
+    max-width: none;
+  }
+}
+@container queue-table (min-width: 600px) and (max-width: 879px) {
+  .office-queue .queue-table tr {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .office-queue .queue-kind {
+    grid-column: 1 / -2;
+  }
+  .office-queue .queue-waiting {
+    grid-column: -2 / -1;
+  }
+  .office-queue .queue-table .queue-action {
+    text-align: right;
+  }
+  .office-queue .queue-action .btn {
+    width: auto;
+  }
+  .office-queue .queue-action .btn + .btn {
+    margin-left: 8px;
+  }
+}
+@container board-table (min-width: 600px) and (max-width: 70em) {
+  .staff-board .board-table tr {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .staff-board .board-client {
+    grid-column: 1 / -2;
+  }
+  .staff-board .board-stage {
+    grid-column: -2 / -1;
+  }
+  .staff-board .board-row-actions {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+  }
+  .staff-board .board-row-actions .btn {
+    width: auto;
+  }
 }
 .kind-pill .icon {
   width: 14px;
@@ -7221,7 +7639,14 @@ button.schedule-shift {
 .schedule-row > .check-in-track {
   grid-row: 2;
   position: relative;
+  /* One grid cell that every bar shares (issue 147): a bar's left and width
+     still place it along the open hours, and the track grows when a short
+     bar's tags take two lines instead of cutting them off. */
+  display: grid;
+  align-items: start;
+  padding: 4px 0;
   min-height: var(--vt-tap);
+  box-sizing: border-box;
   border-top: 1px dashed var(--vt-line);
 }
 .check-in-bar {
@@ -7242,11 +7667,17 @@ button.schedule-shift {
   overflow: hidden;
 }
 .check-in-track > .check-in-bar {
-  position: absolute;
-  top: 4px;
-  bottom: 4px;
+  position: relative;
+  grid-area: 1 / 1;
+  min-height: 36px;
   box-sizing: border-box;
-  white-space: nowrap;
+  flex-wrap: wrap;
+}
+/* In a bar narrower than its time or a tag (one hour on a phone), they break
+   at their spaces rather than run out of the bar. */
+.check-in-track .check-in-time,
+.check-in-track .check-in-bar .badge {
+  white-space: normal;
 }
 .check-in-bar.flagged {
   border-left-color: var(--vt-office);
@@ -7260,7 +7691,7 @@ button.schedule-shift {
   z-index: 1;
 }
 .check-in-bar .schedule-tags {
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
 }
 .schedule-off > .check-in-bar,
 .check-in-list .check-in-bar {
@@ -7372,6 +7803,22 @@ button.schedule-shift {
 }
 .setup-reason {
   margin: 4px 0 0;
+}
+/* The setup screen and the check-in drawer on a phone (issue 147). Up to
+   800 px: the setup panel gives its width back to the list and each missing
+   item stands apart from the next; the drawer's Checked in and Checked out
+   stack when two would cut "Not checked out" short (at 390 px, not at 768),
+   and its close button takes a 44 px touch target around the same circle. */
+@media (max-width: 800px) {
+  .setup-screen {
+    padding: 20px 16px;
+  }
+  .setup-missing > li + li {
+    margin-top: 12px;
+  }
+  .check-in-form .shift-hours .field {
+    flex-basis: 12rem;
+  }
 }
 /* My profile (change add-my-profile): the sidebar's account link and the screen */
 .account-row .btn.account-link {
@@ -7622,4 +8069,100 @@ button.schedule-shift {
 .workspace-switch .btn.nav-link.current {
   background: var(--vt-surface);
   box-shadow: 0 0 0 1px var(--vt-primary-line);
+}
+
+/* ---- Phone: the office and volunteer case pages (issue 147) ----
+   Up to 800 px (where the sidebar becomes a menu), so nothing sits off-screen
+   to the right and every control is a full tap target:
+   - the lifecycle runs down the case header instead of scrolling sideways;
+   - the case tabs wrap onto a second row instead of scrolling sideways;
+   - the Preparer and Reviewer pills keep each name on one line, and drop to
+     a row of their own when they do not fit beside each other;
+   - + Add a label, a label's remove button, the label colours, the
+     Contacts tab's Copy all, Copy and Edit, and the small check rows are
+     44 px tall. Placed last so it wins over the rules above at the same
+     specificity. */
+@media (max-width: 800px) {
+  .lifecycle {
+    flex-direction: column;
+    margin: 16px 0 8px;
+    overflow: visible;
+  }
+  .lifecycle-step {
+    flex: none;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 13px;
+    line-height: 24px;
+    text-align: left;
+  }
+  .lifecycle-step::before {
+    top: -12px;
+    left: 6px;
+    width: 2px;
+    height: 24px;
+  }
+  .lifecycle-dot {
+    flex: none;
+    margin-top: 5px;
+  }
+  .case-tabs {
+    flex-wrap: wrap;
+    gap: 0 20px;
+    overflow-x: visible;
+  }
+  .case-people {
+    flex-wrap: wrap;
+  }
+  .case-people .name-pill {
+    flex: none;
+    max-width: 100%;
+  }
+  .btn.label-add,
+  .label-color-choice,
+  .contact-actions .btn,
+  .contacts-panel .section-head .btn {
+    min-height: var(--vt-tap);
+  }
+  .case-label-row {
+    gap: 12px 8px;
+  }
+  /* A 44 px button inside the chip; the negative margins keep the chip's
+     own size. */
+  .case-label-row .case-label-remove {
+    min-width: var(--vt-tap);
+    min-height: var(--vt-tap);
+    margin: -11px -14px -11px -10px;
+  }
+  .app-main .checkbox-row.small {
+    min-height: var(--vt-tap);
+    margin: 0;
+    align-items: center;
+  }
+}
+
+/* Issue 147, on a phone: the case header's lifecycle is one line, the
+   current step and where it sits, with All steps to open the list (the
+   intake's All steps works the same way). This keeps "Your next step" on the
+   first screen; the list itself is drawn by the block above. */
+@media (max-width: 800px) {
+  .lifecycle-phone {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 16px 0 8px;
+  }
+  .lifecycle-now {
+    min-width: 0;
+    font-weight: 600;
+  }
+  .lifecycle-phone .btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  .lifecycle-wrap:not(.is-open) .lifecycle {
+    display: none;
+  }
 }

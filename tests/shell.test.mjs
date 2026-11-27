@@ -1856,3 +1856,102 @@ test("a clicked Draft 13614-C link keeps its native action and clears on redraw"
   assert.deepEqual(draft.children, []);
   assert.deepEqual(revoked, []);
 });
+
+test("phone: the setup screen and the check-in drawer have their own block up to 800 px, after the rules it overrides", () => {
+  const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
+  const start = css.indexOf("/* The setup screen and the check-in drawer on a phone (issue 147).");
+  assert.ok(start > 0, "the block is there");
+  const block = /@media \(max-width: 800px\)\s*\{([\s\S]*?)\n\}/.exec(css.slice(start))?.[1] ?? "";
+  assert.match(block, /\.setup-screen\s*\{[^}]*padding:\s*20px 16px/);
+  assert.match(block, /\.setup-missing > li \+ li\s*\{[^}]*margin-top:/);
+  // Two time fields of 12rem do not fit a 390 px drawer, so they stack there.
+  assert.match(block, /\.check-in-form \.shift-hours \.field\s*\{[^}]*flex-basis:\s*12rem/);
+  // The 30 px close circle gets 7 px of touch target on each side: 44 px. Since
+  // issue 147's follow-up that holds for every close button, outside this block.
+  assert.match(css, /\n\.close-btn::before\s*\{[^}]*inset:\s*-7px/);
+  for (const rule of [/^\.setup-screen \{/m, /^\.shift-hours \.field \{/m, /^\.close-btn \{/m])
+    assert.ok(css.search(rule) < start, `${rule} comes before the phone block`);
+});
+
+// Issue 147: on a phone the client's text is never smaller than on a
+// computer. These rules set their size once, outside any max-width block.
+test("issue 147: phone media blocks don't shrink the client's buttons, badges, answers or footer", () => {
+  const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
+  const blocks = [];
+  for (const match of css.matchAll(/@media \(max-width: \d+px\) \{/g)) {
+    let depth = 0;
+    let end = match.index;
+    for (let i = match.index; i < css.length; i += 1) {
+      if (css[i] === "{") depth += 1;
+      if (css[i] === "}") depth -= 1;
+      if (depth === 0 && css[i] === "}") {
+        end = i;
+        break;
+      }
+    }
+    blocks.push(css.slice(match.index, end));
+  }
+  const guarded = [
+    ".form-actions > .btn",
+    ".form-actions .btn.text",
+    ".form-blocked",
+    ".badge",
+    ".site-footer",
+    ".demo-fiction",
+    ".detail-row",
+    ".progress-steps small",
+    ".file-chip",
+    ".field > span",
+  ];
+  for (const block of blocks)
+    for (const rule of block.matchAll(/\n\s*([^{}\n]+?)\s*\{([^{}]*)\}/g)) {
+      const selectors = rule[1].split(",").map((s) => s.trim());
+      const shrunk = selectors.filter((s) => guarded.includes(s));
+      if (shrunk.length) assert.doesNotMatch(rule[2], /font-size/, `${shrunk.join(", ")} gets a phone font-size`);
+    }
+});
+
+// Issue 147: in a wide Follow-ups card the actions sit at the right. The
+// rule must outrank the card's `.office-queue .queue-table td` (Zeye, PR 292).
+test("issue 147: a wide Follow-ups card puts its actions at the right", () => {
+  const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
+  const start = css.indexOf("@container queue-table (min-width: 600px)");
+  assert.ok(start > 0, "the wide-card block is there");
+  const block = css.slice(start, css.indexOf("\n}\n", start));
+  assert.match(block, /\.office-queue \.queue-table \.queue-action\s*\{[^}]*text-align:\s*right/);
+});
+
+test("issue 147: on a phone a staff page's intro is compact and Back sits on the overline's row", () => {
+  const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
+  const start = css.indexOf("/* Issue 147, on a phone: a staff page's intro");
+  assert.ok(start > 0, "the block is there");
+  const block = /@media \(max-width: 800px\)\s*\{([\s\S]*?)\n\}/.exec(css.slice(start))?.[1] ?? "";
+  assert.match(block, /\.app-main \.page-intro h1\s*\{[^}]*font-size:\s*24px/);
+  assert.match(block, /\.app-main \.page-intro > \[data-action="open-board"\]\s*\{[^}]*grid-row:\s*1/);
+});
+// Issue 147 follow-ups from PR 288's list.
+test("issue 147: on a staff screen the connection notice starts after the fixed sidebar toggle", () => {
+  const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
+  assert.match(css, /\.connection-notice:has\(~ \.app-shell\),\s*\.problem-banner:has\(~ \.app-shell\)\s*\{[^}]*padding-left:\s*68px/);
+});
+
+test("issue 147: a check-in bar grows with its tags instead of cutting them off", () => {
+  const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
+  const track = /\n\.schedule-row > \.check-in-track\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(track, /display:\s*grid/);
+  const bar = /\n\.check-in-track > \.check-in-bar\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(bar, /position:\s*relative/);
+  assert.match(bar, /grid-area:\s*1 \/ 1/);
+  assert.match(bar, /flex-wrap:\s*wrap/);
+  assert.doesNotMatch(bar, /position:\s*absolute|white-space:\s*nowrap/);
+});
+
+test("issue 147: the client bar's phone block comes after the 800 px block whose padding it narrows", () => {
+  const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
+  const wide = css.indexOf("@media (max-width: 800px) {\n  .client-bar {\n    padding: 10px 16px;");
+  const phone = css.indexOf("/* Issue 147, on a phone (after the 800 px block");
+  assert.ok(wide > 0 && phone > wide, "the 600 px block follows the 800 px one");
+  const block = /@media \(max-width: 600px\)\s*\{([\s\S]*?)\n\}/.exec(css.slice(phone))?.[1] ?? "";
+  assert.match(block, /\.client-bar\s*\{[^}]*padding:\s*8px 12px/);
+  assert.match(block, /\.client-wordmark\s*\{[^}]*font-size:\s*16px/);
+});

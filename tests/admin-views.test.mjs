@@ -938,7 +938,7 @@ test("the close-case dialog is reachable from the shared modal frame", () => {
 test("the office case page uses the same header and five tabs", () => {
   const html = renderAdminCase(officeCase(), { person: SAM, caseTab: "followup" });
   assert.match(html, /<h2 id="case-title" tabindex="-1">/);
-  assert.match(html, /<ol class="lifecycle"/);
+  assert.match(html, /<ol id="case-lifecycle" class="lifecycle"/);
   assert.match(html, /id="case-tab-followup" aria-controls="case-panel-followup" aria-selected="true"/);
   assert.match(html, /id="case-panel-overview"[^>]*hidden>[\s\S]*How this case reached the office[\s\S]*Screening checks[\s\S]*Case details/);
   // "Stage" used to appear twice on Overview: once in the origin section and

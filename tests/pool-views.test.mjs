@@ -427,3 +427,9 @@ test("a pool row shows read-only chips under the reference, and none when unlabe
   assert.doesNotMatch(mRow, /case-label-remove/);
   assert.doesNotMatch(nRow, /case-label/);
 });
+
+test("#147: the pool's service cell is marked so the stylesheet keeps it on one line", () => {
+  const html = render({ poolPhase: "all" });
+  assert.match(html, /<td class="board-service">Federal return<\/td>/);
+  assert.match(html, /<td class="board-service">State return<\/td>/);
+});

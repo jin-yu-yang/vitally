@@ -656,7 +656,8 @@ function boardRow(record, person, ui) {
   if (!rights.claimPreparation.allowed && !rights.claimReview.allowed)
     actions.push(button("Open", "open-case", "secondary", `data-case-id="${id}"`));
   const own = mine(record, person?.id);
-  return `<tr class="board-row${own ? " own" : ""}"><th scope="row">${clientNumberTag(record)}<button class="board-reference" data-action="open-case" data-case-id="${id}">${esc(record.reference)}</button>${rowLabels(record)}</th><td>${stageBadge(record.stage, "en", { record })}</td><td>${listPhone(record, person, "board-phone")}</td><td>${languageCell(languageSummary(clientLanguages(record?.answers)))}</td><td>${esc(serviceLabel(record?.answers?.service) || "—")}</td><td>${who(record.preparerId, record.preparerName, person?.id)}</td><td>${who(record.reviewerId, record.reviewerName, person?.id)}</td><td class="board-updated">${esc(record.updatedAt ? relativeDay(record.updatedAt, ui.now ?? Date.now()) : "No updates yet")}</td><td class="board-actions"><div class="board-row-actions">${actions.join("")}</div></td></tr>`;
+  // The classes and data-labels let a phone show the row as a card (issue 147).
+  return `<tr class="board-row${own ? " own" : ""}"><th scope="row" class="board-client">${clientNumberTag(record)}<button class="board-reference" data-action="open-case" data-case-id="${id}">${esc(record.reference)}</button>${rowLabels(record)}</th><td class="board-stage">${stageBadge(record.stage, "en", { record })}</td><td class="board-phone-cell" data-label="Phone">${listPhone(record, person, "board-phone")}</td><td class="board-language" data-label="Language">${languageCell(languageSummary(clientLanguages(record?.answers)))}</td><td class="board-service" data-label="Service">${esc(serviceLabel(record?.answers?.service) || "—")}</td><td class="board-preparer" data-label="Preparer">${who(record.preparerId, record.preparerName, person?.id)}</td><td class="board-reviewer" data-label="Reviewer">${who(record.reviewerId, record.reviewerName, person?.id)}</td><td class="board-updated" data-label="Updated">${esc(record.updatedAt ? relativeDay(record.updatedAt, ui.now ?? Date.now()) : "No updates yet")}</td><td class="board-actions"><div class="board-row-actions">${actions.join("")}</div></td></tr>`;
 }
 
 // Your own rows first, otherwise in the order the store returned them.
@@ -832,8 +833,10 @@ const LIFECYCLE = Object.freeze([
 ]);
 
 // The record, so that E-filed and Accepted carry the filing method's staff
-// name. A bare stage name still works (a list row, a test).
-export function lifecycleBar(subject) {
+// name. A bare stage name still works (a list row, a test). On a phone (up to
+// 800 px) the stylesheet shows one line, "Step 4 of 10 · Preparing", with an
+// All steps button that opens the list (issue 147); `open` is that choice.
+export function lifecycleBar(subject, { open = false } = {}) {
   const record = typeof subject === "string" ? { stage: subject } : (subject ?? {});
   const stage = record.stage;
   // Corrections loop back into preparation; a rejection loops back into
@@ -854,7 +857,7 @@ export function lifecycleBar(subject) {
   const accepted = stage === "accepted";
   const steps = closed ? [...LIFECYCLE, "closed"] : LIFECYCLE;
   const at = steps.indexOf(amendStep ?? stage);
-  return `<ol class="lifecycle" aria-label="Where this case is">${steps.map((step, index) => {
+  const list = `<ol id="case-lifecycle" class="lifecycle" aria-label="Where this case is">${steps.map((step, index) => {
     // A case can be closed from any stage and nothing records which, so the
     // steps before Closed are neutral (neither done nor still to come); the
     // History tab shows the path it took. An accepted case has finished every
@@ -868,6 +871,13 @@ export function lifecycleBar(subject) {
     const label = describeStage(amend ? amendStage : step, "en", record).label;
     return `<li class="lifecycle-step ${state}${amend ? " amend" : ""}"${state === "current" ? ' aria-current="step"' : ""}><span class="lifecycle-dot"></span><span class="lifecycle-label">${esc(label)}</span></li>`;
   }).join("")}</ol>`;
+  // The phone line names the current step and where it sits; a closed case
+  // (closable from any stage) and a stage off the bar name the stage only.
+  const shownStage = amendStep !== null && !closed ? amendStage : stage;
+  const where = describeStage(shownStage, "en", record).label;
+  const counted = !closed && at >= 0;
+  const line = counted ? `Step ${at + 1} of ${steps.length} · ${where}` : where;
+  return `<div class="lifecycle-wrap${open ? " is-open" : ""}"><div class="lifecycle-phone"><span class="lifecycle-now">${esc(line)}</span><button type="button" class="btn secondary" data-action="toggle-lifecycle" aria-expanded="${open}" aria-controls="case-lifecycle">All steps</button></div>${list}</div>`;
 }
 
 const namePill = (role, id, name, personId) =>
@@ -939,7 +949,7 @@ function labelMenu(record, person, labels, menu, busy = false) {
 }
 
 export function caseHeader(record, person, principal = null, ui = {}) {
-  return `<section class="panel staff-header" aria-labelledby="case-title"><div class="case-title-row"><h2 id="case-title" tabindex="-1">${esc(record.reference ?? "This case")}</h2><div class="case-client-number">${esc(record.clientNumber == null ? clientNumberLabel(record) : `Client ${formatClientNumber(record.clientNumber)}`)}</div>${stageBadge(record.stage, "en", { record })}<span class="case-people">${namePill("Preparer", record.preparerId, record.preparerName, person?.id)}${namePill("Reviewer", record.reviewerId, record.reviewerName, person?.id)}</span></div>${labelRow(record, person, ui)}${lifecycleBar(record)}<p class="field-note">${esc(
+  return `<section class="panel staff-header" aria-labelledby="case-title"><div class="case-title-row"><h2 id="case-title" tabindex="-1">${esc(record.reference ?? "This case")}</h2><div class="case-client-number">${esc(record.clientNumber == null ? clientNumberLabel(record) : `Client ${formatClientNumber(record.clientNumber)}`)}</div>${stageBadge(record.stage, "en", { record })}<span class="case-people">${namePill("Preparer", record.preparerId, record.preparerName, person?.id)}${namePill("Reviewer", record.reviewerId, record.reviewerName, person?.id)}</span></div>${labelRow(record, person, ui)}${lifecycleBar(record, { open: ui?.lifecycleOpen === true })}<p class="field-note">${esc(
     whoThisWindowIs(person, principal),
   )}</p></section>`;
 }

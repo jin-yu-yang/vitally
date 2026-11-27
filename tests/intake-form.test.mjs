@@ -6,7 +6,7 @@ import {
 import { cardsFor } from "../src/document-cards.mjs";
 import { esc } from "../src/ui.mjs";
 import {
-  renderQuestion, valuesFromControls, mergeIntoDraft, drivesVisibility, visibleIds,
+  renderQuestion, CLIENT_AUTOFILL, valuesFromControls, mergeIntoDraft, drivesVisibility, visibleIds,
   needsRedraw, noteState, invalidAnswers, sendable, withholdInvalid, withheldFields,
   sendableDiffers, keepLocalOnly, countText, renderRichText, formatAnswer,
   visibleSubsteps, resolveSubstep, consented, adjacentSubstep, reviewAlerts, substepStatus, stepRollup,
@@ -1113,4 +1113,28 @@ test("the 14446 gate: an unconsented form lands on 0.4 (add-form-14446-consent)"
   assert.equal(resolveSubstep("before.language", {}, []), "before.language");
   assert.equal(resolveSubstep("about.address", open, []), "about.address");
   assert.equal(resolveSubstep(null, {}, []), "before.ready");
+});
+
+// Issue 147: autofill on a phone, for the taxpayer's own fields only.
+test("issue 147: the client's own fields carry autocomplete tokens in the client's intake", () => {
+  const attr = (html) => [...html.matchAll(/autocomplete="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(attr(renderQuestion(q("tp_first_name"), "", { scope: "client" })), ["given-name"]);
+  assert.deepEqual(attr(renderQuestion(q("tp_last_name"), "", { scope: "client" })), ["family-name"]);
+  assert.deepEqual(attr(renderQuestion(q("tp_phone"), "", { scope: "client" })), ["tel"]);
+  assert.deepEqual(attr(renderQuestion(q("email"), "", { scope: "client" })), ["email"]);
+  assert.deepEqual(attr(renderQuestion(q("addr_zip"), "", { scope: "client" })), ["postal-code"]);
+  // The birthday's three boxes each get their part.
+  assert.deepEqual(attr(renderQuestion(q("tp_dob"), "", { scope: "client" })).sort(), ["bday-day", "bday-month", "bday-year"]);
+  // Every id in the map is a real question.
+  for (const id of Object.keys(CLIENT_AUTOFILL)) assert.ok(q(id), `${id} is in the catalogue`);
+});
+
+test("issue 147: no autocomplete for anyone else's fields, a signature, or the office's forms", () => {
+  const none = (id, scope = "client") => assert.doesNotMatch(renderQuestion(q(id), "", { scope }), /autocomplete=/, `${id} (${scope})`);
+  for (const id of ["sp_first_name", "sp_last_name", "sp_dob", "sp_phone", "vc_tp_signature", "vc_sp_signature", "vc_sp_email", "best_contact_note"]) none(id);
+  // The office types a client's answers: its own saved details must not be offered.
+  for (const id of Object.keys(CLIENT_AUTOFILL)) none(id, "office");
+  // Household members (a group) get none.
+  assert.equal(q("hh").type, "group");
+  assert.doesNotMatch(renderQuestion(q("hh"), [{ first_name: "", last_name: "" }], { scope: "client" }), /autocomplete=/);
 });

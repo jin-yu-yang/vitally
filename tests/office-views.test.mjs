@@ -1522,3 +1522,31 @@ test("an Intaker's documents row opens the case, and the admin keeps Put on hold
   assert.doesNotMatch(intaker, /Needs office administrator access\./);
   assert.match(rowOf(page(cases, [], sam), "w1"), /Put on hold…/);
 });
+
+test("issue 147: a queue row names its cells, so a phone can show it as a card", () => {
+  const html = page([{ id: "P", reference: "VT-P", stage: "screening", ownerUserId: "u", updatedAt: "2026-10-18T10:00:00Z" }]);
+  const row = html.split('<tr class="queue-row"')[1] ?? "";
+  for (const cls of ["queue-kind", "queue-needed", "queue-waiting", "queue-action"]) assert.match(row, new RegExp(`<td class="${cls}[" ]`));
+  assert.match(row, /<th scope="row" class="queue-client">/);
+  assert.match(row, /<td class="queue-language" data-label="Language">/);
+  assert.match(row, /<td class="queue-contact" data-label="Contact preference">/);
+});
+
+test("issue 147: on a phone Follow-ups' filters fold behind one line naming the choice, with Filters", () => {
+  const cases = [
+    { id: "P", reference: "VT-P", stage: "screening", ownerUserId: "u", updatedAt: "2026-10-18T10:00:00Z" },
+    { id: "Q", reference: "VT-Q", stage: "screening", ownerUserId: "u", updatedAt: "2026-10-18T10:00:00Z" },
+  ];
+  const shut = renderFollowups(cases, [], { person: sam, now: NOW });
+  assert.match(shut, /<div class="queue-filters-wrap"><div class="queue-filters-phone"><span class="queue-filters-now">All tasks <span class="tab-count">2<\/span> · Any language<\/span>/);
+  assert.match(shut, /data-action="toggle-queue-filters" aria-expanded="false" aria-controls="queue-filters">Filters<\/button>/);
+  // The chips are all still there, inside the folded part.
+  assert.match(shut, /<div class="queue-filters" id="queue-filters"><div class="board-filters"><div class="filter-group" role="group" aria-label="Task type">/);
+  assert.match(shut, /aria-label="Language"/);
+
+  const open = renderFollowups(cases, [], { person: sam, filtersOpen: true, filters: { officeKind: "intake", language: "English" }, now: NOW });
+  assert.match(open, /<div class="queue-filters-wrap is-open">/);
+  assert.match(open, /aria-expanded="true"/);
+  assert.match(open, /<span class="queue-filters-now">[^<]+ <span class="tab-count">\d+<\/span> · English<\/span>/);
+  assert.doesNotMatch(open, /<span class="queue-filters-now">All tasks/);
+});

@@ -388,7 +388,8 @@ function queueRow(row, person, ui) {
     : item?.caseId
       ? '<span class="muted">A case in this workspace</span>'
       : '<span class="muted">No case yet</span>';
-  return `<tr class="queue-row" data-kind="${kind}"><td><span class="kind-pill ${kind}">${icon(KIND_ICONS[kind])} ${esc(KIND_LABELS[kind])}</span></td><th scope="row">${client}</th><td class="queue-needed">${needed(row)}</td><td>${languageCell(languageSummary(rowLanguages(row)))}</td><td>${esc(item?.contactPreference || "—")}</td><td class="queue-waiting ${rowTone(row)}">${esc(waitingLabel(row.days))}</td><td class="queue-action">${rowAction(row, person, ui)}</td></tr>`;
+  // The classes and data-labels let a phone show the row as a card (issue 147).
+  return `<tr class="queue-row" data-kind="${kind}"><td class="queue-kind"><span class="kind-pill ${kind}">${icon(KIND_ICONS[kind])} ${esc(KIND_LABELS[kind])}</span></td><th scope="row" class="queue-client">${client}</th><td class="queue-needed">${needed(row)}</td><td class="queue-language" data-label="Language">${languageCell(languageSummary(rowLanguages(row)))}</td><td class="queue-contact" data-label="Contact preference">${esc(item?.contactPreference || "—")}</td><td class="queue-waiting ${rowTone(row)}">${esc(waitingLabel(row.days))}</td><td class="queue-action">${rowAction(row, person, ui)}</td></tr>`;
 }
 
 /**
@@ -444,6 +445,18 @@ export function renderFollowups(cases = [], assistance = [], ui = {}) {
     )
     .join("")}</div></div>`;
 
+  // On a phone the two filter groups (up to 13 task types) fold behind one
+  // line naming the current choice, with Filters to open them (issue 147).
+  const kindLabel = chosen.kind === "all" ? "All tasks" : (QUEUE_KINDS.find(([value]) => value === chosen.kind)?.[1] ?? chosen.kind);
+  const languageLabel = chosen.language === "all" ? "Any language" : chosen.language;
+  const filtersOpen = view.filtersOpen === true;
+  const filters = `<div class="queue-filters-wrap${filtersOpen ? " is-open" : ""}"><div class="queue-filters-phone"><span class="queue-filters-now">${esc(kindLabel)} <span class="tab-count">${esc(counts[chosen.kind] ?? 0)}</span> · ${esc(languageLabel)}</span>${button(
+    "Filters",
+    "toggle-queue-filters",
+    "secondary",
+    `aria-expanded="${filtersOpen}" aria-controls="queue-filters"`,
+  )}</div><div class="queue-filters" id="queue-filters">${toggles}${chips}</div></div>`;
+
   const kindOn = chosen.kind !== "all";
   const languageOn = chosen.language !== "all";
   // Each button undoes one filter. `clear-board-filters` would also wipe the
@@ -480,7 +493,7 @@ export function renderFollowups(cases = [], assistance = [], ui = {}) {
       )}</div>`
     : "";
 
-  return `<section class="panel office-queue" aria-labelledby="office-queue-title"><div class="section-head"><div><h2 id="office-queue-title" tabindex="-1">Office queue</h2> <span class="muted small">most urgent first</span></div><span class="muted small">${esc(counts.all)} open · ${esc(over3)} over 3 days</span></div>${seasonEnd}${toggles}${chips}${when(
+  return `<section class="panel office-queue" aria-labelledby="office-queue-title"><div class="section-head"><div><h2 id="office-queue-title" tabindex="-1">Office queue</h2> <span class="muted small">most urgent first</span></div><span class="muted small">${esc(counts.all)} open · ${esc(over3)} over 3 days</span></div>${seasonEnd}${filters}${when(
     !person,
     `<p class="staff-reason" role="note">${icon("user")} ${esc(NO_LINKED_VOLUNTEER)} Until then this queue is read-only.</p>`,
   )}${shown.length ? table : empty}<p class="field-note board-note">Waiting turns amber at 3 days and red at 5. This queue shows workflow only: no taxpayer names, no addresses and no document contents.</p></section>${

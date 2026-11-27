@@ -546,6 +546,8 @@ export function staffScreen(state) {
         // The case header's labels and its open menu.
         labels: state.labels ?? [],
         labelMenu: state.labelMenu ?? null,
+        // On a phone, whether the lifecycle shows every step (issue 147).
+        lifecycleOpen: state.lifecycleOpen === true,
         // The demo-tools switch: it shows the Auto-fill button on the forms.
         demoTools: state.demoTools === true,
         busy: state.busy,
@@ -627,6 +629,8 @@ export function staffScreen(state) {
               person,
               list: combineLists(state.lists?.cases, state.lists?.assistance),
               filters: state.boardFilters,
+              // On a phone, whether the filter chips are open (issue 147).
+              filtersOpen: state.queueFiltersOpen === true,
               busy: state.busy,
               now: Date.now(),
               invitations: state.invitations ?? null,
