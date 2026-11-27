@@ -2688,6 +2688,10 @@ if (!config) {
         controller.toggleLifecycle();
         root.querySelector('[data-action="toggle-lifecycle"]')?.focus();
         break;
+      case "toggle-queue-filters":
+        controller.toggleQueueFilters();
+        root.querySelector('[data-action="toggle-queue-filters"]')?.focus();
+        break;
       case "close-label-menu":
         closeLabelMenu();
         break;
