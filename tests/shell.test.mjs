@@ -1701,3 +1701,56 @@ test("strip: the stylesheet wraps it and gives its button 44 px", () => {
   assert.match(rule, /max-width:\s*100%/);
   assert.match(css, /\.check-in-strip \.btn\s*\{[^}]*min-height:\s*44px/);
 });
+
+test("phone: the setup screen and the check-in drawer have their own block up to 800 px, after the rules it overrides", () => {
+  const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
+  const start = css.indexOf("/* The setup screen and the check-in drawer on a phone (issue 147).");
+  assert.ok(start > 0, "the block is there");
+  const block = /@media \(max-width: 800px\)\s*\{([\s\S]*?)\n\}/.exec(css.slice(start))?.[1] ?? "";
+  assert.match(block, /\.setup-screen\s*\{[^}]*padding:\s*20px 16px/);
+  assert.match(block, /\.setup-missing > li \+ li\s*\{[^}]*margin-top:/);
+  // Two time fields of 12rem do not fit a 390 px drawer, so they stack there.
+  assert.match(block, /\.check-in-form \.shift-hours \.field\s*\{[^}]*flex-basis:\s*12rem/);
+  // The 30 px close circle gets 7 px of touch target on each side: 44 px.
+  assert.match(block, /\.modal:has\(#check-in-form\) \.close-btn::before\s*\{[^}]*inset:\s*-7px/);
+  for (const rule of [/^\.setup-screen \{/m, /^\.shift-hours \.field \{/m, /^\.close-btn \{/m])
+    assert.ok(css.search(rule) < start, `${rule} comes before the phone block`);
+});
+
+// Issue 147: on a phone the client's text is never smaller than on a
+// computer. These rules set their size once, outside any max-width block.
+test("issue 147: phone media blocks don't shrink the client's buttons, badges, answers or footer", () => {
+  const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
+  const blocks = [];
+  for (const match of css.matchAll(/@media \(max-width: \d+px\) \{/g)) {
+    let depth = 0;
+    let end = match.index;
+    for (let i = match.index; i < css.length; i += 1) {
+      if (css[i] === "{") depth += 1;
+      if (css[i] === "}") depth -= 1;
+      if (depth === 0 && css[i] === "}") {
+        end = i;
+        break;
+      }
+    }
+    blocks.push(css.slice(match.index, end));
+  }
+  const guarded = [
+    ".form-actions > .btn",
+    ".form-actions .btn.text",
+    ".form-blocked",
+    ".badge",
+    ".site-footer",
+    ".demo-fiction",
+    ".detail-row",
+    ".progress-steps small",
+    ".file-chip",
+    ".field > span",
+  ];
+  for (const block of blocks)
+    for (const rule of block.matchAll(/\n\s*([^{}\n]+?)\s*\{([^{}]*)\}/g)) {
+      const selectors = rule[1].split(",").map((s) => s.trim());
+      const shrunk = selectors.filter((s) => guarded.includes(s));
+      if (shrunk.length) assert.doesNotMatch(rule[2], /font-size/, `${shrunk.join(", ")} gets a phone font-size`);
+    }
+});
