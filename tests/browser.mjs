@@ -14,6 +14,8 @@ import {
   submitVerificationCode,
 } from "./support/browser-fixture.mjs";
 import { applyArgs } from "./support/database-fixture.mjs";
+import { readZip } from "./support/read-zip.mjs";
+import { EXPORT_FILES } from "../src/season-export.mjs";
 import { openDatabase } from "../tools/admin/database.mjs";
 import { SEED_SCENARIOS, resolveSeedTargets, seedCases } from "../tools/admin/seed-cases.mjs";
 import {
@@ -9981,6 +9983,122 @@ test(
         "the Preparer is offered Season settings",
       );
       assertConsoleQuiet(preparer, { name: "the Preparer's window" });
+    } finally {
+      await fixture.close();
+    }
+  },
+);
+
+// Season export (change add-season-export): its own test, like Season
+// settings, Chrome only, on a fixture of its own with one submitted fictional
+// case. The Site Coordinator cancels, then exports; the ZIP is read back; a
+// second admin who is not a site coordinator sees the Last export line but is
+// not offered the export. Fictional values only.
+test(
+  "A site coordinator exports the season",
+  { timeout: 300_000 },
+  async () => {
+    const fixture = await createBrowserFixture();
+    const NO_EXPORT = "No export yet this season.";
+    const alertMark = (page) => page.evaluate(() => (window.__vitallyAlerts ?? []).length);
+    const toastSince = (page, text, mark) =>
+      waitFor(
+        page,
+        `the toast ${JSON.stringify(text)}`,
+        ([wanted, from]) =>
+          (window.__vitallyAlerts ?? []).slice(from).some((line) => line.startsWith("toast: ") && line.includes(wanted)),
+        [text, mark],
+        ARRIVAL_MS,
+      );
+    try {
+      const { caseId } = await fixture.database.submittedClientCase();
+      const { rows: numbered } = await fixture.database.sql("select client_number from public.cases where id=$1", [caseId]);
+      const clientNumber = String(numbered[0].client_number);
+      const { rows: seasonRows } = await fixture.database.sql("select current_season from public.workspaces where id=$1", [
+        fixture.database.workspaceId,
+      ]);
+      const season = seasonRows[0].current_season;
+
+      const engine = await fixture.launch("chrome");
+      const adminWin = await engine.newPage({ viewport: DESKTOP });
+      const admin = adminWin.page;
+      await guardToast(admin);
+      await loginTestUser({ page: admin, actor: fixture.actor("siteCoordinator"), fixture, heading: OFFICE_BOARD_HEADING });
+      await watchAlerts(admin);
+
+      // 1. Season settings shows the Season export card with no export yet.
+      await clickAction(admin, "open-season-settings");
+      await admin.locator("#season-export-title").waitFor({ timeout: ARRIVAL_MS });
+      await waitForQuiet(admin);
+      assert.equal((await admin.locator("#season-export-last").innerText()).trim(), NO_EXPORT);
+
+      // 2. Cancel: the dialog opens, Cancel closes it, nothing downloads.
+      let downloads = 0;
+      admin.on("download", () => {
+        downloads += 1;
+      });
+      await clickAction(admin, "open-export-season");
+      await admin.locator("#export-season-submit").waitFor({ timeout: ARRIVAL_MS });
+      await admin.locator('#export-season-body [data-action="close-dialog"]').click({ timeout: CLICK_MS });
+      await waitFor(admin, "the dialog to close", () => !document.querySelector("#export-season-body"), undefined, ARRIVAL_MS);
+      await waitForQuiet(admin);
+      assert.equal(downloads, 0, "Cancel downloaded a file");
+      assert.equal((await admin.locator("#season-export-last").innerText()).trim(), NO_EXPORT);
+
+      // 3. Export: the dialog names the season; Download ZIP downloads it.
+      await clickAction(admin, "open-export-season");
+      await admin.locator("#export-season-submit").waitFor({ timeout: ARRIVAL_MS });
+      assert.match(await admin.locator(".modal").innerText(), new RegExp(`Export the ${season} season`));
+      const mark = await alertMark(admin);
+      const downloaded = admin.waitForEvent("download", { timeout: ARRIVAL_MS });
+      await admin.locator("#export-season-submit").click({ timeout: CLICK_MS });
+      const download = await downloaded;
+      assert.match(download.suggestedFilename(), /^vitally-\d{4}-export-\d{4}-\d{2}-\d{2}\.zip$/);
+      const files = readZip(await readFile(await download.path()));
+      assert.deepEqual(
+        files.map((file) => file.name),
+        ["README.txt", ...EXPORT_FILES],
+      );
+      const casesBytes = files.find((file) => file.name === "cases.csv").data;
+      assert.deepEqual([...casesBytes.subarray(0, 3)], [0xef, 0xbb, 0xbf], "cases.csv does not start with the UTF-8 BOM");
+      const caseLines = Buffer.from(casesBytes).subarray(3).toString("utf8").split("\r\n").filter(Boolean);
+      assert.equal(caseLines.length, 2, `cases.csv has a header and one case: ${JSON.stringify(caseLines)}`);
+      assert.equal(caseLines[1].split(",")[0].replaceAll('"', ""), clientNumber, "the case's client number");
+
+      // 4. The toast and the Last export line.
+      await toastSince(admin, "Season exported", mark);
+      await waitFor(
+        admin,
+        "the Last export line",
+        () => (document.querySelector("#season-export-last")?.textContent ?? "").startsWith("Last export: Avery Lin · "),
+        undefined,
+        ARRIVAL_MS,
+      );
+      const lastLine = (await admin.locator("#season-export-last").innerText()).trim();
+      assert.match(lastLine, /^Last export: Avery Lin · \S.*\d:\d{2}\s?[ap]m$/i);
+      assertConsoleQuiet(adminWin, { name: "the Site Coordinator's Season export window" });
+
+      // 5. An admin who is not a site coordinator sees the line, not the button.
+      const other = await fixture.database.staff({
+        key: "export_admin",
+        name: "Nadia Brennan",
+        capabilities: ["admin", "assist", "followup", "receive_documents"],
+      });
+      const otherWin = await engine.newPage({ viewport: DESKTOP });
+      const otherPage = otherWin.page;
+      await guardToast(otherPage);
+      await loginTestUser({
+        page: otherPage,
+        actor: { key: "export_admin", email: other.email, userId: other.userId },
+        fixture,
+        heading: OFFICE_BOARD_HEADING,
+      });
+      await clickAction(otherPage, "open-season-settings");
+      await otherPage.locator("#season-export-title").waitFor({ timeout: ARRIVAL_MS });
+      await waitForQuiet(otherPage);
+      assert.equal((await otherPage.locator("#season-export-last").innerText()).trim(), lastLine);
+      assert.equal(await otherPage.locator('[data-action="open-export-season"]').count(), 0, "the admin is offered the export");
+      assertConsoleQuiet(otherWin, { name: "the second admin's Season export window" });
     } finally {
       await fixture.close();
     }
