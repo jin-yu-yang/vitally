@@ -1787,7 +1787,6 @@ textarea::placeholder {
   }
   .site-footer {
     padding: 20px;
-    font-size: 9px;
     margin-bottom: 116px;
   }
   .demo-bar {
@@ -1796,26 +1795,20 @@ textarea::placeholder {
   }
   .demo-label {
     margin-bottom: 7px;
-    font-size: 10px;
   }
   .demo-actions {
     gap: 5px;
   }
   .demo-actions .btn {
     flex: 1;
-    font-size: 9px;
     white-space: nowrap;
     padding: 6px 8px;
   }
   .demo-actions .subtle {
     flex: unset;
   }
-  .demo-label strong {
-    font-size: 10px;
-  }
   .demo-fiction {
     display: block;
-    font-size: 9px;
   }
   .workspace {
     display: block;
@@ -1843,19 +1836,11 @@ textarea::placeholder {
   .form-workspace .page-intro p {
     font-size: 15px;
   }
-  .field > span {
-    font-size: 13px;
-  }
   .form-actions > .btn {
-    font-size: 12px;
     padding: 11px 15px;
   }
   .form-actions .btn.text {
     padding: 9px;
-    font-size: 11px;
-  }
-  .form-blocked {
-    font-size: 12px;
   }
   .dashboard {
     padding: 30px 22px;
@@ -1894,9 +1879,6 @@ textarea::placeholder {
   }
   .section-head h2 {
     font-size: 17px;
-  }
-  .badge {
-    font-size: 9px;
   }
   .history-panel .section-head .small {
     display: none;
@@ -1990,17 +1972,12 @@ textarea::placeholder {
     letter-spacing: 2px;
   }
   .reference-bottom {
-    font-size: 11px;
     gap: 10px;
   }
   .reference-card {
     padding: 23px;
   }
-  .reference-card > span small {
-    font-size: 11px;
-  }
   .card-tools .btn {
-    font-size: 11px;
     padding: 10px 15px;
   }
   .access-panel {
@@ -2009,9 +1986,6 @@ textarea::placeholder {
   .section-head {
     gap: 8px;
     flex-wrap: wrap;
-  }
-  .progress-steps small {
-    font-size: 10px;
   }
   .action-card h2 {
     font-size: 22px;
@@ -2022,14 +1996,7 @@ textarea::placeholder {
   .received-card h2 {
     font-size: 23px;
   }
-  .file-chip {
-    font-size: 9px;
-  }
-  .site-footer {
-    font-size: 8px;
-  }
   .demo-actions .btn {
-    font-size: 8px;
     gap: 5px;
     padding: 6px;
   }
@@ -2048,12 +2015,6 @@ textarea::placeholder {
   }
   .demo-label {
     gap: 6px;
-  }
-  .demo-fiction {
-    font-size: 8px;
-  }
-  .detail-row {
-    font-size: 11px;
   }
   .modal-backdrop {
     padding: 15px;
@@ -3271,6 +3232,18 @@ textarea::placeholder {
 @media (max-width: 800px) {
   .client-bar {
     padding: 10px 16px;
+  }
+  /* Issue 147, on a phone: text links that act (Change, "1 more document
+     may be needed", the draft's other-language link) are full tap targets,
+     and the rail's All steps stays on one line beside a long step title. */
+  .client-shell button.inline,
+  .client-shell .btn.inline {
+    min-height: var(--vt-tap);
+    min-width: var(--vt-tap);
+  }
+  .client-shell .rail-phone .btn {
+    flex-shrink: 0;
+    white-space: nowrap;
   }
 }
 
