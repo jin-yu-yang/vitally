@@ -7817,3 +7817,74 @@ button.schedule-shift {
   background: var(--vt-surface);
   box-shadow: 0 0 0 1px var(--vt-primary-line);
 }
+
+/* ---- Phone: the office and volunteer case pages (issue 147) ----
+   Up to 800 px (where the sidebar becomes a menu), so nothing sits off-screen
+   to the right and every control is a full tap target:
+   - the lifecycle runs down the case header instead of scrolling sideways;
+   - the case tabs wrap onto a second row instead of scrolling sideways;
+   - the Preparer and Reviewer pills keep each name on one line, and drop to
+     a row of their own when they do not fit beside each other;
+   - + Add a label, a label's remove button, the label colours, the
+     Contacts tab's Copy all, Copy and Edit, and the small check rows are
+     44 px tall. Placed last so it wins over the rules above at the same
+     specificity. */
+@media (max-width: 800px) {
+  .lifecycle {
+    flex-direction: column;
+    margin: 16px 0 8px;
+    overflow: visible;
+  }
+  .lifecycle-step {
+    flex: none;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 13px;
+    line-height: 24px;
+    text-align: left;
+  }
+  .lifecycle-step::before {
+    top: -12px;
+    left: 6px;
+    width: 2px;
+    height: 24px;
+  }
+  .lifecycle-dot {
+    flex: none;
+    margin-top: 5px;
+  }
+  .case-tabs {
+    flex-wrap: wrap;
+    gap: 0 20px;
+    overflow-x: visible;
+  }
+  .case-people {
+    flex-wrap: wrap;
+  }
+  .case-people .name-pill {
+    flex: none;
+    max-width: 100%;
+  }
+  .btn.label-add,
+  .label-color-choice,
+  .contact-actions .btn,
+  .contacts-panel .section-head .btn {
+    min-height: var(--vt-tap);
+  }
+  .case-label-row {
+    gap: 12px 8px;
+  }
+  /* A 44 px button inside the chip; the negative margins keep the chip's
+     own size. */
+  .case-label-row .case-label-remove {
+    min-width: var(--vt-tap);
+    min-height: var(--vt-tap);
+    margin: -11px -14px -11px -10px;
+  }
+  .app-main .checkbox-row.small {
+    min-height: var(--vt-tap);
+    margin: 0;
+    align-items: center;
+  }
+}
