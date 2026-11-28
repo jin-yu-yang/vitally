@@ -834,6 +834,8 @@ test("app.mjs applies the sidebar peek in place after every render and feeds it 
 // Toasts on staff-only paths stay English (spec 2026-10-05 §2: staff screens
 // are always English). Each is listed with the path that raises it.
 const STAFF_ONLY_TOASTS = Object.freeze([
+  // the Season export card: the ZIP was downloaded (staff only)
+  "Season exported",
   // submitCloseUnsigned: the season-end close
   "The unsigned cases were closed as Dismissed.",
   // fillAssistedIntake: the office's fill on Add a case

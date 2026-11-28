@@ -5,6 +5,7 @@ import {
   renderSeasonSettings,
   changeSidnDialogBody,
   startSeasonDialogBody,
+  exportSeasonDialogBody,
   seasonRefusalLines,
   startSeasonReady,
   seasonLabel,
@@ -143,9 +144,9 @@ test("a notice is said in its own card", () => {
 
 test("busy disables the page's buttons", () => {
   const html = renderSeasonSettings(view(), { canEdit: true, ui: { busy: true } });
-  // Save, Change…, Start next season…, Add, and Remove on each of the two
-  // rows; idle, only Add (nothing picked).
-  assert.equal((html.match(/<button[^>]* disabled/g) ?? []).length, 6);
+  // Save, Change…, Export this season…, Start next season…, Add, and Remove
+  // on each of the two rows; idle, only Add (nothing picked).
+  assert.equal((html.match(/<button[^>]* disabled/g) ?? []).length, 7);
   assert.equal((renderSeasonSettings(view(), { canEdit: true, ui: {} }).match(/<button[^>]* disabled/g) ?? []).length, 1);
 });
 
@@ -427,4 +428,40 @@ test("app.mjs handles the site hours form and main's My profile, with no usual-d
   assert.match(app, /form\.id === "my-profile-form"/);
   assert.doesNotMatch(app, /toggle-usual-day|toggleUsualDay|syncUsualDays|readUsualDays/);
   assert.match(app, /case "open-my-profile"/);
+});
+
+test("the Season export card for a site coordinator", () => {
+  const html = renderSeasonSettings(view({ lastExport: null }), { canEdit: true, ui: {} });
+  assert.match(html, /Season export/);
+  assert.match(html, /No export yet this season\./);
+  assert.match(html, /data-action="open-export-season"/);
+  assert.ok(html.indexOf("site-hours-title") < html.indexOf("season-export-title"));
+  assert.ok(html.indexOf("season-export-title") < html.indexOf("next-season-title"));
+});
+
+test("another admin sees the export line and no button", () => {
+  const html = renderSeasonSettings(
+    view({ lastExport: { name: "Dana Wu", exportedAt: "2026-11-27T20:05:00Z" } }),
+    { canEdit: false, ui: {} },
+  );
+  assert.ok(html.includes("Last export: Dana Wu · Nov 27, 3:05 pm"));
+  assert.doesNotMatch(html, /open-export-season/);
+});
+
+test("a missing lastExport reads as none", () => {
+  const html = renderSeasonSettings(view(), { canEdit: true, ui: {} });
+  assert.match(html, /No export yet this season\./);
+});
+
+test("the export dialog", () => {
+  const html = exportSeasonDialogBody({ season: 2026 });
+  assert.match(html, /Export the 2026 season/);
+  assert.match(html, /Messages, notes and call log entries are exported as staff and clients wrote them\. Notes must not hold amounts or ID numbers\./);
+  assert.match(html, /Roster → Export CSV/);
+  assert.match(html, /rebuilt from the answers/);
+  assert.match(html, /Cancel/);
+  assert.match(html, /Download ZIP/);
+  assert.doesNotMatch(html, /disabled/);
+  const busy = exportSeasonDialogBody({ season: 2026, busy: true });
+  assert.match(busy, /<button[^>]*data-action="export-season"[^>]*disabled[^>]*>Preparing…<\/button>/);
 });

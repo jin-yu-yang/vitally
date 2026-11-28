@@ -44,6 +44,7 @@ import { volunteerProblem, profileProblem, withoutLostRoles, roleNeedsMessage, o
 import { emptyUpdateForm, toUpdateRequest, validateUpdate } from "./posted-updates.mjs";
 import { nowInput } from "./contact-log.mjs";
 import { seasonRefusalLines } from "./season-settings-views.mjs";
+import { seasonExportZip } from "./season-export.mjs";
 import { CHECK_IN_REFUSALS, hhmm } from "./volunteer-check-in.mjs";
 
 // The one place browser state lives. It owns what is loaded, what is being
@@ -168,7 +169,14 @@ const STAFF_SIDN_UPDATED = "SIDN updated";
 const SETTINGS_LINK_FIELDS = Object.freeze(["certificateUploadUrl", "clientDocumentsUrl"]);
 // Start next season (change add-start-next-season, design D8).
 const STAFF_SEASON_MOVED_MESSAGE = "The season has already moved.";
-const freshSettingsUi = () => ({ notice: null, fieldErrors: null, sidnError: null, startRefusal: null });
+const freshSettingsUi = (previous = null) => ({
+  notice: null,
+  fieldErrors: null,
+  sidnError: null,
+  startRefusal: null,
+  // An export in flight keeps its busy flag when a write resets the rest.
+  ...(previous?.exportBusy ? { exportBusy: true } : {}),
+});
 // The Schedule (change add-volunteer-schedule, design D7 and D10). Staff-only.
 const STAFF_SHIFT_CONFLICT_MESSAGE = "Someone changed this shift. The schedule has been refreshed.";
 // The same for a check-in corrected from the Schedule (change
@@ -2508,7 +2516,7 @@ export function createController({
     let request = pendingSettingsWrite?.key === key ? pendingSettingsWrite.request : null;
     pendingSettingsWrite = null;
     if (!request) request = makeRequest();
-    state.seasonSettingsUi = freshSettingsUi();
+    state.seasonSettingsUi = freshSettingsUi(state.seasonSettingsUi);
     state.busy = true;
     state.error = null;
     show();
@@ -2752,6 +2760,60 @@ export function createController({
       show();
     }
     return `The ${season} season has started`;
+  }
+
+  // Season export (change add-season-export, design D8). One call, no action
+  // id, so it does not go through settingsWrite. The file is built only when
+  // the answer arrives; the card's Last export line shows the exporter and
+  // time from that answer. FORBIDDEN closes the dialog and reads Season
+  // settings again; any other error keeps the dialog with the window's usual
+  // notice. Resolves to `{filename, bytes}`, or null.
+  async function exportSeason() {
+    if (state.busy || !staffWindow() || state.screen !== "office-settings" || !state.seasonSettings) return null;
+    if (state.seasonSettingsUi?.exportBusy) return null;
+    state.seasonSettingsUi = { ...state.seasonSettingsUi, exportBusy: true };
+    state.error = null;
+    show();
+    // Who asked: a sign-out (or another sign-in) while the export is out
+    // replaces both, and that window must not download or write anything.
+    const { session } = state;
+    const userId = state.principal?.userId;
+    // The user, not the object: a wake refresh replaces the principal object.
+    const stale = () => state.session !== session || state.principal?.userId !== userId;
+    try {
+      const answer = await store.exportSeason();
+      if (stale()) return null;
+      const file = seasonExportZip(answer, new Date());
+      // Patch Last export only onto the same season's page (a Start next
+      // season meanwhile shows another one).
+      if (state.seasonSettings && Number(state.seasonSettings.season) === Number(answer.season)) {
+        state.seasonSettings = {
+          ...state.seasonSettings,
+          lastExport: { name: answer.exportedByName, exportedAt: answer.exportedAt },
+        };
+      }
+      noteConnected();
+      if (state.dialog === "export-season") {
+        state.dialog = null;
+        state.dialogContext = null;
+      }
+      return file;
+    } catch (error) {
+      if (stale()) return null;
+      if (error?.code === "FORBIDDEN") {
+        if (state.dialog === "export-season") {
+          state.dialog = null;
+          state.dialogContext = null;
+        }
+        await readSeasonSettings().catch(() => {});
+      } else {
+        noteFailure(error);
+      }
+      return null;
+    } finally {
+      state.seasonSettingsUi = { ...state.seasonSettingsUi, exportBusy: false };
+      show();
+    }
   }
 
   // Add (the picker's volunteer) or Remove (a row's), at the account
@@ -3591,7 +3653,7 @@ export function createController({
     // My profile is a cleared window's: an uncleared one stays on its home.
     if (CLEARED_ONLY_SCREENS.includes(screen) && !screenAllowed(screen)) screen = homeScreen();
     // Season settings starts without an earlier visit's sentences.
-    if (screen === "office-settings") state.seasonSettingsUi = freshSettingsUi();
+    if (screen === "office-settings") state.seasonSettingsUi = freshSettingsUi(state.seasonSettingsUi);
     // Leaving or opening a page ends its draft, and the revision it began at.
     siteHoursBaseRevision = null;
     linksBaseRevision = null;
@@ -6187,6 +6249,7 @@ export function createController({
     saveMyProfile,
     saveSidn,
     startNextSeason,
+    exportSeason,
     addSiteCoordinator,
     removeSiteCoordinator,
     saveUpdate,

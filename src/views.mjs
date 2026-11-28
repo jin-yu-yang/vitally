@@ -53,7 +53,7 @@ import {
   deleteDraftConfirm,
   updateGoneBody,
 } from "./update-views.mjs";
-import { renderSeasonSettings, changeSidnDialogBody, startSeasonDialogBody } from "./season-settings-views.mjs";
+import { renderSeasonSettings, changeSidnDialogBody, startSeasonDialogBody, exportSeasonDialogBody } from "./season-settings-views.mjs";
 import { timeLabel } from "./volunteer-check-in.mjs";
 import {
   scheduleScreen,
@@ -860,6 +860,12 @@ export function dialog(state) {
       busy: state.busy === true,
     });
   }
+  // Season export (change add-season-export, design D8): the season the page read.
+  if (state.dialog === "export-season") {
+    const season = state.seasonSettings?.season ?? state.workspace?.currentSeason ?? null;
+    title = season == null ? "Export the season" : `Export the ${season} season`;
+    body = exportSeasonDialogBody({ season, busy: state.seasonSettingsUi?.exportBusy === true });
+  }
   // The Schedule's shift drawer and its Remove shift confirmation (change
   // add-volunteer-schedule). The drawer's refusals are said above its body.
   if (state.dialog === "shift") {
@@ -970,12 +976,12 @@ export function dialog(state) {
         ? "OFFICE · WORKLOAD"
         : state.dialog === "notifications"
           ? "FROM THE OFFICE"
-          : ["update-people", "unpublish-update", "delete-update", "change-sidn", "start-season"].includes(state.dialog)
+          : ["update-people", "unpublish-update", "delete-update", "change-sidn", "start-season", "export-season"].includes(state.dialog)
             ? "OFFICE · ADMIN"
             : ["shift", "remove-shift", "check-in", "remove-check-in"].includes(state.dialog)
               ? "VOLUNTEERS · SCHEDULE"
               : drawer
                 ? "OFFICE FOLLOW-UP"
                 : t("dialog.overline", {}, lang);
-  return `<div class="modal-backdrop"><section class="modal${drawer ? " office-drawer" : ""}" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1"><button class="close-btn" data-action="close-dialog" aria-label="${say("dialog.close")}">${icon("close")}</button><span class="overline">${esc(overline)}</span><h2 id="modal-title">${esc(title)}</h2>${dialogError(state, lang)}${body}</section></div>`;
+  return `<div class="modal-backdrop"><section class="modal${drawer ? " office-drawer" : ""}" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1"><button class="close-btn" data-action="close-dialog" aria-label="${say("dialog.close")}"${state.dialog === "export-season" && state.seasonSettingsUi?.exportBusy === true ? " disabled" : ""}>${icon("close")}</button><span class="overline">${esc(overline)}</span><h2 id="modal-title">${esc(title)}</h2>${dialogError(state, lang)}${body}</section></div>`;
 }

@@ -13561,3 +13561,159 @@ test("losing the Office side on All cases goes home", async () => {
   assert.equal(state.workspaceSide, "cases");
   controller.stop();
 });
+
+// ---------------------------------------------------------------------------
+// Season export (change add-season-export, design D8)
+// ---------------------------------------------------------------------------
+
+const exportAnswer = () => ({
+  season: 2026,
+  exportedAt: "2026-11-27T20:05:00Z",
+  exportedByName: "Dana Wu",
+  cases: [],
+  events: [],
+  clientEvents: [],
+  documentRequests: [],
+  followups: [],
+  contactLog: [],
+  contactAttempts: [],
+  helpRequests: [],
+});
+
+async function onExportSeason() {
+  const built = await onSettingsScreen();
+  const { store } = built;
+  store.settings.season = 2026;
+  store.exportFailure = null;
+  store.exportGate = null;
+  store.exportSeason = async () => {
+    store.calls.push("exportSeason");
+    if (store.exportGate) await store.exportGate;
+    const error = store.exportFailure;
+    store.exportFailure = null;
+    if (error) throw error;
+    return exportAnswer();
+  };
+  await built.controller.loadSeasonSettings();
+  built.controller.openDialog("export-season");
+  return built;
+}
+
+test("season export: success returns the file, sets Last export and closes the dialog", async () => {
+  const { store, controller } = await onExportSeason();
+  assert.match(dialog(controller.getState()), /Export the 2026 season/);
+  const file = await controller.exportSeason();
+  assert.match(file.filename, /^vitally-2026-export-\d{4}-\d{2}-\d{2}\.zip$/);
+  assert.ok(file.bytes instanceof Uint8Array && file.bytes.length > 0);
+  const state = controller.getState();
+  assert.deepEqual(state.seasonSettings.lastExport, { name: "Dana Wu", exportedAt: "2026-11-27T20:05:00Z" });
+  assert.equal(state.dialog, null);
+  assert.equal(state.seasonSettingsUi.exportBusy, false);
+  assert.equal(store.calls.filter((c) => c === "exportSeason").length, 1);
+  controller.stop();
+});
+
+test("season export: FORBIDDEN closes the dialog and reads Season settings again", async () => {
+  const { store, controller } = await onExportSeason();
+  const reads = settingsReads(store);
+  store.exportFailure = settingsRefusal("FORBIDDEN");
+  assert.equal(await controller.exportSeason(), null);
+  const state = controller.getState();
+  assert.equal(state.dialog, null);
+  assert.equal(settingsReads(store), reads + 1);
+  assert.equal(state.seasonSettingsUi.exportBusy, false);
+  assert.equal(state.seasonSettings.lastExport ?? null, null);
+  controller.stop();
+});
+
+test("season export: another error keeps the dialog open and clears the busy flag", async () => {
+  const { store, controller } = await onExportSeason();
+  store.exportFailure = Object.assign(new Error("Network error."), { code: "OFFLINE" });
+  assert.equal(await controller.exportSeason(), null);
+  const state = controller.getState();
+  assert.equal(state.dialog, "export-season");
+  assert.equal(state.error.code, "OFFLINE");
+  assert.equal(state.seasonSettingsUi.exportBusy, false);
+  assert.doesNotMatch(dialog(state), /Preparing…/);
+  // It can be pressed again.
+  assert.ok(await controller.exportSeason());
+  controller.stop();
+});
+
+test("season export: an answer after sign-out downloads and writes nothing", async () => {
+  const { store, controller } = await onExportSeason();
+  let release;
+  store.exportGate = new Promise((resolve) => (release = resolve));
+  const pending = controller.exportSeason();
+  await new Promise((resolve) => setImmediate(resolve));
+  await controller.signOut();
+  release();
+  assert.equal(await pending, null);
+  const state = controller.getState();
+  assert.equal(state.seasonSettings, null);
+  assert.equal(state.dialog, null);
+  assert.equal(state.seasonSettingsUi.exportBusy ?? false, false);
+  controller.stop();
+});
+
+test("season export: a dialog opened meanwhile is not closed by the answer", async () => {
+  const { store, controller } = await onExportSeason();
+  let release;
+  store.exportGate = new Promise((resolve) => (release = resolve));
+  const pending = controller.exportSeason();
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.openDialog("start-season");
+  release();
+  assert.ok(await pending);
+  assert.equal(controller.getState().dialog, "start-season");
+  controller.stop();
+});
+
+test("season export: a wake refresh during the export still returns the file and clears busy", async () => {
+  const { store, controller, events } = await onExportSeason();
+  let release;
+  store.exportGate = new Promise((resolve) => (release = resolve));
+  const pending = controller.exportSeason();
+  await new Promise((resolve) => setImmediate(resolve));
+  const before = controller.getState().principal;
+  await events.emit("focus");
+  release();
+  assert.ok(await pending, "the same user's export is still downloaded");
+  const state = controller.getState();
+  assert.equal(state.principal.userId, before.userId);
+  assert.equal(state.seasonSettingsUi.exportBusy, false);
+  assert.ok(state.seasonSettings.lastExport);
+  controller.stop();
+});
+
+test("season export: leaving Season settings and returning keeps the busy flag", async () => {
+  const { store, controller } = await onExportSeason();
+  let release;
+  store.exportGate = new Promise((resolve) => (release = resolve));
+  const pending = controller.exportSeason();
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.navigate("office-home");
+  controller.navigate("office-settings");
+  assert.equal(controller.getState().seasonSettingsUi.exportBusy, true);
+  release();
+  await pending;
+  assert.equal(controller.getState().seasonSettingsUi.exportBusy, false);
+  controller.stop();
+});
+
+test("season export: a second press while one is in flight sends nothing", async () => {
+  const { store, controller } = await onExportSeason();
+  let release;
+  store.exportGate = new Promise((resolve) => (release = resolve));
+  const first = controller.exportSeason();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(controller.getState().seasonSettingsUi.exportBusy, true);
+  assert.match(dialog(controller.getState()), /Preparing…/);
+  assert.match(dialog(controller.getState()), /<button class="close-btn"[^>]*disabled/);
+  assert.equal(await controller.exportSeason(), null);
+  assert.equal(store.calls.filter((c) => c === "exportSeason").length, 1);
+  release();
+  assert.ok(await first);
+  assert.equal(controller.getState().seasonSettingsUi.exportBusy, false);
+  controller.stop();
+});
