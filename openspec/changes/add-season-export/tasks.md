@@ -23,7 +23,7 @@
 
 ## 4. Checks
 
-- [ ] 4.1 `npm test`
-- [ ] 4.2 `npm run db:migrate:test`, then `npm run test:database`
-- [ ] 4.3 `npm run test:browser`
-- [ ] 4.4 `npx openspec validate --all`
+- [x] 4.1 `npm test`
+- [x] 4.2 `npm run db:migrate:test`, then `npm run test:database`
+- [x] 4.3 `npm run test:browser`
+- [x] 4.4 `npx openspec validate --all`
